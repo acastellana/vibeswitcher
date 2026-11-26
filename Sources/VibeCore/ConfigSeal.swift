@@ -266,10 +266,12 @@ public enum ConfigSeal {
     static func goneKey(of key: String) -> String { gonePrefix + name(ofKey: key) }
 
     /// Whether the thing `key` names comes and goes with what settings say (a plugin they enable, the scripts of a
-    /// settings file that reads), unlike a file, which hashes as absent when it's not there.
+    /// settings file that reads), unlike a file, which hashes as absent when it's not there. And a zsh startup file's
+    /// compiled twin (`isTwin`), watched since after most seals began: one a seal first sees present, past its first
+    /// look, waits for your Accept once (an existing user's own twin: one card); one first seen absent is recorded.
     static func comesAndGoes(key: String) -> Bool {
         let name = name(ofKey: key)
-        return isPlugin(name: name) || isScripts(name: name)
+        return isPlugin(name: name) || isScripts(name: name) || isTwin(name: name)
     }
 
     /// Where a seal notes that it has watched plugins and scripts since (its first look that did): after it, one seen
@@ -431,8 +433,23 @@ public enum ConfigSeal {
     /// The vault's answer to a lead that seals a change made while the team's sessions ran.
     public static let heldRefusal = "The agents' config changed while the team's sessions ran: only you accept that, in VibeSwitcher."
 
-    /// The files in your home every session or shell loads.
-    static let homeFiles: [(String, Watched.Kind)] = [
+    /// The files in your home every session or shell loads, and the compiled twin of each zsh startup file among them
+    /// (`twinSuffix`).
+    static let homeFiles: [(String, Watched.Kind)] = sourceHomeFiles + sourceHomeFiles.filter { zshStartupFiles.contains($0.0) }.map { ($0.0 + ".zwc", .file) }
+
+    /// zsh's startup files. zsh runs a `<file>.zwc` (what `zcompile` makes) in place of the file when it's newer, and
+    /// alone when the file is absent, so each one's twin is watched beside it, present or absent: one appearing is a
+    /// change. Like the files themselves, only your home's: not under `$ZDOTDIR`.
+    static let zshStartupFiles: Set<String> = [".zshenv", ".zprofile", ".zshrc", ".zlogin", ".zlogout"]
+
+    /// How a compiled twin is named to the lead and on your card: "~/.zshrc.zwc (a compiled copy of your shell startup file)".
+    static let twinSuffix = " (a compiled copy of your shell startup file)"
+
+    /// Whether the watched thing `name` is a zsh startup file's compiled twin.
+    static func isTwin(name: String) -> Bool { name.hasPrefix("~/") && name.hasSuffix(".zwc" + twinSuffix) }
+
+    /// The files in your home every session or shell loads, as they're written.
+    private static let sourceHomeFiles: [(String, Watched.Kind)] = [
         (".claude/settings.json", .file), (".claude/settings.local.json", .file), (".claude/CLAUDE.md", .file),
         (".claude/skills", .folder), (".claude/agents", .folder), (".claude/commands", .folder), (".claude/hooks", .folder),
         (".claude/output-styles", .folder), (".claude.json", .mcpServers),
@@ -457,7 +474,7 @@ public enum ConfigSeal {
     /// plugins they enable.
     public static func homeWatched(home: String) -> [Watched] {
         let files = homeFiles.map { file in
-            let name = "~/" + file.0
+            let name = "~/" + file.0 + (file.0.hasSuffix(".zwc") ? twinSuffix : "")
             return Watched(name: name, path: (home as NSString).appendingPathComponent(file.0), kind: file.1, executes: !instructions.contains(name))
         }
         let skip = files.filter { $0.kind == .file || $0.kind == .folder }.map(\.path)
@@ -591,6 +608,11 @@ public enum ConfigSeal {
     /// doesn't read as JSON now.
     static func keyHashes(_ watched: Watched) -> [String: String]? {
         if let parts = parts(watched) { return Dictionary(parts, uniquingKeysWith: { first, _ in first }) }
+        // A compiled twin: none while absent, so one first watched holds only when it's there (`comesAndGoes`).
+        if watched.kind == .file, isTwin(name: watched.name) {
+            let digest = twinDigest(watched.path)
+            return digest == "absent" ? [:] : [twinKey: hex(SHA256.hash(data: Data(digest.utf8)))]
+        }
         guard watched.kind == .mcpServers || (watched.kind == .file && watched.path.hasSuffix(".json")) else { return nil }
         var info = stat()
         guard stat(watched.path, &info) == 0 else { return [:] }
@@ -723,6 +745,7 @@ public enum ConfigSeal {
     public static func fingerprint(_ watched: Watched) -> String? {
         switch watched.kind {
         case .plugin, .scripts: return parts(watched).map(partsHash)
+        case .file where isTwin(name: watched.name): return hex(SHA256.hash(data: Data(twinDigest(watched.path).utf8)))
         default: break
         }
         var hasher = SHA256()
@@ -756,6 +779,36 @@ public enum ConfigSeal {
             break
         }
         return hex(hasher.finalize())
+    }
+
+    /// A compiled twin's per-key hash (`keyHashes`), as the card names it.
+    static let twinKey = "compiled code"
+
+    /// A zsh startup file's compiled twin as watched: "absent", or its link's target and its contents' hash. What
+    /// can't be read whole (unreadable, not a regular file, past `scriptLimit`) is told by its size, times (ctime too:
+    /// a shell can set mtime back, not ctime) and inode, so rewriting it is still a change.
+    static func twinDigest(_ path: String) -> String {
+        var info = stat()
+        guard lstat(path, &info) == 0 else { return "absent" }
+        var said = ""
+        if (info.st_mode & S_IFMT) == S_IFLNK {
+            said = "link " + ((try? FileManager.default.destinationOfSymbolicLink(atPath: path)) ?? "") + " "
+            var target = stat()
+            guard stat(path, &target) == 0 else { return said + "dangling " + identity(info) }
+            info = target
+        }
+        guard (info.st_mode & S_IFMT) == S_IFREG else { return said + "other " + identity(info) }
+        guard info.st_size <= Int64(scriptLimit) else { return said + "big " + identity(info) }
+        switch contentsDigest(path, followLink: true) {
+        case .digest(let digest): return said + "file " + digest
+        case .other: return said + "other " + identity(info)
+        case .unreadable: return said + "unreadable " + identity(info)
+        }
+    }
+
+    /// A file's size, times and inode: what tells it when its contents can't be read.
+    private static func identity(_ info: stat) -> String {
+        "\(info.st_mode) \(info.st_size) \(info.st_mtimespec.tv_sec).\(info.st_mtimespec.tv_nsec) \(info.st_ctimespec.tv_sec).\(info.st_ctimespec.tv_nsec) \(info.st_ino)"
     }
 
     /// The hash of a plugin's or a settings' scripts' parts, in order.
