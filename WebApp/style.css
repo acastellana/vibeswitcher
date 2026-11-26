@@ -1827,7 +1827,7 @@ kbd { padding: 1px var(--s-3); border-radius: var(--r-1); box-shadow: var(--e-1-
 .act { display: inline-flex; align-items: center; flex-wrap: wrap; gap: var(--s-3) var(--s-4); }
 .act-said { color: var(--ink-2); font-size: var(--t-caption); }
 .act-said:empty { display: none; }
-.act-said.refused, .confirm-note.refused { color: var(--danger); }
+.act-said.refused, .confirm-note.refused, .offer-said.refused { color: var(--danger); }
 .card-acts { display: flex; flex-wrap: wrap; gap: var(--s-4); }
 .mine.refused { color: var(--ink-2); }
 .acts-line { display: flex; align-items: center; flex-wrap: wrap; gap: var(--s-3) var(--s-4); color: var(--ink-2); }

@@ -9,13 +9,16 @@
 //   for this project (`prompt-audit` with `snooze` or `off`).
 //
 // Each says what happened in place once the node took it, and stays to say so after the node's value has gone (an
-// OK puts it away): nothing disappears from under the pointer. A page that doesn't act shows the line for a terminal.
+// OK puts it away): nothing disappears from under the pointer. While its request is out a card stays as it was drawn
+// whatever the node sends meanwhile (the node takes the sessions out of its offer before it answers, so the value
+// without them may come first), then draws what happened, or the node's refusal in the card, and the list holding it
+// draws again. A page that doesn't act shows the line for a terminal.
 
 import * as kit from '../kit.js';
 import { h } from '../dom.js';
 import { t } from '../i18n.js';
 import { dateTime } from '../words.js';
-import { actsFor, doButton } from '../acting.js';
+import { actsFor, doButton, refusalWords } from '../acting.js';
 import { copyLine } from './cards.js';
 import { icon } from '../marks.js';
 
@@ -52,7 +55,8 @@ export function reopenedWords(result) {
 }
 
 // The restart's reopen offer as a card: { el, update(offer), shown(), count() }. `el` is empty while there is none to
-// show; `changed()` after an OK put an answered card away (a list that holds it draws again).
+// show; `changed()` once a request it sent settled, and after an OK put an answered card away (a list that holds it
+// draws again).
 export function reopenCard(app, { changed = () => {} } = {}) {
   const el = h('div', { class: 'offer-slot' });
   let offer = null;
@@ -62,6 +66,20 @@ export function reopenCard(app, { changed = () => {} } = {}) {
   let opening = false;
   let chosen = new Set();
   let key = '';
+  // The requests out now, the node's offer last told meanwhile (undefined: none), and the node's last refusal.
+  let out = 0;
+  let latest;
+  let refusal = '';
+  const sending = (args) => () => { out += 1; refusal = ''; return args; };
+  const settled = (reply) => {
+    out -= 1;
+    if (!reply.ok) refusal = refusalWords(reply.error);
+    // Refused, the node gives the sessions back: an offer without them told meanwhile is already over.
+    if (out === 0 && latest !== undefined && (reply.ok || latest)) take(latest);
+    if (out === 0) latest = undefined;
+    draw();
+    changed();
+  };
 
   const draw = () => {
     if (said) { el.replaceChildren(answered(said.title, said.words, said.tone, () => { said = null; draw(); changed(); })); return; }
@@ -78,15 +96,15 @@ export function reopenCard(app, { changed = () => {} } = {}) {
       return;
     }
     const all = doButton(app, { label: sessions.length === 1 ? t('roReopen') : t('roReopenAll'), kind: 'session.reopen', busy: t('roReopening'),
-      args: () => ({ all: true }), done: finish });
-    const later = doButton(app, { label: t('roNotNow'), kind: 'session.reopen', plain: true, args: () => ({ forget: true }),
-      done: (reply) => { said = { title, words: reopenedWords(reply.result || {}), tone: 'quiet' }; choosing = false; draw(); } });
+      args: sending({ all: true }), done: finish, settled });
+    const later = doButton(app, { label: t('roNotNow'), kind: 'session.reopen', plain: true, args: sending({ forget: true }),
+      done: (reply) => { said = { title, words: reopenedWords(reply.result || {}), tone: 'quiet' }; choosing = false; draw(); }, settled });
     const choose = sessions.length > 1 ? kit.button('plain', { 'aria-expanded': String(choosing),
       onclick: () => { choosing = !choosing; opening = choosing; chosen = new Set(); draw(); } }, choosing ? t('acCancel') : t('roChoose')) : null;
     let picker = null;
     if (choosing && sessions.length > 1) {
       const some = doButton(app, { label: t('roReopenChosen'), kind: 'session.reopen', busy: t('roReopening'),
-        args: () => ({ sessions: [...chosen] }), done: finish });
+        args: () => sending({ sessions: [...chosen] })(), done: finish, settled });
       some.button.disabled = chosen.size === 0;
       picker = kit.unfold({ class: 'offer-choose', motion: opening ? 'opening' : null }, h('ul', { class: 'offer-picks' }, sessions.map((one) => h('li', null, h('label', { class: 'offer-pick' },
         kit.checkbox({ checked: chosen.has(one.session), onchange: (event) => {
@@ -96,8 +114,18 @@ export function reopenCard(app, { changed = () => {} } = {}) {
       opening = false;
     }
     el.replaceChildren(frame(title, lede, choosing ? null : list, picker,
+      refusal ? h('p', { class: 'offer-said refused', role: 'status' }, refusal) : null,
       h('div', { class: 'offer-actions' }, choosing ? null : all.el, choose, later.el)));
   };
+
+  // The node's offer taken as the one to draw (null for none).
+  function take(offered) {
+    offer = offered;
+    // A session reopened elsewhere leaves the choice.
+    const ids = new Set((offer?.sessions || []).map((one) => one.session));
+    chosen = new Set([...chosen].filter((one) => ids.has(one)));
+    if (!offer) choosing = false;
+  }
 
   return {
     el,
@@ -107,14 +135,12 @@ export function reopenCard(app, { changed = () => {} } = {}) {
       const now = JSON.stringify([offered, actsFor(app, 'session.reopen'), app.store.acts()]);
       if (now === key) return;
       key = now;
-      offer = offered;
-      // A session reopened elsewhere leaves the choice.
-      const ids = new Set((offer?.sessions || []).map((one) => one.session));
-      chosen = new Set([...chosen].filter((one) => ids.has(one)));
-      if (!offer) choosing = false;
+      // A request out: the card stays as it is until it settles.
+      if (out > 0) { latest = offered; return; }
+      take(offered);
       draw();
     },
-    shown: () => !!(offer || said),
+    shown: () => !!(offer || said || out > 0),
     count: () => offer?.sessions.length || 0,
   };
 }
@@ -136,9 +162,27 @@ export function auditChangedWords(result) {
 export function promptAuditCards(app, { changed = () => {} } = {}) {
   const el = h('div', { class: 'offer-slot' });
   let audits = [];
-  // What was done for each project's card, by its folder, kept until its OK.
+  // What was done for each project's card, by its folder, kept until its OK; the node's refusal of a card's last click.
   const said = new Map();
+  const refused = new Map();
   let key = '';
+  // The requests out now, and the node's list last told meanwhile (undefined: none).
+  let out = 0;
+  let latest;
+  // Each card drawn while a request is out, by its folder: kept (its button busy) until it settles.
+  const kept = new Map();
+  const sending = (audit, args) => () => { out += 1; refused.delete(audit.folder); kept.set(audit.folder, audit); return args; };
+  const settledFor = (audit) => (reply) => {
+    out -= 1;
+    if (!reply.ok) refused.set(audit.folder, refusalWords(reply.error));
+    if (out === 0) {
+      if (latest !== undefined) audits = latest;
+      latest = undefined;
+      kept.clear();
+    }
+    draw();
+    changed();
+  };
 
   const card = (audit) => {
     const title = t('paTitle', { project: audit.project });
@@ -150,17 +194,21 @@ export function promptAuditCards(app, { changed = () => {} } = {}) {
       return frame(title, ...words, h('div', { class: 'card-command' }, h('span', { class: 'card-command-label' }, t('noInATerminal')),
         copyLine(`vibeswitcher prompt-audit ${audit.folder} snooze`, t('paTheCommand'))), h('p', { class: 'confirm-note' }, app.store.acts() ? t('paTerminalOnly') : t('paPageReads')));
     }
+    const settled = settledFor(audit);
     const run = audit.session && actsFor(app, 'send')
-      ? doButton(app, { label: t('paRun'), kind: 'send', busy: t('paRunning'), args: () => ({ session: audit.session, text: PROMPT_AUDIT_COMMAND }), done: answer('run') }).el : null;
-    const snooze = doButton(app, { label: t('paSnooze'), kind: 'prompt-audit', plain: !!run, args: () => ({ folder: audit.folder, do: 'snooze' }), done: answer('snooze') }).el;
-    const off = doButton(app, { label: t('paOff'), kind: 'prompt-audit', plain: true, args: () => ({ folder: audit.folder, do: 'off' }), done: answer('off') }).el;
-    return frame(title, ...words, run ? null : h('p', { class: 'confirm-note' }, t('paRunInLead')), h('div', { class: 'offer-actions' }, run, snooze, off));
+      ? doButton(app, { label: t('paRun'), kind: 'send', busy: t('paRunning'), args: sending(audit, { session: audit.session, text: PROMPT_AUDIT_COMMAND }), done: answer('run'), settled }).el : null;
+    const snooze = doButton(app, { label: t('paSnooze'), kind: 'prompt-audit', plain: !!run, args: sending(audit, { folder: audit.folder, do: 'snooze' }), done: answer('snooze'), settled }).el;
+    const off = doButton(app, { label: t('paOff'), kind: 'prompt-audit', plain: true, args: sending(audit, { folder: audit.folder, do: 'off' }), done: answer('off'), settled }).el;
+    const why = refused.get(audit.folder);
+    return frame(title, ...words, run ? null : h('p', { class: 'confirm-note' }, t('paRunInLead')),
+      why ? h('p', { class: 'offer-said refused', role: 'status' }, why) : null, h('div', { class: 'offer-actions' }, run, snooze, off));
   };
 
   function draw() {
     const shown = [...audits];
-    // A card answered stays (its words) after the node's list dropped it.
+    // A card answered stays (its words) after the node's list dropped it; so does one whose request is out.
     for (const [folder, done] of said) if (!shown.some((one) => one.folder === folder)) shown.push(done.audit);
+    for (const [folder, audit] of kept) if (!shown.some((one) => one.folder === folder)) shown.push(audit);
     el.replaceChildren(...shown.map(card));
   }
 
@@ -171,10 +219,12 @@ export function promptAuditCards(app, { changed = () => {} } = {}) {
       const now = JSON.stringify([list, actsFor(app, 'prompt-audit'), actsFor(app, 'send'), app.store.acts()]);
       if (now === key) return;
       key = now;
+      // A request out: the cards stay as they are until it settles.
+      if (out > 0) { latest = list; return; }
       audits = list;
       draw();
     },
-    shown: () => audits.length > 0 || said.size > 0,
+    shown: () => audits.length > 0 || said.size > 0 || out > 0,
     count: () => audits.length,
   };
 }

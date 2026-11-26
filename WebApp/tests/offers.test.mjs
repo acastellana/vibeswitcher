@@ -82,7 +82,7 @@ test('C3: Reopen all sends session.reopen all, and says what it did after the of
   buttonNamed(card.el, 'OK').click();
   assert.equal(card.el.children.length, 0);
   assert.equal(card.shown(), false);
-  assert.equal(changed, 1, 'the list told to draw again');
+  assert.equal(changed, 2, 'the list told to draw again: once the reply settled, once OK put it away');
 });
 
 test('C3: Choose reopens only the sessions ticked; Not now puts the offer away; a refusal is said in place', async () => {
@@ -121,6 +121,79 @@ test('C3: Choose reopens only the sessions ticked; Not now puts the offer away; 
   await flush();
   assert.match(refused.el.textContent, /nothing reopened: its folder is gone/);
   assert.ok(buttonNamed(refused.el, 'Reopen all'), 'the button back');
+});
+
+// The node takes the sessions out of its offer before it answers (`Requests.reopenSessions`), so the `node` value
+// without them can come before the reply: the card stays, busy, then says what happened; refused, the offer stays with
+// the node's words in it.
+test('C3: the node’s update before the reply: the card stays put, then says what happened, or the refusal', async () => {
+  let answer = null;
+  const app = fakeApp({ reply: () => new Promise((resolve) => { answer = resolve; }) });
+  let changed = 0;
+  const card = reopenCard(app, { changed: () => { changed += 1; } });
+  card.update(OFFER);
+  buttonNamed(card.el, 'Reopen all').click();
+  card.update(null);
+  assert.equal(card.shown(), true, 'still in its list while the request is out');
+  assert.match(card.el.textContent, /3 sessions ended with the restart/, 'still drawn');
+  assert.ok(find(card.el, (node) => node.tag === 'button' && node.getAttribute('aria-busy') === 'true'), 'its button busy');
+  assert.equal(changed, 0);
+  answer({ ok: true, result: { reopened: OFFER.sessions.map((one) => ({ was: one.session, session: 'local:new' })), refused: [] } });
+  await flush();
+  assert.match(card.el.textContent, /Reopened 3 sessions/);
+  assert.equal(card.shown(), true);
+  assert.equal(changed, 1, 'the list draws again to hold what it said');
+  buttonNamed(card.el, 'OK').click();
+  assert.equal(card.shown(), false, 'the node said none: nothing left');
+
+  // Refused: the node gives the sessions back, so an offer without them told meanwhile is already over.
+  const refusing = reopenCard(app);
+  refusing.update(OFFER);
+  buttonNamed(refusing.el, 'Reopen all').click();
+  refusing.update(null);
+  answer({ ok: false, error: { code: 'refused', message: 'nothing reopened: its folder is gone' } });
+  await flush();
+  assert.match(refusing.el.textContent, /3 sessions ended with the restart/);
+  assert.match(find(refusing.el, byClass('offer-said')).textContent, /nothing reopened: its folder is gone/, 'the refusal in the card');
+  assert.ok(buttonNamed(refusing.el, 'Reopen all'));
+  // A partial choice: the rest of the offer, told meanwhile, is drawn once it settles.
+  const choosing = reopenCard(app);
+  choosing.update(OFFER);
+  buttonNamed(choosing.el, 'Choose…').click();
+  const box = findAll(choosing.el, (node) => node.tag === 'input')[0];
+  box.checked = true;
+  box.dispatch('change');
+  buttonNamed(choosing.el, 'Reopen the chosen ones').click();
+  choosing.update({ ...OFFER, sessions: OFFER.sessions.slice(1) });
+  assert.match(choosing.el.textContent, /3 sessions ended/, 'unchanged while out');
+  answer({ ok: true, result: { reopened: [{ was: OFFER.sessions[0].session, session: 'local:new' }], refused: [] } });
+  await flush();
+  assert.match(choosing.el.textContent, /Reopened 1 session/);
+  buttonNamed(choosing.el, 'OK').click();
+  assert.match(choosing.el.textContent, /2 sessions ended with the restart/, 'then the rest of the offer');
+});
+
+test('C4: the node’s update before the reply: the card stays put, then says what happened', async () => {
+  let answer = null;
+  const app = fakeApp({ reply: () => new Promise((resolve) => { answer = resolve; }) });
+  const cards = promptAuditCards(app);
+  cards.update([AUDIT]);
+  buttonNamed(cards.el, 'Not for this project').click();
+  cards.update([]);
+  assert.equal(cards.shown(), true);
+  assert.match(cards.el.textContent, /Time for a prompt audit in example-site/);
+  answer({ ok: true, result: { project: 'example-site', root: AUDIT.folder, do: 'off', until: null } });
+  await flush();
+  assert.match(cards.el.textContent, /No more prompt audit reminders for example-site\./);
+  buttonNamed(cards.el, 'OK').click();
+  assert.equal(cards.shown(), false);
+  // Refused: the card stays with the node's words in it.
+  cards.update([AUDIT]);
+  buttonNamed(cards.el, 'Remind me in a week').click();
+  answer({ ok: false, error: { code: 'refused', message: 'this server keeps no leads' } });
+  await flush();
+  assert.match(find(cards.el, byClass('offer-said')).textContent, /this server keeps no leads/);
+  assert.ok(buttonNamed(cards.el, 'Remind me in a week'));
 });
 
 test('C3: where the page doesn’t act, the card has no button: the line for a terminal and why', () => {
@@ -176,7 +249,7 @@ test('C4: Remind me in a week and Not for this project send prompt-audit; Run it
   assert.match(cards.el.textContent, /You’ll be reminded/, 'still said once the node dropped it');
   buttonNamed(cards.el, 'OK').click();
   assert.equal(cards.el.children.length, 0);
-  assert.equal(changed, 1);
+  assert.equal(changed, 2, 'settled, then OK');
 
   cards.update([AUDIT]);
   buttonNamed(cards.el, 'Not for this project').click();

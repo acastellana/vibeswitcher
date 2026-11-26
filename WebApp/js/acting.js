@@ -58,7 +58,9 @@ export function pageMaySet(setting, value) {
 // as kit.js's.
 // `busy`: the button's words while the request is out ("Starting…").
 // `receipt(reply)`: what happened, in words, said beside the button once the node took it.
-export function doButton(app, { label, kind, args, done = () => {}, plain = false, confirm = null, danger = false, size = 'm', className = '', busy = null, receipt = null }) {
+// `settled(reply)`: after any reply, taken or refused, once the button said it (a view that keeps something while the
+// request is out).
+export function doButton(app, { label, kind, args, done = () => {}, settled = () => {}, plain = false, confirm = null, danger = false, size = 'm', className = '', busy = null, receipt = null }) {
   const said = h('span', { class: 'act-said', role: 'status' });
   let asking = false;
   let stopAsking = () => {};
@@ -90,10 +92,12 @@ export function doButton(app, { label, kind, args, done = () => {}, plain = fals
         const words = receipt ? receipt(reply.result || {}) : '';
         if (words) { setText(said, words); said.classList.add('receipt'); }
         done(reply);
+        settled(reply);
         return;
       }
       setText(said, refusalWords(reply.error, label));
       said.classList.add('refused');
+      settled(reply);
     });
   });
   return { el, button, say: (text) => setText(said, text) };
