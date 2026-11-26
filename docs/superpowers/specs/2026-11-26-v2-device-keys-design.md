@@ -312,6 +312,18 @@ closed on anything it doesn't name, in this order:
    EdDSA, other curves, other algorithms and any other member are refused; Chrome's RS256 and EdDSA registrations
    are among the vectors.
 
+**The authenticators supported today** are the platform ones: Touch ID (a Mac's browser), Face ID (an iPhone),
+Windows Hello, and Android's. A registration carrying extensions, so probably a hardware security key under
+Chromium's `credProtect` default, is refused until a real key is measured (the lead's call, 2026-11-26: a security
+key is nobody's path yet, and the refusal is a clear error at enrolment, not a lockout later).
+
+**A decision the owed look must settle before the cut-over slice (21): a missing `crossOrigin`.** The rule above
+refuses `clientDataJSON` without `crossOrigin` (no measured ceremony omits it). If WebKit (Safari on the Mac, Safari
+and home-screen pages on iOS) omits it, the rule becomes "absent or false" at that position, as §5.8.1.1 step 9 treats
+an absent `crossOrigin` like false: after `,"origin":O` the bytes may also be exactly `}` and nothing more (never
+`,` and further members, so a later `"crossOrigin":true` can't pass as absent). Only that one alternative is added; the
+prefix up to the origin and every other rule stay.
+
 **Not shown here, owed to the user's devices:** Safari's and iOS's bytes (whether WebKit sends `crossOrigin`, its
 flags and sign count, its AAGUID), Safari's passkeys on `http://localhost` (slice 13), and the 7-day storage rule on
 a phone ("Safari clears a site's script storage after 7 days without a visit"), which slice 2 can't measure on this

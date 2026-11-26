@@ -193,6 +193,14 @@ struct WebAuthnAssertionTests {
             return [0x30, UInt8(body.count)] + body
         }
         #expect(with(encoded(r, s)).refusal == nil)                                                // the control
+        // A byte after s that the SEQUENCE's own length covers, on a signature short enough (70 bytes, neither r nor s
+        // with a leading zero) that the byte keeps it within the 72 a DER signature may have.
+        var short = valid
+        repeat { short.sign() } while short.signature.count > 70
+        let (shortR, shortS) = Self.integers([UInt8](short.signature))
+        let inner = [0x02, UInt8(shortR.count)] + shortR + [0x02, UInt8(shortS.count)] + shortS + [0x00]
+        short.signature = Data([0x30, UInt8(inner.count)] + inner)
+        #expect(short.signature.count <= 72 && short.refusal == .signatureEncoding)
         #expect(with(encoded([0] + r, s)).refusal == .signatureEncoding)                           // a needless leading zero
         #expect(with(encoded(r, [0] + s)).refusal == .signatureEncoding)
         #expect(with(encoded([0x80] + Array(repeating: 1, count: 31), s)).refusal == .signatureEncoding) // negative
