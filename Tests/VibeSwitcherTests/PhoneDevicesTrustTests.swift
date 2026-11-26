@@ -1,3 +1,4 @@
+import CryptoKit
 import Darwin
 import Foundation
 import Testing
@@ -82,11 +83,11 @@ extension TailscaleFakeTests { @MainActor @Suite(.serialized) struct PhoneDevice
     /// Phone Access as the app runs it (`enabled`, the real listener on a scratch port, a fake `tailscale serve`), over
     /// `devicesFile`, with replies on, the Mac unlocked and one lead with an open question: everything a planted phone
     /// needs to act, so only the device check stands in its way.
-    private func running(_ store: SessionStore, devicesFile: URL, fake: FakeTailscale, acted: Acted,
+    private func running(_ store: SessionStore, devicesFile: URL, key: SymmetricKey, fake: FakeTailscale, acted: Acted,
                          question: LeadQuestion, root: String) async throws -> PhoneAccess {
         let defaults = scratch.defaults("phone-trust")
         defaults.set(true, forKey: "phoneInputAllowed")
-        let access = PhoneAccess(store: store, defaults: defaults, devicesFile: devicesFile)
+        let access = PhoneAccess(store: store, defaults: defaults, devicesFile: devicesFile, devicesKey: key)
         access.listenPort = try freePort()
         access.screenLocked = { false }
         access.agentRunning = { _, _, _ in true }
@@ -156,8 +157,9 @@ extension TailscaleFakeTests { @MainActor @Suite(.serialized) struct PhoneDevice
     }
 
     /// The reported route, end to end: a record with a token of the process's own, written into the devices file as
-    /// the app writes it (plain JSON), then (the app started as at login) `POST /api/input` and `/api/lead/answer` with
-    /// that token, on loopback, under the owner's login header. Neither acts: the record isn't one the app wrote.
+    /// the app wrote it before sealing (plain JSON), then (the app started as at login, with its key) `POST /api/input`
+    /// and `/api/lead/answer` with that token, on loopback, under the owner's login header. Neither acts: the record isn't
+    /// one the app sealed, so no phone is paired, and Settings says why.
     @Test func aDeviceRecordPlantedInTheDevicesFileDoesNotAct() async throws {
         let fake = try FakeTailscale(scratch: scratch)
         let store = try await store()
@@ -171,7 +173,8 @@ extension TailscaleFakeTests { @MainActor @Suite(.serialized) struct PhoneDevice
         let acted = Acted()
         let question = LeadQuestion(text: "Ship to the testers first?", options: ["Testers first", "Everyone"])
         let root = scratch.url("phone-trust-lead").path
-        let access = try await running(store, devicesFile: file, fake: fake, acted: acted, question: question, root: root)
+        let access = try await running(store, devicesFile: file, key: SymmetricKey(size: .bits256), fake: fake, acted: acted,
+                                       question: question, root: root)
         let port = access.listenPort
         let sid = try #require(store.sessions.first { $0.tty == Self.tty }).identity
 
@@ -185,6 +188,158 @@ extension TailscaleFakeTests { @MainActor @Suite(.serialized) struct PhoneDevice
         #expect(acted.typed.value.isEmpty, "the planted phone typed \(acted.typed.value)")
         #expect(acted.answered.value.isEmpty, "the planted phone answered \(acted.answered.value)")
         #expect(!access.devices.contains { $0.id == "planted" })
+        #expect(access.devicesUnverified, "Settings says no phone is paired, and why")
         await finish(access, fake)
+    }
+
+    // MARK: - The devices file, in memory (`serveForTests`)
+
+    private let owner = TailscaleCLI.Status(dnsName: FakeTailscale.host, login: FakeTailscale.login, httpsAvailable: true)
+
+    private func request(_ method: String, _ path: String, body: String = "", token: String? = nil) throws -> HTTPRequest {
+        var head = "\(method) \(path) HTTP/1.1\r\nHost: \(FakeTailscale.host):8443\r\nTailscale-User-Login: \(FakeTailscale.login)\r\n"
+        if let token { head += "Authorization: Bearer \(token)\r\n" }
+        head += "Content-Length: \(body.utf8.count)\r\n\r\n\(body)"
+        guard case .complete(let parsed) = HTTPParser.parse(Data(head.utf8)) else { throw CancellationError() }
+        return parsed
+    }
+
+    private func send(_ access: PhoneAccess, _ method: String, _ path: String, body: String = "", token: String? = nil) throws -> Int {
+        var answer: HTTPResponse?
+        access.handleForTests(try request(method, path, body: body, token: token)) { answer = $0 }
+        return try #require(answer).status
+    }
+
+    /// Phone Access as the app starts it over `file` with `key`, served in memory.
+    private func started(_ file: URL, key: SymmetricKey?) -> PhoneAccess {
+        AppStatus.enabled = false
+        let access = PhoneAccess(store: SessionStore(), defaults: scratch.defaults("phone-trust"), devicesFile: file, devicesKey: key)
+        access.serveForTests(owner)
+        return access
+    }
+
+    /// Pairs a phone as a phone does (a code shown on the Mac, then `/api/pair`): its token.
+    private func pair(_ access: PhoneAccess) throws -> String {
+        access.setPairingForTests(PairingCode(code: "ABCDEFGH", expires: Date().addingTimeInterval(600)))
+        var answer: HTTPResponse?
+        access.handleForTests(try request("POST", "/api/pair", body: #"{"code":"ABCDEFGH","name":"Pixel"}"#)) { answer = $0 }
+        let body = try #require(answer).body
+        return try #require((try JSONSerialization.jsonObject(with: body) as? [String: Any])?["token"] as? String)
+    }
+
+    private func plain(_ devices: [PairedDevice]) throws -> Data {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        return try encoder.encode(devices)
+    }
+
+    private func planted(_ token: String) -> PairedDevice {
+        PairedDevice(id: "planted", name: "Planted", tokenHash: RemoteAuth.hash(token), tailscaleLogin: FakeTailscale.login, pairedAt: Date())
+    }
+
+    /// The other half: a phone the app paired stays paired when it starts again with its key, and the list on disk is
+    /// sealed (its token hash isn't there to read or copy).
+    @Test func aPhonePairedByTheAppStaysPairedAcrossARestart() throws {
+        let file = scratch.adopt(scratch.url("devices").appendingPathExtension("json"))
+        let key = SymmetricKey(size: .bits256)
+        let first = started(file, key: key)
+        let token = try pair(first)
+        #expect(try send(first, "GET", "/api/state", token: token) == 200)
+        let hash = try #require(first.devices.first).tokenHash
+        let onDisk = try Data(contentsOf: file)
+        #expect(onDisk.range(of: Data(hash.utf8)) == nil, "the list is sealed, not plain")
+
+        let again = started(file, key: key)
+        #expect(!again.devicesUnverified && !again.devicesUnreadable)
+        #expect(try send(again, "GET", "/api/state", token: token) == 200)
+    }
+
+    /// A list the app sealed, changed by one byte, or sealed under another key, isn't believed: no phone is paired (its
+    /// phone hears it isn't, and pairs again), Settings says why, and the next pairing writes a list the app sealed.
+    @Test func anAlteredOrForeignListPairsNoPhone() throws {
+        let key = SymmetricKey(size: .bits256)
+        let file = scratch.adopt(scratch.url("devices").appendingPathExtension("json"))
+        let token = try pair(started(file, key: key))
+        var altered = try Data(contentsOf: file)
+        altered[altered.count / 2] ^= 0x01
+        let foreignFile = scratch.adopt(scratch.url("devices-foreign").appendingPathExtension("json"))
+        let foreignToken = RemoteAuth.newToken()
+        try SealedData.seal(try plain([planted(foreignToken)]), key: SymmetricKey(size: .bits256)).write(to: foreignFile)
+        try altered.write(to: file)
+
+        for (file, token) in [(file, token), (foreignFile, foreignToken)] {
+            let access = started(file, key: key)
+            #expect(access.devicesUnverified)
+            #expect(access.devices.isEmpty)
+            #expect(try send(access, "GET", "/api/state", token: token) == 401)
+            #expect(try send(access, "POST", "/api/input", body: "{}", token: token) == 401)
+            // The user pairs again on the Mac: a list the app sealed replaces it, and stays.
+            let fresh = try pair(access)
+            #expect(!access.devicesUnverified)
+            let restarted = started(file, key: key)
+            #expect(!restarted.devicesUnverified)
+            #expect(try send(restarted, "GET", "/api/state", token: fresh) == 200)
+            #expect(try send(restarted, "GET", "/api/state", token: token) == 401)
+        }
+    }
+
+    /// No key (the Keychain didn't give it): a list on disk can't be checked, so it neither admits nor unpairs (503)
+    /// and isn't written over; phones paired meanwhile are kept in memory only.
+    @Test func withoutTheKeyAListOnDiskAdmitsNobody() throws {
+        let file = scratch.adopt(scratch.url("devices").appendingPathExtension("json"))
+        let token = RemoteAuth.newToken()
+        let written = try plain([planted(token)])
+        try written.write(to: file)
+        let access = started(file, key: nil)
+        #expect(access.devicesUnreadable)
+        #expect(try send(access, "GET", "/api/state", token: token) == 503)
+        #expect(try send(access, "POST", "/api/input", body: "{}", token: token) == 503)
+        #expect(try Data(contentsOf: file) == written)
+
+        let empty = scratch.adopt(scratch.url("devices-none").appendingPathExtension("json"))
+        let memoryOnly = started(empty, key: nil)
+        let paired = try pair(memoryOnly)
+        #expect(try send(memoryOnly, "GET", "/api/state", token: paired) == 200)
+        #expect(!FileManager.default.fileExists(atPath: empty.path), "nothing written without the key")
+    }
+
+    /// While the list can't be read, every request reads it again: a plain list put there meanwhile is read as at
+    /// launch, and isn't believed either.
+    @Test func aListPlantedWhileTheFileIsUnreadableIsNotBelieved() throws {
+        let file = scratch.adopt(scratch.url("devices").appendingPathExtension("json"))
+        try Data().write(to: file)
+        try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: file.path)
+        let access = started(file, key: SymmetricKey(size: .bits256))
+        #expect(access.devicesUnreadable)
+        let token = RemoteAuth.newToken()
+        #expect(try send(access, "GET", "/api/state", token: token) == 503)
+        try FileManager.default.removeItem(at: file)
+        try plain([planted(token)]).write(to: file)
+        #expect(try send(access, "POST", "/api/input", body: "{}", token: token) == 401)
+        #expect(try send(access, "GET", "/api/state", token: token) == 401)
+        #expect(access.devicesUnverified)
+        #expect(access.devices.isEmpty)
+    }
+
+    /// Every route a paired phone uses, from a loopback client with the owner's login header and a planted record's
+    /// token: none is served. Only the page's own assets and `/api/pair` (which needs the code shown on the Mac) take no
+    /// token.
+    @Test func noRouteServesAPlantedRecord() throws {
+        let file = scratch.adopt(scratch.url("devices").appendingPathExtension("json"))
+        let token = RemoteAuth.newToken()
+        try plain([planted(token)]).write(to: file)
+        let access = started(file, key: SymmetricKey(size: .bits256))
+        access.inputAllowed = true
+        let routes = [("GET", "/api/state"), ("GET", "/api/screen?tty=ttys000"), ("POST", "/api/input"), ("POST", "/api/pause"),
+                      ("POST", "/api/push"), ("POST", "/api/push/test"), ("GET", "/api/history?tty=ttys000"),
+                      ("GET", "/api/conversation?tty=ttys000"), ("GET", "/api/conversation/tool"), ("GET", "/api/devpages"),
+                      ("POST", "/api/preview"), ("GET", "/api/lead"), ("POST", "/api/lead/answer"), ("POST", "/api/briefing"),
+                      ("GET", "/api/briefing"), ("POST", PhoneAccess.dictationPath), ("POST", "/api/unpair")]
+        for (method, path) in routes {
+            #expect(try send(access, method, path, body: method == "POST" ? "{}" : "", token: token) == 401, "\(method) \(path)")
+        }
+        #expect(RemoteServer.bodyLimit(method: "POST", path: PhoneAccess.dictationPath,
+                                       headers: ["authorization": "Bearer \(token)", "tailscale-user-login": FakeTailscale.login],
+                                       devices: access.devices) == HTTPParser.defaultMaxBodyBytes)
     }
 } }

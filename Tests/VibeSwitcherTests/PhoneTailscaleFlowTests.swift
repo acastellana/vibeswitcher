@@ -1,5 +1,6 @@
 import Darwin
 import AppKit
+import CryptoKit
 import Foundation
 import SwiftUI
 import Testing
@@ -293,12 +294,16 @@ extension TailscaleFakeTests { @MainActor @Suite struct PhoneTailscaleFlowTests 
     }
 
     /// A devices file that can't be read says nothing about who's paired: no phone is told to forget its token, nobody
-    /// gets in, the file isn't overwritten, and once it reads again the same phone works.
+    /// gets in, the file isn't overwritten, and once it reads again (a list the app sealed) the same phone works. (One
+    /// that reads but isn't a list the app sealed pairs no phone: PhoneDevicesTrustTests.)
     @Test func anUnreadableDevicesFileNeitherUnpairsNorAdmits() throws {
         let file = scratch.adopt(scratch.url("devices").appendingPathExtension("json"))
         try Data("{ not json".utf8).write(to: file)
+        try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: file.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path) }
         AppStatus.enabled = false
-        let access = PhoneAccess(store: SessionStore(), defaults: scratch.defaults("phone-flow"), devicesFile: file)
+        let key = SymmetricKey(size: .bits256)
+        let access = PhoneAccess(store: SessionStore(), defaults: scratch.defaults("phone-flow"), devicesFile: file, devicesKey: key)
         access.listenPort = try freePort()
         access.serveForTests(owner)
         let token = "a-token-of-a-phone-paired-before"
@@ -308,12 +313,13 @@ extension TailscaleFakeTests { @MainActor @Suite struct PhoneTailscaleFlowTests 
         #expect((answer.json["error"] as? String)?.isEmpty == false)
         access.setPairingForTests(PairingCode(code: "ABCDEFGH", expires: Date().addingTimeInterval(600)))
         #expect(try send(access, "POST", "/api/pair", body: pairBody("ABCDEFGH")).status == 503)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
         #expect(try Data(contentsOf: file) == Data("{ not json".utf8), "pairing must not overwrite the phones it couldn't read")
-        // Readable again (a restored backup, say): the same token works.
+        // Readable again (a restored backup of the list the app sealed, say): the same token works.
         let device = PairedDevice(id: "p", name: "Pixel", tokenHash: RemoteAuth.hash(token), tailscaleLogin: FakeTailscale.login, pairedAt: Date())
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
-        try encoder.encode([device]).write(to: file)
+        try SealedData.seal(try encoder.encode([device]), key: key).write(to: file)
         #expect(try send(access, "GET", "/api/state", token: token).status == 200)
     }
 

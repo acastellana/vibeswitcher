@@ -9,7 +9,10 @@ import VibeCore
 /// - Off by default. The server listens on 127.0.0.1; `tailscale serve` (never `funnel`) is the only
 ///   way in, so only devices on your tailnet can reach it, over HTTPS.
 /// - Every request must come from this Mac's own Tailscale account (the `Tailscale-User-Login`
-///   header set by `tailscale serve`) and, except for pairing, carry a device token.
+///   header set by `tailscale serve`) and, except for pairing, carry a device token. The header is only text from
+///   any other loopback client (a process of your own account can connect to the port and send it): the token is
+///   what admits a request, and the list of paired phones' tokens is sealed under the app's Keychain key, so a record
+///   that process writes into it is never believed (`loadDevices`).
 /// - A device gets its token by pairing with a one-time code shown on the Mac (10 min, 5 tries).
 /// - Typing into sessions is a separate switch, off by default. Every pairing and remote input is
 ///   written to an audit log and announced on the Mac.
@@ -37,6 +40,9 @@ final class PhoneAccess: ObservableObject {
     /// The devices file is there but can't be read: who's paired isn't known, which isn't the same as nobody. Nothing
     /// under /api/ is served meanwhile (503, so no phone forgets its token) and the file is never overwritten.
     @Published private(set) var devicesUnreadable = false
+    /// The devices file reads but isn't a list the app sealed (a phone list from before sealing, or one written or
+    /// changed by something else): no phone is paired, Settings says so, and the next pairing replaces it.
+    @Published private(set) var devicesUnverified = false
     var devicesFilePath: String { devicesFile.path }
     @Published private(set) var recentActivity: [String] = []
     @Published var enabled: Bool {
@@ -195,9 +201,11 @@ final class PhoneAccess: ObservableObject {
         inputAllowed = defaults.bool(forKey: "phoneInputAllowed")
         devPagesAllowed = defaults.bool(forKey: "phoneDevPagesAllowed")
         pushOnlyWhenAway = defaults.bool(forKey: "phonePushOnlyWhenAway")
-        let loaded = Self.loadDevices(self.devicesFile)
-        devices = loaded ?? []
-        devicesUnreadable = loaded == nil
+        switch Self.loadDevices(self.devicesFile, key: devicesKey) {
+        case .devices(let loaded): devices = loaded
+        case .unreadable: devicesUnreadable = true
+        case .unverified: devicesUnverified = true
+        }
         pairedNow.value = devices   // an initializer's assignment runs no didSet
         recentActivity = Self.tailOfAuditLog()
         // Network and Tailscale come back a few seconds after wake.
@@ -460,7 +468,8 @@ final class PhoneAccess: ObservableObject {
         guard RemoteGate.hostMatches(request.header("host"), host: host, port: Self.httpsPort) else {
             return respond(.error(421, "wrong host"))
         }
-        // Only requests relayed by `tailscale serve` for this Mac's own account.
+        // Requests relayed by `tailscale serve` for this Mac's own account. From any other loopback client this header is
+        // just text, so it admits nothing by itself: the token below, checked against the sealed list, does.
         guard request.header("tailscale-user-login") == owner else { return respond(.error(403, "not your tailnet account")) }
         if request.method == "GET", let asset = WebAssets.response(for: request.path) { return respond(asset) }
         if request.path.hasPrefix("/api/"), !devicesReadable() { return respond(.error(503, Self.devicesUnreadableMessage)) }
@@ -630,7 +639,7 @@ final class PhoneAccess: ObservableObject {
         guard Sandbox.isOn else { return false }
         let failure: TailscaleCLI.Failure?
         switch name {
-        case "off", "expired", "unreadable": failure = nil
+        case "off", "expired", "unreadable", "unverified": failure = nil
         case "notinstalled": failure = .notInstalled
         case "notrunning": failure = .notRunning
         case "https": failure = .httpsDisabled
@@ -640,6 +649,7 @@ final class PhoneAccess: ObservableObject {
         pairing = nil
         url = nil
         devicesUnreadable = name == "unreadable"
+        devicesUnverified = name == "unverified"
         state = failure.map { .failed($0.description) } ?? .off
         if name == "expired" {
             state = .on
@@ -1675,43 +1685,71 @@ final class PhoneAccess: ObservableObject {
         try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
     }
 
-    private static func writePrivate(_ data: Data, to url: URL) {
+    @discardableResult
+    private static func writePrivate(_ data: Data, to url: URL) -> Bool {
         ensureDirectory()
-        try? data.write(to: url, options: .atomic)
+        guard (try? data.write(to: url, options: .atomic)) != nil else { return false }
         try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        return true
     }
 
-    /// The phones in `url`: none if there's no file; nil if there is one that can't be read or decoded.
-    private static func loadDevices(_ url: URL) -> [PairedDevice]? {
+    enum DevicesRead: Equatable {
+        /// The phones the app sealed there (none: no file).
+        case devices([PairedDevice])
+        /// It can't be read now (or there's no key to open it with): who's paired isn't known.
+        case unreadable
+        /// It reads, but isn't a list the app sealed under `key`: not believed, so no phone is paired.
+        case unverified
+    }
+
+    /// The phones in `url`, sealed under `key` (`SealedData`): the only ones believed. Your own account's processes can
+    /// write that file; only the app, with its Keychain key, can seal it, so a record put there by anything else (or a
+    /// list changed since, or one from before sealing) is `unverified`, never a paired phone.
+    static func loadDevices(_ url: URL, key: SymmetricKey?) -> DevicesRead {
         let data: Data
         do {
             data = try Data(contentsOf: url)
         } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
             // A link to nowhere says "no such file" too, and doesn't mean no phones.
-            return (try? FileManager.default.destinationOfSymbolicLink(atPath: url.path)) == nil ? [] : nil
+            return (try? FileManager.default.destinationOfSymbolicLink(atPath: url.path)) == nil ? .devices([]) : .unreadable
         } catch {
-            return nil
+            return .unreadable
         }
+        // No key (the Keychain didn't give it): a list there can't be checked, which isn't the same as no phones.
+        guard let key else { return .unreadable }
+        guard let opened = SealedData.open(data, key: key) else { return .unverified }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        return try? decoder.decode([PairedDevice].self, from: data)
+        // Sealed by the app but not a list this build reads (a later build's): unknown, and never written over.
+        guard let devices = try? decoder.decode([PairedDevice].self, from: opened) else { return .unreadable }
+        return .devices(devices)
     }
 
-    /// Whether the phones are known; a file that couldn't be read is read again, so restoring it needs no restart.
+    /// Whether the phones are known; a file that couldn't be read is read again, so restoring it needs no restart. Read
+    /// again as at launch: only a list the app sealed is believed.
     private func devicesReadable() -> Bool {
         guard devicesUnreadable else { return true }
-        guard let loaded = Self.loadDevices(devicesFile) else { return false }
-        devices = loaded
+        switch Self.loadDevices(devicesFile, key: devicesKey) {
+        case .unreadable: return false
+        case .unverified:
+            devices = []
+            devicesUnverified = true
+        case .devices(let loaded):
+            devices = loaded
+        }
         devicesUnreadable = false
         return true
     }
 
     private func saveDevices() {
         guard !devicesUnreadable else { return }   // never over the phones it couldn't read
+        guard let devicesKey else { return }       // no key: kept in memory only
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        if let data = try? encoder.encode(devices) { Self.writePrivate(data, to: devicesFile) }
+        encoder.outputFormatting = [.sortedKeys]
+        guard let data = try? encoder.encode(devices), let sealed = try? SealedData.seal(data, key: devicesKey) else { return }
+        // A list the app sealed replaces the one it didn't believe.
+        if Self.writePrivate(sealed, to: devicesFile) { devicesUnverified = false }
     }
 
     private static func loadOrCreateVapidKey() -> P256.Signing.PrivateKey {
