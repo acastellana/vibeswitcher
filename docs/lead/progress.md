@@ -4803,3 +4803,4 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-26 18:22 Released a-vault-that-didn's worker (idle since its done report on 391c119a) while its audit runs
 - 2026-11-26 18:22 Automatically (auto_advance): Started the audit of a-vault-that-didn at 391c119a (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
 - 2026-11-26 18:22 Automatically (auto_advance): Started the audit of the-command-guard-fails at f840ad64 (Its review is audit).
+- 2026-11-26 18:27 Audit of a-vault-that-didn: complete, clean, round 1: 2 Nit open
