@@ -6,7 +6,7 @@
 import * as kit from '../kit.js';
 import { h, setText, setClass } from '../dom.js';
 import { icon } from '../marks.js';
-import { AGENTS } from '../words.js';
+import { AGENTS, tilde, lastPart } from '../words.js';
 import { copyLine, UNDO_MS } from './cards.js';
 import {
   sessionShort, shellWord, renameLine, PAUSES, pauseLine, endable, endLine, closeShellsLine, resumeLine, endedEntry, newLine,
@@ -572,82 +572,138 @@ export function resumeOrLine(app, entry, { plain = false } = {}) {
     note: (result) => (!result.reopened?.length && result.refused?.length ? t('drResumeRefused', { why: result.refused[0].why || '' }) : null) });
 }
 
-// Starting a session: a folder, one of the launch presets the node keeps for it (`session.presets`: the folder's own
-// and its default first, as the app's New Session lists them; Claude and Shell when the node lists none), Claude's model;
-// the line that starts it, as you type. `folder()` gives the folder to offer first. Returns { el, update() }.
-// Starting a project lead in a folder (the Mac's Start Project Lead…, and the palette's "Start Project Lead in …"): the
-// folder and the goal, and the line that starts it, a click to copy. Returns { el, choose(folder), update() }.
+// The start forms (New session, New project; the design review's D12): a short form each, in the page's components.
+// A row is its words over its control: what to start, where (the folder field, the recent folders offered beside
+// it), what is optional; then one primary button that says what it will start, which opens what started. Where the
+// page can't act, the same form ends in the line to copy and one sentence why. A folder is shown as ~/… (`~` is the
+// node's home, as a shell reads it).
+function startRow(label, ...controls) {
+  return h('div', { class: 'start-row' }, h('span', { class: 'start-label' }, label), h('div', { class: 'start-control' }, ...controls));
+}
+
+// The folder field's text as the folder the node takes: `~/` is the node's home.
+function folderOf(app, typed) {
+  const home = app.store.state.node?.home;
+  const text = String(typed || '').trim();
+  return home && (text === '~' || text.startsWith('~/')) ? home + text.slice(1) : text;
+}
+
+// The recent folders beside a folder field, each a quiet button with its folder's name (~/… on hover): a press puts it
+// in the field. Returns { el, update(folders) }.
+function recentChoices(app, pick) {
+  const list = h('span', { class: 'start-recent-list' });
+  const el = h('div', { class: 'start-recent', hidden: true }, h('span', { class: 'start-recent-label' }, t('drRecent')), list);
+  let drawn = '';
+  return {
+    el,
+    update(folders) {
+      const home = app.store.state.node?.home;
+      const key = JSON.stringify([folders, home]);
+      if (key === drawn) return;
+      drawn = key;
+      el.hidden = !folders.length;
+      list.replaceChildren(...folders.map((folder) => kit.button('quiet', { size: 's', title: tilde(folder, home), onclick: () => pick(folder) }, lastPart(folder) || folder)));
+    },
+  };
+}
+
+// A preset in a person's words: what it starts (Claude with its model, Codex, a shell), and what else it does, counted.
+// Its whole command stays in the tooltip (presetNote).
+export function presetWords(preset) {
+  if (!preset) return '';
+  const parts = [];
+  if (preset.kind === 'shell') parts.push(t('drPwShell'));
+  else {
+    const agent = preset.kind === 'codex' ? 'Codex' : 'Claude';
+    const model = /(?:^|\s)--model[= ](\S+)/.exec(preset.command || '')?.[1];
+    parts.push(model ? t('drPwModel', { agent, model: model.charAt(0).toUpperCase() + model.slice(1) }) : agent);
+  }
+  if (preset.env?.length) parts.push(t('drPwSettings', { n: preset.env.length }));
+  if (preset.keepShell) parts.push(t('drShellStays'));
+  if (preset.default) parts.push(t('drFolderDefault'));
+  return parts.join(' · ');
+}
+
+// Starting a project lead in a folder that exists (the Mac's Start Project Lead…, and the palette's "Start Project
+// Lead in …"): the folder, the goal, and Start the lead in <folder>; a folder whose lead runs offers Open it instead.
+// Returns { el, choose(folder), update(recent) }.
 export function newLeadForm(app) {
   const path = kit.field({ class: 'answer-input', type: 'text', placeholder: t('drPathPlaceholder'), 'aria-label': t('drProjectFolder'), spellcheck: 'false', autocomplete: 'off' });
-  const goal = kit.field({ tag: 'textarea', class: 'answer-input lead-goal', rows: 2, placeholder: t('drTheGoalOptionalWithoutOne'), 'aria-label': t('drGoal') });
-  const lineSlot = h('div', { class: 'prompt-line' });
-  const el = h('section', { class: 'new-session new-lead', 'aria-label': t('drStartAProjectLead') },
-    h('div', { class: 'new-head' }, h('h2', { class: 'new-title' }, t('drStartAProjectLead'))),
-    h('div', { class: 'new-fields' }, path, goal),
-    lineSlot,
-    h('p', { class: 'confirm-note' }, t('drALeadThatRunsWorkers')));
-  function where() {
-    const home = app.store.state.node?.home;
-    const typed = path.value.trim();
-    return home && (typed === '~' || typed.startsWith('~/')) ? home + typed.slice(1) : typed;
-  }
+  const goal = kit.field({ tag: 'textarea', class: 'answer-input lead-goal', rows: 2, placeholder: t('drGoalPlaceholder'), 'aria-label': t('drGoal') });
+  const recent = recentChoices(app, (folder) => { path.value = tilde(folder, app.store.state.node?.home); draw(); goal.focus?.(); });
+  const lineSlot = h('div', { class: 'prompt-line start-actions' });
+  const el = h('section', { class: 'start-form new-lead', 'aria-label': t('drStartAProjectLead') },
+    startRow(t('drWhereFolder'), path, recent.el),
+    startRow(t('drGoalOptional'), goal),
+    lineSlot);
+  let drawn = '';
   function draw() {
-    const folder = where();
-    if (!folder) { lineSlot.replaceChildren(h('p', { class: 'confirm-note' }, t('drGiveAFolderTheLine'))); return; }
-    // With the `act` right and `lead` listed, Start the lead starts it (the folder and the goal; never `--init`, which
-    // stays the terminal's), then opens its project; Take the base as it is and Replace it where the node's state asks
-    // for them (leadStartOrLine).
-    lineSlot.replaceChildren(...leadStartOrLine(app, { folder, label: t('acStartLead'), orLine: true,
+    const folder = folderOf(app, path.value);
+    const running = folder ? [...app.store.state.leads.values()].find((one) => one.root === folder && one.session) : null;
+    const key = JSON.stringify([folder, goal.value.trim(), running?.project || null, app.store.acts(), app.store.can('lead')]);
+    if (key === drawn) return;
+    drawn = key;
+    if (!folder) { lineSlot.replaceChildren(kit.button('primary', { class: 'start-button', disabled: true }, t('acStartLead'))); return; }
+    const name = lastPart(folder) || folder;
+    if (running) {
+      lineSlot.replaceChildren(kit.button('primary', { tag: 'a', class: 'start-button', href: projectHref(running.project) }, t('drOpenProject', { name })),
+        h('p', { class: 'confirm-note' }, t('drItsLeadRuns')));
+      return;
+    }
+    // With the `act` right and `lead` listed, it starts the lead (the folder and the goal; never `--init`, which stays
+    // the terminal's), then opens its project; Take the base as it is and Replace it where the node's state asks
+    // for them (leadStartOrLine). Elsewhere the line and why.
+    lineSlot.replaceChildren(...leadStartOrLine(app, { folder, label: t('drStartLeadIn', { name }), orLine: false,
       extra: () => (goal.value.trim() ? { goal: goal.value.trim() } : {}),
       line: leadLine(folder, goal.value), lineLabel: t('drTheCommandThatStartsThe') }));
   }
   path.addEventListener('input', draw);
-  goal.addEventListener('input', draw);
+  goal.addEventListener('input', () => { if (!actsFor(app, 'lead')) draw(); });
   draw();
   return {
     el,
     // The palette's "Start Project Lead in …": that folder in the form, the goal to write.
     choose(folder) {
-      path.value = folder;
+      path.value = tilde(folder, app.store.state.node?.home);
       draw();
       goal.focus?.();
       el.scrollIntoView?.({ block: 'nearest' });
     },
-    update: draw,
+    update(folders = []) { recent.update(folders); draw(); },
   };
 }
 
-// New Project… (the Mac's sheet): a name, where (the node's projects folder when empty) and a goal, drafted as the
-// `vibeswitcher new-project` line that makes its folder, repository and first commit, then starts its lead.
+// A brand-new project (the Mac's New Project…): a name, where (the node's projects folder when empty) and a goal. No
+// node request makes a project's folder from a page yet (`vibeswitcher new-project` makes it, its repository and first
+// commit, in the terminal's own process): the form says so plainly and ends in that line. Returns { el, update() }.
 export function newProjectForm(app) {
-  const name = kit.field({ class: 'answer-input', type: 'text', placeholder: t('drProjectName'), 'aria-label': t('drProjectName'), spellcheck: 'false', autocomplete: 'off' });
+  const name = kit.field({ class: 'answer-input', type: 'text', placeholder: t('drProjectNamePlaceholder'), 'aria-label': t('drProjectName'), spellcheck: 'false', autocomplete: 'off' });
   const location = kit.field({ class: 'answer-input', type: 'text', placeholder: t('drWhereOptionalTheNodeS'), 'aria-label': t('drWhere'), spellcheck: 'false', autocomplete: 'off' });
-  const goal = kit.field({ tag: 'textarea', class: 'answer-input lead-goal', rows: 2, placeholder: t('drTheGoalOptional'), 'aria-label': t('drGoal') });
+  const goal = kit.field({ tag: 'textarea', class: 'answer-input lead-goal', rows: 2, placeholder: t('drGoalPlaceholder'), 'aria-label': t('drGoal') });
   const folderNote = h('p', { class: 'confirm-note', hidden: true });
-  const lineSlot = h('div', { class: 'prompt-line' });
-  const el = h('section', { class: 'new-session new-project', 'aria-label': t('drNewProject') },
-    h('div', { class: 'new-head' }, h('h2', { class: 'new-title' }, t('drNewProject'))),
-    h('div', { class: 'new-fields' }, name, location, goal),
-    h('p', { class: 'confirm-note where-hint' }, t('drWhereHint')),
-    folderNote,
-    lineSlot,
-    h('p', { class: 'confirm-note' }, t('drMakesTheProjectSFolder')));
+  const lineSlot = h('div', { class: 'prompt-line start-actions' });
+  const el = h('section', { class: 'start-form new-project', 'aria-label': t('drNewProject') },
+    startRow(t('drProjectName'), name, folderNote),
+    startRow(t('drWhere'), location, h('p', { class: 'confirm-note where-hint' }, t('drWhereHint'))),
+    startRow(t('drGoalOptional'), goal),
+    lineSlot);
   function draw() {
     const folder = projectFolderName(name.value);
     folderNote.hidden = !folder;
     folderNote.textContent = folder ? t('drItsFolder', { folder }) : '';
-    // No node kind makes a project's folder from a page (`vibeswitcher new-project` makes it in the terminal's own
-    // process): the line, and why it is one.
-    lineSlot.replaceChildren(...(folder ? [copyLine(newProjectLine(name.value, location.value, goal.value), t('drTheCommandThatMakesThe')),
-      h('p', { class: 'confirm-note start-why' }, t('drProjectTerminalOnly'))]
-      : [h('p', { class: 'confirm-note' }, t('drGiveItANameThe'))]));
+    lineSlot.replaceChildren(h('p', { class: 'confirm-note start-why' }, t('drProjectTerminalOnly')),
+      folder ? copyLine(newProjectLine(name.value, location.value, goal.value), t('drTheCommandThatMakesThe')) : h('p', { class: 'confirm-note' }, t('drGiveItANameThe')));
   }
   for (const field of [name, location, goal]) field.addEventListener('input', draw);
   draw();
   return { el, update: draw };
 }
 
-export function newSessionForm(app, { folder }) {
+// Starting a session: what (one of the launch presets the node keeps for the folder, `session.presets`: the folder's
+// own and its default first, as the app's New Session lists them; Claude, Codex and Shell when the node lists none),
+// where (`folder()` offered first, the recent folders beside it), Claude's model if you want another; then Start
+// <preset> in <folder>. Returns { el, update(), choose(folder, preset) }.
+export function newSessionForm(app, { folder, recent = () => [] }) {
   const BUILT_IN = [{ name: 'Claude', kind: 'claude', builtIn: true }, { name: 'Codex', kind: 'codex', builtIn: true }, { name: 'Shell', kind: 'shell', builtIn: true }];
   let presets = BUILT_IN;
   let chosen = 'Claude';
@@ -656,11 +712,12 @@ export function newSessionForm(app, { folder }) {
   let asked = null;
   let timer = null;
   const path = kit.field({ class: 'answer-input', type: 'text', placeholder: t('drPathPlaceholder'), 'aria-label': t('drFolder'), spellcheck: 'false', autocomplete: 'off' });
-  const model = kit.field({ class: 'answer-input model-input', type: 'text', placeholder: t('drModelOptional'), 'aria-label': t('drModel'), spellcheck: 'false', autocomplete: 'off' });
+  const model = kit.field({ class: 'answer-input model-input', type: 'text', placeholder: t('drModelPlaceholder'), 'aria-label': t('drModel'), spellcheck: 'false', autocomplete: 'off' });
   const kinds = kit.segmented({ class: 'presets', role: 'group', 'aria-label': t('drPreset') });
   const about = h('p', { class: 'confirm-note preset-about', hidden: true });
-  const lineSlot = h('div', { class: 'prompt-line' });
-  // Adding, changing and removing the folder's presets: the `vibeswitcher preset` line for each.
+  const lineSlot = h('div', { class: 'prompt-line start-actions' });
+  const choices = recentChoices(app, (one) => { path.value = tilde(one, app.store.state.node?.home); offered = true; draw(); ask(); });
+  // Adding, changing and removing the folder's presets: the `vibeswitcher preset` line for each, or Save where it acts.
   const editor = presetEditor({ folder: () => where(), app, saved: () => { asked = null; ask(); } });
   const editing = kit.button('quiet', { size: 's', class: 'preset-edit-toggle', 'aria-expanded': 'false', onclick: () => {
     const open = editor.el.hidden;
@@ -668,22 +725,17 @@ export function newSessionForm(app, { folder }) {
     editing.setAttribute('aria-expanded', String(open));
     if (open) editor.update(presets, true);
   } }, t('drEditPresets'));
-  const el = h('section', { class: 'new-session', 'aria-label': t('drStartASession') },
-    h('div', { class: 'new-head' }, h('h2', { class: 'new-title' }, t('drStartASession')), editing),
-    h('div', { class: 'new-fields' }, path, kinds, model),
-    about,
+  const modelRow = startRow(t('drModelOptional'), model);
+  const el = h('section', { class: 'start-form start-card new-session', 'aria-label': t('drStartASession') },
+    startRow(t('drWhat'), h('div', { class: 'start-what' }, kinds, editing), about),
+    startRow(t('drWhereFolder'), path, choices.el),
+    modelRow,
     lineSlot,
-    h('p', { class: 'confirm-note' }, t('drRunItInATerminal3')),
     editor.el);
   let offered = false;
   let lineDrawn = '';
 
-  // `~/` is the node's home, as a shell would read it (the command line takes the folder as given).
-  function where() {
-    const home = app.store.state.node?.home;
-    const typed = path.value.trim();
-    return home && (typed === '~' || typed.startsWith('~/')) ? home + typed.slice(1) : typed;
-  }
+  const where = () => folderOf(app, path.value);
 
   // The node's presets for the folder, asked a moment after it changes (an absolute path only).
   function ask() {
@@ -704,31 +756,35 @@ export function newSessionForm(app, { folder }) {
   function draw() {
     const preset = presets.find((one) => one.name === chosen && !one.refused) || presets.find((one) => one.name === chosen) || presets[0];
     kinds.replaceChildren(...presets.map((one) => kit.segment({
-      'aria-pressed': String(one === preset), disabled: !!one.refused, title: one.refused ? t('drCantStartHere', { why: one.refused }) : presetNote(one),
+      'aria-pressed': String(one === preset), disabled: !!one.refused, title: one.refused ? t('drCantStartHere', { why: one.refused }) : presetNote(one) || null,
       onclick: () => { chosen = one.name; picked = true; draw(); },
     }, one.name)));
-    model.hidden = preset.kind === 'shell';
-    about.hidden = preset.builtIn || !presetNote(preset);
-    setText(about, preset.builtIn ? '' : presetNote(preset));
+    modelRow.hidden = preset.kind === 'shell' || !!preset.command?.includes('--model');
+    const words = preset.builtIn ? '' : presetWords(preset);
+    about.hidden = !words;
+    setText(about, words);
+    about.title = preset.builtIn ? '' : presetNote(preset);
     const folder = where();
+    const what = preset.name;
     if (!folder) {
       lineDrawn = '';
-      lineSlot.replaceChildren(h('p', { class: 'confirm-note' }, t('drGiveAFolderTheLine2')));
+      lineSlot.replaceChildren(kit.button('primary', { class: 'start-button', disabled: true }, t('acStart')));
       if (!editor.el.hidden) editor.update(presets);
       return;
     }
     // With the `act` right, Start starts it from here (`session.new`: the folder, a built-in's agent or a preset by
-    // name, the model), the line beside it.
+    // name, the model); elsewhere the line and why.
     // A preset the node listed goes by its name with the digest it was listed with (the node starts it only while it is
     // as shown); the page's own Claude, Codex or Shell (the node listed none) by its agent.
     // Drawn again only when what it starts changed: a store update while a start is out keeps its "Starting…".
     const drawnNow = JSON.stringify([folder, preset.name, preset.digest ?? null, preset.kind, model.value, actsFor(app, 'session.new'), app.store.acts()]);
     if (drawnNow === lineDrawn) { if (!editor.el.hidden) editor.update(presets); return; }
     lineDrawn = drawnNow;
+    const withModel = !modelRow.hidden && model.value.trim();
     const startArgs = () => ({ folder, ...(preset.digest ? { preset: preset.name, digest: preset.digest } : { agent: preset.kind || 'claude' }),
-      ...(model.value.trim() && preset.kind !== 'shell' ? { model: model.value.trim() } : {}) });
-    lineSlot.replaceChildren(...startOrLine(app, { kind: 'session.new', label: t('acStart'), terminalOnly: 'drStartTerminalOnly', args: startArgs,
-      line: newLine(folder, preset, model.value), lineLabel: 'the command that starts it',
+      ...(withModel ? { model: model.value.trim() } : {}) });
+    lineSlot.replaceChildren(...startOrLine(app, { kind: 'session.new', label: t('drStartIn', { what, name: lastPart(folder) || folder }), terminalOnly: 'drStartTerminalOnly', args: startArgs,
+      orLine: false, line: newLine(folder, preset, withModel ? model.value : ''), lineLabel: 'the command that starts it',
       target: (result) => ({ session: typeof result.session === 'string' ? result.session : null }) }));
     if (!editor.el.hidden) editor.update(presets);
   }
@@ -737,22 +793,23 @@ export function newSessionForm(app, { folder }) {
 
   return {
     el,
-    // The palette's "New … in …": that folder and preset in the form, and its line ready to copy.
+    // The palette's "New … in …": that folder and preset in the form, its Start (or its line) ready.
     choose(given, name) {
-      path.value = given;
+      path.value = tilde(given, app.store.state.node?.home);
       offered = true;
       chosen = name;
       picked = true;
       ask();
       draw();
-      lineSlot.querySelector('.copy-button')?.focus();
+      (lineSlot.querySelector('.start-button') || lineSlot.querySelector('.copy-button'))?.focus();
       el.scrollIntoView?.({ block: 'nearest' });
     },
     update() {
       if (!offered && !path.value) {
         const given = folder();
-        if (given) { path.value = given; offered = true; }
+        if (given) { path.value = tilde(given, app.store.state.node?.home); offered = true; }
       }
+      choices.update(recent());
       ask();
       draw();
     },

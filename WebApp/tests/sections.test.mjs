@@ -282,3 +282,98 @@ test('D18: the inspector folds the agent’s ids, process, command and size unde
   assert.match(bareCss, /\.button, \.button\.small, \.button\.quiet,/);
   setLanguage('en');
 });
+
+// ---- D12: New session and New project ----
+
+const shown = (el) => findAll(el, (node) => node.tag === 'button' && !node.hidden && !findAncestorHidden(node));
+function findAncestorHidden(node) { for (let at = node.parentNode; at; at = at.parentNode) if (at.hidden) return true; return false; }
+const primaries = (el) => shown(el).filter((node) => /(^| )button( |$)/.test(node.attrs.class || '') && !/plain|quiet/.test(node.attrs.class));
+
+test('D12: New session is one short form: what (the presets, the default chosen, in words), the folder with the recent ones, the model, and one button that says what it starts', async () => {
+  const { newSessionForm } = await import('../js/views/drive.js');
+  for (const code of ['en', 'es']) {
+    setLanguage(code);
+    let read;
+    const asked = new Promise((resolve) => { read = resolve; });
+    const app = fakeApp({ route: { name: 'sessions' }, kinds: ['session.new', 'session.presets'], state: { node: { home: '/home/dev' } } });
+    app.store.read = (kind, args) => { read(args); return Promise.resolve({ ok: true, result: { problems: [], presets: [
+      { name: 'Opus', kind: 'claude', command: 'claude --model opus', env: ['MAX_THINKING_TOKENS'], keepShell: false, project: true, default: true, digest: 'd-opus', refused: null },
+      { name: 'Claude', kind: 'claude', command: 'claude', env: [], keepShell: false, project: false, default: false, digest: 'd-claude', refused: null }] } }); };
+    const form = newSessionForm(app, { folder: () => '/home/dev/projects/example-site', recent: () => ['/home/dev/projects/example-site', '/home/dev/projects/notes'] });
+    form.update();
+    // The node's presets for the folder: asked a moment after it is offered, drawn once they come.
+    await asked;
+    await flush();
+    const labels = findAll(form.el, byClass('start-label')).filter((one) => !findAncestorHidden(one)).map((one) => one.textContent);
+    assert.deepEqual(labels, [t('drWhat'), t('drWhereFolder')], `${code}: what and where (the preset sets its own model)`);
+    const chosen = find(form.el, (node) => node.classList.contains('segment') && node.attrs['aria-pressed'] === 'true');
+    assert.equal(chosen.textContent, 'Opus', 'the folder’s default chosen');
+    const about = find(form.el, byClass('preset-about'));
+    assert.equal(about.textContent, [t('drPwModel', { agent: 'Claude', model: 'Opus' }), t('drPwSettings', { n: 1 }), t('drFolderDefault')].join(' · '));
+    assert.match(about.title, /claude --model opus/, 'the command on hover only');
+    const field = find(form.el, (node) => node.tag === 'input' && node.attrs['aria-label'] === t('drFolder'));
+    assert.equal(field.value, '~/projects/example-site', 'shown as ~/…');
+    const one = primaries(form.el);
+    assert.equal(one.length, 1, 'one primary action');
+    assert.equal(one[0].textContent, t('drStartIn', { what: 'Opus', name: 'example-site' }));
+    assert.doesNotMatch(form.el.shownText, /vibeswitcher|--model|MAX_THINKING/, 'no command where a person reads');
+    // A recent folder, pressed, is the folder.
+    find(find(form.el, byClass('start-recent')), (node) => node.tag === 'button' && node.textContent === 'notes').click();
+    assert.equal(field.value, '~/projects/notes');
+    one[0].click();
+    assert.deepEqual(app.sent.at(-1), { kind: 'session.new', args: { folder: '/home/dev/projects/example-site', preset: 'Opus', digest: 'd-opus' } }, 'the button drawn for example-site');
+  }
+  setLanguage('en');
+});
+
+test('D12: where the page can’t act New session is the same form, ending in the line to copy and one sentence why', async () => {
+  const { newSessionForm } = await import('../js/views/drive.js');
+  const app = fakeApp({ route: { name: 'sessions' }, acts: false, kinds: ['session.new'], state: { node: { home: '/home/dev' } } });
+  const form = newSessionForm(app, { folder: () => '/home/dev/projects/example-site', recent: () => [] });
+  form.update();
+  assert.deepEqual(findAll(form.el, byClass('start-label')).filter((one) => !findAncestorHidden(one)).map((one) => one.textContent), ['What to start', 'Folder', 'Model (optional)']);
+  assert.equal(primaries(form.el).length, 0);
+  assert.ok(find(form.el, byClass('copy-line')));
+  assert.equal(findAll(form.el, byClass('start-why')).length, 1);
+  assert.match(form.el.textContent, /doesn’t act for you here/);
+  assert.equal(find(form.el, byClass('start-recent')).hidden, true, 'none recent: nothing offered');
+});
+
+test('D12: New project, for someone with no projects yet: a folder you have (the default) or a new one; no recent row; Start the lead waits for a folder; a new folder says plainly the page can’t make it, and offers the line, no button', async () => {
+  const { newProjectView } = await import('../js/views/own.js');
+  for (const code of ['en', 'es']) {
+    setLanguage(code);
+    const app = fakeApp({ route: { name: 'new' }, kinds: ['lead', 'recent'], state: { node: { home: '/home/dev', ended: [] } },
+      reply: (kind) => (kind === 'recent' ? { ok: true, result: { projects: [] } } : { ok: true, result: {} }) });
+    const view = newProjectView(app);
+    view.render();
+    await flush();
+    view.render();
+    assert.match(view.el.textContent, new RegExp(t('owProjectLede').slice(0, 30)), 'one sentence on what a project is');
+    const modes = findAll(view.el, byClass('segment'));
+    assert.deepEqual(modes.map((one) => [one.textContent, one.attrs['aria-pressed']]), [[t('owModeFolder'), 'true'], [t('owModeNew'), 'false']]);
+    assert.equal(find(view.el, byClass('start-recent')).hidden, true);
+    let start = primaries(view.el);
+    assert.equal(start.length, 1);
+    assert.equal(start[0].disabled, true, 'nothing to start until a folder is given');
+    const folder = find(view.el, (node) => node.tag === 'input' && node.attrs['aria-label'] === t('drProjectFolder'));
+    folder.value = '~/projects/shop';
+    folder.dispatch('input');
+    start = primaries(view.el);
+    assert.equal(start[0].textContent, t('drStartLeadIn', { name: 'shop' }));
+    start[0].click();
+    assert.deepEqual(app.sent.at(-1), { kind: 'lead', args: { folder: '/home/dev/projects/shop' } });
+    // A new folder: the form says so plainly, offers the line, no button.
+    modes[1].click();
+    const fresh = find(view.el, byClass('new-project'));
+    assert.equal(fresh.hidden, false);
+    assert.equal(find(view.el, byClass('new-lead')).hidden, true);
+    const name = find(fresh, (node) => node.tag === 'input' && node.attrs['aria-label'] === t('drProjectName'));
+    name.value = 'Shop';
+    name.dispatch('input');
+    assert.equal(primaries(fresh).length, 0, 'no button the node can’t serve');
+    assert.match(fresh.textContent, new RegExp(t('drProjectTerminalOnly').slice(0, 30)));
+    assert.match(find(fresh, byClass('copy-line')).textContent, /vibeswitcher new-project Shop/);
+  }
+  setLanguage('en');
+});

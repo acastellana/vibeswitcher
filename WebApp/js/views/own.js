@@ -1,9 +1,10 @@
 // Two screens of the centre, from the left column's links (the redesign's "Other screens"):
 // - Your own sessions (#/sessions): the sessions outside every project's team, each opening the session view the page
-//   had (chat, terminal, inspector); starting one (the line that starts it in a terminal, views/drive.js); and the
-//   ones that ended lately, with the line that resumes each.
-// - New project (#/new): the lines that make a project and start its lead, and the recent folders with theirs.
-// Nothing here starts anything: each line is copied and run in a terminal, where the code is typed.
+//   had (chat, terminal, inspector); starting one (views/drive.js's short form: what, where, the model, one Start); and
+//   the ones that ended lately, with Resume.
+// - New project (#/new): a lead in a folder you have (the page starts it) or a brand-new project (its folder made by
+//   the line a terminal runs: no page makes one yet), as one short form.
+// Where the page doesn't act, each form ends in the line to run in a terminal and why.
 
 import * as kit from '../kit.js';
 import { h, setClass, setText, framed } from '../dom.js';
@@ -12,10 +13,10 @@ import { STATES, stateOf, since, tilde, lastPart, AGENTS } from '../words.js';
 import { twoColumns, queryWords, holdsAll } from './twocol.js';
 import { t } from '../i18n.js';
 import { actsFor } from '../acting.js';
-import { sessionHref, projectHref, leadMarks } from '../ui.js';
+import { sessionHref, leadMarks } from '../ui.js';
 import { ownSession } from './left.js';
-import { newSessionForm, newLeadForm, newProjectForm, startOrLine, resumeOrLine, leadStartOrLine } from './drive.js';
-import { recentProjects, projectLines } from '../actions.js';
+import { newSessionForm, newLeadForm, newProjectForm, resumeOrLine } from './drive.js';
+import { recentProjects, recentFolders } from '../actions.js';
 
 const ENDED_SHOWN = 5;
 
@@ -63,7 +64,9 @@ export function ownSessionsView(app, { session = null } = {}) {
     hosted.sort((a, b) => String(b.startedAt || '').localeCompare(String(a.startedAt || '')));
     return hosted[0]?.cwd || store.state.node?.home || '';
   };
-  const starting = newSessionForm(app, { folder });
+  // The recent folders offered beside the form's folder field: your sessions' and those that ended lately.
+  const recent = () => recentFolders(store.state.sessions.values(), store.state.node?.ended || [], 4);
+  const starting = newSessionForm(app, { folder, recent });
   const endedList = h('div', { class: 'ended-list' });
   const endedNote = h('p', { class: 'confirm-note' }, t('owRunTheLineInA'));
   const ended = h('section', { class: 'ended', hidden: true }, h('h2', { class: 'new-title' }, t('owEndedLately')), endedList, endedNote);
@@ -119,14 +122,24 @@ export function newProjectView(app) {
   const { store } = app;
   const project = newProjectForm(app);
   const leading = newLeadForm(app);
-  const recentList = h('div', { class: 'ended-list' });
-  const recentNote = h('p', { class: 'confirm-note' }, t('owRunALineInA'));
-  const recent = h('section', { class: 'ended recent', hidden: true }, h('h2', { class: 'new-title' }, t('owRecentFolders')), recentList, recentNote);
+  // What to start: a lead in a folder that exists (the default: the page starts it), or a brand-new project (its
+  // folder made by the terminal's line). One form shows at a time.
+  let mode = 'folder';
+  const modes = [['folder', t('owModeFolder')], ['new', t('owModeNew')]].map(([key, label]) => kit.segment({ 'aria-pressed': String(key === mode), onclick: () => choose(key) }, label));
+  const switcher = h('div', { class: 'start-row' }, h('span', { class: 'start-label' }, t('owModeWhat')),
+    h('div', { class: 'start-control' }, kit.segmented({ role: 'group', 'aria-label': t('owModeWhat') }, modes)));
+  function choose(key) {
+    mode = key;
+    modes.forEach((button, index) => button.setAttribute('aria-pressed', String(['folder', 'new'][index] === key)));
+    leading.el.hidden = key !== 'folder';
+    project.el.hidden = key !== 'new';
+  }
+  choose(mode);
   const el = h('section', { class: 'centre screen new', 'aria-label': t('newProject') },
-    screenHead(app, t('newProject')), h('div', { class: 'screen-body' }, h('div', { class: 'screen-col' }, project.el, leading.el, recent)));
+    screenHead(app, t('newProject')), h('div', { class: 'screen-body' }, h('div', { class: 'screen-col' },
+      h('p', { class: 'tc-lede' }, t('owProjectLede')), h('div', { class: 'start-card' }, switcher, leading.el, project.el))));
   let known = null;
   let asked = false;
-  let drawn = '';
 
   function render() {
     const state = store.state;
@@ -134,30 +147,11 @@ export function newProjectView(app) {
       asked = true;
       store.request('recent', {}).then((reply) => { if (reply.ok) { known = reply.result.projects; render(); } else asked = false; });
     }
-    const rows = recentProjects(known, state.sessions.values(), state.node?.ended || [], state.leads.values());
-    const key = JSON.stringify([rows, state.node?.home, store.acts(), store.can('session.new'), store.can('lead')]);
-    if (key === drawn) return;
-    drawn = key;
-    recent.hidden = rows.length === 0;
-    // Where the page acts and the node lists `session.new` and `lead`, New session and Start lead start them from here
-    // (views/drive.js, the page goes to what started); elsewhere each line and why.
-    const startsHere = actsFor(app, 'session.new') || actsFor(app, 'lead');
-    setText(recentNote, startsHere ? t('owRecentActs') : t('owRunALineInA'));
-    recentList.replaceChildren(...rows.map((one) => {
-      const lines = projectLines(one);
-      const name = lastPart(one.folder) || one.folder;
-      return h('div', { class: 'ended-row recent-row' },
-        h('div', { class: 'ended-name' }, h('span', null, name), h('span', { class: 'ended-folder' }, tilde(one.folder, state.node?.home))),
-        h('div', { class: 'recent-acts' },
-          ...startOrLine(app, { kind: 'session.new', label: t('owNewSessionHere'), plain: true, orLine: false, args: () => ({ folder: one.folder, agent: 'claude' }),
-            line: lines.session, lineLabel: t('owStartsIn', { name }), terminalOnly: 'drStartTerminalOnly',
-            target: (result) => ({ session: typeof result.session === 'string' ? result.session : null }) }),
-          ...(lines.lead ? leadStartOrLine(app, { folder: one.folder, label: t('acStartLead'), plain: true, line: lines.lead, lineLabel: t('owTheCommandThatStartsIts') })
-            : [h('a', { class: 'link', href: projectHref(one.lead) }, t('owItsLeadRunsOpenIt'))])));
-    }));
+    // The recent folders, offered beside the folder field: your sessions', those ended lately, the node's recent projects.
+    leading.update(recentProjects(known, state.sessions.values(), state.node?.ended || [], state.leads.values(), 5).map((one) => one.folder));
   }
 
   const schedule = framed(render);
   for (const topic of ['sessions', 'node', 'connection', 'leads']) store.subscribe(topic, schedule);
-  return { el, render, lead: (folder) => leading.choose(folder) };
+  return { el, render, lead: (folder) => { choose('folder'); leading.choose(folder); } };
 }

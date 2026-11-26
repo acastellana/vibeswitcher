@@ -645,7 +645,6 @@ small { font-size: var(--t-caption); }
 .action-panel { display: grid; gap: 6px; }
 .action-panel .confirm-note { margin: 0; }
 .gone-resume { width: 100%; text-align: left; }
-.new-session { display: grid; grid-template-columns: minmax(0, 1fr); gap: 9px; margin: 22px 0 26px; padding: 14px 16px 15px; border-radius: var(--r-3); background: var(--fill); }
 .new-title { color: var(--ink-2); font-size: var(--t-caption); font-weight: var(--w-strong); }
 /* The folder's presets under the new session form: each with Edit and Remove, and the form that drafts a change. */
 .new-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
@@ -661,8 +660,6 @@ small { font-size: var(--t-caption); }
 .preset-var { display: flex; gap: 8px; }
 .preset-var .answer-input:first-child { flex: 1 1 50%; font-family: var(--mono); font-size: var(--t-code); }
 .preset-chips { display: flex; flex-wrap: wrap; gap: 6px; }
-/* Starting from the page: the primary button, then the line under "Or in a terminal", a little apart. */
-.new-session .prompt-line .or-terminal { margin-top: 10px; }
 .preset-chip { display: inline-flex; align-items: center; gap: 2px; padding: 1px 2px 1px 8px; border-radius: var(--r-1); background: var(--fill-2); font-family: var(--mono); font-size: var(--t-code); }
 .preset-chip.off { color: var(--ink-3); text-decoration: line-through; }
 .preset-ticks { display: flex; flex-wrap: wrap; gap: 6px 16px; color: var(--ink-2); font-size: var(--t-caption); }
@@ -678,6 +675,30 @@ small { font-size: var(--t-caption); }
 .new-fields > .model-input { flex: 1 1 120px; }
 /* A lead's goal: a line of its own under the folder, as long as it needs. */
 .new-fields > .lead-goal { flex: 1 1 100%; min-height: 3em; resize: vertical; font: inherit; }
+/* The start forms (D12): a card; each row its words beside its control (over it on a phone); the recent folders under
+   the folder field; then the one primary button that says what it starts, under the controls. */
+.start-card { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; margin: 18px 0 26px; padding: 16px; border-radius: var(--r-3); background: var(--fill); }
+.start-form { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
+.start-form[hidden] { display: none; }
+.start-row { display: grid; grid-template-columns: 120px minmax(0, 1fr); align-items: baseline; gap: 12px; }
+.start-row[hidden] { display: none; }
+.start-label { padding-top: 6px; color: var(--ink-2); font-weight: var(--w-medium); }
+.start-control { display: grid; justify-items: start; gap: 6px; min-width: 0; }
+.start-control > .field { width: 100%; }
+.start-control > .confirm-note { margin: 0; }
+.start-what { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.start-row > .preset-about { grid-column: 2; margin: -8px 0 0; }
+.start-recent { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 2px; }
+.start-recent-label { margin-right: 4px; color: var(--ink-3); font-size: var(--t-caption); }
+.start-actions { display: grid; justify-items: start; gap: 8px; padding-left: 132px; } /* under the controls: the label column and its gap */
+.start-actions .copy-line { width: 100%; }
+.start-actions > .confirm-note { margin: 0; }
+@media (max-width: 760px) {
+  .start-row { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  .start-label { padding-top: 0; }
+  .start-row > .preset-about { grid-column: 1; margin: 0; }
+  .start-actions { padding-left: 0; }
+}
 /* The composer's lane: what / and @ complete to, the images pasted into the box, the messages held behind a question,
    and the presets a new session starts from. */
 .suggestions { flex: none; width: calc(100% - 48px); max-width: 752px; max-height: 232px; margin: 4px auto 0; padding: 4px; overflow-y: auto; border-radius: var(--r-3); background: var(--raised); box-shadow: var(--e-2); list-style: none; }
@@ -1646,7 +1667,7 @@ code.dim { color: var(--ink-3); }
 .tc-empty { padding: 32px 0; }
 .tc-lede { margin-bottom: 4px; color: var(--ink-2); }
 .tc-start { margin: 0; padding: 0; }
-.tc-start .new-session { margin-top: 14px; }
+.tc-start .start-card { margin-top: 14px; }
 mark.found { padding: 0 1px; border-radius: var(--r-1); background: var(--highlight); color: inherit; }
 /* A team's session (a lead's, a worker's): alone, as before, without Your own sessions' list. */
 .twocol.alone { grid-template-columns: minmax(0, 1fr); }

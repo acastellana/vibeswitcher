@@ -223,35 +223,38 @@ test('B3: Resume refused says the node’s words, the button back; where the pag
   }
 });
 
-test('B2: Recent projects get New session and Start the lead; each starts from here and opens what started; elsewhere their lines', async () => {
+test('B2: New project offers the recent folders beside its folder field; Start the lead in <folder> starts there and opens what started; a folder whose lead runs offers Open; elsewhere the line', async () => {
   const { newProjectView } = await import('../js/views/own.js');
+  const { projectHref } = await import('../js/ui.js');
   const SITE = '/home/dev/projects/example-site';
+  const API = '/home/dev/projects/example-api';
+  const P = 'local:project:api';
   for (const code of ['es', 'en']) {
     setLanguage(code);
-    const started = 'local:cc33dd44-0000-4000-8000-000000000003';
-    const app = fakeApp({ route: { name: 'new' }, state: { node: { ...nodeValue(), home: '/home/dev', ended: [] } }, kinds: ['recent', 'session.new', 'lead'],
-      reply: (kind) => (kind === 'recent' ? { ok: true, result: { projects: [{ folder: SITE, lastUsed: '2026-11-25T08:00:00.000Z', lead: null }] } }
-        : kind === 'session.new' ? { ok: true, result: { session: started, terminal: 'pts/4', agent: 'claude', folder: SITE, model: null, preset: null } }
-          : { ok: true, result: { happened: 'started', session: 'local:lead0000-0000-4000-8000-000000000004', program: '/usr/bin/claude', notes: [] } }) });
+    const app = fakeApp({ route: { name: 'new' }, state: { node: { ...nodeValue(), home: '/home/dev', ended: [] }, leads: new Map([[P, { project: P, root: API, session: 'local:lead-api' }]]) },
+      kinds: ['recent', 'session.new', 'lead'],
+      reply: (kind) => (kind === 'recent' ? { ok: true, result: { projects: [{ folder: SITE, lastUsed: '2026-11-25T08:00:00.000Z', lead: null }, { folder: API, lastUsed: '2026-11-24T08:00:00.000Z', lead: P }] } }
+        : { ok: true, result: { happened: 'started', session: 'local:lead0000-0000-4000-8000-000000000004', program: '/usr/bin/claude', notes: [] } }) });
     const view = newProjectView(app);
     view.render();
     await flush();
     view.render();
-    const recent = find(view.el, byClass('recent'));
-    assert.doesNotMatch(recent.textContent, /vibeswitcher new|vibeswitcher lead/, `${code}: no lines where the buttons do it`);
-    assert.match(recent.textContent, new RegExp(t('owRecentActs').slice(0, 14)));
-    buttonNamed(recent, t('owNewSessionHere')).click();
-    await flush();
-    assert.deepEqual(app.sent.at(-1), { kind: 'session.new', args: { folder: SITE, agent: 'claude' } });
-    app.store.state.sessions.set(started, { id: started, hosted: true, cwd: SITE, status: 'working' });
-    app.store.notify('sessions');
-    assert.deepEqual(app.went, ['#/s/' + encodeURIComponent(started)]);
-    buttonNamed(recent, t('acStartLead')).click();
+    assert.doesNotMatch(view.el.textContent, /vibeswitcher (new|lead)/, `${code}: no lines where the button does it`);
+    const recent = find(view.el, byClass('start-recent'));
+    assert.equal(recent.hidden, false);
+    buttonNamed(recent, 'example-site').click();
+    assert.equal(find(view.el, (node) => node.tag === 'input' && node.attrs['aria-label'] === t('drProjectFolder')).value, '~/projects/example-site', 'as ~/…');
+    buttonNamed(view.el, t('drStartLeadIn', { name: 'example-site' })).click();
     await flush();
     assert.deepEqual(app.sent.at(-1), { kind: 'lead', args: { folder: SITE } });
-    assert.match(recent.textContent, new RegExp(t('drLeadStartedWaiting').slice(0, 10)));
+    assert.match(view.el.textContent, new RegExp(t('drLeadStartedWaiting').slice(0, 10)));
+    // A folder whose lead runs: Open it, a link to its project, and nothing to start.
+    buttonNamed(recent, 'example-api').click();
+    const open = find(view.el, (node) => node.tag === 'a' && node.textContent === t('drOpenProject', { name: 'example-api' }));
+    assert.equal(open?.attrs.href, projectHref(P));
+    assert.equal(buttonNamed(view.el, t('drStartLeadIn', { name: 'example-api' })), null);
   }
-  // A page that reads: the lines, and why.
+  // A page that reads: the same form, ending in the line and why.
   setLanguage('en');
   const reads = fakeApp({ route: { name: 'new' }, acts: false, state: { node: { ...nodeValue(), home: '/home/dev', ended: [] } }, kinds: ['recent', 'session.new', 'lead'],
     reply: () => ({ ok: true, result: { projects: [{ folder: SITE, lastUsed: '2026-11-25T08:00:00.000Z', lead: null }] } }) });
@@ -259,11 +262,10 @@ test('B2: Recent projects get New session and Start the lead; each starts from h
   view.render();
   await flush();
   view.render();
-  const recent = find(view.el, byClass('recent'));
-  assert.equal(buttonNamed(recent, 'New session'), null);
-  assert.match(recent.textContent, /vibeswitcher new/);
-  assert.match(recent.textContent, /vibeswitcher lead/);
-  assert.match(recent.textContent, /doesn’t act for you here/);
+  buttonNamed(find(view.el, byClass('start-recent')), 'example-site').click();
+  assert.equal(buttonNamed(view.el, 'Start the lead in example-site'), null);
+  assert.match(view.el.textContent, /vibeswitcher lead/);
+  assert.match(view.el.textContent, /doesn’t act for you here/);
 });
 
 test('B1: the Shells tab lists the folder’s shells first, then Close N finished shells, asked twice; the receipt says what ended and what was left', async () => {
@@ -606,7 +608,8 @@ test('B9: a lead running without its role: the start says so, then Replace it, i
       reply: (kind, args) => (args.replace ? { ok: true, result: { happened: 'started', session: fresh, program: '/usr/bin/claude', notes: [] } } : { ok: true, result: ROLELESS }) });
     const form = newLeadForm(app);
     form.choose(SITE_ROOT);
-    buttonNamed(form.el, t('acStartLead')).click();
+    // The button says what it starts (D12).
+    buttonNamed(form.el, t('drStartLeadIn', { name: 'example-site' })).click();
     await flush();
     assert.deepEqual(app.sent.at(-1), { kind: 'lead', args: { folder: SITE_ROOT } });
     assert.match(form.el.textContent, new RegExp(t('drLeadNoRole').slice(0, 20)));

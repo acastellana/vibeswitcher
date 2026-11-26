@@ -143,6 +143,7 @@ test('the page leaves no English of its own in Spanish: the folder field’s pla
   const { readFileSync } = await import('node:fs');
   const drive = readFileSync(new URL('../js/views/drive.js', import.meta.url), 'utf8');
   assert.doesNotMatch(drive, /placeholder: '\//, 'no placeholder written in the view');
-  assert.equal(TABLES.es.drPathPlaceholder, '/ruta/al/proyecto');
-  assert.equal(TABLES.en.drPathPlaceholder, '/path/to/project');
+  // A folder as the forms show it, ~/… (D12).
+  assert.equal(TABLES.es.drPathPlaceholder, '~/proyectos/mi-app');
+  assert.equal(TABLES.en.drPathPlaceholder, '~/projects/my-app');
 });

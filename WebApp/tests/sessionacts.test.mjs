@@ -242,7 +242,9 @@ test('U12: Start starts the session from the page, “Starting…” while it go
   typed(form, '/home/dev/projects/example-api');
   const start = find(form.el, button('Start'));
   assert.ok(start?.classList.contains('start-button'), 'a primary button');
-  assert.match(form.el.shownText, /Or in a terminal:/);
+  // It says what it will start, and where the page acts no command shows (D12).
+  assert.equal(start.textContent, 'Start Claude in example-api');
+  assert.doesNotMatch(form.el.shownText, /vibeswitcher new|Or in a terminal/);
   start.click();
   assert.equal(start.textContent, 'Starting…');
   assert.equal(start.disabled, true);
@@ -324,8 +326,8 @@ test('U12: Start the lead starts it and opens its project; a lead that waits for
 });
 
 test('U12: where the node doesn’t list session.new or lead, or the page doesn’t act, the line stays and says why; New project’s folder is a terminal’s', () => {
-  for (const [code, words] of [['en', [/This node starts a session only from a terminal/, /This node starts a project’s lead only from a terminal/, /This page doesn’t act for you here, so it can’t start it/, /A new project’s folder is made only from a terminal/]],
-    ['es', [/Este nodo solo arranca una sesión desde una terminal/, /Este nodo solo arranca el líder de un proyecto desde una terminal/, /Aquí esta página no actúa por ti, así que no puede arrancarla/, /La carpeta de un proyecto nuevo solo se crea desde una terminal/]]]) {
+  for (const [code, words] of [['en', [/This node starts a session only from a terminal/, /This node starts a project’s lead only from a terminal/, /This page doesn’t act for you here, so it can’t start it/, /A page can’t make a new project’s folder yet/]],
+    ['es', [/Este nodo solo arranca una sesión desde una terminal/, /Este nodo solo arranca el líder de un proyecto desde una terminal/, /Aquí esta página no actúa por ti, así que no puede arrancarla/, /Una página aún no puede crear la carpeta de un proyecto nuevo/]]]) {
     setLanguage(code);
     const older = rig({ kinds: ['session.reply'], sessions: [] });
     const session = newSessionForm(older.app, { folder: () => '' });
