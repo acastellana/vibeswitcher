@@ -1375,4 +1375,5 @@ export const ES = {
   cmLeadDraftTitle: "Redactar un mensaje para el líder (↩): aquí esta página no envía por ti",
   cmTouchSend: "En pantalla táctil ↩ es nueva línea: Enviar es el botón.",
   cmAnswerTitle: "Responder (↩). ⇧↩ nueva línea",
+  cmEmptyWhat: "Escribe abajo para empezar: el agente lo lee en su siguiente paso.",
 };

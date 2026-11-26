@@ -656,6 +656,19 @@ small { font-size: var(--t-caption); }
 .composer-retry { margin-left: 8px; }
 .answer { align-items: flex-end; }
 textarea.answer-input { max-height: 200px; line-height: var(--lh-body); resize: none; }
+/* A short chat sits at the foot of its pane, by the box, as a messaging app's does: what grows above (a picture
+   loading, a fold opening) moves the older rows up, never the newest or the question under them (D14). */
+.chat-column { display: flex; flex-direction: column; justify-content: flex-end; min-height: 100%; box-sizing: border-box; }
+.chat-column > * { flex: none; }
+/* A session's question waits for the chat's rows, so it is drawn once where it stays (D14). */
+.session-prompt.waiting-rows { display: none; }
+.pane-empty-what[hidden] { display: none; }
+/* On a touch screen a message's actions show on a tap, over its corner, not above every message (D15). */
+@media (hover: none) {
+  .chat-row.prompt > .row-actions, .chat-row.reply > .row-actions { display: none; }
+  .chat-row.touched > .row-actions { position: absolute; top: -14px; right: 0; display: flex; margin: 0; background: var(--raised); box-shadow: var(--e-2); }
+  .chat-row.prompt.touched > .row-actions { top: auto; bottom: -14px; right: 12px; }
+}
 
 /* ---- Cards ---- */
 

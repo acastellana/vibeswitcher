@@ -24,7 +24,7 @@
 import { h, keyed, setText, setClass, framed } from '../dom.js';
 import { agentMark, statusMark, setMark, icon } from '../marks.js';
 import { since, short, clock, plural, tilde, stateOf, AGENTS, STATES, KEY } from '../words.js';
-import { markdown, diffView, codeBlock } from '../text.js';
+import { markdownNodes, diffView, codeBlock } from '../text.js';
 import { copyButton } from '../copying.js';
 import { runnable } from '../runnable.js';
 import { summaryOf, newSince, sinceSummary, chatMarkdown, exportName, findIn, fold, openingPlace } from '../chatops.js';
@@ -112,7 +112,8 @@ function imageView(view, image) {
         button.setAttribute('aria-expanded', String(wide));
         view.redraw();
       } }, picture);
-    picture.addEventListener('load', () => view.redraw(), { once: true });
+    // Its size known: drawn again at once (not at the next frame), so the end the view keeps never shows it moving.
+    picture.addEventListener('load', () => view.settle(), { once: true });
     holder.replaceChildren(button);
   };
   const known = view.images.known(view.session, image);
@@ -162,13 +163,13 @@ function toolView(tool, home, view) {
   } else if (detail.type === 'command' && detail.command !== tool.title) {
     body.push(codeBlock(detail.command));
   } else if (detail.type === 'thought' || detail.type === 'plan') {
-    body.push(h('div', { class: 'prose quiet' }, markdown(detail.text || '', { links: true })));
+    body.push(h('div', { class: 'prose quiet' }, markdownNodes(detail.text || '', { links: true })));
   } else if (detail.type === 'todos') {
     body.push(h('ul', { class: 'todos' }, (detail.todos || []).map((todo) => h('li', { class: 'todo ' + todo.status }, todo.text))));
   } else if (detail.type === 'patch') {
     body.push(codeBlock(detail.text || ''));
   } else if (detail.type === 'agent') {
-    body.push(h('div', { class: 'prose quiet' }, markdown(detail.prompt || '', { links: true })));
+    body.push(h('div', { class: 'prose quiet' }, markdownNodes(detail.prompt || '', { links: true })));
   } else if (detail.type === 'questions') {
     for (const question of detail.questions || []) body.push(h('div', { class: 'prose quiet' }, question.question, h('ul', null, (question.options || []).map((option) => h('li', null, option)))));
   } else if (detail.type === 'fields') {
@@ -216,7 +217,7 @@ function makeRow(view, first) {
         row = item;
         if (item.text !== drawnText) {
           drawnText = item.text;
-          text.replaceChildren(markdown(item.text || '', { links: true, breaks: true }));
+          text.replaceChildren(...markdownNodes(item.text || '', { links: true, breaks: true }));
         }
         text.hidden = !item.text;
         actions.hidden = !item.text || !!item.pending;
@@ -253,7 +254,7 @@ function makeRow(view, first) {
         shown = item.text;
         wasStreaming = !!item.streaming;
         // Still arriving, a marker waits for its other half (text.js), so nothing flickers between typed and drawn.
-        const next = h('div', null, markdown(item.text, { links: true, streaming: !!item.streaming, codeAction: (code, language) => runButton(view, code, language) }));
+        const next = h('div', null, markdownNodes(item.text, { links: true, streaming: !!item.streaming, codeAction: (code, language) => runButton(view, code, language) }));
         if (grew) patchChildren(body, next); else body.replaceChildren(...next.childNodes);
       },
     };
@@ -362,7 +363,9 @@ export function chatView(app) {
   const live = h('div', { class: 'chat-live' }, liveMark, liveText);
   const skeleton = h('div', { class: 'chat-skeleton', 'aria-hidden': 'true' },
     h('span', { class: 'bone right' }), h('span', { class: 'bone wide' }), h('span', { class: 'bone' }), h('span', { class: 'bone short' }));
-  const empty = h('p', { class: 'pane-empty', hidden: true }, t('chNoConversationForThisSession'));
+  // An empty chat says what to do (the words under it only where the box is there to write in).
+  const emptyWhat = h('span', { class: 'pane-empty-what' }, t('cmEmptyWhat'));
+  const empty = h('p', { class: 'pane-empty', hidden: true }, t('chNoConversationForThisSession'), ' ', emptyWhat);
   // A node whose page can't follow a chat (`chat.page` isn't among what this connection may send): said once, calmly,
   // in the conversation's place. A lead's questions still follow below it.
   const later = h('p', { class: 'pane-empty', hidden: true }, t('chThisNodeDoesnTSend'));
@@ -451,6 +454,7 @@ export function chatView(app) {
     // Its pictures' bytes, asked of the node where it serves them (`chat.image`).
     get images() { return store.can('chat.image') ? loader : null; },
     redraw: () => { structural = true; schedule(); },
+    settle: () => { structural = true; if (view.session) render(); },
     // A row's Copy: the text to the clipboard, and the button says so for a moment.
     copy: (text, button) => copyText(text, button),
     // Edit in Composer (the box holds the text, nothing is sent) and Send Again (a draft, as every message here).
@@ -621,6 +625,12 @@ export function chatView(app) {
     later.hidden = following;
     const list = items();
     empty.hidden = !following || !loaded || list.length > 0 || !!stack;
+    // What follows the rows (a session's question, a lead's cards, a plugin's) waits for the rows: drawn before them it
+    // would jump down as they arrive (D14, 213 px measured); the skeleton holds the place meanwhile.
+    const placed = loaded || !following;
+    stackSlot.hidden = !placed;
+    pluginSlot.hidden = !placed;
+    asking.el.classList.toggle('waiting-rows', !placed);
     if (loaded && marking) noteLooked(list);
     if (loaded) {
       if (structural) {
@@ -717,6 +727,7 @@ export function chatView(app) {
     if (!typed) { closeAttach(); nodeImage.hidden = true; }
     hint.hidden = typed;
     asking.update(session);
+    emptyWhat.hidden = !typed;
     drafted.update(session);
     queuedMessages.update(session);
     attachedEl.hidden = !typed || !attached.length;
@@ -808,6 +819,20 @@ export function chatView(app) {
   }
 
   scroller.addEventListener('scroll', scrolled, { passive: true });
+  // On a touch screen a message's actions wait for a tap on it, over its corner; a tap elsewhere puts them away (D15).
+  let touchedRow = null;
+  const putAway = () => { touchedRow?.classList.remove('touched'); touchedRow = null; };
+  rowsEl.addEventListener('click', (event) => {
+    if (!globalThis.matchMedia?.('(hover: none)')?.matches) return;
+    const row = event.target?.closest?.('.chat-row.prompt, .chat-row.reply');
+    if (!row || event.target.closest('a, button, pre, .table, .diff')) return;
+    const again = row === touchedRow;
+    putAway();
+    if (!again) { touchedRow = row; row.classList.add('touched'); }
+  });
+  globalThis.document?.addEventListener?.('pointerdown', (event) => {
+    if (touchedRow && !touchedRow.contains(event.target)) putAway();
+  }, { passive: true });
 
   const grow = () => box.grow();
   input.addEventListener('keyup', (event) => { if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) lookToken(); });

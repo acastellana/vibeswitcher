@@ -1388,6 +1388,7 @@ const EN = {
   cmLeadDraftTitle: "Draft a message for the lead (↩): this page doesn’t send for you here",
   cmTouchSend: "On a touch screen ↩ is a new line: Send is the button.",
   cmAnswerTitle: "Answer (↩). ⇧↩ a new line",
+  cmEmptyWhat: "Write below to start: the agent reads it at its next step.",
 };
 
 
