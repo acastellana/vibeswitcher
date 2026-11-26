@@ -539,10 +539,11 @@ public struct LeadVault: Sendable {
 
     // MARK: Files
 
-    /// The folder every launch of `root`'s roles writes its files under, the standard vault's (`runFolder`), ending in
-    /// `/`: where a launch's `--settings` file must lie for the bind (`RoleLaunchCheck.SettingsFile`).
-    public static func runPrefix(root: String) -> String {
-        standard.folder.appendingPathComponent("run/\(key(root))", isDirectory: true).path + "/"
+    /// The folder every launch of `root`'s roles writes its files under (`runFolder`) in the leads' folder `lead`,
+    /// resolved (each link followed, the Mac's /var and /tmp too), ending in `/`: where a launch's `--settings` file must
+    /// lie for the bind (`RoleLaunchCheck.SettingsFile`); nil when it isn't there to resolve.
+    public static func resolvedRunFolder(root: String, lead: URL) -> String? {
+        WorkerLaunch.realPathOf(lead.appendingPathComponent("run/\(key(root))", isDirectory: true).path).map { $0 + "/" }
     }
 
     /// Where a role's launch files go.
@@ -755,8 +756,10 @@ extension LeadVault {
             state.holdsFirstLook == true && state.firstLookAccepted?.contains(LeadVault.key(root)) != true
         }
 
-        /// The lead's private folder the team tasks' walls are in (`LeadWall`), which a teammate's post is sealed from:
-        /// nil, the Mac's (`LeadVault.standard`'s); a test's scratch one.
+        /// The leads' private folder (`LeadVault.standard`'s, where its tool servers keep their files): the team tasks'
+        /// walls are in it (`LeadWall`), which a teammate's post is sealed from, and its launches' run folders
+        /// (`LeadVault.runFolder`), where a bind looks for a role's `--settings` file. Nil: the Mac's standard one; a
+        /// test's scratch one.
         public var wallFolder: URL?
 
         /// A vault as it was saved (`saved`, from `onChange` or `serialized`), or a new one when there's none or it
@@ -1072,7 +1075,9 @@ extension LeadVault {
                 if member.role != .lead, team(root)?.floor?.verifierDifferent == true, let launch, launch.known, let command = launch.command {
                     if let why = RoleLaunchCheck.refusal(command: command, agent: launch.agent ?? member.agent ?? .claude, role: member.role,
                                                          environment: launch.environmentNames, settings: launch.settings,
-                                                         file: .init(digest: member.settingsDigest, folder: LeadVault.runPrefix(root: root)),
+                                                         file: .init(digest: member.settingsDigest,
+                                                                     folder: LeadVault.resolvedRunFolder(root: root, lead: wallFolder ?? LeadVault.standard.folder)),
+                                                         settingsAt: launch.settingsFolder,
                                                          inline: settingsInline, full: launch.full) {
                         return .refused(why)
                     }

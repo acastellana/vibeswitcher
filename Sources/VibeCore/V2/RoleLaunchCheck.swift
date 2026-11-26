@@ -57,24 +57,26 @@ public enum RoleLaunchCheck {
     static let wayOut = "remove it from the launch preset, or lower `floor_verifier_different`"
 
     /// The launch's `--settings` file as the bind can check it, where settings aren't inline (the Mac's, S10): the
-    /// digest of what the launch builder wrote (`LeadLaunch.Prepared.settingsDigest`, given with the bind) and the
-    /// launch's own folder it must lie in (`LeadVault.runPrefix`).
+    /// digest of what the launch builder wrote (`LeadLaunch.Prepared.settingsDigest`, given with the grant) and the
+    /// folder it must lie under (`LeadVault.resolvedRunFolder`: resolved, ending in `/`; nil when it couldn't be).
     public struct SettingsFile: Equatable, Sendable {
         public var digest: String?
-        public var folder: String
-        public init(digest: String?, folder: String) {
+        public var folder: String?
+        public init(digest: String?, folder: String?) {
             self.digest = digest
             self.folder = folder
         }
     }
 
     /// Why a `role` session launched with `command` (its spawn environment's names `environment`, nil: the host didn't
-    /// say; `settings`: a `--settings` file as the bind read it; `file`: what that file must be; `inline`: whether this
+    /// say; `settings`: a `--settings` file as the bind read it; `file`: what that file must be; `settingsAt`: the folder
+    /// the bind found that file in, resolved (`WorkerLaunch.BindFacts.settingsFolder`); `inline`: whether this
     /// platform's launches put their settings inline, so that a file is never theirs; `full`: whether the host had the
     /// command in full) isn't judged under the floor; nil when it is. One plain sentence, naming what it found and the
     /// way out. The options read as the agent reads them (`WorkerLaunch.options(of:)`).
     public static func refusal(command: String, agent: Agent, role: LeadLaunch.Role, environment: [String]?, settings: SettingsRead?,
-                               file: SettingsFile? = nil, inline: Bool = Platform.Tools.roleSettingsInline, full: Bool = true) -> String? {
+                               file: SettingsFile? = nil, settingsAt: String? = nil, inline: Bool = Platform.Tools.roleSettingsInline,
+                               full: Bool = true) -> String? {
         guard full else {
             return "This session's full command isn't known to the host (it restarted or took over after the session started), so it can't be judged under your review rules: start it again."
         }
@@ -108,7 +110,10 @@ public enum RoleLaunchCheck {
                     continue
                 }
                 if inline { return said("a `--settings` file (VibeSwitcher's launch here gives its settings inline)") }
-                guard let file, value.hasPrefix(file.folder), !value.contains("/../"), (value as NSString).lastPathComponent == "settings.json" else {
+                // Both sides resolved, never one path's text against another's: on the Mac a scratch home is behind
+                // /var or /tmp, and any folder may be reached by a link.
+                guard let file, let folder = file.folder, let at = settingsAt, (at + "/").hasPrefix(folder),
+                      (value as NSString).lastPathComponent == "settings.json" else {
                     return said("a `--settings` file outside its launch's own folder")
                 }
                 // A grant from a tool server that gives no digest (an older build's): its own words, not the preset's.
