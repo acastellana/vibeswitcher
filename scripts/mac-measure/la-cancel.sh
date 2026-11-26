@@ -20,4 +20,5 @@ mm_wait_for "$mm_out/$mm_label.out" '^outcome=' 90
 mm_say "First ask ended. Now the second: leave it alone."
 /bin/launchctl kickstart "gui/$mm_uid/$mm_label" || mm_stop "kickstart failed"
 mm_wait_for "$mm_out/$mm_label.out" '^outcome=' 100 2
+mm_seen="did Cancel close the first dialog, and did the second go away by itself (after about 60 s)?"
 mm_record "$mm_out/$mm_label.out" "$mm_out/$mm_label.err"

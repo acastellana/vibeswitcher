@@ -5,7 +5,13 @@
 # What these never do: load or touch dev.vibeswitcher.node, write ~/Library/LaunchAgents, ~/.vibeswitcher or the
 # Keychain, start the user's node, or bind a port. A job they load has a label of their own
 # (dev.vibeswitcher.measure.<what>.<pid>), a property list in their scratch folder, and is booted out when the script
-# ends, Ctrl-C too.
+# ends, Ctrl-C too. A job that asks LocalAuthentication is never booted out while its ask is open: the script waits for
+# the dialog to end (Cancel, or its own 60 s limit) and leaves the job loaded, naming the bootout line, if it doesn't
+# (nothing kills a process inside an authentication call).
+#
+# Each real run saves its record in .build/mac-measure-records/<script>.txt of this checkout (git-ignored; the scratch
+# folder is removed at the end), with a line of what the person saw, asked at the end; a run that stopped saves what it
+# had as <script>.stopped.txt.
 #
 # --dry-run (every script takes it): builds the probes, writes and checks the property list, prints what the real run
 # would do, and stops before anything appears on screen or is loaded. It is what an agent may run; the real run refuses
@@ -24,7 +30,12 @@ mm_dry=0
 mm_label=""
 mm_plist=""
 mm_loaded=0
+mm_asks=0
+mm_saved=0
+mm_seen=""
 mm_uid=$(/usr/bin/id -u)
+mm_name=$(/usr/bin/basename "$0" .sh)
+mm_records=$mm_root/.build/mac-measure-records
 
 mm_say() { printf '%s\n' "$*"; }
 mm_stop() { printf 'STOPPED: %s\n' "$*" >&2; exit 1; }
@@ -48,6 +59,28 @@ mm_users_terminal() {
         && mm_stop "this runs from an agent's process (CLAUDECODE or CODEX_SANDBOX is set): run it yourself in Terminal or a shell card, or use --dry-run"
     [[ -t 0 && -t 1 ]] || mm_stop "no terminal on stdin and stdout: run it in Terminal or a shell card (or --dry-run)"
     [[ $(/usr/bin/uname -s) == Darwin ]] || mm_stop "not a Mac"
+    on_exit mm_finish
+}
+
+# On every real run's exit (a stop and Ctrl-C too): the job booted out (once no ask is open), and what the run had
+# saved as <script>.stopped.txt when it ended before its record.
+mm_finish() {
+    trap '' INT
+    mm_bootout
+    if [[ $mm_saved == 1 ]]; then return 0; fi
+    local had=() file
+    for file in "$mm_out"/*; do
+        if [[ -f $file ]]; then had+=("$file"); fi
+    done
+    if (( ${#had[@]} == 0 )); then return 0; fi
+    /bin/mkdir -p "$mm_records"
+    { echo "== $mm_name: STOPPED before its record; what it had"; mm_scrub "${had[@]}"; } > "$mm_records/$mm_name.stopped.txt"
+    printf 'what this run had is saved in %s\n' "${mm_records#"$mm_root"/}/$mm_name.stopped.txt" >&2
+}
+
+# The files' lines with the account's name and home taken out.
+mm_scrub() {
+    /usr/bin/sed -e "s#$HOME#~#g" -e "s#$(/usr/bin/id -un)#<user>#g" "$@"
 }
 
 # For a measurement of Terminal.app itself (its chain through login): refuses anywhere else, a shell card included.
@@ -82,6 +115,7 @@ mm_build() {
     /usr/bin/clang -O1 -Wall -o "$mm_bin/facts" "$probes/facts.c" || mm_stop "facts didn't build"
     /usr/bin/clang -O1 -Wall -o "$mm_bin/detach" "$probes/detach.c" || mm_stop "detach didn't build"
     if [[ ${1:-} == la ]]; then
+        mm_asks=1
         /usr/bin/swiftc -O -parse-as-library -o "$mm_bin/la" "$probes/platform-stub.swift" \
             "$mm_root/Sources/VibePlatform/Approval.swift" "$mm_root/Sources/VibePlatform/Approval+Darwin.swift" \
             "$probes/la-main.swift" > "$mm_out/swiftc.log" 2>&1 || { cat "$mm_out/swiftc.log" >&2; mm_stop "la didn't build"; }
@@ -130,8 +164,29 @@ PLIST
     mm_say "property list: $mm_plist (plutil: OK)"
 }
 
+# Whether the job has a running process (`pid = ` one tab in, as AG-1 reads launchctl print).
+mm_job_running() {
+    /bin/launchctl print "gui/$mm_uid/$mm_label" 2> /dev/null | /usr/bin/grep -qE '^	pid = [0-9]+'
+}
+
 mm_bootout() {
     [[ $mm_loaded == 1 ]] || return 0
+    # A job that asks LocalAuthentication is booted out only once its process has ended: never while a dialog is open
+    # (bootout would kill it inside the authentication call). The ask ends by itself within its limit (60 s at most,
+    # then 5 s to take the dialog down); 80 s is past every script's. If it hasn't ended, the job is left loaded.
+    if [[ $mm_asks == 1 ]] && mm_job_running; then
+        mm_say "A dialog may still be open: Cancel it (or leave it: it ends by itself within 60 s). Waiting for it to end before the job is booted out."
+        local waited=0
+        while mm_job_running && (( waited < 160 )); do
+            /bin/sleep 0.5
+            waited=$((waited + 1))
+        done
+        if mm_job_running; then
+            printf 'WARNING: gui/%s/%s still runs its ask after 80 s: left loaded, not killed. Once no dialog is on screen, run  launchctl bootout gui/%s/%s\n' "$mm_uid" "$mm_label" "$mm_uid" "$mm_label" >&2
+            mm_loaded=0
+            return 0
+        fi
+    fi
     /bin/launchctl bootout "gui/$mm_uid/$mm_label" > /dev/null 2>&1 || true
     if /bin/launchctl print "gui/$mm_uid/$mm_label" > /dev/null 2>&1; then
         printf 'WARNING: gui/%s/%s is still loaded: run  launchctl bootout gui/%s/%s\n' "$mm_uid" "$mm_label" "$mm_uid" "$mm_label" >&2
@@ -148,7 +203,7 @@ mm_bootstrap_and_start() {
         mm_say "dry run done: nothing was loaded or shown"
         exit 0
     fi
-    on_exit mm_bootout
+    # mm_finish (on exit, from mm_users_terminal) boots it out.
     /bin/launchctl bootstrap "gui/$mm_uid" "$mm_plist" || mm_stop "launchctl bootstrap refused the job"
     mm_loaded=1
     /bin/launchctl kickstart "gui/$mm_uid/$mm_label" || mm_stop "launchctl kickstart failed"
@@ -182,14 +237,27 @@ mm_wait_soft() {
     return 0
 }
 
-# A record the user pastes back: the script's results, with the account's name and home taken out.
+# The record: the script's results, with the account's name and home taken out, then (when the script set mm_seen, its
+# question) one line of what the person saw, typed here. Saved as .build/mac-measure-records/<script>.txt of this
+# checkout (a run again replaces it) and printed.
 mm_record() {
-    local file=$mm_out/record.txt
-    /usr/bin/sed -e "s#$HOME#~#g" -e "s#$(/usr/bin/id -un)#<user>#g" "$@" > "$file"
+    local file=$mm_out/record.txt seen=""
+    { echo "== $mm_name ($(/bin/date '+%Y-%m-%d %H:%M'), run from: $(mm_where))"; mm_scrub "$@"; } > "$file"
+    if [[ -n $mm_seen ]]; then
+        mm_say ""
+        mm_say "One line for the record (never a password): $mm_seen"
+        printf '> '
+        IFS= read -r seen || seen=""
+        printf 'seen: %s\n' "${seen:-(nothing typed)}" >> "$file"
+    fi
+    /bin/mkdir -p "$mm_records"
+    /bin/cp "$file" "$mm_records/$mm_name.txt"
+    /bin/rm -f "$mm_records/$mm_name.stopped.txt"
+    mm_saved=1
     mm_say ""
-    mm_say "---- the record to paste back (account name and home taken out) ----"
+    mm_say "---- the record (account name and home taken out) ----"
     cat "$file"
-    mm_say "---- end of the record ----"
+    mm_say "---- end of the record: saved in ${mm_records#"$mm_root"/}/$mm_name.txt ----"
 }
 
 # The facts of PID and of each of its ancestors up to launchd, as the voice rule would read them (Darwin ancestry:
