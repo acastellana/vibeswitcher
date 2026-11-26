@@ -4769,3 +4769,6 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-26 12:03 Audit of keychain-keys-the-stated: complete, clean, round 1: 3 Nit open, 2 Pre-existing open
 - 2026-11-26 12:03 Planned a-vault-that-didn: A vault that didn't open keeps its old sealed file until the user has answered (no overwrite under the current key before the alert) (review audit, for irreversible)
 - 2026-11-26 12:04 Planned the-command-guard-fails: The command guard fails closed on a program name the shell makes (patterns, variables pieced together, script/setsid wrappers), for git and for `security` (review audit, for security)
+- 2026-11-26 12:23 Pipeline held: keychain-keys-the-stated ready to merge with none landing; cause: a merge in progress
+- 2026-11-26 12:29 Automatically (auto_advance): Merge of keychain-keys-the-stated failed: Tests fail rebased onto main: noScriptOrTestCanPutAKeychainDialogUp() Sent its worker the output; it's back at work.
+- 2026-11-26 12:32 Started a worker on review-v2-s-mac-5
