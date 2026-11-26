@@ -336,6 +336,13 @@ public struct MacAgent {
     /// `status`, from the host itself: not loaded or not running (69, with launchd's last exit), a job of the label that
     /// isn't the node's (77), or the job's host checked as `node` checks it.
     public func status() -> Result<String, StartRefusal> {
+        runningHost().map { say("the node runs: \(Self.describe($0))") }
+    }
+
+    /// The node's host as `status` finds it, said to no one: the job of the label judged by launchd's whole word, its
+    /// process the node's host by the connection's audit token and running code (`node`). The command line's server
+    /// check takes the host's pid from this (`ServerCheck`), never from `launchctl print`'s text alone.
+    public func runningHost() -> Result<Host, StartRefusal> {
         if notLoaded() { return .failure(StartRefusal("the node isn't running: no job labelled \(place.label) is loaded", exitCode: 69)) }
         let builds: [NodePins.Build]
         switch steps.pins() {
@@ -352,11 +359,17 @@ public struct MacAgent {
                 return .failure(StartRefusal("the node isn't running: its job is loaded and not running (\(printed.lastExit ?? "never started"))", exitCode: 69))
             }
             switch node(pid, builds: builds) {
-            case .success(let host): return .success(say("the node runs: \(Self.describe(host))"))
+            case .success(let host): return .success(host)
             case .failure(let why):
                 return .failure(StartRefusal("a job labelled \(place.label) runs pid \(pid), which isn't the node's host: \(why.text)", exitCode: 77))
             }
         }
+    }
+
+    /// The switch's follow-up on the Mac (`vibeswitcher switch`, once the host handed over): the agent's plist rewritten
+    /// for the build `target` (in `folder`) the host now runs. The seam: not built yet, so a switch rewrites no plist.
+    public func switched(to target: NodePins.Build, folder: String) -> Result<String, StartRefusal> {
+        .failure(StartRefusal("the Mac's switch rewrites no plist yet", exitCode: 1))
     }
 
     /// The build the command line `own` (its running code) is in the record `pins` (the row whose `cli` it is), and its
