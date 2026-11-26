@@ -32,7 +32,9 @@ measures them and what this design does if the answer goes the other way.
   On the Mac the Touch ID window itself names the change.
 - **Adding your phone:** This node › Devices › Add a phone shows a QR code. Scan it, use Face ID on the phone, check
   that the three words on the phone are the ones your computer shows, and approve with Touch ID on the computer.
-- **Phone access** is one button (Turn on phone access) that sets up `tailscale serve` for you, and Turn off undoes it.
+- **Phone access** is one button (Turn on phone access), and Turn off undoes it. One catch is [for you to decide](#for-the-user-to-decide)
+  (6): letting the node change Tailscale's settings itself would let any program running as you change them too, so
+  the design recommends one `sudo` line, once, at setup.
 - **Setup on Linux** still ends with one confirmation in the install's own terminal (your first browser). On the Mac
   it is Touch ID.
 
@@ -56,10 +58,10 @@ the Devices list ends its access at once.
 4. **A program that takes over the node itself** (S11 item 3: it restarts the node from files it changed) owns
    everything, as today.
 
-**Five questions for you** are at the end ([For the user to decide](#for-the-user-to-decide)): whether a desktop
+**Six questions for you** are at the end ([For the user to decide](#for-the-user-to-decide)): whether a desktop
 unlock should survive closing the last tab; how Linux lets devices back in after a restart; whether guarded changes on
-a Linux desktop should be approved on your phone; where the push key lives on Linux; and one about the Mac's unlock
-dialog.
+a Linux desktop should be approved on your phone; where the push key lives on Linux; the Mac's unlock dialog; and
+who sets `tailscale serve`.
 
 ## What is protected, and from whom
 
@@ -72,9 +74,10 @@ guarded acts without a fresh biometric for that change on such a device.
 | --- | --- | --- |
 | **A team session, or any process of the user's uid that is not the user**, that holds no device's unlock key | **Stopped** from acting through the page, adding its own device and approving a guarded change | no bearer token acts any more; every client frame is signed by an unlock key the vault certified; the device list is written only by the server, app-only in the vault (`VaultV2Handler.answer`'s `caller == .app`); an add needs an existing device's biometric over the new key |
 | the same, that can **read the open page's memory or drive its browser** during an unlock | **Accepted** (the user, 2026-11-25), **limited**: up to 12 h, that device's acts only, never a guarded change, every act recorded with the device's id, ended by removal | the unlock key is in the page's memory (desktop) or the browser's storage (phone); see [Open to attack](#open-to-attack) 1 |
-| the same, that **writes the user's files** | **Limited** on Linux, **stopped** on the Mac | Linux: the vault is memory only (S7), so the device list's copy on disk is a hint a worker can rewrite; after a host end it is re-admitted only on a witness or a terminal confirmation ([where the node keeps the devices](#where-the-node-keeps-the-devices)). Mac: the vault is sealed under a Keychain key (`VaultStorage`) |
+| the same, that **writes the user's files** | **Limited** on both | Linux: the vault is memory only (S7), so the device list's copy on disk is a hint a worker can rewrite; after a host end it is re-admitted only on a witness or a terminal confirmation ([where the node keeps the devices](#where-the-node-keeps-the-devices)). Mac: the vault is sealed under a Keychain key (`VaultStorage`), so a worker can't write a device into it, but `VaultStorage` keeps no counter, so a sealed file it copied earlier can be put back (a rollback) unless the epoch is also kept in the Keychain (below) |
 | the same, that **becomes the host** (S11 item 3, T3) or replaces the command line (T12) | **Accepted**, as S11 says today | not this design's to close; signed releases (S12 item 12) |
-| **A process of another uid** | **Stopped** | the loopback port needs a device's signature; the serve backend takes only tailscaled's connections; Unix sockets check the uid (S1's principals). Under WSL's mirrored networking, every Windows process (S11 item 34) is in this row |
+| **A process of another uid** | **Stopped** | the loopback port needs a device's signature; the serve backend takes only tailscaled's connections; Unix sockets check the uid (S1's principals). Under WSL's mirrored networking, the Windows processes of **other** Windows users (S11 item 34) are in this row |
+| **A Windows process of the user's own Windows account** (WSL, where the desktop browser is a Windows one) | **Accepted**, as the uid's processes are | it can read the Windows browser's memory (the unlock key), and it can ask Windows Hello for an assertion with rpId `localhost` and a `clientDataJSON` of its own naming `http://localhost:47830`: after one Windows Hello sheet the user approves, it holds a valid unlock or a guarded change's assertion ([Open to attack](#open-to-attack) 1) |
 | **Another tailnet device** | **Stopped** | the peer's Tailscale login must be the machine's own (decision 4); then it still needs a device key, and a new device needs an existing one's biometric |
 | another device **of the same Tailscale login** | **Limited** | it passes the login check; it can reach the page's public files and hold connection slots; it can't act or enrol without the user's approval |
 | **Someone holding the locked phone** | **Stopped** | the phone's lock; the page's unlock needs Face ID; a push shows the first line of a card, masked (the user accepted the first line) |
@@ -112,7 +115,7 @@ software one, so every guarantee rests on who can write the list.**
 | W6 | Rename (`device.rename`) | an unlocked device's signed request; a name is shown inert and never alone in a prompt (the words and the date go with it) | `DeviceListTests.aNameIsShownInert` |
 | W7 | The vault itself | app-only: `VaultV2Handler.answer` (`caller == .app`, through the connector) | `VaultDeviceTests.onlyTheAppWritesDevices` |
 | W8 | A handover (`switch`) | the vault crosses in sealed memory (S8); no file | `VaultDeviceTests.devicesAndUnlocksSurviveAHandover` |
-| W9 | A host end on Linux: the devices' hint file `<root>/v2/devices.json` read back | never authority: held until a witness or a terminal confirmation (below) | `DeviceRestoreTests.aPlantedDeviceIsHeld`, `DeviceRestoreTests.aRolledBackFileIsHeld`, `DeviceRestoreTests.noWitnessMeansTheTerminal` |
+| W9 | A host end on Linux (or an unsigned Mac node): the devices' hint file `<root>/v2/devices.json` read back | never authority: the digest recomputed from the records; the list admitted whole only on a serve-gate witness that agrees byte for byte, else each device by its own knock, approved by an admitted device's biometric (`device.readmit`) or the terminal | `DeviceRestoreTests.aPlantedDeviceIsHeld`, `DeviceRestoreTests.aStoredDigestIsNeverTrusted`, `DeviceRestoreTests.aRolledBackFileIsHeld`, `DeviceRestoreTests.aHeldDeviceIsReadmittedOnlyByItsOwnKnock`, `DeviceRestoreTests.noWitnessMeansTheTerminal` |
 | W10 | A same-uid process writing `devices.json` while the host runs | the server never reads it while the host runs; written only from the vault | `DeviceRestoreTests.theFileIsNeverReadWhileTheVaultHoldsTheList` |
 | W11 | The upgrade from today's tokens and `web_acts` | no device is made from a token, a level or a confirmed pairing; every page starts locked | `DeviceMigrationTests.noDeviceIsMadeFromAnOldToken` |
 | W12 | The scratch server's flags (`--test-web-pair`'s open form, `--test-web-terminal`, `--test-web-terminal-watch`) | refused with `--node` (`ServerArguments`); the device kinds' test forms (an enrolment without a terminal) are scratch-only flags of the same rule | `DeviceKeysTests.theUsersNodeRefusesTheTestEnrolment` |
@@ -129,25 +132,26 @@ software one, so every guarantee rests on who can write the list.**
 | C10 | Another tab of the same origin (`BroadcastChannel`) | same origin only; the unlock key passes as a non-extractable `CryptoKey`, never as bytes | `devicekey.test.js` (`shares only a non-extractable key`) |
 | C11 | A dev server on `localhost:<port>` asking a passkey for rpId `localhost` | the node checks `clientDataJSON.origin` exactly `http://localhost:47830` | `WebAuthnTests.anAssertionFromAnotherPortIsRefused` |
 | C12 | Push (outbound only) | nothing comes in; the payload is the masked first line | `PushPayloadTests.theFirstLineIsMasked` |
+| C13 | The `tailscale serve` configuration: what the phone's address serves | phone access refused while the uid is Tailscale's operator; the configuration read at each serve-gate connection and every 30 s, any entry not exactly the node's closing the gate and locking the tailnet's devices | `PhoneAccessTests.anOperatorUidRefusesPhoneAccess`, `PhoneAccessTests.aForeignServeEntryLocksTheTailnetDevices` |
 | **Trust on first use** | | | |
 | T1 | The first device (W1, W3) | the terminal's voice, or Touch ID asked by the server | (W1, W3) |
 | T2 | A new device's passkey, `attestation: 'none'` | an existing device's biometric over the new key and its words (W4) | (W4) |
 | T3 | The machine's Tailscale login and name | read by the root-only `tailscale` (`Tailnet.find`'s rule) | `ServeGateTests.theLoginComesFromTheRootOnlyTailscale` |
 | T4 | The phone page's TLS certificate | the browser's own check of the `ts.net` certificate (no TOFU) | none needed |
-| T5 | The page's own code | the node serves only embedded files (`WebAssets`); the page is as trustworthy as the node | (LW-D9's) |
+| T5 | The page's own code | the node serves only embedded files (`WebAssets`); the page is as trustworthy as the node, and on the phone as what `tailscale serve` serves at its name (C13) | (LW-D9's), (C13's) |
 | **Where a key or a token rests** | | | |
 | K1 | A passkey's private key | in the authenticator (Secure Enclave, Windows Hello, a security key; synced by the platform where it syncs) | none (the platform's) |
-| K2 | Devices' public keys and records | Linux: the vault (memory) and the hint file; Mac: the vault (Keychain-sealed) | (W7 to W10) |
+| K2 | Devices' public keys and records | Linux: the vault (memory) and the hint file; Mac: the vault (Keychain-sealed), its epoch in a Keychain item | (W7 to W10), `MacVaultTests.aSealedVaultPutBackHoldsEveryDevice` |
 | K3 | An unlock's private key | the page's memory on a desktop; the browser's storage, non-extractable, on a phone ([for you to decide](#for-the-user-to-decide), 1) | `devicekey.test.js` (`never exports the key`) |
-| K4 | An unlock's public key | the vault only, never a file | `VaultDeviceTests.unlocksAreNeverWritten` |
+| K4 | An unlock's public key | the vault only: never a plain file (on the Mac inside the sealed vault file; never in Linux's hint file) | `VaultDeviceTests.unlocksAreNeverInTheHintFile` |
 | K5 | Challenges, windows, words' nonces | the server's memory, once, 120 s | `UnlockTests.aChallengeIsTakenOnce` |
 | K6 | The first-device address and the QR's address | no secret in either: a plain address | `AddPhoneTests.theQRCarriesNoSecret` |
 | K7 | The VAPID push key | the host's vault (the push note's decision 3; on Linux memory only: [for you to decide](#for-the-user-to-decide), 4) | (the push track's) |
-| K8 | Push subscriptions | the vault, per device, dropped with it | `DeviceRemovalTests.aRemovedDevicesSubscriptionIsDropped` |
-| K9 | The serve configuration | tailscaled's (root's); the vault records the one entry the node set | `PhoneAccessTests.offRemovesOnlyTheNodesOwnEntry` |
+| K8 | Push subscriptions | with the VAPID key (K7), per device, dropped with it: the vault, or on Linux where the push key lives ([for you to decide](#for-the-user-to-decide), 4) | `DeviceRemovalTests.aRemovedDevicesSubscriptionIsDropped` |
+| K9 | The serve configuration | tailscaled's (root's; the uid's too if it is the operator, which C13 refuses); the vault records the one entry expected | `PhoneAccessTests.offRemovesOnlyTheNodesOwnEntry` |
 | K10 | Today's `web-tokens.json`, `web-tokens-tailnet.json` | deleted at the upgrade, never read | `DeviceMigrationTests.theTokenFilesAreRemovedAndNeverRead` |
 
-That is 39 rows: 12 writers of the list, 12 channels, 5 trusts on first use and 10 resting places. Two rules run
+That is 40 rows: 12 writers of the list, 13 channels, 5 trusts on first use and 10 resting places. Two rules run
 through every row: each client frame is signed ([The key](#the-key)), and the guarded kinds always ask again
 ([The unlock](#the-unlock-and-what-it-never-covers)).
 
@@ -191,11 +195,17 @@ not a browser passkey ([The Mac](#the-mac)); the unlock key is the same.
 
 ### The unlock
 
-1. `unlock.begin` `{device}` → `{challenge}`: 32 random bytes, 120 s, once, for this connection.
+1. `unlock.begin` `{device?}` → `{challenge}`: 32 random bytes, 120 s, once, for this connection. Passkeys are made
+   **discoverable** (`residentKey: 'required'`, amending `passkey.js`'s `'discouraged'`), so a page that lost its
+   storage (Safari clears a site's script storage after 7 days without a visit; to be measured, slice 2) still
+   unlocks as its device: with no `device`, `allowCredentials` is empty, the person picks the passkey, and the server
+   finds the device by the assertion's credential id. Losing its storage costs the page its unlock key and its
+   witness, never its place in the list.
 2. The page makes a fresh unlock key and asks `navigator.credentials.get` with `rpId` the listener's name,
-   `allowCredentials` the device's credential, `userVerification: 'required'`, and as challenge
+   `allowCredentials` the device's credential (or none, above), `userVerification: 'required'`, and as challenge
    `SHA-256("vibeswitcher-unlock-v1\n" + origin + "\n" + conn + "\n" + challenge + "\n" + SPKI(unlock key))`.
-3. `unlock` `{device, spki, credential, authenticatorData, clientDataJSON, signature}`. The server, then the vault
+3. `unlock` `{spki, credential, authenticatorData, clientDataJSON, signature, witness?}` (the device is the one whose
+   credential id the assertion names; `witness` only while devices are held, below). The server, then the vault
    again before it records (VibeCore's verifier, so the host checks it too), checks, failing closed on anything else:
    the challenge is live, this connection's and unused; `clientDataJSON` parses as exactly one JSON object whose `type`
    is `webauthn.get`, `challenge` the recomputed bytes, `origin` exactly this listener's origin, and `crossOrigin`
@@ -263,7 +273,19 @@ or the approving device's assertion for W4, which the vault verifies itself), `r
 `addUnlock` (with its assertion, verified), `dropUnlocks`, `devices`.
 
 **The Mac:** the vault is sealed on disk under a Keychain key only the host's binary gets without asking
-(`VaultStorage`); the list lives there and survives restarts. No file.
+(`VaultStorage`, `keychainKey`); the list lives there and survives restarts. Two gaps, closed in slice 4's Mac arm:
+
+- **Rollback.** `VaultStorage` seals the whole vault with ChaChaPoly and no counter: a worker that copied
+  `vault.sealed` before the user removed a lost phone can put it back and kill the host (a launchd agent of the uid),
+  and the phone is listed again. So the host also keeps the device list's `epoch` in a Keychain item of its own (the
+  same access rule as the key), raised with each add or removal, and a vault whose epoch is lower than the Keychain's
+  holds every device as Linux does after a host end (below).
+- **No key.** `keychainKey` gives nil to a host not signed with `setup-signing.sh`'s identity (the Mac spec leaves
+  signing "for the user"), and then the vault is memory only. Such a Mac node takes Linux's path (the hint file and
+  the witness), and `status` says so.
+
+Unlocks ride in the sealed vault on the Mac (`Book.onChange` saves it whole): sealed, never a plain file; a rolled-back
+unlock has ended within 12 hours anyway.
 
 **Linux:** the vault is memory only (S7, "memory only; lost"). Nowhere on Linux before strong mode can the node keep
 something that survives a host end and that a process of the uid can't write: a key file is no secret (S7's "Why"),
@@ -274,14 +296,27 @@ of the uid. So:
 - **The hint file** `<root>/v2/devices.json` (0600, written from the vault after each change, never read while the
   host runs) holds the public records, `epoch` and `digest`. Never an unlock.
 - **After a host end** the server reads the hint file and holds every device: shown on the lock screen as "held after
-  the restart", none may unlock. It lets them back in on one of:
-  1. **A witness**: every device keeps the `{epoch, digest}` it last saw (the page stores it with its unlock key, and
-     refreshes it at each change it sees). A device on the **serve gate** (C3: a remote peer through tailscaled, its
-     storage on another machine) that unlocks puts its `{epoch, digest}` into the unlock's challenge. When they equal
-     the file's, the file's list is admitted whole; when they don't, only that device is admitted, and every device
-     shows "Your device list on the node changed while it restarted" with what differs, each to Keep or Remove.
-  2. **The terminal**: `vibeswitcher web` lists the held devices (each name, date, place and words) and the user types
-     the code to admit them (S3's voice).
+  the restart", none may unlock. **The file's `digest` field is never trusted**: the server computes the digest again
+  from the records it read (their canonical bytes), and the file's `epoch` is only a claim. It lets devices back in on
+  one of:
+  1. **A witness that agrees.** Every device keeps, in its own storage, the canonical list it last saw (each device's
+     id, credential key hash, name and place: a few hundred bytes) and its `epoch`, refreshed at each change it is shown
+     (the `devices` stream). A device on the **serve gate** (C3: a remote peer through tailscaled, its storage on
+     another machine) that unlocks while devices are held adds its witness to the unlock: the unlock's challenge
+     becomes `SHA-256("vibeswitcher-unlock-v1\n" + origin + "\n" + conn + "\n" + challenge + "\n" + SPKI(unlock key)
+     + "\n" + witnessDigest)`, where `witnessDigest` is SHA-256 of the canonical list and epoch the page sends beside
+     it, so the passkey vouches for exactly that witness. When the witness's list is byte for byte the list the server
+     recomputed from the file, and its epoch the file's, the list is admitted whole.
+  2. **Otherwise one device at a time, each as a new knock.** A witness that doesn't agree admits only its own device;
+     the page shows what differs **from the phone's own copy** (a device the file has and the phone doesn't is "not
+     known to your phone", with the file's name shown as not vouched for). Every other held device stays held until it
+     knocks (it tries to unlock: its passkey assertion proves it holds that key) and an admitted device approves that
+     knock as a guarded change (`device.readmit`: its words from a nonce the server picks after the knock, the biometric
+     over the knocking key and the words), or the terminal confirms it (`vibeswitcher web` lists the knocks' words;
+     the user types the words their own device shows, and the code, S3's voice). Nothing is re-admitted from a name or
+     a date the file gives.
+  3. **No witness** (no serve-gate device paired, or none has a stored list): every device is let back in only by
+     such a terminal confirmation of its own knock.
 
   A loopback device is never a witness on Linux: its browser's storage is the uid's to write.
 
@@ -366,7 +401,7 @@ make it, and on the Mac the system dialog shows the words the server derived, no
   typed ones (normalised as `webConfirm` does), records its unlock, closes the window; refuses, closing the window, on
   a word that matches no knock.
 - New, `.acts` (an unlocked device's signed frame): `devices`, `device.add.open`, `device.rename`, `device.remove`,
-  `device.lock`, `phone.off`, `guard.begin`. New, `.guarded` (below): `device.add.approve`, `phone.on`. New, a locked
+  `device.lock`, `phone.off`, `guard.begin`. New, `.guarded` (below): `device.add.approve`, `device.readmit`, `phone.on`. New, a locked
   connection's (a new sender, `webLocked`, taken only before `auth` succeeds): `unlock.begin`, `unlock`,
   `device.enroll`.
 
@@ -394,7 +429,7 @@ the desktop and on the phone (N1, N8):
 | `set` of the 13 settings whose `page` is `.terminalOnly` (`lead_mail`, `policy`, `verifier_model`, `security_audit_model`, `max_workers`, `floor_sensitive_paths`, `floor_strict_paths`, `floor_audit_finders`, `floor_merge_policy`, `floor_risk_lines`, `floor_risk_model`, `floor_audit_sample_percent`, `floor_verifier_different`), and every plugin setting (`PluginSettings`) | `pageSetRefusal` | N1; `NodeSettings` |
 | `plugin.add` (`plugin.inspect` becomes a read an unlock may ask) | `.terminalOnly` | N1 |
 | Claude Code's self-update switch (the E8 kind to be added) | not built | N8 |
-| `device.add.approve`, `phone.on` | new | **the design's call**: each widens the node's reach, as `web.open`'s reason says ("a page would widen its own reach") |
+| `device.add.approve`, `device.readmit`, `phone.on` | new | **the design's call**: each widens the node's reach, as `web.open`'s reason says ("a page would widen its own reach") |
 | the journal's acknowledgment (the N6 kind to be added) | `status --ack` | **the design's call**, stricter than N6's words: it clears marks that say a start or a request nobody explained |
 
 Still the terminal's: `start` (no server is there to ask), `web.open`, `web.pairing`, `web.confirm`.
@@ -447,18 +482,38 @@ ID either way.
 
 ## The phone's path
 
-**HTTPS through `tailscale serve`, set by the node (N5).** Turn on phone access is `phone.on`, a guarded change whose
-text says what it changes ("Tailscale will serve this page at https://<name>:47830 to your tailnet's devices; HTTPS
-certificates put the machine's name in public logs"). The server runs only the root-only `tailscale` (`Tailnet.find`'s
-rule: fixed path, fixed `PATH`, no inherited environment, 5 s), reads `tailscale serve status --json` first, and
-refuses (saying why) when port 47830 is already served by anything it didn't set, when the output doesn't parse, or
-when HTTPS certificates or MagicDNS are off. It then sets one entry, HTTPS on 47830 to the node's backend, records
-that entry in the vault, and reads the status back to see exactly it. `phone.off` (an unlock may: it narrows) removes
-that one entry only and drops the tailnet's devices' connections. To be measured, slice 17: that `tailscale serve`
+**HTTPS through `tailscale serve` (N5: set by the node on the user's click, undone on Turn off; but see "Who can
+re-point the phone's page" below, which finds N5 unsafe as worded).** Turn on phone access is `phone.on`, a guarded
+change whose text says what it changes ("Tailscale will serve this page at https://<name>:47830 to your tailnet's
+devices; HTTPS certificates put the machine's name in public logs"). The server runs only the root-only `tailscale`
+(`Tailnet.find`'s rule: fixed path, fixed `PATH`, no inherited environment, 5 s), reads `tailscale serve status
+--json` first, and refuses (saying why) when port 47830 is already served by anything but the node's one expected
+entry, when the output doesn't parse, or when HTTPS certificates or MagicDNS are off. Where the node may set the entry
+(as N5 words it), it sets exactly HTTPS on 47830 to the node's backend, records that entry in the vault, and reads the
+status back to see exactly it; where it may not (the recommendation below), it shows the one line and checks the
+result the same way. `phone.off` (an unlock may: it narrows) has the host let the backend go, removes the entry where
+the node may, and drops the tailnet's devices' connections. To be measured, slice 17: that `tailscale serve`
 takes HTTPS on 47830 (**verified** that Serve, unlike Funnel, no longer limits its ports in the current CLI,
 [Tailscale's Funnel docs](https://tailscale.com/kb/1311/funnel-cli) and [Serve docs](https://tailscale.com/kb/1312/serve),
-to check against the installed version), and which operator rights a user's process needs (on Linux, `tailscale set
---operator=$USER` once, with `sudo`: then a setup line, E6).
+to check against the installed version), and which rights a change of `tailscale serve` needs.
+
+**Who can re-point the phone's page.** A non-root `tailscale serve` is expected to need Tailscale's operator setting
+for the user (`tailscale set --operator=$USER`, once, with `sudo`; to be measured, slice 17). **If the user's uid is
+the operator, every process of that uid can change `tailscale serve`**: a worker keeps `/ws` pointed at the node's
+backend and serves `/` from its own server under the same name, so the phone runs the worker's script on the real
+origin. That script uses the phone's stored unlock key, shows false text while Face ID approves a guarded change, and
+stores the witness the worker chooses. The serve gate sees nothing wrong (the peer is tailscaled, the login is right,
+the address is the phone's). So:
+
+- The node never makes the uid an operator, and **phone access refuses to turn on while the uid can change `tailscale
+  serve`** (read from `tailscale debug prefs`' `OperatorUser`, or the measured equivalent; unreadable counts as yes).
+- Then the node can't set or undo serve itself. **This is where N5 meets its limit** ([for you to decide](#for-the-user-to-decide), 6):
+  the design's recommendation is that Turn on phone access shows the one line to run once with `sudo` (E6) and checks
+  the result, and Turn off has the host let the backend socket go, so Serve has nothing to forward to (the leftover
+  entry serves nothing; the page shows the line that removes it).
+- Whoever set it, the node reads the serve configuration at every serve-gate connection and every 30 s; any entry for
+  the machine's name on 47830 other than exactly its own (a path handler included) closes the serve gate and locks
+  every tailnet device until the configuration is its own again.
 
 **The backend, and who can reach it.** Way A's bind of the Tailscale address (`TailnetWeb`, the host's `tailnet`
 place) is retired. The backend is a socket the host holds (H1's rule: the host binds, the server accepts):
@@ -529,7 +584,7 @@ Removing the device you are on signs you out. Removing the last device is allowe
 | the terminal-led passkey words | `WebApp/js/acting.js` (`acPasskeyOrigin`, `vibeswitcher web --localhost`), `i18n.js` and `i18n-es.js` `pk…` words ("Añadir una llave de acceso (pedida desde tu terminal)"), `passkey.js`'s header ("when the terminal asks (`vibeswitcher web --passkey`)") | Set up this browser, Unlock, Add a phone |
 | "a web client is never the user's voice" | the security architecture's principals, S3's table rows for `draft` and `web.*`, LW-D6 | a device's signed frame is the user's for `.acts` kinds, as recorded with its id |
 
-**An existing install moves over** in the cut-over slice (20): the new build deletes both token files unread; the
+**An existing install moves over** in the cut-over slice (21): the new build deletes both token files unread; the
 vault's `PageActs` keys are dropped at its first start; every open page is closed with 4403 and reopens locked;
 `web_acts`, if set, is ignored and `status` says once "acting from the page now needs a device: run `vibeswitcher web`
 once" (Linux) or "open the page and use Touch ID" (Mac). No device is made from anything the old build left (W11). A
@@ -556,7 +611,8 @@ from the command line, and for every guarded kind from any page, its text the ch
   `NodeSystem.approvalMeasured`, `HostImages.isCheckedMacNode` and the `NodeSystem.macUnbuilt` refusal (the 16:27:18
   decision), and the new `MacPageUnlock.measured`. So the Mac's slices build and test the code with a fake
   authenticator (`ApprovalLintTests` forbids the real dialog in tests) and change nothing a user runs.
-- The Mac node's vault survives restarts (Keychain), so the Mac needs no hint file or witness.
+- The Mac node's vault survives restarts (Keychain) when the host is signed; its epoch is kept in the Keychain too,
+  against a sealed file put back. An unsigned Mac node (no Keychain key) takes Linux's hint file and witness.
 
 ## Build order
 
@@ -578,23 +634,27 @@ lead.
 | 7 | Signed frames in `WebRequestScreen.text` before `Principal.route`; `Principal.page` with a device | `WebAccess.swift` (`WebRequestScreen`), `Server/Principal.swift` | on a scratch server | none | yes | 13, 16 |
 | 8 | Signed terminal frames (type 6) in `TerminalRelay.binary`, still watch-only on the user's node | `Sources/VibeNode/Live/TerminalRelay.swift` | on a scratch server | none | with 7 | 11, 13, 16 |
 | 9 | The unlock kinds: `unlock.begin`, `unlock`, `device.lock`; `KindSpec` gains `.guarded` and the `webLocked` sender | `Server/KindSpec.swift`, `Server/PageRequests.swift`, a new `Server/DeviceRequests.swift` | on a scratch server | none | yes | 13, 16, 17 |
-| 10 | The first device: amended `web.open`, `web.pairing`, `web.confirm`, `device.enroll` in a window | `Server/PageRequests.swift` (`webPairing`, `webConfirm`), `Server/WebRequests.swift`, `Web/PagePairing.swift`, the command line's `web` | the logic on a scratch server | S3's voice rule on the user's node (the cgroup), the install line's ending | yes | 13, 16, 17 |
+| 10 | The first device: amended `web.open`, `web.pairing`, `web.confirm`, `device.enroll` in a window, behind `DeviceKeys.usersNode` (today's `web.open` with its fragment code stays as built on the user's node until slice 21) | `Server/PageRequests.swift` (`webPairing`, `webConfirm`), `Server/WebRequests.swift`, `Web/PagePairing.swift`, the command line's `web` | the logic on a scratch server | S3's voice rule on the user's node (the cgroup), the install line's ending | yes | 13, 16, 17 |
 | 11 | The Devices list: `devices`, `device.rename`, `device.remove`, Remove all; the page's This node › Devices | `DeviceRequests.swift`, `WebApp/js/views/node.js` | all | none | with 12 | 8, 13, 16 |
 | 12 | Removal's effects: connections, streams, in-flight, push subscriptions | `WebAccess.swift` (`WebRequestScreen.end`), `Server/NodeLive.swift` | all | none | yes | 13, 16 |
-| 13 | N7: `localhost` beside `127.0.0.1`, the `loopback6` place, CSP per name; measures each browser's passkeys on `http://localhost` and the desktop's authenticators | `Web/NodeWebListener.swift`, `Sources/VibeCore/V2/HostWebListen.swift`, `Sources/VibeHost/V2/HostWebListeners.swift`, `Web/WebSecurityHeaders.swift` | all | the host's `::1` bind on Linux | **yes, the N7 review** | 6 to 12 |
+| 13 | N7: `localhost` beside `127.0.0.1`, the `loopback6` place, CSP per name, behind `DeviceKeys.usersNode`; measures each browser's passkeys on `http://localhost` and the desktop's authenticators | `Web/NodeWebListener.swift`, `Sources/VibeCore/V2/HostWebListen.swift`, `Sources/VibeHost/V2/HostWebListeners.swift`, `Web/WebSecurityHeaders.swift` | all | the host's `::1` bind on Linux | **yes, the N7 review** | 6 to 12 |
 | 14 | Guarded changes: `guard.begin`, the digest again at the act, the vault's check; the guarded table in `KindSpec` and `NodeSettings` | `KindSpec.swift`, `PageRequests.swift` (`pageChecks`, `pageSetRefusal`), `Settings/NodeSettings.swift` | all | none | yes | 16, 17 |
 | 15 | Each guarded kind wired, one slice each: `hooks.install`, the 13 settings and plugin settings, `config.accept` and `approve` past `pageNotSame`, `plugin.add`, `build.switch`/`build.seal` (the `update` kind and N8's and N6's kinds are their own tasks first) | each kind's request file | all | `build.switch`'s handover on Linux | with 14, once | one another |
 | 16 | Credential masking on the serve gate (`Redaction.secrets`, terminal screen masking) | `Web/WebAccess.swift` or a new `Web/RemoteMask.swift`, `Live/TerminalRelay.swift` (the mask), `Web/PagePairing.swift` (`TerminalMask`) | all | none | yes | 6 to 15 |
 | 17 | Phone access on and off: `phone.on`, `phone.off`, the serve status parse; measures `tailscale serve`'s ports, `unix:` targets and operator rights | `Server/PhoneAccess.swift`, `Web/Tailnet.swift` | with a fake `tailscale` | the real `tailscale` on Linux | yes | 9 to 16 |
-| 18 | The serve gate: the host's backend socket, the peer check, the login and peer-address checks, Host and Origin for `https://<name>:47830`; retires way A | `HostWebListen.swift` (a `serve` place), `HostWebListeners.swift`, `Server/TailnetWeb.swift` (becomes the serve gate), `NodeWebListener.swift` | the gate's checks with injected peers | `SO_PEERCRED` and `/proc/net/tcp` on Linux | yes | 14, 15 |
+| 18 | The serve gate: the host's backend socket, the peer check, the login and peer-address checks, Host and Origin for `https://<name>:47830`, behind `PhoneAccess.usersNode`; way A (`TailnetWeb`'s bind) stays on the user's node until that gate is switched (slice 25) | `HostWebListen.swift` (a `serve` place), `HostWebListeners.swift`, `Server/TailnetWeb.swift` (becomes the serve gate), `NodeWebListener.swift` | the gate's checks with injected peers | `SO_PEERCRED` and `/proc/net/tcp` on Linux | yes | 14, 15 |
 | 19 | Add a phone: `device.add.open`, enrolment on the serve gate only, `device.add.approve` | `DeviceRequests.swift`, `WebApp/js/views/node.js`, the QR encoder in `WebApp/js` | all | the serve gate on Linux | yes | 22 |
-| 20 | **The cut-over: the first slice that acts differently for a user.** On the user's node acting needs an unlocked device; tokens, `web_acts` and confirmed pairings retired; the migration; the lock screen | `WebAccess.swift`, `ActingPages.swift` (removed), `WebTokens.swift` (removed), `NodeSettings.swift`, `LeadVaultV2.swift`, `WebApp/js/acting.js`, `i18n*.js` | all but the user's node | the user's node's first start after it on Linux | yes | none (it lands alone) |
-| 21 | The Linux restart: the hint file, the witness, the terminal re-admission | `DeviceRequests.swift`, `Server/ServerStart.swift`, the command line's `web` | the logic with a scratch vault | the host end and the real restart on Linux | yes | 22, 23 |
+| 20 | The Linux restart: the hint file, the recomputed digest, the witness, `device.readmit`, the terminal re-admission; the Mac's Keychain epoch | `DeviceRequests.swift`, `Server/ServerStart.swift`, the command line's `web`, `Sources/VibeHost/VaultStorage.swift` (the epoch) | the logic with a scratch vault; the Mac arm's epoch | the host end and the real restart on Linux | yes | 22, 23 |
+| 21 | **The cut-over: the first slice that acts differently for a user.** It switches `DeviceKeys.usersNode` on: on the user's node acting needs an unlocked device; tokens, `web_acts` and confirmed pairings retired; the migration; the lock screen; `localhost` and `::1` held | `WebAccess.swift`, `ActingPages.swift` (removed), `WebTokens.swift` (removed), `NodeSettings.swift`, `LeadVaultV2.swift`, `WebApp/js/acting.js`, `i18n*.js` | all but the user's node | the user's node's first start after it on Linux | yes | none (it lands alone) |
 | 22 | Typing into terminals on the user's node (LW-D12 amended): loopback first, then the serve gate after 16 to 19 | `TerminalRelay.swift` (`Mode.type`), `Server/NodeLive.swift`, `WebApp/js/terminal.js` | on a scratch server, a fake tty | the user's node on Linux | yes | 21 |
 | 23 | The Mac: the unlock and guarded changes by the server's Touch ID, `MacPageUnlock.measured` false | `Server/ApprovalVoice.swift`, `DeviceRequests.swift` | with a fake authenticator | none (the Mac arm) | yes | 21, 22 |
 | 24 | The leftovers: the page's words, `passkey.js`'s header, the docs' rules (S3's table, the principals, LW-D6, LW-D12, the contract's §1, §2, §8, §9) | `WebApp/js/*`, the docs | all | none | no | any |
 
-Slice 21 lands before slice 19 is offered to a user, so a phone's pairing survives a restart from its first day.
+Then: **25**, the one-line switch of `PhoneAccess.usersNode` (after 16 to 20 and their reviews; it retires way A's
+listener on the user's node); **26**, the switch of `TerminalTyping.usersNode` (after 22); **27**, `MacPageUnlock.measured`,
+only after the Mac's measurements, as `approvalMeasured`. Every slice before 21 is behind a gate that is false on the
+user's node, so slice 21 is the first that makes anything act differently for a user. Slice 20 lands before 21, so no
+Linux host end after the cut-over loses the devices for good.
 
 ## Open to attack
 
@@ -602,15 +662,21 @@ Slice 21 lands before slice 19 is offered to a user, so a phone's pairing surviv
    browser (an extension written into the profile, a debugging port, ptrace where there is no Yama, as on this WSL
    machine) can run script on the page's origin: use the unlock key (accepted) and also show an innocent text while
    the passkey's sheet (which shows only the site's name) approves the guarded change the server described. The node
-   can't tell. The Mac closes it with the server's own dialog; Linux desktops don't ([for you to decide](#for-the-user-to-decide), 3).
+   can't tell. On WSL a Windows process of the user's own Windows account needs no browser at all: it can call
+   Windows Hello's WebAuthn with rpId `localhost` and a `clientDataJSON` of its own naming `http://localhost:47830`,
+   and one sheet the user approves gives it an unlock or a guarded change. The Mac closes it with the server's own
+   dialog; Linux desktops don't ([for you to decide](#for-the-user-to-decide), 3).
 2. **The witness after a Linux host end.** It rests on three things not proven on paper: that only tailscaled reaches
    the backend (3); that a removed device's comeback by rollback is rare enough (a phone offline when the removal
    happened); and that a worker can't make the phone's page store a digest it chose (it would have to send the phone
    a page: the page's code is the node's own embedded files, so only a worker that became the host, S11 item 3).
-3. **The serve backend as a channel.** If any same-uid process can connect to the backend, it can forge the login
-   header and the peer address, then enrol during an add window, or be the witness. The design refuses to open the
-   phone path unless the peer is told to be tailscaled; whether that can be told on each platform and Tailscale
-   variant (root on Linux; the Mac's App Store and standalone variants) is unmeasured.
+3. **The serve backend and the serve configuration.** If any same-uid process can connect to the backend, it can
+   forge the login header and the peer address, then enrol during an add window, or be the witness. If any same-uid
+   process can change `tailscale serve` (the operator setting), it can serve the phone its own page under the real
+   origin. The design refuses the phone path in both cases and watches the configuration, but whether each can be
+   told on each platform and Tailscale variant (root on Linux; the Mac's App Store and standalone variants), and
+   whether the 30 s look leaves a window a worker can use (a phone that loads `/` in that window runs its script), is
+   unmeasured.
 4. **rpId `localhost`.** Every dev server a session runs shares the rpId: it can't use an assertion (the origin is
    checked), but it can put Touch ID or Windows Hello sheets on the screen at will and train the user to approve them;
    and a browser that answers `localhost` from DNS, or a `::1` the host can't hold, would hand the page to a squatter.
@@ -640,17 +706,29 @@ Only what the answers of 2026-11-25 and the lead's calls don't settle.
    later change would need `sudo` to be safe against rollback, so it costs a password prompt per device added or
    removed; (c) pair every device again after each restart (a terminal line and a QR each time); (d) trust the file,
    **not recommended**: a program running as you could add its own device and restart the node.
-3. **Guarded changes on a Linux desktop** (N1 says the desktop and the phone). On a Linux or WSL desktop a program
+3. **Guarded changes on a Linux desktop** (N1 says the desktop and the phone). The phone's half of this rests on
+   phone access being set with no operator rights for your account (6). On a Linux or WSL desktop a program
    running as you that drives the browser can show you one change while the passkey approves another (Open to attack
    1); the Mac's dialog and a phone don't have this. **Recommended: from a Linux desktop, a guarded change is approved
    on your phone** (the desktop asks, the phone shows the change and asks Face ID), **or in the terminal when no phone
    is paired.** Costs: a second device for those few monthly changes on Linux.
 4. **The push key on Linux** (the push note's decision 3 put it in the host's vault, "open to the building lead's
-   better reason"). Linux's vault is memory only, so every host end changes the key, every phone's subscription stops
-   working, and pushes stop until each phone opens the page. **Recommended: on Linux, a 0600 file under the node's
-   root until strong mode** (its vault key file, S12 item 5), the Mac's in its vault. Cost: a program running as you
+   better reason"). Linux's vault is memory only, so every host end loses the key **and** every subscription made
+   with it: pushes stop until each phone opens the page and subscribes again, just when push is wanted (the page
+   closed). A file for the key alone saves nothing: it must hold the key and the subscriptions together.
+   **Recommended: on Linux, the VAPID key and the devices' subscriptions in one 0600 file under the node's root until
+   strong mode** (its vault key file, S12 item 5); the Mac keeps both in its vault. Cost: a program running as you
    could send your phone notifications with words of its choosing; a notification only opens the page, which shows
-   the real state and asks the unlock as always.
+   the real state and asks the unlock as always. The other way, both in the vault: no such pushes, and none at all
+   after a reboot until you open the page on each phone.
 5. **The Mac's unlock dialog words.** Comparing three words in the Touch ID dialog with the page is what keeps another
    program from taking the unlock (Open to attack 5). **Recommended: keep the words** (the same three words the
    phone's pairing shows). Cost: one glance at each unlock; without them the dialog says only "this Mac's browser".
+6. **Who sets `tailscale serve`** (N5: the node sets it on your click and undoes it on Turn off). For the node,
+   running as you, to change `tailscale serve`, your account must be Tailscale's operator, and then every program
+   running as you can change it too: one could serve your phone its own page at the node's real address, and that page
+   could act as your phone and get your Face ID for a change it hides (the phone's path, above). **Recommended: you
+   run the one line once with `sudo` (Turn on phone access shows it and then checks it), the node refuses phone access
+   while your account is the operator, and Turn off closes the node's side without your password** (the line that
+   removes the entry is shown). Cost: one `sudo` line at setup, beside turning on HTTPS certificates in the admin
+   console, which you already do once.
