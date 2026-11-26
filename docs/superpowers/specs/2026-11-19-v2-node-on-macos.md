@@ -634,8 +634,8 @@ server child is started with:
   owns, not a link; else the sessions have none. Measured: a scratch job in `gui/501` running `launchctl getenv
   SSH_AUTH_SOCK` gets the same socket (`/var/run/com.apple.launchd.<random>/Listeners`) as a process outside launchd,
   and launchd gives the job the same in its own environment. *Residual:* the domain's value is any process of the user's to set
-  (`launchctl setenv`), as for every Terminal opened after it; the Mac seal list (step 8) watches launchctl's user
-  environment.
+  (`launchctl setenv`), as for every Terminal opened after it; the Mac seal list (step 8) can't watch it (launchd's
+  memory, not a file: "Built: `MacSealList`", what can't be sealed), only its persistent forms.
 - `__CF_USER_TEXT_ENCODING`: `0x<uid>:<encoding>:<region>` as launchd gives it, from the user's
   `~/.CFUserTextEncoding` (home from the user database; two hex or decimal numbers), `0x<uid>:0x0:0x0` without one.
 - `LANG`: `en_US.UTF-8` when nothing sets it, as the app's sessions get it (`HostedSession.environment`, unchanged): a
@@ -866,7 +866,7 @@ the user's). The plist written at the user's login (`--at-login`, `RunAtLoad`).
   build's. The switch's follow-up now rewrites the plist for the build it went to, and `status` refuses a host whose
   build isn't the plist's.
 - *`launchctl getenv SSH_AUTH_SOCK`* is any process of the user's to set (`launchctl setenv`), as for every Terminal
-  opened after it (the Mac seal list, step 8).
+  opened after it; the Mac seal list (step 8) can't watch it, only its persistent forms (its "what can't be sealed").
 - *Sessions keep a hard core limit of 0* (the reset's): soft-only in the reset would give `ulimit -c` back.
 - *A session that ignores the hangup* outlives a `stop` without the server: `stop` names it by pid and fails after its
   limit (it doesn't kill what may be the user's own program).
@@ -1065,6 +1065,7 @@ every folder's mode), so a mode changed in place, of the folder or under it, is 
 | `/var/db/xcode_select_link` | file | `root:wheel lrwxr-xr-x` → `/Applications/Xcode.app/Contents/Developer` (`root:wheel drwxr-xr-x`); `/private/var/db` `root:wheel drwxr-xr-x`; `/var` a root link | `sudo xcode-select -s` only | a row (cheap, no churn), the account's own home only: only an administrator changes it; `DEVELOPER_DIR`, which overrides it, is the startup files' (their rows) |
 | `~/.nvm` (`nvm.sh`, `versions/node`, `alias`) | file, listing | absent here | `nvm install`, `nvm alias` | Linux's rows, by its names: absent hashes as absent, made is a change |
 | `~/bin`, `~/.local/bin`, `~/.local/share/claude/versions` | listing | `~/bin` absent; `~/.local/bin` `501:staff drwxr-xr-x`, 7 entries, `claude` a link into the versions (`501:staff drwxr-xr-x`, 5 versions); both on the login shell's PATH ahead of `/usr/bin` | Claude Code's update: the `claude` link rewritten on 2026-11-25 | Linux's rows (listings here, Linux's `~/bin` is a `.folder`): an update holds once, as on Linux, being new code every session runs |
+| `~/.config/gh` | listing | `501:staff drwxr-x--x`; `config.yml` and `hosts.yml` `501:staff -rw-------` (the token's file: by metadata, never read); `~/.config` `501:staff drwxr-xr-x` | `gh auth`: `hosts.yml` rewritten on 2026-10-27, `config.yml` not since 2026-01-14 | Linux's row: an alias in `config.yml` runs as `gh <alias>`; a login holds once |
 | `~/.claude/shell-snapshots`, `~/.codex/shell-snapshots` | entries | `501:staff drwxr-xr-x`, 18 snapshots, none rewritten after it was made (one's ctime 1 s after its birth); Codex's absent | each session's start writes one | Linux's rows by Linux's names, so an entry coming or going is no change and one changed in place is (`LinuxSealList.cameOrWent`) |
 | `~/.gitconfig`, `~/.config/git/config` | (file) | `501:staff -rw-r--r--`; no `include`, `hooksPath` or `sshCommand` line | the user, `git config` | the Mac's `homeFiles` rows already: nothing added |
 | `launchctl`'s user environment | none | no file: launchd keeps `launchctl setenv` in memory; `launchctl config user` persists under `/private/var/db/com.apple.xpc.launchd/config` (`root:wheel drwxr-xr-x`, empty) | any process of the user's | not a row (below) |
@@ -1088,7 +1089,8 @@ vault's next look until the user's accept, and the next change after an accept i
 (`aChangeToEachRowIsHeldUntilAcceptedThenTheNextAgain`); an accept with a card's hashes seals only what the card showed
 (`anAcceptSealsOnlyWhatTheCardShowed`); a row removed or unreadable is held, never left out (no Mac row's fingerprint is
 nil: `anUnreadableOrMissingRowFailsClosed`); no other host's book watches the list
-(`aBookThatIsntANodeHostsWatchesNoneOfIt`, `MacCheckedStartTests`).
+(`aBookThatIsntANodeHostsWatchesNoneOfIt`, `MacCheckedStartTests`). Terminal's ByHost files are read whether its own
+file is there or not (the blind check's finding: before, an absent domain file hid them).
 
 **What can't be sealed, and why:**
 
@@ -1108,6 +1110,11 @@ nil: `anUnreadableOrMissingRowFailsClosed`); no other host's book watches the li
 - *cfprefsd's cache.* A `defaults write com.apple.Terminal …` reaches cfprefsd first, and Terminal reads it from there;
   the seal reads the file, which cfprefsd writes after. A change Terminal took before the file was written is seen at the
   first look after it is.
+- *The global preferences domain.* Terminal's own domain is sealed by keys, but a key it doesn't hold may be read from
+  `NSGlobalDomain` (`~/Library/Preferences/.GlobalPreferences.plist` and its ByHost files: `defaults write -g Shell …`),
+  if Terminal looks its startup keys up through the standard defaults (not measured: it would mean writing the user's
+  domain). That file is every app's to write (rewritten on 2026-11-26 at 07:57 here), so a row needs its churn measured
+  over days before its keys can be told from churn: owed, below.
 - *A row's owner.* No kind reads one: a process of the user's can't give a file to another user (`chown` refused,
   `aRowsOwnerIsntAProcessOfTheUsersToChange`), and a group changed among the user's own changes ctime, which a listing
   reads (a file row reads contents only, which a group doesn't change).
@@ -1122,6 +1129,8 @@ nil: `anUnreadableOrMissingRowFailsClosed`); no other host's book watches the li
   they need the node root's names first; the builds folder's row turns on the switch's refusals, a change of step 5's
   switch. For the step that lifts `isCheckedMacNode`.
 - `appWrite` around `start`'s and a switch's plist writes (above), for the switch-on review.
+- The global preferences domain (above): whether Terminal takes `Shell` or a profile from it (a scratch account's
+  measurement), and if it does, a `.preferences` row on `.GlobalPreferences.plist` with its churn measured over days.
 - A real checked node host's book watching the list (`isCheckedMacNode` is false: `MacCheckedStartTests` proves the
   flag on a checked start's host built by hand).
 - On Linux, `MacSealListTests.theListIsEmptyOnLinux` and `LinuxSealListTests` once there: this Mac reads none of

@@ -44,6 +44,8 @@ public enum MacSealList {
         (".nvm/nvm.sh", .file), (".nvm/versions/node", .listing), (".nvm/alias", .listing),
         // The user's folders on a session's PATH (the login shell's), and Claude Code's versions behind `~/.local/bin/claude`.
         ("bin", .listing), (".local/bin", .listing), (".local/share/claude/versions", .listing),
+        // gh's config and token, as on Linux: by metadata, so the token is never read; an alias there runs as `gh <alias>`.
+        (".config/gh", .listing),
         // Each session writes its snapshot here, and sources it before each command (Linux's ST-D19).
         (".claude/shell-snapshots", .entries), (".codex/shell-snapshots", .entries),
     ]

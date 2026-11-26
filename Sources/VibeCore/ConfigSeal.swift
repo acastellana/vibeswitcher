@@ -736,6 +736,8 @@ public enum ConfigSeal {
     public static func fingerprint(_ watched: Watched) -> String? {
         switch watched.kind {
         case .plugin, .scripts: return parts(watched).map(partsHash)
+        // Its ByHost files are read whether the domain's own file is there or not (`preferencesHash` says it absent).
+        case .preferences: return MacSealList.preferencesHash(watched.path)
         default: break
         }
         var hasher = SHA256()
@@ -760,7 +762,7 @@ public enum ConfigSeal {
         case .listing:
             return LinuxSealList.listingHash(watched.path)
         case .preferences:
-            return MacSealList.preferencesHash(watched.path)
+            return MacSealList.preferencesHash(watched.path)  // Taken above, before the absent guard.
         case .mcpServers:
             var servers = mcpServers(watched.path)
             for _ in 1..<3 where servers == nil {

@@ -540,7 +540,7 @@ or decided. Done on Linux, tested on both systems (`ApprovalJudgmentTests`, `App
    watches it, and `isCheckedMacNode` is false; needs a review)**, as the node on the Mac's design's "Built:
    `MacSealList`" says. *Built:* `MacSealList`, the rows as data in `LinuxSealList`'s shape (the LaunchAgents folder,
    the node's plist, Terminal's preferences, what the zsh files source, Homebrew's `bin` and `sbin`, the Xcode link, nvm,
-   `~/bin`, `~/.local/bin`, Claude Code's versions, the shell snapshots), appended by `ConfigSeal.homeWatched(home:macList:)`
+   `~/bin`, `~/.local/bin`, Claude Code's versions, `~/.config/gh`, the shell snapshots), appended by `ConfigSeal.homeWatched(home:macList:)`
    only for a book with `watchesMacList` (set beside `recordsActions` by a checked node host) and held until accepted by
    the vault's own look and accept, Linux's path; the lead-approved `.preferences` kind (Terminal's keys but the measured
    churn: `LastTerminalStartTime`, `NSWindow Frame …`). *Measured first, on this Mac:* each row's owner, mode, parents,
@@ -552,7 +552,8 @@ or decided. Done on Linux, tested on both systems (`ApprovalJudgmentTests`, `App
    checked node host's watches nothing of it, and the app's seal is today's. *What the switch-on review can rely on:* a
    change to any row holds the team until accepted, on the node's book alone. *Can't be sealed:* launchctl's user
    environment (memory, not a file; the node takes one name of it at its host's start, checked), what Homebrew's links
-   point at, the user's own PATH folders, cfprefsd's cache before its write, a row's owner (not the user's to change).
+   point at, the user's own PATH folders, cfprefsd's cache before its write, the global preferences domain (unmeasured:
+   whether Terminal reads `Shell` from it; its churn), a row's owner (not the user's to change).
    *Owed:* the node root's own folders (Linux's quiet rules key on Linux's names; the builds folder's row turns on the
    switch's refusals), `appWrite` around `start`'s and a switch's plist writes (until then each is a held change), a real
    checked node host, the Linux run of `theListIsEmptyOnLinux`.
