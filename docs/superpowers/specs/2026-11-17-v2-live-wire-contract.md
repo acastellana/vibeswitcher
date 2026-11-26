@@ -226,7 +226,11 @@ that sends `"parts": true` in `subscribe` gets every snapshot of a keyed collect
   refused past it). **Text a person decides on is never cut** (the plugin spec's rule 3): one past the room anyway is
   withheld whole. `cards`: with a stub (its id, kind, project and root, open, when, blocking; a plugin card's plugin,
   asking session, asker and title; `tooLarge` with its bytes and `vibeswitcher questions`, which shows it whole), drawn
-  in its place as "This card is too large for the page: read it with `vibeswitcher questions`". `sessions` (a prompt),
+  in its place, where the page reads it whole in parts (2026-11-26, the no-terminal inventory's C7): `questions` with
+  `card` (its whole id) and `part` (from 0), after the first part with the `version` it gave, answers `part` {`card`,
+  `version` (the SHA-256 of all its bytes), `part`, `parts`, `bytes`, `data` (base64, at most 96 KiB a part, at most
+  64 parts)}: the bytes `questions` with `card` alone gives whole, and `changed` once the card isn't that version any
+  more. `sessions` (a prompt),
   `leads` (a push) and `node`: withheld with no stub. `boards` alone, which hold nothing a person decides on (tasks'
   notes, the lead's records; a question is a card), may have their longest texts cut instead, each keeping its start
   and ending `… [cut: N bytes]`; one whose shape alone doesn't fit is withheld. The rest of the snapshot is always

@@ -98,6 +98,16 @@ extension Requests {
         case .failure(let failure): return reply(.init(re: request.id, error: failure))
         case .success(let typed): args = typed
         }
+        if let index = args.part {
+            guard let wanted = args.card else {
+                return reply(.init(re: request.id, error: .init(.badArgs, "questions with part needs card, the card's whole id")))
+            }
+            let card = engine?.cards.resolve(wanted).flatMap { $0.id == wanted ? $0 : nil }
+            switch Self.cardPart(card?.value, id: wanted, part: index, version: args.version) {
+            case .failure(let refusal): return reply(.init(re: request.id, error: refusal.failure))
+            case .success(let part): return reply(.init(re: request.id, typed: WireKinds.Questions.Result(part: part)))
+            }
+        }
         if let wanted = args.card {
             let card = engine?.cards.resolve(wanted)
             return reply(.init(re: request.id, typed: WireKinds.Questions.Result(cards: card.map { [$0.value] } ?? [], more: 0)))
@@ -117,6 +127,47 @@ extension Requests {
             let cards = listed.filter { !left.contains($0.id) }
             reply(.init(re: request.id, typed: WireKinds.Questions.Result(cards: cards.map(\.value), more: left.count)))
         }
+    }
+
+    /// The most bytes of a card one part carries (`questions` with `part`), before base64: a part's reply stays well
+    /// under a snapshot's part (`NodeWire.partBytes`), base64 and its envelope counted.
+    public static let cardPartBytes = 96 << 10
+    /// The most parts a card is read in: a card past `cardPartBytes` times this isn't given in parts (6 MiB; a lead's
+    /// question comes on a line of at most 1 MiB).
+    public static let mostCardParts = 64
+
+    /// Part `part` of the card `value` (the card whose whole id is `id`; nil when there is none), as `questions` with
+    /// `card` alone gives it whole: its bytes as the wire writes them, cut every `cardPartBytes`, each part with the
+    /// card's id and the SHA-256 of all of them (`version`). After the first part, the `version` it gave is required, and
+    /// a card whose bytes changed since is `changed`: parts of two versions are never joined. Refused: no such card
+    /// (`gone`), a part it hasn't (`bad-args`), a card past `mostCardParts` parts.
+    static func cardPart(_ value: NodeWire.Value?, id: String, part: Int, version: String?) -> Result<WireKinds.Questions.CardPart, CardPartRefusal> {
+        guard let value else { return .failure(CardPartRefusal(.gone, "no card \(ConfigSeal.inert(id, limit: 80))")) }
+        guard part >= 0 else { return .failure(CardPartRefusal(.badArgs, "questions' part is a part's number from 0")) }
+        guard part == 0 || version != nil else {
+            return .failure(CardPartRefusal(.badArgs, "questions with a part after the first needs the version the first part gave"))
+        }
+        let bytes = Data(NodeWire.line(value).dropLast())
+        let current = BuildInfo.sha256(of: bytes)
+        if let version, version != current {
+            return .failure(CardPartRefusal(.changed, "the card changed while it was being read: read it again from its first part"))
+        }
+        let parts = max(1, (bytes.count + cardPartBytes - 1) / cardPartBytes)
+        guard parts <= mostCardParts else {
+            return .failure(CardPartRefusal(.refused, "the card is \(bytes.count) bytes: more than \(mostCardParts) parts of \(cardPartBytes / 1024) KiB"))
+        }
+        guard part < parts else { return .failure(CardPartRefusal(.badArgs, "the card has \(parts) parts, from 0: not \(part)")) }
+        let start = part * cardPartBytes
+        let slice = bytes.subdata(in: (bytes.startIndex + start)..<(bytes.startIndex + min(bytes.count, start + cardPartBytes)))
+        return .success(.init(card: id, version: current, part: part, parts: parts, bytes: bytes.count, data: slice.base64EncodedString()))
+    }
+
+    /// Why a part of a card isn't given: the reply's error.
+    struct CardPartRefusal: Error, Equatable {
+        let failure: NodeWire.Failure
+        init(_ code: NodeWire.Code, _ message: String) { failure = .init(code, message) }
+        var code: String { failure.code }
+        var message: String { failure.message }
     }
 
     /// How long `questions` with `wait` holds its reply at most before it answers with no card (`waited`): the command

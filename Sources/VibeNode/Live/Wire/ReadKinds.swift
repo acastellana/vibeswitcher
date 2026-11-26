@@ -149,6 +149,9 @@ extension WireKinds {
     public enum Questions: WireKind {
         public static let kind = "questions"
 
+        /// With `card` (its whole id) and `part` (from 0), and after the first part the `version` it gave: that part of the
+        /// card as `card` alone gives it whole (the no-terminal inventory's C7, 2026-11-26): a card too large for a
+        /// snapshot's part read in parts.
         public struct Args: Codable, Sendable, Equatable {
             public var card: String?
             public var folder: String?
@@ -156,13 +159,39 @@ extension WireKinds {
             public var wait: Bool?
             public var limit: Int?
             public var seconds: Int?
-            public init(card: String? = nil, folder: String? = nil, all: Bool? = nil, wait: Bool? = nil, limit: Int? = nil, seconds: Int? = nil) {
+            public var part: Int?
+            public var version: String?
+            public init(card: String? = nil, folder: String? = nil, all: Bool? = nil, wait: Bool? = nil, limit: Int? = nil, seconds: Int? = nil,
+                        part: Int? = nil, version: String? = nil) {
                 self.card = card
                 self.folder = folder
                 self.all = all
                 self.wait = wait
                 self.limit = limit
                 self.seconds = seconds
+                self.part = part
+                self.version = version
+            }
+        }
+
+        /// One part of a card's bytes (`CardStore.Card.value` as the wire writes it, the bytes `cards`' entry for it
+        /// takes): `card` its whole id, `version` the SHA-256 (lower-case hex) of all of its bytes, which every part
+        /// carries; `part` of `parts`, `bytes` the whole's length, `data` this part's bytes in base64 (at most
+        /// `Requests.cardPartBytes` of them).
+        public struct CardPart: Codable, Sendable, Equatable {
+            public var card: String?
+            public var version: String?
+            public var part: Int?
+            public var parts: Int?
+            public var bytes: Int?
+            public var data: String?
+            public init(card: String, version: String, part: Int, parts: Int, bytes: Int, data: String) {
+                self.card = card
+                self.version = version
+                self.part = part
+                self.parts = parts
+                self.bytes = bytes
+                self.data = data
             }
         }
 
@@ -170,11 +199,13 @@ extension WireKinds {
             public var cards: [NodeWire.Value]?
             public var more: Int?
             public var waited: Bool?
+            public var part: CardPart?
             public init(cards: [NodeWire.Value], more: Int, waited: Bool? = nil) {
                 self.cards = cards
                 self.more = more
                 self.waited = waited
             }
+            public init(part: CardPart) { self.part = part }
         }
     }
 
