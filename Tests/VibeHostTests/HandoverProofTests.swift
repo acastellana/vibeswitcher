@@ -40,13 +40,6 @@ struct HandoverProofTests {
 
         deinit { descriptors.forEach { Darwin.close($0) } }
 
-        /// Closes `fd`, one of this scene's (so it isn't closed again, when the number may be another test's).
-        func close(_ fd: Int32) {
-            guard let index = descriptors.firstIndex(of: fd) else { return }
-            descriptors.remove(at: index)
-            Darwin.close(fd)
-        }
-
         /// A descriptor on the lock at `path` (this scene's), held through it when `held`.
         func lock(held: Bool, path: String? = nil) -> Int32 {
             let fd = open(path ?? lockPath, O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
@@ -64,9 +57,11 @@ struct HandoverProofTests {
 
         /// A state file at the path the host looks for it, naming `lockFD` and a channel holding `secrets`: its bytes,
         /// and the channel's descriptor.
-        func state(lockFD: Int32, secrets: Data?, sessions: Int = 0) throws -> (bytes: Data, secretFD: Int32?) {
-            let secretFD = try secrets.map(HostHandover.SecretChannel.make)
-            secretFD.map { descriptors.append($0) }
+        /// `gone`: the state names a channel that isn't open (-1: never a descriptor, where a closed number could be
+        /// another test's by then).
+        func state(lockFD: Int32, secrets: Data?, sessions: Int = 0, gone: Bool = false) throws -> (bytes: Data, secretFD: Int32?) {
+            let secretFD = gone ? -1 : try secrets.map(HostHandover.SecretChannel.make)
+            if let secretFD, secretFD >= 0 { descriptors.append(secretFD) }
             let listenFD = socket(AF_UNIX, SOCK_STREAM, 0)
             descriptors.append(listenFD)
             let info = (0..<sessions).map { _ in
@@ -89,8 +84,17 @@ struct HandoverProofTests {
 
         /// The intake as the user's host runs it, with this scene's key (nil: refused, and why).
         func receive(proof: String?, userHost: Bool = true, key: SymmetricKey?? = nil, lockPath: String? = nil) -> Result<HostHandover.Received, Error> {
-            Result { try HostHandover.receive(from: statePath, lockPath: lockPath ?? self.lockPath, userHost: userHost, proof: proof,
-                                              logPath: logPath) { key ?? self.key } }
+            let channel = (try? HostHandover.read(from: statePath))?.secretFD
+            let result = Result { try HostHandover.receive(from: statePath, lockPath: lockPath ?? self.lockPath, userHost: userHost, proof: proof,
+                                                           logPath: logPath) { key ?? self.key } }
+            // A channel the intake took is closed already: not this scene's to close again.
+            let taken: Bool
+            switch result {
+            case .success: taken = true
+            case .failure(let error): taken = "\(error)".contains("its secrets aren't the ones its proof names")
+            }
+            if taken, let channel, let index = descriptors.firstIndex(of: channel) { descriptors.remove(at: index) }
+            return result
         }
 
         /// The intake refused, saying `why` in the log and its error; the vault file as it was, byte for byte, and
@@ -173,9 +177,8 @@ struct HandoverProofTests {
         let scene = try Scene(temp)
         let lockFD = scene.lock(held: true)
         let secrets = scene.storage.book().serialized
-        let (bytes, secretFD) = try scene.state(lockFD: lockFD, secrets: secrets)
+        let (bytes, _) = try scene.state(lockFD: lockFD, secrets: secrets, gone: true)
         let proof = try scene.proof(bytes, secrets: secrets, lockFD: lockFD)
-        scene.close(try #require(secretFD))
         let received = try scene.receive(proof: proof).get()
         #expect(received.secrets == nil)
     }
