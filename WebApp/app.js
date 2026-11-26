@@ -2,7 +2,7 @@
 // it (the node's WebSocket, or with ?mock an invented node that needs no server), the window's own state, the views
 // and the keyboard.
 
-import * as kit from './kit.js';
+import * as kit from './js/kit.js';
 import { createStore } from './js/store.js';
 import { connectSocket } from './js/socket.js';
 import { validate } from './wire/validators.js';

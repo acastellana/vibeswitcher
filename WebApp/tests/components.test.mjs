@@ -143,6 +143,16 @@ const OLD = ['section-title', 'col-title', 'tc-group', 'setting-section-title', 
   'empty-state', 'placeholder', 'empty-line', 'tc-none', 'tc-empty', 'left-empty', 'answer-input', 'setting-input', 'setting-picker', 'look-input', 'left-filter',
   'button', 'icon-button', 'field', 'check', 'empty'];
 
+test('every file that asks the kit imports it from where it is (app.js is at the root, the views a folder down)', () => {
+  const wrong = [];
+  for (const file of FILES) {
+    for (const match of readFileSync(join(root, file), 'utf8').matchAll(/from '([^']*kit\.js)'/g)) {
+      if (join(root, dirname(file), match[1]) !== join(root, 'js', 'kit.js')) wrong.push(`${file}: ${match[1]}`);
+    }
+  }
+  assert.deepEqual(wrong, []);
+});
+
 test('every view builds its buttons, switches, fields, badges, tiles, titles and empty states through kit.js, never by a class of its own', () => {
   const wrong = [];
   const at = (one, what) => wrong.push(`${one.file}:${one.line} ${what}: ${one.text.trim().slice(0, 90)}`);
