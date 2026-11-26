@@ -7,10 +7,11 @@ import { h } from '../dom.js';
 import { t } from '../i18n.js';
 import { wayName, wayLine } from '../sendways.js';
 
-export function sendMenu({ send, className = '', primary = 'step' }) {
+// `main: false`: the arrow and its menu alone, beside the message box's own Send (views/composer.js).
+export function sendMenu({ send, className = '', primary = 'step', main: withMain = true }) {
   let ways = ['step', 'now'];
   // The button's own way: the next step, unless the caller's says otherwise (a draft left to steer a working agent).
-  const main = kit.button('primary', { size: 's', class: 'send-main', title: wayLine(primary), onclick: () => send(primary) }, t('swSend'));
+  const main = withMain ? kit.button('primary', { size: 's', class: 'send-main', title: wayLine(primary), onclick: () => send(primary) }, t('swSend')) : null;
   const list = h('div', { class: 'send-ways', role: 'menu', hidden: true });
   const toggle = kit.button('plain', { size: 's', class: 'send-more', 'aria-haspopup': 'menu', 'aria-expanded': 'false', 'aria-label': t('swMore'), title: t('swMore'),
     onclick: () => (list.hidden ? open() : close()) }, '▾');

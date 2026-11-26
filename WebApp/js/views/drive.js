@@ -16,6 +16,7 @@ import { t } from '../i18n.js';
 import { actsFor, doButton, refusalWords } from '../acting.js';
 import { waysFor, sendArgs } from '../sendways.js';
 import { sendMenu } from './sendmenu.js';
+import { composer as messageBox } from './composer.js';
 import { sessionHref, projectHref } from '../ui.js';
 
 // The command line's words for a session and for what the user typed (js/actions.js, where the page's lines are made).
@@ -260,10 +261,14 @@ export function promptCard(app) {
       parts.push(h('div', { class: 'options' }, buttons));
       if (chosen !== null && takes.has(chosen)) {
         const index = chosen;
-        const input = kit.field({ class: 'answer-input', type: 'text', value: words, placeholder: t('drYourWords'), 'aria-label': t('drYourWordsForThisOption'), autocomplete: 'off' });
-        const send = kit.button('primary', { type: 'submit', disabled: !words.trim() }, t('drReplySend'));
-        input.addEventListener('input', () => { words = input.value; send.disabled = !words.trim(); });
-        parts.push(h('form', { class: 'answer', onsubmit: (event) => { event.preventDefault(); if (words.trim()) { const text = words.trim(); words = ''; chosen = null; answer(session, index, text); } } }, input, send));
+        // The one message box (views/composer.js) with this card's Send: Enter answers, Shift+Enter a new line.
+        const send = kit.button('primary', { type: 'submit', disabled: !words.trim(), title: t('cmAnswerTitle') }, t('drReplySend'));
+        const box = messageBox({ className: 'answer', inputClass: kit.fieldClass('plain', 'answer-input'), label: t('drYourWordsForThisOption'), placeholder: t('drYourWords'), button: send, storage: null,
+          onInput: () => { words = box.input.value; send.disabled = !words.trim(); },
+          onSend: () => { if (words.trim()) { const text = words.trim(); words = ''; chosen = null; answer(session, index, text); } } });
+        box.input.value = words;
+        box.grow();
+        parts.push(box.el);
       }
       if (mine?.phase === 'refused' && mine.key === promptKey(prompt)) parts.push(h('p', { class: 'card-notice', role: 'alert' }, t('drReplyRefused', { why: mine.why })));
       if (mine?.phase === 'dropped') parts.push(h('p', { class: 'card-notice', role: 'status' }, t('drReplyChanged')));

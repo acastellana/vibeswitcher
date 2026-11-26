@@ -1373,6 +1373,21 @@ const EN = {
   txCopyDiffWord: "Copy diff",
   txCopyNew: "Copy the new text (the file’s lines after the edit, no signs)",
   txCopyOutput: "Copy the whole output",
+  cmRetry: "Try again",
+  cmRefused: "Not sent: {why}",
+  cmSteer: "Steer",
+  cmSteerTitle: "Steer {agent} now, while it works (↩). ⇧↩ a new line",
+  cmQueue: "Queue",
+  cmQueueTitle: "{agent} is asking a question: the node types this in once it closes (↩). ⇧↩ a new line",
+  cmSendTitle: "Send to {agent} (↩). ⇧↩ a new line",
+  cmDraft: "Draft",
+  cmDraftTitle: "Leave it as a draft beside the session (↩): this page doesn’t send for you here",
+  cmDraftsWhy: "This page doesn’t act for you here: ↩ leaves a draft, and its line sends it from a terminal.",
+  cmSending: "Sending…",
+  cmLeadSendTitle: "Send to the lead at its next step (↩). ⇧↩ a new line",
+  cmLeadDraftTitle: "Draft a message for the lead (↩): this page doesn’t send for you here",
+  cmTouchSend: "On a touch screen ↩ is a new line: Send is the button.",
+  cmAnswerTitle: "Answer (↩). ⇧↩ a new line",
 };
 
 

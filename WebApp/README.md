@@ -68,7 +68,8 @@ Screenshots of each main state, light and dark, wide and at 390 px, are in `shot
 | `js/i18n.js`, `js/i18n-es.js` | Every view's own words: the English with the keys and `t(key, values)` (the browser's language chosen once), and the Spanish, a file a language. |
 | `js/words.js` | The vocabulary: state words, durations, a task's words (from `VibeCore`). |
 | `js/dom.js`, `js/marks.js`, `js/text.js` | Building nodes; status marks, agent badges, icons; markdown and diffs as nodes (`parseMarkdown` reads text into a plain tree, then `h` builds it: emphasis, strikethrough, code, links, quotes, nested lists, headings, tables, rules, fenced code; a marker that doesn't close is shown as typed; `tests/markdown.test.mjs` is its corpus). |
-| `js/copying.js` | Copy on a block of the chat (fenced code, a diff, a tool's output): exactly its text, "Copied" for a moment. |
+| `js/copying.js` | Copy on a block of the chat (fenced code, a diff, a tool's output): exactly its text, "Copied" for a moment. A diff's Copy takes the new text (its kept and added lines, no signs); Copy diff the change with its signs. |
+| `js/views/composer.js` | The one message box: the lead's, a session's and a card's answer box, one behaviour (the keys below); it grows to about nine lines, then scrolls; what you typed and didn't send is kept per box in this tab (sessionStorage) across navigation and a reload; a refused send says why beside it, with Try again. |
 | `js/terminal.js` | A session's terminal over the socket (the contract's §9): the binary frames, and the stream's life (open, the replay drawn whole, live, resync, reconnect, close). |
 | `vendor/` | xterm.js and its fit add-on, at the versions and hashes `vendor/README.md` records; nothing else is vendored. |
 | `js/viewport.js` | A phone's on-screen keyboard: while a box is being typed in, the page keeps to the visible part above the keyboard (`keyboard`, `--vv-height`, `--vv-top` on the root, style.css's 760 px blocks) and the box stays in sight. |
@@ -95,6 +96,10 @@ Screenshots of each main state, light and dark, wide and at 390 px, are in `shot
 | ⌥⌘1 2 / Ctrl+Alt+1 2 | Terminal, Chat |
 | ⌥⌘0 / Ctrl+Alt+0, ⌥0 / Alt+0 | Toggle Inspector (the Mac's View › Toggle Inspector) |
 | ⌥⌘3 / Ctrl+Alt+3 | The inspector's Team tab, for a lead or a session of its team |
+| ↩ in a message box | Sends: to a session (Steer while a Claude works, Queue behind its open question; the button's word says which), to the lead, a card's answer. Where the page doesn't act, it leaves the draft and its line instead |
+| ⇧↩ / ⌥↩ / ⌘↩ (Ctrl+↩) in a message box | A new line / after the agent's turn / now, where its agent takes those (else at its next step) |
+| Esc in a message box | Leaves the box (closes `/` and `@` completion first) |
+| On a touch screen | The soft keyboard's ↩ is a new line: Send is the button (a phone's keyboard has no ⇧↩) |
 | ↑ in an empty message box | Into the last open card |
 | In a card: 1–9, ↑ ↓, ↩, H | Answer with that option; move; answer with the focused one; hold the timer |
 

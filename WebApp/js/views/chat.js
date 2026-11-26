@@ -39,8 +39,9 @@ import { talkButton } from '../dictate.js';
 import { pluginCardsOf, pluginsOn } from '../plugincard.js';
 import { pluginCard } from './cards.js';
 import { t } from '../i18n.js';
-import { actsFor, doButton } from '../acting.js';
-import { sendArgs, sentWords } from '../sendways.js';
+import { actsFor, doButton, refusalWords } from '../acting.js';
+import { sendArgs, sentWords, waysFor } from '../sendways.js';
+import { composer } from './composer.js';
 
 // How close to the end counts as being at the end.
 const NEAR = 48;
@@ -379,8 +380,6 @@ export function chatView(app) {
   const latestCount = h('span', { class: 'latest-count' });
   const latest = h('button', { class: 'latest', type: 'button', hidden: true, onclick: () => toEnd(true) }, icon('down', 12), t('chLatest'), latestCount);
 
-  const input = h('textarea', { class: 'composer-input', rows: 1, 'aria-label': t('chMessage') });
-  const sendButton = h('button', { class: 'send', type: 'submit', title: t('chSend'), 'aria-label': t('chSend2'), disabled: true }, icon('send', 15));
   // Images into the message: one from this device (as a paste, `session.attach`), or one that is a file on the node,
   // which the page can't read: for that, the line that sends the message with it (`send … --image PATH`).
   const pick = h('input', { type: 'file', accept: 'image/*', multiple: true, hidden: true, 'aria-hidden': 'true' });
@@ -398,14 +397,26 @@ export function chatView(app) {
       h('button', { class: 'icon-button', type: 'button', title: t('chClose'), 'aria-label': t('chClose'), onclick: () => { nodeImage.hidden = true; input.focus(); } }, icon('close', 12))),
     nodeLine,
     nodeNote);
+  // The one message box (views/composer.js): Enter sends, steers or queues where the page acts (`send`), else leaves
+  // a draft (`session.draft`); Shift+Enter a new line; what you typed kept per session.
+  const box = composer({
+    label: t('chMessage'), before: [attachButton],
+    beforeKey: (event) => composerKeys(event),
+    onInput: () => lookToken(),
+    onSend: (way, text) => sendFromBox(way, text),
+  });
+  const input = box.input;
+  const sendButton = box.button;
   // Push-to-talk dictation into the box (js/dictate.js): only where the browser recognises speech and you turned it on.
   const talk = talkButton(input);
-  const form = h('form', { class: 'composer' }, attachButton, input, talk, sendButton, pick);
+  const form = box.el;
+  if (talk) form.insertBefore(talk, sendButton);
+  form.append(pick);
   const hint = h('p', { class: 'composer-hint', hidden: true });
   // The message this page left for the session, over the box, with the line that sends it; Edit puts it and its images
   // back in the box.
   const drafted = draftBox(app, { edit: (text, images = []) => {
-    input.value = text;
+    box.value = text;
     attached = images.map((path) => ({ key: path, name: path.split('/').pop(), path, failed: null, thumb: null }));
     drawAttached();
     grow();
@@ -417,7 +428,7 @@ export function chatView(app) {
   const suggestions = h('ul', { class: 'suggestions', role: 'listbox', 'aria-label': t('chCompletions'), hidden: true });
   // The images pasted or dropped into the box (`session.attach`), as small pictures over it.
   const attachedEl = h('div', { class: 'attached', hidden: true });
-  const notice = h('p', { class: 'composer-notice', role: 'status', hidden: true });
+  const notice = box.notice;
   // Find in the chat: over it, opened by ⌘F / Ctrl+F (or the palette's Find in Chat) while the chat shows.
   const findInput = h('input', { class: 'find-input', type: 'search', placeholder: t('chFindInChat'), 'aria-label': t('chFindInChat'),
     autocomplete: 'off', spellcheck: 'false' });
@@ -447,7 +458,7 @@ export function chatView(app) {
     canDraft: () => !form.hidden && drafting(),
     edit: (text) => {
       if (form.hidden) return;
-      input.value = text;
+      box.value = text;
       grow();
       input.focus();
       input.setSelectionRange(text.length, text.length);
@@ -717,19 +728,32 @@ export function chatView(app) {
       return;
     }
     const agent = AGENTS[session.agent] || AGENTS.claude;
-    const working = stateOf(session) === 'working';
-    if (drafting()) {
-      // While it works, as the app's ↩ steers and ⌥↩ queues: ↩ leaves a draft that steers it now, ⌥↩ one for after.
-      const steers = working && session.agent === 'claude';
-      // On a phone the words that fit one line; the keys are a keyboard's (the send button's title says what it does).
-      input.placeholder = narrow() ? (steers ? t('chSteerShort', { agent }) : t('chMessageShort', { agent }))
-        : steers ? t('chSteerLong', { agent })
-          : t('chMessageLong', { agent });
-      sendButton.title = steers ? t('chLeaveAsASendNow') : t('chLeaveAsADraft');
-      sendButton.setAttribute('aria-label', steers ? t('chLeaveAsASendNow2') : t('chLeaveAsADraft2'));
+    const way = primaryWay(session);
+    // The button's word says what Enter does: Send, Steer (a working Claude), Queue (behind its open question), or
+    // Draft where the page doesn't act; the placeholder names whom, the title the keys.
+    input.placeholder = way === 'now' ? t('chSteerShort', { agent }) : t('chMessageShort', { agent });
+    if (sends()) {
+      box.setMode(session.prompt ? { word: t('cmQueue'), title: t('cmQueueTitle', { agent }), way }
+        : way === 'now' ? { word: t('cmSteer'), title: t('cmSteerTitle', { agent }), way }
+          : { word: t('swSend'), title: t('cmSendTitle', { agent }), way });
     } else {
-      input.placeholder = working ? (narrow() ? t('chSteerShort', { agent }) : t('chSteerWorks', { agent })) : t('chMessageShort', { agent });
+      box.setMode({ word: t('cmDraft'), title: t('cmDraftTitle'), way });
     }
+    // Where the page drafts, why, once, under the box.
+    hint.hidden = sends() || !drafting();
+    if (!hint.hidden) setText(hint, t('cmDraftsWhy'));
+  }
+  // The page sends for you (`send` where it acts): else Enter leaves a draft.
+  const sends = () => actsFor(app, 'send') && drivable(store.state.sessions.get(view.session));
+  // Enter's way: now for a working Claude (it steers), else at its next step.
+  function primaryWay(session) {
+    const ways = waysFor(session);
+    return stateOf(session) === 'working' && session?.agent === 'claude' && ways.includes('now') ? 'now' : 'step';
+  }
+  // ⌥↩ and ⌘↩ where the agent takes them; else the next step.
+  function wayFor(session, way) {
+    if (way === 'step' || way === 'now' || way === 'after') return waysFor(session).includes(way) ? way : 'step';
+    return primaryWay(session);
   }
   // A phone's width (style.css's own breakpoint): the composer's words kept to one line. Drawn again as it changes.
   const narrowQuery = globalThis.matchMedia?.('(max-width: 760px)');
@@ -785,63 +809,72 @@ export function chatView(app) {
 
   scroller.addEventListener('scroll', scrolled, { passive: true });
 
-  function grow() {
-    input.style.height = 'auto';
-    input.style.height = Math.min(input.scrollHeight, 200) + 'px';
-    sendButton.disabled = uploading() || (!input.value.trim() && !attached.some((item) => item.path));
-  }
-  input.addEventListener('input', () => { grow(); lookToken(); });
+  const grow = () => box.grow();
   input.addEventListener('keyup', (event) => { if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) lookToken(); });
   input.addEventListener('click', lookToken);
   input.addEventListener('blur', () => setTimeout(closeSuggestions, 120));
-  // ⌥↩: the next submit is for after the turn.
-  let queueNext = false;
-  input.addEventListener('keydown', (event) => {
-    if (completion && !event.isComposing) {
+  // The box's own keys, before Enter's: `/` and `@` completion takes ↑ ↓ ↩ Tab and Esc while its list shows, and ↑ in
+  // an empty box steps into what waits for an answer. True when taken.
+  function composerKeys(event) {
+    if (event.isComposing || event.keyCode === 229) return false;
+    if (completion) {
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
         event.preventDefault();
         completion.index = (completion.index + (event.key === 'ArrowDown' ? 1 : -1) + completion.items.length) % completion.items.length;
         drawSuggestions();
-        return;
+        return true;
       }
       if ((event.key === 'Enter' && !event.shiftKey) || event.key === 'Tab') {
         event.preventDefault();
         take(completion.index);
-        return;
+        return true;
       }
       if (event.key === 'Escape') {
         event.preventDefault();
         closeSuggestions();
-        return;
+        return true;
       }
     }
-    if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
-      event.preventDefault();
-      queueNext = event.altKey;
-      form.requestSubmit();
-    } else if (event.key === 'ArrowUp' && input.value === '') {
+    if (event.key === 'ArrowUp' && input.value === '') {
       // ↑ from an empty box steps into what's waiting for an answer (the Mac's "↑ ↓ and ↩ with the message box empty").
       const cards = el.querySelectorAll('.card:not(.closed)');
       const target = cards[cards.length - 1]?.querySelector('.option, .answer-input');
-      if (target) { event.preventDefault(); target.focus(); }
+      if (target) { event.preventDefault(); target.focus(); return true; }
     }
-  });
-  form.addEventListener('submit', (event) => {
-    event.preventDefault();
-    const text = input.value.trim();
+    return false;
+  }
+  // Enter, or the button: where the page acts, `send` the way it says (now steers a working Claude, after for after its
+  // turn), the box emptied at once and its words back with Try again if the node refuses; else a draft over the box
+  // (`session.draft`, a send-now one while a Claude works), or, for a feed that types without drafts, `send` as typed.
+  function sendFromBox(way, typed) {
+    const text = typed ?? input.value.trim();
     const images = attached.filter((item) => item.path).map((item) => item.path);
-    if (uploading() || (!text && !images.length)) return;
-    input.value = '';
+    if (uploading() || (!text && !images.length)) return null;
+    const id = view.session;
+    const session = store.state.sessions.get(id);
+    const held = attached;
+    box.clear();
     attached = [];
     drawAttached();
     closeSuggestions();
-    grow();
-    // A draft left while a Claude agent works steers it (`now`), unless ⌥↩ asked for after its turn.
-    const session = store.state.sessions.get(view.session);
-    const now = !queueNext && stateOf(session) === 'working' && session?.agent === 'claude';
-    queueNext = false;
-    if (drafting()) store.sessionDraft(view.session, text, images, now); else store.send(view.session, text);
-  });
+    if (sends()) {
+      const chosen = wayFor(session, way);
+      return store.request('send', sendArgs(session, text, chosen, images)).then((reply) => {
+        if (view.session !== id) return;
+        if (reply?.ok) {
+          // The node's own words where it says something the chat won't show (held behind a question, sent otherwise).
+          const words = reply.result?.said || reply.result?.queued ? sentWords(chosen, reply.result) : '';
+          say(words);
+          return;
+        }
+        if (!attached.length) { attached = held; drawAttached(); }
+        box.refused(t('cmRefused', { why: refusalWords(reply?.error) }), text, () => sendFromBox(way, input.value.trim()));
+      });
+    }
+    const now = way === 'now' || (way !== 'after' && primaryWay(session) === 'now');
+    if (drafting()) return store.sessionDraft(id, text, images, now);
+    return store.send(id, text);
+  }
 
   // ---- `/` and `@`: what the app's composer completes, asked of the node as you type ----
 
@@ -897,10 +930,11 @@ export function chatView(app) {
 
   let attached = [];         // { key, name, path, failed, thumb }
   const uploading = () => attached.some((item) => !item.path && !item.failed);
+  // Nothing to send: no words and no image the node holds, or an image still on its way.
+  box.setEmpty(() => uploading() || (!input.value.trim() && !attached.some((item) => item.path)));
   const canAttach = () => drafting() && store.can('session.attach') && drivable(store.state.sessions.get(view.session));
   function say(text) {
-    notice.hidden = !text;
-    setText(notice, text || '');
+    box.say(text || '');
   }
   function drawAttached() {
     attachedEl.hidden = !attached.length;
@@ -1022,7 +1056,7 @@ export function chatView(app) {
       const images = paths.map((path) => (home && (path === '~' || path.startsWith('~/')) ? home + path.slice(1) : path));
       const way = now ? 'now' : 'step';
       const send = doButton(app, { label: t('acSend'), kind: 'send', busy: t('chSendingImage'), args: () => sendArgs(session, input.value.trim(), way, images),
-        receipt: (result) => sentWords(way, result), done: () => { input.value = ''; nodePath.value = ''; send.button.disabled = true; } });
+        receipt: (result) => sentWords(way, result), done: () => { box.clear(); nodePath.value = ''; send.button.disabled = true; } });
       nodeLine.replaceChildren(send.el);
       return;
     }
@@ -1173,7 +1207,8 @@ export function chatView(app) {
       found = [];
       foundAt = -1;
       foundKey = null;
-      // What the box held for the last session stays with it: nothing typed here goes to another.
+      // What the box held for the last session stays with it (kept under its key): nothing typed here goes to another.
+      box.setKey('session:' + id);
       attached = [];
       drawAttached();
       closeSuggestions();

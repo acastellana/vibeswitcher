@@ -20,6 +20,18 @@ import { t, lang } from '../i18n.js';
 import { actsFor, refusalWords, doButton, answerArgs } from '../acting.js';
 import { questionHead, shortHashes, lineKey, contextOf } from '../conversation.js';
 import { routeHref } from '../ui.js';
+import { composer as messageBox } from './composer.js';
+
+// A card's answer box: the one message box (views/composer.js) with the card's own button: Enter answers, Shift+Enter
+// a new line, an input method's Enter never; what was typed kept across the card's redraws by its caller.
+function answerBox({ value, placeholder, button, onSend, onInput, maxLength = null }) {
+  const box = messageBox({ className: 'answer', inputClass: kit.fieldClass('plain', 'answer-input'), label: t('yourAnswer'), placeholder, maxLength, button, onSend, onInput, storage: null });
+  box.input.value = value;
+  box.grow();
+  const talk = talkButton(box.input);
+  if (talk) box.el.insertBefore(talk, button);
+  return box;
+}
 
 const PRIORITY = { blocking: t('cBlocking'), important: t('cImportant'), whenever: t('cWhenever') };
 
@@ -300,11 +312,11 @@ export function questionCard(app, first, { expand = null } = {}) {
     el.append(list.el);
 
     const draft = input?.value || '';
-    input = kit.field({ class: 'answer-input', type: 'text', placeholder: question.options.length ? t('cOwnWords') : t('yourAnswer'), 'aria-label': t('yourAnswer'), autocomplete: 'off' });
-    input.value = draft;
-    const send = kit.button('primary', { type: 'submit', disabled: !draft.trim() }, t('cAnswer'));
-    input.addEventListener('input', () => { send.disabled = !input.value.trim(); });
-    el.append(h('form', { class: 'answer', onsubmit: (event) => { event.preventDefault(); choose(input.value); } }, input, talkButton(input), send));
+    const send = kit.button('primary', { type: 'submit', disabled: !draft.trim(), title: t('cmAnswerTitle') }, t('cAnswer'));
+    const box = answerBox({ value: draft, placeholder: question.options.length ? t('cOwnWords') : t('yourAnswer'), button: send,
+      onSend: (way, text) => choose(text), onInput: () => { send.disabled = !input.value.trim(); } });
+    input = box.input;
+    el.append(box.el);
 
     if (acting.refused) el.append(h('p', { class: 'card-notice', role: 'alert' }, refusalWords({ code: acting.code, message: acting.refused })));
     else if (card.notice) el.append(h('p', { class: 'card-notice' }, card.notice));
@@ -337,15 +349,16 @@ export function questionCard(app, first, { expand = null } = {}) {
 
     const own = drafted && !question.options.includes(drafted.text) ? drafted.text : '';
     const typed = input?.value ?? '';
-    input = kit.field({ class: 'answer-input', type: 'text', placeholder: question.options.length ? t('cOwnWords') : t('yourAnswer'), 'aria-label': t('yourAnswer'), autocomplete: 'off', maxlength: 4000 });
-    input.value = typed || own;
     // Acting is on for the node but not in this tab (it isn't paired): a pick isn't a draft for a terminal, it's a choice
     // this tab can't send; the banner at the top says how to make it act.
     const level = app.store.state.node?.web?.acts?.level ?? (app.store.state.node?.web?.acts?.on ? 'trust' : 'off');
     const notYet = level !== 'off';
-    const send = kit.button('plain', { type: 'submit', disabled: !input.value.trim() || input.value.trim() === drafted?.text }, t(notYet ? 'cChoose' : 'cDraft'));
-    input.addEventListener('input', () => { send.disabled = !input.value.trim() || input.value.trim() === app.store.draftOf(card.id)?.text; });
-    el.append(h('form', { class: 'answer', onsubmit: (event) => { event.preventDefault(); pick(input.value); } }, input, talkButton(input), send));
+    const start = typed || own;
+    const send = kit.button('plain', { type: 'submit', disabled: !start.trim() || start.trim() === drafted?.text }, t(notYet ? 'cChoose' : 'cDraft'));
+    const box = answerBox({ value: start, placeholder: question.options.length ? t('cOwnWords') : t('yourAnswer'), button: send, maxLength: 4000,
+      onSend: (way, text) => pick(text), onInput: () => { send.disabled = !input.value.trim() || input.value.trim() === app.store.draftOf(card.id)?.text; } });
+    input = box.input;
+    el.append(box.el);
 
     const refused = app.store.state.draftRefused.get(card.id);
     if (refused) el.append(h('p', { class: 'card-notice', role: 'alert' }, refused));

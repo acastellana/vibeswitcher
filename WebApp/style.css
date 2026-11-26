@@ -644,6 +644,18 @@ small { font-size: var(--t-caption); }
   content: ""; display: inline-block; width: 7px; height: 1em; margin-left: 2px; vertical-align: -0.15em; border-radius: var(--r-1);
   background: var(--ink-3); animation: pulse var(--loop) ease-in-out infinite;
 }
+/* The one message box (views/composer.js, U9): the session's, the lead's and a card's answer box. Send says what Enter
+   does (Send, Steer, Queue, Draft) in words; the arrow beside it, where the agent takes other ways. A send refused:
+   why, beside the box, in the failure's colour, with Try again. */
+.send.labelled { width: auto; gap: 6px; padding: 0 14px 0 12px; border-radius: var(--r-pill); font-size: var(--t-body); font-weight: var(--w-medium); }
+.send-word { white-space: nowrap; }
+.composer.lead-box { flex: 1; min-width: 0; max-width: none; margin: 0; padding: 0; align-items: flex-end; }
+.composer-lead { flex-wrap: wrap; }
+.composer-lead > .composer-notice { flex-basis: 100%; width: auto; max-width: none; margin: 0; }
+.composer-notice.refused { color: var(--danger); }
+.composer-retry { margin-left: 8px; }
+.answer { align-items: flex-end; }
+textarea.answer-input { max-height: 200px; line-height: var(--lh-body); resize: none; }
 
 /* ---- Cards ---- */
 

@@ -28,6 +28,7 @@ import { pluginFacts } from '../plugincard.js';
 import { actsFor, doButton, cardArgs, refusalWords } from '../acting.js';
 import { waysFor, sendArgs, sentWords } from '../sendways.js';
 import { sendMenu } from './sendmenu.js';
+import { composer as messageBox } from './composer.js';
 
 // The line marks: a diamond for a question (filled while open, an outline once answered), a check for a result, a
 // small dot for a status update.
@@ -110,15 +111,17 @@ export function projectView(app, { sheet }) {
   // (`show=asks`, the class `show-asks`) there is no conversation: it takes the centre, the one thing that scrolls.
   const waitBox = h('section', { class: 'wait-box', hidden: true, 'aria-label': t('cQuestionsForYou') });
   const toWho = h('span', { class: 'to' });
-  const input = h('input', { class: 'say', type: 'text', placeholder: t('messageLead'), 'aria-label': t('messageLead'), autocomplete: 'off', maxlength: 4000 });
-  // With the `act` right, one Send and a menu of the ways the lead's agent takes a message (js/sendways.js): at its
-  // next step (Enter: `tell`, as the lead's mail), now (Ctrl+Enter), after this turn where it has one, or interrupt,
-  // then send (the others `send` to the lead's session with `when`).
-  const sender = sendMenu({ className: 'lead-send', send: (way) => note({ way }) });
-  input.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && !sender.el.hidden && waysNow().includes('now')) { event.preventDefault(); note({ way: 'now' }); }
+  // The one message box (views/composer.js), as a session's: Enter sends to the lead at its next step (`tell`, as the
+  // lead's mail), ⌘↩ / Ctrl+↩ now and ⌥↩ after this turn where its agent takes them; Shift+Enter a new line. With the
+  // `act` right the arrow beside Send opens every way the lead's agent takes a message (js/sendways.js): the others
+  // `send` to the lead's session with `when`. Where the page doesn't act, Enter drafts the note and its line.
+  const sender = sendMenu({ className: 'lead-send', send: (way) => note({ way }), main: false });
+  const box = messageBox({
+    className: 'composer lead-box', label: t('messageLead'), placeholder: t('messageLead'), maxLength: 4000, menu: sender.el,
+    onSend: (way) => note({ way: way === 'send' ? 'step' : way }),
   });
-  const composer = h('form', { class: 'composer-lead', onsubmit: (event) => { event.preventDefault(); note(); } }, toWho, input, sender.el);
+  const input = box.input;
+  const composer = h('div', { class: 'composer-lead' }, box.notice, toWho, box.el);
   // While an answer is being changed here: its line's key, and what the node said if it refused.
   const changing = new Map();
   // A project whose lead isn't running: how to start it again, plainly (the line, and New project's lead form).
@@ -212,7 +215,7 @@ export function projectView(app, { sheet }) {
   // with the line that sends it from a terminal.
   function note({ way = 'step' } = {}) {
     const route = ui.state.route;
-    const text = input.value.trim();
+    const text = box.value.trim();
     const lead = store.state.leads.get(route.id);
     if (!text || !lead?.root) return;
     const sends = way !== 'step' && sendsTo(lead) && waysNow().includes(way);
@@ -220,26 +223,25 @@ export function projectView(app, { sheet }) {
     const action = crypto.randomUUID();
     const entry = { text, way: chosen, action, state: actsFor(app, 'tell') || sends ? 'sending' : 'draft', why: '' };
     notes.set(route.id, [...(notes.get(route.id) || []), entry]);
-    input.value = '';
+    box.clear();
     if (entry.state === 'sending') {
-      input.disabled = true;
       const asked = sends ? store.request('send', sendArgs(store.state.sessions.get(lead.session), text, chosen), action) : store.request('tell', { folder: lead.root, text }, action);
       asked.then((reply) => {
-        input.disabled = false;
         entry.state = reply.ok ? 'sent' : 'refused';
         entry.why = reply.ok ? '' : refusalWords(reply.error);
         // What became of it, in the node's words where it gives them.
         entry.result = reply.ok ? reply.result || {} : null;
         entry.said = reply.ok ? reply.result?.said || null : null;
-        if (!reply.ok) input.value = text;
+        // Refused: why, beside the box, with Try again; the words back in it.
+        if (!reply.ok) box.refused(t('cmRefused', { why: entry.why }), text, () => note({ way: chosen }));
         drawn = '';
         render();
       });
     }
     drawn = '';
     render();
-    const box = scrollBox();
-    box.scrollTop = box.scrollHeight;
+    const scrolling = scrollBox();
+    scrolling.scrollTop = scrolling.scrollHeight;
   }
 
   // An answer's state under its pill, as the node says it (`delivered`): read by the lead, or not yet, when it can be
@@ -674,6 +676,10 @@ export function projectView(app, { sheet }) {
     // On a phone the header names the project: the line over the box shows only when there is no lead to tell.
     setClass(toWho, 'no-lead', !lead?.root);
     input.disabled = !lead?.root;
+    // What was typed for this lead and not sent comes back with it.
+    box.setKey('lead:' + route.id);
+    const tells = actsFor(app, 'tell') || sendsTo(lead);
+    box.setMode({ word: tells ? t('swSend') : t('cmDraft'), title: tells ? t('cmLeadSendTitle') : t('cmLeadDraftTitle'), way: 'step', disabled: !lead?.root });
     // The buttons only where the page sends: next step with `tell`; now with `send` to a live lead session.
     sender.el.hidden = !lead?.root || (!actsFor(app, 'tell') && !sendsTo(lead));
     sender.update(waysNow());
