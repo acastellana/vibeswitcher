@@ -4725,3 +4725,6 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-26 09:17 Started a worker on the-app-s-keychain
 - 2026-11-26 09:18 Incident: A worker's Keychain probes left the user's real login keychain locked with a lock timer set, which stopped every new Claude session on the Mac ("Not logged in")… (in the-app-s-keychain); planned turn-this-incident-into-21 to turn it into a check
 - 2026-11-26 09:18 Folded turn-this-incident-into-21 into turn-this-incident-into-20: that task carries its work
+- 2026-11-26 09:38 Planned keychain-keys-the-stated: Keychain keys, the stated limit made visible: team sessions can't run `security`, the key-mismatch alert names a replaced key, and a started-over vault doesn't adopt the app's key silently (review audit, for security)
+- 2026-11-26 09:38 Started a worker on keychain-keys-the-stated
+- 2026-11-26 09:38 Automatically (auto_advance): Started a worker on keychain-keys-the-stated (Keychain keys, the stated limit made visible: team sessions can't run `security`, the key-mismatch alert names a replaced key, and a started-over vault doesn't adopt the app's key silently).
