@@ -1319,4 +1319,5 @@ export const ES = {
   noRuleShortNone: "Nadie",
   noRuleShortApproval: "Con aprobación",
   tlLines: "líneas",
+  dpAProgram: "un programa",
 };

@@ -1331,6 +1331,7 @@ const EN = {
   noRuleShortNone: "No one",
   noRuleShortApproval: "With approval",
   tlLines: "lines",
+  dpAProgram: "a program",
 };
 
 

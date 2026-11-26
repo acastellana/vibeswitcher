@@ -132,7 +132,7 @@ function overview(app) {
     portList.replaceChildren(...rows.map((row) => h('li', null,
       row.url ? kit.button('quiet', { size: 's', tag: 'a', class: 'inspect-link', href: row.url, target: '_blank', rel: 'noopener noreferrer', title: t('inOpensInTab', { url: row.url }) }, row.label)
         : h('span', { title: t('inOnTheNodeSMachine') }, row.label),
-      h('span', { class: 'inspect-port-about' }, ' · ' + row.about))));
+      h('span', { class: 'inspect-port-about', title: row.process }, ' · ' + row.about))));
   }
   function askPorts(session) {
     if (!store.can('session.ports') || session.ended) {
