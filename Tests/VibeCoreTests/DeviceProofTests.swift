@@ -55,6 +55,9 @@ struct DeviceProofTests {
         return nil
     }
 
+    /// A backslash and a u: the start of a JSON `\\u` escape, written so no tool reads it as one.
+    static let u = "\u{5C}u"
+
     static func hex(_ text: String) -> [UInt8] {
         let digits = Array(text.utf8)
         return stride(from: 0, to: digits.count, by: 2).map { UInt8(String(decoding: digits[$0..<($0 + 2)], as: UTF8.self), radix: 16)! }
@@ -251,10 +254,10 @@ struct DeviceProofTests {
         let text = String(decoding: frame, as: UTF8.self)
         func refused(_ changed: String) -> DeviceProof.Refusal? { Self.refusal(Self.check(Array(changed.utf8))) }
         // Escapes other than \" and \\ (each a valid JSON spelling of a body byte).
-        #expect(refused(text.replacingOccurrences(of: #"\"v\""#, with: #""v""#)) == .nonCanonical)
+        #expect(refused(text.replacingOccurrences(of: #"\"v\""#, with: "\u{5C}u0022v\u{5C}u0022")) == .nonCanonical)
         let slash = Self.body(seq: 1, text: "a/b")
         #expect(refused(String(decoding: Self.text(slash), as: UTF8.self).replacingOccurrences(of: "a/b", with: #"a\/b"#)) == .nonCanonical)
-        #expect(refused(text.replacingOccurrences(of: "hello", with: #"hello"#)) == .nonCanonical)
+        #expect(refused(text.replacingOccurrences(of: "hello", with: "hell\u{5C}u006f")) == .nonCanonical)
         // The signature's spare bits: the last of 86 characters carries 2 bits of the 64th byte and 4 that must be zero.
         let sig = Array(frame[(frame.count - 88)..<(frame.count - 2)])
         let last = sig[85]
@@ -316,10 +319,10 @@ struct DeviceProofTests {
             (#"{"v":1,"seq":1,"s":'x'}"#, .body),
             (#"{"v":1,"seq":1,"s":"\x"}"#, .body),
             (#"{"v":1,"seq":1,"s":"\u12"}"#, .body),
-            (#"{"v":1,"seq":1,"s":"\ud800"}"#, .body),
-            (#"{"v":1,"seq":1,"s":"\udc00\ud800"}"#, .body),
-            (#"{"v":1,"seq":1,"s":"\ud800A"}"#, .body),
-            (#"{"v":1,"seq":1,"kind":"send"}"#, .body),
+            (#"{"v":1,"seq":1,"s":""# + Self.u + #"d800"}"#, .body),
+            (#"{"v":1,"seq":1,"s":""# + Self.u + "dc00" + Self.u + #"d800"}"#, .body),
+            (#"{"v":1,"seq":1,"s":""# + Self.u + "d800" + Self.u + #"0041"}"#, .body),
+            (#"{"v":1,"seq":1,"k"# + Self.u + #"0069nd":"send"}"#, .body),
             (#"{"v":1,"seq":1,"kind":"send","kind":"status"}"#, .duplicateName),
             (#"{"v":1,"seq":1,"seq":2,"id":"1"}"#, .duplicateName),
             (#"{"v":1,"seq":1,"v":1,"id":"1"}"#, .duplicateName),
@@ -332,6 +335,7 @@ struct DeviceProofTests {
         // What JSON allows, and the grammar takes: every value form, a paired surrogate, escapes in a value, a name
         // repeated in two different objects.
         for body in [#"{"v":1,"seq":1,"a":[],"b":{},"c":[1,-0,0.5,-1.5e+3,2E-2,true,false,null,"x"],"d":"\"\\\/\b\f\n\r\té😀"}"#,
+                     #"{"v":1,"seq":1,"d":""# + Self.u + "00e9" + Self.u + "d83d" + Self.u + "de00" + Self.u + #"001f"}"#,
                      #"{"v":1,"seq":1,"args":{"items":[{"card":"a"},{"card":"b"}]}}"#] {
             #expect((try? Self.signedBody(body).get())?.body == Array(body.utf8), "\(body)")
         }
@@ -345,7 +349,7 @@ struct DeviceProofTests {
     @Test func aBodyNestedPastTheLimitIsRefused() {
         func nested(_ depth: Int) -> String {
             // The body's own object is level 1; each "a" nests one more.
-            #"{"v":1,"seq":1,"a":"# + String(repeating: #"{"a":"#, count: depth - 2) + "1" + String(repeating: "}", count: depth - 1)
+            #"{"v":1,"seq":1,"a":"# + String(repeating: #"{"a":"#, count: depth - 1) + "1" + String(repeating: "}", count: depth)
         }
         #expect((try? Self.signedBody(nested(DeviceProof.depthAtMost)).get()) != nil)
         #expect(Self.refusal(Self.signedBody(nested(DeviceProof.depthAtMost + 1))) == .tooDeep)
@@ -499,7 +503,8 @@ struct DeviceProofTests {
     /// standard JSON reader agrees it is one object with that seq.
     @Test func randomSignedBodiesPassOnlyAsTheObjectTheySay() {
         var random = Seeded(state: 0xB0D1_E500_0000_0002)
-        let body = Array(#"{"v":1,"seq":1,"id":"1","kind":"send","args":{"session":"s-1","n":[1,-2.5e3,true,null],"t":"\"x\" é é"}}"#.utf8)
+        let text: String = #"{"v":1,"seq":1,"id":"1","kind":"send","args":{"session":"s-1","n":[1,-2.5e3,true,null],"t":"\"x\" é "# + Self.u + #"00e9"}}"#
+        let body = Array(text.utf8)
         var passed = 0
         for round in 0..<2_000 {
             let mutated = Self.mutate(body, &random)

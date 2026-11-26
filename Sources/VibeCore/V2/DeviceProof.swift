@@ -53,8 +53,6 @@ public enum DeviceProof {
     static let envelopeEnd = Array(#""}"#.utf8)
     static let bodyStart = Array(#"{"v":1,"seq":"#.utf8)
     static let signatureCharacters = 86
-    /// Red first: the checks below checking nothing.
-    static let stubbed = true
 
     /// What the frame is bound to: the connection's nonce (the server's `challenge`, 32 random bytes) and the origin of
     /// the listener it arrived on (`http://localhost:47830`, `https://<name>:47830`).
@@ -139,7 +137,6 @@ public enum DeviceProof {
     /// A text frame of `connection`'s, signed by `key`, expected to carry `next`: its body, or why not.
     public static func text(_ frame: [UInt8], on connection: Connection, next: UInt64,
                             key: P256.Signing.PublicKey) -> Result<Request, Refusal> {
-        if stubbed { return .success(Request(seq: next, body: frame)) }
         guard frame.count <= frameBytesAtMost else { return .failure(.tooLarge) }
         let envelope: (body: [UInt8], signature: [UInt8])
         switch layout(text: frame) {
@@ -162,7 +159,6 @@ public enum DeviceProof {
     /// A terminal frame (binary type 6) of `connection`'s, signed by `key`, expected to carry `next`.
     public static func terminal(_ frame: [UInt8], on connection: Connection, next: UInt64,
                                 key: P256.Signing.PublicKey) -> Result<Terminal, Refusal> {
-        if stubbed { return .success(Terminal(stream: 0, seq: next, kind: .input, payload: frame)) }
         guard frame.count <= frameBytesAtMost else { return .failure(.tooLarge) }
         guard let first = frame.first else { return .failure(.truncated) }
         guard first == terminalType else { return .failure(.notSigned) }
