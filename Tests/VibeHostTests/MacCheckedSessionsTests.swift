@@ -26,13 +26,16 @@ struct MacCheckedSessionsTests {
                                                 }, late: { [CheckedSessions.testShapeFlag, home] })
         defer { host.stop() }
         let (client, _, _, _, _, _, _) = try await TestClient.welcomed(host.socket, appKey: host.appKey)
-        let session = try await client.spawn("env; echo umask=$(umask); echo core=$(ulimit -c),$(ulimit -Hc); echo DONE-ENV", cwd: home)
+        // It prints once attached (`printOnceAttached`): an ended session's replay is its drawn screen, 80 columns.
+        let session = try await client.spawn(Self.printOnceAttached("env; echo umask=$(umask); echo core=$(ulimit -c),$(ulimit -Hc)"), cwd: home)
         await client.attach(session.id)
+        client.send(.input(id: session.id, bytes: Data("go\r".utf8), reply: false))
         #expect(await eventually { client.text(session.id).contains("DONE-ENV") }, "\(client.text(session.id))\n\(host.log)")
         let text = client.text(session.id).replacingOccurrences(of: "\r", with: "")
         let lines = Set(text.split(separator: "\n").map(String.init))
         func value(_ name: String) -> String? { lines.first { $0.hasPrefix(name + "=") }.map { String($0.dropFirst(name.count + 1)) } }
-        #expect(value("PATH")?.split(separator: ":").contains("/vs-login-marker") == true, "PATH=\(value("PATH") ?? "none")")
+        #expect(value("PATH")?.split(separator: ":").contains("/vs-login-marker") == true,
+                "PATH=\(value("PATH") ?? "none"); login=\(value("login") ?? "?"); home-files=\(value("home-files") ?? "?"); HOME=\(value("HOME") ?? "none")")
         #expect(value("PLANTED_BY_STARTER") == nil, "the starter's variable reached the session")
         let launchd = Self.launchdSocket()
         #expect(value("SSH_AUTH_SOCK") == launchd, "SSH_AUTH_SOCK=\(value("SSH_AUTH_SOCK") ?? "none"), launchd's \(launchd ?? "none")")
@@ -44,6 +47,16 @@ struct MacCheckedSessionsTests {
         #expect(value("umask").flatMap { Int($0, radix: 8) } == 0o022, "umask=\(value("umask") ?? "none")")
         #expect(value("core")?.hasPrefix("0,") == true, "core=\(value("core") ?? "none")")
         #expect(!host.log.contains("not started"), "\(host.log)")
+    }
+
+    /// `commands` as a checked session's command that waits for a line typed once the test has attached, then runs them,
+    /// says whether its shell is a login one and what its home holds, and `DONE-ENV`. Printed before the attach, the
+    /// lines came to the test as the replay; one of a session already ended is its drawn screen, 80 columns wide, where
+    /// `PATH=…` broke after `/sbin:`, its 80th column, and the marker was on the next line (v2 macos, host job: one of
+    /// the two checked-session tests failed on each of 6d606884, 568df3b5 and 35499e25, as the attach raced the end).
+    static func printOnceAttached(_ commands: String) -> String {
+        "read -r _; \(commands); (shopt -q login_shell 2>/dev/null || [[ -o login ]] 2>/dev/null) && echo login=yes || echo login=no; "
+            + "echo home-files=$(ls -A \"$HOME\" | tr '\\n' ' '); echo DONE-ENV"
     }
 
     /// The scratch `home`'s login profiles add `/vs-login-marker` to `PATH`, for whichever login shell the user database
