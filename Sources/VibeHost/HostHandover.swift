@@ -351,6 +351,10 @@ public enum HostHandover {
     /// the host carries on, sessions and all.
     static func probeCheck(_ arguments: [String], statePath: String, key: () -> SymmetricKey?) throws {
         _ = try read(from: statePath)
+        guard let index = arguments.firstIndex(of: probeKeyFlag) else { return }
+        guard arguments.indices.contains(index + 1), let key = key(), Proof.keyID(key) == arguments[index + 1] else {
+            throw Failure.probe("it doesn't get this host's vault key from the Keychain, so it would refuse the handover")
+        }
     }
 
     /// How long the probe may take to answer. On a loaded Mac most of it is the system's check of the new build's first

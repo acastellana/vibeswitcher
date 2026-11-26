@@ -748,6 +748,10 @@ public final class HostServer {
         guard FileManager.default.isExecutableFile(atPath: executable) else {
             return reply(.error("Couldn't hand over: \(HostHandover.Failure.notExecutable(executable))."))
         }
+        guard !handoverNeedsKey || handoverKey != nil else {
+            log.note("handover refused: this host has no vault key to prove it with")
+            return reply(.error("Couldn't hand over: this host has no vault key from the Keychain to prove the handover with."))
+        }
         handingOver = true
         let path = config.handoverPath
         let fail: (Error) -> Void = { [weak self] error in
