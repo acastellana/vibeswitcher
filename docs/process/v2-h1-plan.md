@@ -126,7 +126,9 @@ pages too. Page input waits on decisions 1 and 2. A phone's input also waits on 
 ## What can now be built, in order
 
 From the user's answers of 2026-11-25 (decisions 1, 2 and 4 here, and [the push note's](v2-push-decision.md#decisions-for-the-user)).
-Each says what it still waits on; none is designed here.
+Each says what it still waits on; none is designed here. **Items 1 to 3, the Devices list, QR pairing and the Mac's
+single Touch ID are designed (2026-11-26, for review before any is built) in
+[device keys](../superpowers/specs/2026-11-26-v2-device-keys-design.md)**, with its build order in slices.
 
 1. **HTTPS on the tailnet page**, through `tailscale serve` (way B). Waits on: HTTPS certificates turned on for the
    tailnet and the machine's `tailscale serve` configuration (the user's Tailscale settings, which the node doesn't
