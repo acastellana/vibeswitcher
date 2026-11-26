@@ -7,10 +7,10 @@
 - Hide, show or move only scratch windows, not real ones: moving windows across Spaces stranded the user's terminals.
 - Don't attach a debugger or inspect another process (lldb, debugserver, sample, leaks, spindump): each puts a password
   dialog on the user's screen. Use `dyld_info -disassemble` and ~/Library/Logs/DiagnosticReports instead.
-- Probe or test the Keychain (`security`, SecItem, keychain files) only in a scratch keychain file made unlocked with
-  its timeout off and deleted when done (`scripts/lib/scratch-keychain.sh`): no-UI on every SecItem call, a short hard
-  timeout on every `security` call, never the login or default keychain, the real service names or an ACL. On
-  2026-11-26 a probe's locked scratch keychain put a password dialog on the user's screen twice.
+- Keychain work in tests, scripts and probes (`security`, SecItem): scratch keychain files only, made never to lock
+  (`scripts/lib/scratch-keychain.sh`), no-UI on every SecItem call, no access-list calls, and never kill a process in a
+  keychain call; probe live Keychain behaviour only in a keyboard session with the user. 2026-11-26: a locked scratch
+  keychain put dialogs on the user's screen, and a probe killed mid-call crashed securityd, locking the login keychain.
 - Leave /Applications/VibeSwitcher.app and the user's running app alone: check UI in the sandbox below.
   `scripts/build-app.sh --install` relaunches the user's app, so it's the user's call.
 - Install nothing (brew, npm -g, pip, apps): ask the user.

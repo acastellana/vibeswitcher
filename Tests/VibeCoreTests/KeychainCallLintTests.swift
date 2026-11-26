@@ -3,15 +3,17 @@ import Testing
 
 /// No script or test of this project can put a Keychain password dialog on the user's screen by accident. 2026-11-26:
 /// a worker's probe let its scratch keychain auto-lock after the default 300 s, and `security add-generic-password`
-/// waited on an unlock dialog on the user's screen (twice); other probes' `security` and SecKeychain calls left the
-/// user's login keychain locked, with a stream of real password prompts, and an ACL change raised a dialog even with
-/// user interaction switched off. So under scripts/ and Tests/, by their source:
-/// - `security` runs only through scripts/lib/scratch-keychain.sh's keychain_call (a scratch keychain file made
-///   unlocked with no timeout, a scratch HOME, a hard timeout), but for a few read-only subcommands;
+/// waited on an unlock dialog on the user's screen (twice); an access-list change asked through SecurityAgent even
+/// with user interaction switched off, and `timeout` killing that probe mid-call crashed securityd, whose restart
+/// locked every keychain, the user's login keychain too (then a stream of real password prompts). So under scripts/
+/// and Tests/, by their source:
+/// - `security` runs only through scripts/lib/scratch-keychain.sh's keychain_call (a scratch keychain file made never
+///   to lock, unlocked by its password before each call, on a scratch HOME), but for a few read-only subcommands;
 /// - each SecItem call passes no-UI (`kSecUseAuthenticationUI: kSecUseAuthenticationUIFail`);
-/// - no SecKeychain, SecAccess, SecACL or SecTrustedApplication call (ACLs, locks, unlocks, settings, the search
-///   list), but the read-only lock-state probe (open, get status);
-/// each other use allowed below by file and text, with its reason.
+/// - no SecKeychain, SecAccess, SecACL or SecTrustedApplication call (locks, unlocks, settings, the search list),
+///   but the read-only lock-state probe (open, get status);
+/// each other use allowed below by file and text, with its reason. Never allowed, in any file: a change to an access
+/// list or partition list, and `security` under `timeout` (a keychain client killed mid-call).
 struct KeychainCallLintTests {
     static let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
     static let helper = "scripts/lib/scratch-keychain.sh"
@@ -52,6 +54,9 @@ struct KeychainCallLintTests {
     /// A legacy keychain or ACL call (SecKeychainLock, …SetSettings, …SetSearchList, …ItemSetAccess, SecAccessCreate,
     /// SecTrustedApplicationCreateFromPath, …), named in its first capture.
     static let aclOrKeychainCall = try! Regex(#"\b(Sec(?:[K]eychain|Access|ACL|TrustedApplication)[A-Za-z]*)\s*\("#)
+    /// What no allowed file or entry lets through: an access-list or partition-list change (SecurityAgent asks whatever
+    /// the interaction flag says), and `security` killed at a timeout (it took securityd down with it).
+    static let never = try! Regex(#"\bSec(?:[K]eychainItemSetAccess|ACLSetContents|ACLCreate|ACLRemove|AccessCreate|TrustedApplicationCreate)[A-Za-z]*\s*\(|\bsecurity\s+set-(?:generic-password-|internet-password-)?(?:key-)?partition-list\b|\bg?timeout\s[^;&|]*?(?:\s|/)security\s"#)
     /// The lock-state probe build-app.sh and test-signing.sh use: it opens a keychain and reads its status, no dialog.
     static let lockStateProbe: Set<String> = ["Sec" + "KeychainOpen", "Sec" + "KeychainGetStatus", "Sec" + "KeychainStatus"]
 
@@ -122,7 +127,9 @@ struct KeychainCallLintTests {
         var flagged: [Finding] = []
         for (path, lines) in files(under: root) {
             for (index, line) in lines.enumerated() where !isComment(line, in: path) {
-                func flag(_ rule: String) { flagged.append(Finding(file: path, line: index + 1, text: line, rule: rule)) }
+                // One finding a line: a never-allowed rule first.
+                var rules: [String] = []
+                func flag(_ rule: String) { rules.append(rule) }
                 let unsafe = line.matches(of: securityCall).contains { match in
                     let subcommand = String(match.output[1].substring ?? "")
                     guard readOnly.contains(subcommand) else { return true }
@@ -136,6 +143,8 @@ struct KeychainCallLintTests {
                 if line.matches(of: aclOrKeychainCall).contains(where: { !lockStateProbe.contains(String($0.output[1].substring ?? "")) }) {
                     flag("keychain or ACL call")
                 }
+                if line.contains(never) { rules.insert("never: an access-list change, or security killed at a timeout", at: 0) }
+                if let rule = rules.first { flagged.append(Finding(file: path, line: index + 1, text: line, rule: rule)) }
             }
         }
         return flagged
@@ -145,6 +154,7 @@ struct KeychainCallLintTests {
     static func check(under root: URL) -> (offending: [Finding], unused: [String]) {
         var used = Set<Int>()
         let offending = findings(under: root).filter { finding in
+            if finding.rule.hasPrefix("never:") { return true }
             if allowedFiles.contains(where: { $0.file == finding.file }) { return false }
             guard let entry = allowed.firstIndex(where: { $0.file == finding.file && finding.text.contains($0.text) }) else { return true }
             used.insert(entry)
@@ -159,8 +169,9 @@ struct KeychainCallLintTests {
         let (offending, unused) = Self.check(under: Self.repo)
         #expect(offending == [], """
             these can put a Keychain password dialog on the user's screen: call security through \(Self.helper) \
-            (scratch_keychain, then keychain_call), pass \(Self.noUI) on each SecItem call, and make no SecKeychain or \
-            ACL call; or allow the line in KeychainCallLintTests.allowed, with its reason:
+            (scratch_keychain, then keychain_call), pass \(Self.noUI) on each SecItem call, make no SecKeychain or ACL \
+            call, and never kill one; or allow the line in KeychainCallLintTests.allowed, with its reason (an access-list \
+            change or a timeout can't be):
             \(offending.map(\.description).joined(separator: "\n"))
             """)
         #expect(unused == [], "allowed entries nothing matches any more: take them out")
@@ -195,9 +206,18 @@ struct KeychainCallLintTests {
             security find-certificate -c Name -p
             keychain_call add-generic-password -s probe -a me -w x "$scratch_keychain"
             print(score['security'])
+            timeout 5 security list-keychains -d user
+            gtimeout -s KILL 5 security find-certificate -c Name
             """
         try script.write(to: root.appendingPathComponent("scripts/probe.sh"), atomically: true, encoding: .utf8)
         try "security add-generic-password\n".write(to: root.appendingPathComponent(Self.helper), atomically: true, encoding: .utf8)
+        // An allowed file lets its security calls through, but never an access-list change.
+        try """
+            #!/bin/bash
+            security add-generic-password -s probe -a me -w x "$kc"
+            security set-key-partition-list -S apple-tool: -s "$kc"
+            guard \(keychain)ItemSetAccess(item, access) == errSecSuccess else { exit(1) }
+            """.write(to: root.appendingPathComponent("scripts/build-app.sh"), atomically: true, encoding: .utf8)
         let swift = """
             import Security
             func probe(_ service: String) {
@@ -226,25 +246,23 @@ struct KeychainCallLintTests {
             }
             """
         try swift.write(to: root.appendingPathComponent("Tests/SomeTests/Probe.swift"), atomically: true, encoding: .utf8)
-        let found = Self.findings(under: root).map { "\($0.file):\($0.line)" }
-        #expect(found == (2...13).map { "scripts/probe.sh:\($0)" }
-            + [4, 5, 14, 15, 16, 17, 18, 21, 22, 23].map { "Tests/SomeTests/Probe.swift:\($0)" })
+        let planted = (2...13).map { "scripts/probe.sh:\($0)" } + ["scripts/probe.sh:20", "scripts/probe.sh:21"]
+            + [4, 5, 14, 15, 16, 17, 18, 21, 22, 23].map { "Tests/SomeTests/Probe.swift:\($0)" }
+        #expect(Self.findings(under: root).map { "\($0.file):\($0.line)" } == (2...4).map { "scripts/build-app.sh:\($0)" } + planted)
+        #expect(Self.check(under: root).offending.map { "\($0.file):\($0.line)" } == (3...4).map { "scripts/build-app.sh:\($0)" } + planted)
     }
 
     // MARK: The helper, run with a stand-in security: nothing here reaches the real one or any keychain.
 
-    /// Runs `body` in bash with the helper sourced, keychain_call_timeout 1 s, and a stand-in `security` (`standIn`, a
-    /// bash body that logs each call) first on a PATH that holds no real one; returns the output, the stand-in's log
-    /// and the exit status, once bash has ended (a hang guard: a call the timeout didn't end would hang it).
-    func runHelper(_ body: String, standIn: String, in folder: URL) async throws -> (output: String, log: [String], status: Int32) {
+    /// Runs `body` in bash with the helper sourced and a stand-in `security` (logging each call) first on a PATH that
+    /// holds no real one; returns the output, the stand-in's log and the exit status once bash has ended (hang guard).
+    func runHelper(_ body: String, in folder: URL) async throws -> (output: String, log: [String], status: Int32) {
         let bin = folder.appendingPathComponent("bin")
         try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
         let log = folder.appendingPathComponent("security.log")
         try """
             #!/bin/bash
             printf '%s|%s|%s\\n' "$HOME" "$CFFIXED_USER_HOME" "$*" >> '\(log.path)'
-            \(standIn)
-            exit 0
             """.write(to: bin.appendingPathComponent("security"), atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: bin.appendingPathComponent("security").path)
         // od and tr from /usr/bin, where the real security is: linked here alone, so PATH needs only this and /bin.
@@ -255,7 +273,6 @@ struct KeychainCallLintTests {
         try """
             set -uo pipefail
             source '\(Self.repo.appendingPathComponent("scripts/lib/scratch.sh").path)'
-            keychain_call_timeout=1
             source '\(Self.repo.appendingPathComponent(Self.helper).path)'
             \(body)
             """.write(to: script, atomically: true, encoding: .utf8)
@@ -272,15 +289,16 @@ struct KeychainCallLintTests {
         try process.run()
         let ended = await exited(process)
         try output.close()
-        #expect(ended, "the helper's script didn't end: a call through it blocked")
+        #expect(ended, "the helper's script didn't end")
         let logged = (try? String(contentsOf: log, encoding: .utf8)) ?? ""
         return (try String(contentsOf: outputFile, encoding: .utf8), logged.split(separator: "\n").map(String.init), process.terminationStatus)
     }
 
-    /// scratch_keychain makes the keychain in the folder it's given, unlocked with a password, then at once with no
-    /// timeout and no lock on sleep; each call is on a scratch HOME beside it, never the search list; it's deleted on
-    /// exit. keychain_call runs an item call that names it, and refuses, before security runs, one that doesn't, one
-    /// with -T, and the subcommands that lock, unlock, or take the default keychain or the search list.
+    /// scratch_keychain makes the keychain by path in the folder it's given, with a password, then at once with no
+    /// timeout and no lock on sleep; each call is on a scratch HOME beside it, never the search list; it's deleted by
+    /// path on exit. keychain_call unlocks it by its password, then runs an item call that names it; it refuses, before
+    /// security runs, one that doesn't name it, one with -T, and the subcommands that lock, unlock, or take the default
+    /// keychain or the search list. Nothing is timed out or killed.
     @Test func theHelperKeepsToItsScratchKeychain() async throws {
         let temp = Scratch()
         let folder = temp.url("scratch-keychain")
@@ -288,46 +306,32 @@ struct KeychainCallLintTests {
         let (output, log, status) = try await runHelper("""
             scratch_keychain "$1"; echo "made=$? $scratch_keychain"
             keychain_call add-generic-password -s probe -a me -w x "$scratch_keychain"; echo "add=$?"
+            keychain_call find-generic-password -s probe -a me "$scratch_keychain"; echo "find=$?"
             keychain_call find-generic-password -s probe -a me; echo "unnamed=$?"
             keychain_call add-generic-password -s probe -a me -w x -T /bin/ls "$scratch_keychain"; echo "acl=$?"
             for sub in lock-keychain unlock-keychain set-keychain-settings default-keychain list-keychains login-keychain \\
                 set-key-partition-list dump-keychain import; do
                 keychain_call $sub "$scratch_keychain"; echo "$sub=$?"
             done
-            """, standIn: "", in: folder)
+            """, in: folder)
         let keychain = folder.appendingPathComponent("vs-scratch.keychain-db").path
         let home = folder.appendingPathComponent("vs-keychain-home").path
         #expect(status == 0, "\(output)")
-        #expect(output.contains("made=0 \(keychain)\n") && output.contains("add=0\n") && output.contains("unnamed=2\n") && output.contains("acl=2\n"), "\(output)")
-        for sub in ["lock-keychain", "unlock-keychain", "set-keychain-settings", "default-keychain", "list-keychains", "login-keychain",
-                    "set-key-partition-list", "dump-keychain", "import"] {
-            #expect(output.contains("\(sub)=2\n"), "\(sub): \(output)")
+        for expected in ["made=0 \(keychain)", "add=0", "find=0", "unnamed=2", "acl=2"] + ["lock-keychain", "unlock-keychain",
+            "set-keychain-settings", "default-keychain", "list-keychains", "login-keychain", "set-key-partition-list", "dump-keychain",
+            "import"].map { "\($0)=2" } {
+            #expect(output.contains(expected + "\n"), "\(expected): \(output)")
         }
-        // What security was asked, in order: made with a password, settings with no options (no timeout, no lock on
-        // sleep), the one item call, deleted on exit; all on the scratch HOME.
-        #expect(log.count == 4, "\(log)")
+        // What security was asked, in order, all on the scratch HOME: made by path with a password, settings with no
+        // options (no timeout, no lock on sleep), each item call after an unlock by that password, deleted on exit.
         #expect(log.allSatisfy { $0.hasPrefix("\(home)|\(home)|") }, "\(log)")
         let calls = log.map { $0.split(separator: "|", maxSplits: 2).last.map(String.init) ?? "" }
         let made = try #require(calls.first?.wholeMatch(of: #/create-keychain -p ([0-9a-f]{24}) (.+)/#))
         #expect(made.2 == keychain)
-        #expect(Array(calls.dropFirst()) == ["set-keychain-settings \(keychain)", "add-generic-password -s probe -a me -w x \(keychain)",
+        let unlock = "unlock-keychain -p \(made.1) \(keychain)"
+        #expect(Array(calls.dropFirst()) == ["set-keychain-settings \(keychain)",
+                                            unlock, "add-generic-password -s probe -a me -w x \(keychain)",
+                                            unlock, "find-generic-password -s probe -a me \(keychain)",
                                             "delete-keychain \(keychain)"])
-    }
-
-    /// A call through the helper can't block: a stand-in security that never answers (as one waiting on a dialog) is
-    /// killed at the timeout, and the call fails with 124 and says so; the script goes on. Shown with a stand-in only:
-    /// a real locked keychain would mean a real dialog, so that case rests on the lint (nothing locks the scratch one).
-    @Test func aCallThroughTheHelperEndsAtItsTimeout() async throws {
-        let temp = Scratch()
-        let folder = temp.url("scratch-keychain-hang")
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let (output, log, status) = try await runHelper("""
-            scratch_keychain "$1"; echo "made=$?"
-            keychain_call find-generic-password -s probe -w "$scratch_keychain"; echo "find=$?"
-            """, standIn: #"[[ $1 == find-generic-password ]] && exec /bin/sleep 600"#, in: folder)
-        #expect(status == 0, "\(output)")
-        #expect(output.contains("made=0\n") && output.contains("find=124\n"), "\(output)")
-        #expect(output.contains("security find-generic-password timed out after 1 s (killed)"), "\(output)")
-        #expect(log.last?.hasSuffix("|delete-keychain \(folder.appendingPathComponent("vs-scratch.keychain-db").path)") == true, "\(log)")
     }
 }

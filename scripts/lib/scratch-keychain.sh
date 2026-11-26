@@ -1,36 +1,28 @@
 # The one way a script or test of this project calls the `security` tool (KeychainCallLintTests): on a scratch
 # keychain file only, never the user's. 2026-11-26: a worker's probe let its scratch keychain auto-lock after the
 # default 300 s, and the next `security add-generic-password` waited on an unlock dialog on the user's screen (twice);
-# other probes left the user's login keychain locked, with a stream of real password prompts.
+# then a probe killed mid-call (by `timeout`) inside an access-list change crashed securityd, whose restart locked
+# every keychain, the user's login keychain too. So nothing here times out or kills a keychain call: the keychain is
+# made never to lock instead, and unlocked by its password before each call.
 # Source it after scripts/lib/scratch.sh (on_exit).
 #
 # scratch_keychain [DIR]: makes $scratch_keychain, DIR/vs-scratch.keychain-db (DIR: $tool_scratch from scratch_tmpdir,
-#   or a test's own Scratch folder), with a throwaway password (-p), and in the same step no lock timeout and no lock
-#   on sleep (set-keychain-settings with no options), so it's never locked; deleted on exit. Every call runs on a
-#   scratch HOME beside it (DIR/vs-keychain-home), so it's never added to the user's search list and the user's
-#   default and login keychains are never read or changed.
-# keychain_call SUBCOMMAND ARGS…: security SUBCOMMAND ARGS… with stdin closed, killed after $keychain_call_timeout
-#   seconds (default 10; status 124 then). It runs only a call that names $scratch_keychain and is one of the item
-#   subcommands below, with no -T (an access list without security on it asks you on the next read); anything else is
-#   refused, status 2, before security runs: what takes the default keychain or the search list, locks, unlocks,
-#   passwords, partition lists, trust settings, ACLs.
+#   or a test's own Scratch folder), by path with a throwaway password (-p), and at once no lock timeout and no lock
+#   on sleep (set-keychain-settings with no options); deleted by path on exit. Every call runs on a scratch HOME
+#   beside it (DIR/vs-keychain-home), so it's never added to the user's search list and the user's default and login
+#   keychains are never read or changed.
+# keychain_call SUBCOMMAND ARGS…: unlock-keychain -p on $scratch_keychain, then security SUBCOMMAND ARGS…, stdin
+#   closed. It runs only a call that names $scratch_keychain and is one of the item subcommands below, with no -T (an
+#   access list without security on it asks you on the next read); anything else is refused, status 2, before security
+#   runs: what takes the default keychain or the search list, locks, passwords, partition lists, trust settings, ACLs.
 
 scratch_keychain=""
 scratch_keychain_home=""
 scratch_keychain_password=""
-keychain_call_timeout=${keychain_call_timeout:-10}
 
-# security "$@" on the scratch HOME, stdin closed, killed by SIGALRM after the timeout (an alarm outlives exec).
+# security "$@" on the scratch HOME, stdin closed.
 scratch_keychain_run() {
-    local status
-    HOME="$scratch_keychain_home" CFFIXED_USER_HOME="$scratch_keychain_home" \
-        /usr/bin/perl -e 'alarm shift; exec @ARGV or exit 127' "$keychain_call_timeout" security "$@" < /dev/null
-    status=$?
-    if [[ $status -eq 142 ]]; then
-        echo "security $1 timed out after $keychain_call_timeout s (killed)" >&2
-        return 124
-    fi
-    return $status
+    HOME="$scratch_keychain_home" CFFIXED_USER_HOME="$scratch_keychain_home" security "$@" < /dev/null
 }
 
 scratch_keychain() {
@@ -91,5 +83,8 @@ keychain_call() {
         echo "keychain_call: security $subcommand doesn't name $scratch_keychain: it would take the default keychain" >&2
         return 2
     fi
+    # Unlocked by its password first, by path (no prompt): whatever locked it meanwhile (lock-keychain -a, a securityd
+    # restart), the call never meets it locked.
+    scratch_keychain_run unlock-keychain -p "$scratch_keychain_password" "$scratch_keychain" || return 1
     scratch_keychain_run "$subcommand" "$@"
 }
