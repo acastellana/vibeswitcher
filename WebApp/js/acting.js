@@ -5,7 +5,8 @@
 // - `doButton`: a real button that sends one request, disabled while it is out, the node's refusal said in place
 //   (a card that changed since the page drew it: "look again", nothing was done).
 // - What a card's request carries: the card, the `seen` the page drew it with, the usual arguments, no code.
-// - Which settings a page may not set even when it acts (the node refuses them by voice): they stay terminal lines.
+// - Which settings a page may not set even when it acts (the node refuses them by voice): they stay terminal lines,
+//   by each setting's rule as the node sends it (`pageMaySet`).
 
 import { h, setText } from './dom.js';
 import { button as kitButton } from './kit.js';
@@ -34,18 +35,20 @@ export const cardArgs = (card, args = {}) => ({ card: card.id, seen: card.seen ?
 // A question's version answered; a plugin's card (a shell request's) has none, so none is sent.
 export const answerArgs = (card, text) => cardArgs(card, { text, ...(card.question?.version != null ? { version: card.question.version } : {}) });
 
-// The settings a page may set when it acts: those the node's catalog marks `.sets` (`NodeSettings`' `page`), and
-// web_acts lowered. Every other one the node keeps to a terminal (`terminalOnly`: lead_mail, verifier_model,
-// security_audit_model, max_workers, the policy, the floors, and every plugin's setting) and refuses from a page by
-// voice; a key the page doesn't know (a newer node's, a plugin's) is the terminal's too, so nothing is offered that the
-// node would refuse. The node sends no setting's page rule yet (`settings`' `Setting` has no `page`): this list is it.
-export const PAGE_SETS = new Set(['projects_folder', 'node_max_sessions', 'load_threshold', 'node_heavy_slots', 'ignore_usage_limits',
-  'boost', 'boost_load_threshold', 'boost_max_sessions', 'boost_max_workers', 'boost_heavy_slots', 'prompt_audit', 'prompt_audit_days',
-  'ai_summaries', 'lead_model', 'lead_advisor', 'worker_advisor', 'lead_rotation']);
-
-export function pageMaySet(key, value) {
-  if (key === 'web_acts') return ['off', 'confirm'].includes(String(value).trim().toLowerCase());
-  return PAGE_SETS.has(key);
+// Whether a page that acts may set `setting` (as `settings` sends it) to `value`: the node's own rule for it, its
+// `page` (`NodeSettings`' `page`, B10 of 2026-11-26): `sets`, `lowersOnly` (only below its value now, its choices lowest
+// first, or to its lowest or `default`: web_acts lowered) or `terminalOnly` (lead_mail, verifier_model,
+// security_audit_model, max_workers, the policy, the floors, every plugin's setting). A setting with no rule (a node
+// from before it) is the terminal's: nothing is offered that the node would refuse. The node still refuses by voice
+// whatever the rule forbids (`Requests.pageSetRefusal`); this only chooses between Set and the terminal's line.
+export function pageMaySet(setting, value) {
+  const rule = setting?.page;
+  if (rule === 'sets') return true;
+  if (rule !== 'lowersOnly') return false;
+  const choices = Array.isArray(setting.choices) ? setting.choices : [];
+  const asked = value === 'default' ? 0 : choices.indexOf(value);
+  const now = Math.max(0, choices.indexOf(setting.value));
+  return asked >= 0 && (asked < now || asked === 0);
 }
 
 // A button that sends `kind` with `args()` (a function, read at the click), disabled while it is out; `done(reply)` on
@@ -55,7 +58,9 @@ export function pageMaySet(key, value) {
 // as kit.js's.
 // `busy`: the button's words while the request is out ("Starting…").
 // `receipt(reply)`: what happened, in words, said beside the button once the node took it.
-export function doButton(app, { label, kind, args, done = () => {}, plain = false, confirm = null, danger = false, size = 'm', className = '', busy = null, receipt = null }) {
+// `settled(reply)`: after any reply, taken or refused, once the button said it (a view that keeps something while the
+// request is out).
+export function doButton(app, { label, kind, args, done = () => {}, settled = () => {}, plain = false, confirm = null, danger = false, size = 'm', className = '', busy = null, receipt = null }) {
   const said = h('span', { class: 'act-said', role: 'status' });
   let asking = false;
   let stopAsking = () => {};
@@ -87,10 +92,12 @@ export function doButton(app, { label, kind, args, done = () => {}, plain = fals
         const words = receipt ? receipt(reply.result || {}) : '';
         if (words) { setText(said, words); said.classList.add('receipt'); }
         done(reply);
+        settled(reply);
         return;
       }
       setText(said, refusalWords(reply.error, label));
       said.classList.add('refused');
+      settled(reply);
     });
   });
   return { el, button, say: (text) => setText(said, text) };

@@ -160,9 +160,11 @@ test('This node: the list is the page’s groups with a count or a one-word stat
   const view = nodeView(app);
   await settle();
   const names = listText(view);
-  assert.deepEqual(rowsOf(view).slice(0, 2).map((row) => row.dataset.key), ['approve', 'notices']);
-  assert.equal(names[1], 'Notices 1');
-  assert.match(names[0], / 1$/);
+  // The node's offers first (the vectors' node: a reopen offer of one session, one audit due; C3, C4), then the rest.
+  assert.deepEqual(rowsOf(view).slice(0, 4).map((row) => row.dataset.key), ['reopen', 'audits', 'approve', 'notices']);
+  assert.deepEqual(names.slice(0, 2), ['After the restart 1', 'Prompt audits 1']);
+  assert.equal(names[3], 'Notices 1');
+  assert.match(names[2], / 1$/);
   assert.ok(names.includes('Session host Connected'), names.join(' | '));
   // The build by the day it has run since, never its hash (D18).
   assert.ok(names.some((one) => /^Build [A-Z][a-z]{2} \d{1,2}$/.test(one)), names.join(' | '));

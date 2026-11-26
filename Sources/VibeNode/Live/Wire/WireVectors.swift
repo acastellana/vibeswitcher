@@ -406,6 +406,12 @@ public enum WireVectors {
             "ending": .array([.object(["session": .string(NodeIds.session(host: UUID(uuidString: "5c1e7a92-0000-4000-8000-000000000001")!)),
                                        "folder": .string("/home/u/notes"), "name": .string("notes"), "at": .string("2026-11-17T09:13:40.000Z"),
                                        "listedAt": .string("2026-11-17T09:14:10.000Z")])]),
+            // The restart's reopen offer and a prompt audit due (C3, C4): the page's two cards.
+            "reopenOffer": .object(["at": .string("2026-11-17T08:01:10.555Z"), "sessions": .array([
+                .object(["session": .string(NodeIds.session(host: UUID(uuidString: "5c1e7a92-0000-4000-8000-000000000002")!)), "name": .string("site"),
+                         "project": .string("site"), "agent": .string("claude")])])]),
+            "promptAudits": .array([.object(["project": .string("site"), "folder": .string("/home/u/site"), "session": .null,
+                                             "reason": .string("interval"), "days": .int(15), "ranBefore": .bool(false)])]),
             "web": .object(["state": .string("listening"), "port": .int(Int(NodeWeb.port)), "tokens": .int(1), "connections": .int(1)]),
             "usage": usage,
             "boost": .object(["mode": .string("on"), "on": .bool(true), "why": .string("on in Settings"),

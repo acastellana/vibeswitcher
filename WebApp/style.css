@@ -1849,7 +1849,7 @@ kbd { padding: 1px var(--s-3); border-radius: var(--r-1); box-shadow: var(--e-1-
 .act { display: inline-flex; align-items: center; flex-wrap: wrap; gap: var(--s-3) var(--s-4); }
 .act-said { color: var(--ink-2); font-size: var(--t-caption); }
 .act-said:empty { display: none; }
-.act-said.refused, .confirm-note.refused { color: var(--danger); }
+.act-said.refused, .confirm-note.refused, .offer-said.refused { color: var(--danger); }
 .card-acts { display: flex; flex-wrap: wrap; gap: var(--s-4); }
 .mine.refused { color: var(--ink-2); }
 .acts-line { display: flex; align-items: center; flex-wrap: wrap; gap: var(--s-3) var(--s-4); color: var(--ink-2); }
@@ -1857,6 +1857,23 @@ kbd { padding: 1px var(--s-3); border-radius: var(--r-1); box-shadow: var(--e-1-
 /* What a button did, in words, beside it (docs/process/v2-no-terminal.md's table B and A5): the done colour, calm. */
 .act-said.receipt { color: var(--done); }
 .node-act { display: grid; justify-items: start; gap: var(--s-4); margin-top: var(--s-5); }
+/* The node's offers as cards (views/offers.js: the restart's reopen offer, a prompt audit due): a filled panel, its
+   head, its words, then its buttons in a row; answered, what happened in its place until OK. */
+.offer-slot { display: grid; gap: var(--s-5); }
+.offer-slot:empty { display: none; }
+.offer-slot + .offer-slot:not(:empty), .offer-slot:not(:empty) + .ended { margin-top: var(--s-5); }
+.offer-card { display: grid; justify-items: start; gap: var(--s-4); padding: var(--s-6); border-radius: var(--r-3); background: var(--fill); }
+.offer-head { display: flex; align-items: center; gap: var(--s-4); }
+.offer-head .icon { color: var(--needs-you); }
+.offer-title { margin: 0; }
+.offer-words, .offer-said { max-width: 62ch; margin: 0; }
+.offer-said { color: var(--ink-2); }
+.offer-said.receipt { color: var(--done); }
+.offer-list, .offer-picks { display: grid; gap: var(--s-2); margin: 0; padding: 0; list-style: none; }
+.offer-list li, .offer-pick { display: flex; align-items: baseline; gap: var(--s-4); }
+.offer-sub { color: var(--ink-3); font-size: var(--t-caption); }
+.offer-choose > .unfold-inner { display: grid; justify-items: start; gap: var(--s-4); }
+.offer-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-4); }
 .recent-acts { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-3) var(--s-5); }
 .recent-acts .start-why { flex-basis: 100%; }
 /* A lead's start that asks a choice (Take the base as it is, Replace it): its consequence in a line, the button under. */

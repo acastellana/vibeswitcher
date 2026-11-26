@@ -161,7 +161,7 @@ test('a setting’s value out of its range, or not a number, says the range besi
   setLanguage('en');
   const { draftProblem } = await import('../js/settings.js');
   const { editor } = await import('../js/views/settings.js');
-  const slots = { key: 'node_heavy_slots', title: 'Test and build slots at once', form: 'count', scope: 'node', limits: '1 to 12', value: '3', default: '2' };
+  const slots = { key: 'node_heavy_slots', title: 'Test and build slots at once', form: 'count', scope: 'node', limits: '1 to 12', value: '3', default: '2', page: 'sets' };
   const load = { key: 'boost_load_threshold', title: 'Start nothing above a load of, while boosted', form: 'number', scope: 'node', limits: 'above 0, at most 48', value: '36', default: '36' };
   assert.equal(draftProblem(slots, '4'), null);
   assert.equal(draftProblem(slots, 'default'), null);

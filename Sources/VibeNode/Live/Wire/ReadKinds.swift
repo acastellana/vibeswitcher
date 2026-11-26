@@ -30,6 +30,10 @@ extension WireKinds {
             public var reminders: [NodeWire.Value]?
             @WireNull public var restart: NodeWire.Value?
             public var reopen: NodeWire.Value?
+            /// The restart's offer to reopen the user's sessions (`LeadEngine.reopenOffer`), null while none; and each
+            /// project due a prompt audit (`PromptAuditWatch.value`). Both absent from a node before them (2026-11-26).
+            public var reopenOffer: NodeWire.Value?
+            public var promptAudits: NodeWire.Value?
             public var ended: NodeWire.Value?
             public var ending: NodeWire.Value?
             @WireNull public var builds: Builds?
@@ -288,8 +292,14 @@ extension WireKinds {
             public var `where`: String?
             public var guardRail: Bool?
             @WireNull public var note: String?
+            /// Whether an acting page may set it (`NodeSettings.Page.word`: sets, lowersOnly, terminalOnly), and why not
+            /// (2026-11-26, the no-terminal inventory's B10): the page offers Set by it, the node still refuses what the
+            /// rule forbids. Both absent from a node before it (the page then offers no Set); `pageWhy` absent for `sets`.
+            public var page: String?
+            public var pageWhy: String?
             public init(key: String, title: String, about: String, section: String, scope: String, form: String, home: String, choices: [String],
-                        limits: String?, value: String, default: String, isDefault: Bool, where: String, guardRail: Bool, note: String?) {
+                        limits: String?, value: String, default: String, isDefault: Bool, where: String, guardRail: Bool, note: String?,
+                        page: String? = nil, pageWhy: String? = nil) {
                 self.key = key
                 self.title = title
                 self.about = about
@@ -305,6 +315,8 @@ extension WireKinds {
                 self.where = `where`
                 self.guardRail = guardRail
                 self.note = note
+                self.page = page
+                self.pageWhy = pageWhy
             }
         }
 
