@@ -112,9 +112,9 @@ function imageView(view, image) {
         button.setAttribute('aria-expanded', String(wide));
         view.redraw();
       } }, picture);
-    // Its size known: drawn again at once (not at the next frame), so the end the view keeps never shows it moving.
-    picture.addEventListener('load', () => view.settle(), { once: true });
-    holder.replaceChildren(button);
+    // Placed only once it has loaded, and the chat drawn again in the same task: a picture laid out at its size before
+    // that would move what is under it for a frame (D14). Its words stand in meanwhile, and stay if it can't be read.
+    picture.addEventListener('load', () => { holder.replaceChildren(button); view.settle(); }, { once: true });
   };
   const known = view.images.known(view.session, image);
   if (known) show(known);
