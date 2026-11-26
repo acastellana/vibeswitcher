@@ -26,9 +26,9 @@ struct CodexWorkerTests: LeadTeamFixture {
 
     /// A stand-in for Codex: writes each argument it was given, NUL-separated, to `log`, and exits.
     func fakeCodex(log: String) throws -> String {
-        // In a folder of the scratch's own (removed with it), laid out as Codex's npm package is (the vault tells Codex
-        // from what a session's command runs: `WorkerLaunch.commandAgent`).
-        let folder = temp.url("prefix").appendingPathComponent("lib/node_modules/@openai/codex/bin").path
+        // In a folder of the scratch's own (removed with it), and behind the vault's link for Codex, as the node's own
+        // Codex is (the vault tells Codex from what a session's command runs: `WorkerLaunch.commandAgent`).
+        let folder = temp.url("bin").path
         try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
         let path = folder + "/codex"
         try installScript("#!/bin/sh\nprintf '%s\\0' \"$@\" > '\(log)'\n", atPath: path)
@@ -56,6 +56,7 @@ struct CodexWorkerTests: LeadTeamFixture {
         let runtime = FakeRuntime()
         let log = temp.url("codex-args").path
         runtime.codex = try fakeCodex(log: log) + " --yolo -s danger-full-access --model o3 -c model_reasoning_effort=high"
+        runtime.programLinks = [.codex: [runtime.codex.components(separatedBy: " ").first ?? ""]]
         let lead = try lead(root, runtime)
         lead.codexWorkers = true
         let added = lead.call("add_task", ["title": "Rename x", "goal": "x is y", "acceptance": ["grep -q y a.txt"], "agent": "codex",

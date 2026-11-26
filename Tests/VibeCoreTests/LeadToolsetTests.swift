@@ -65,8 +65,10 @@ final class FakeRuntime: LeadRuntime {
     func hostSeen(_ session: String) -> WorkerLaunch.Seen? {
         calls.lock()
         defer { calls.unlock() }
-        return spawned.last { $0.id == session }.map { WorkerLaunch.Seen(command: $0.command) }
+        return spawned.last { $0.id == session }.map { WorkerLaunch.Seen(command: $0.command, links: programLinks) }
     }
+    /// The stand-in programs a session's command may name (a scratch node's links, `WorkerLaunch.nodeLinks`); nil: those.
+    var programLinks: [Agent: [String]]?
     /// The project's Codex command, flags included.
     var codex = "codex"
     func codexCommand(root: String) -> String { codex }
