@@ -16,9 +16,10 @@ mm_say ""
 mm_say "First: close the lid now (external display and keyboard on), then press Return here."
 mm_go "Lid closed?"
 mm_say "What LocalAuthentication says with the lid closed (shows nothing):"
-"$mm_bin/la" can | tee "$mm_out/can.txt"
+if [[ $mm_dry == 1 ]]; then mm_say "(dry run: would run  la can)"; else "$mm_bin/la" can | tee "$mm_out/can.txt"; fi
 mm_say "Next: a job $mm_label asks once. Approve with whatever the dialog offers (the password into the system dialog only)."
 mm_go "Ready?"
 mm_bootstrap_and_start
 mm_wait_for "$mm_out/$mm_label.out" '^outcome=' 90
+mm_seen="with the lid closed, which way the dialog offered to approve (password, Apple Watch, nothing)"
 mm_record "$mm_out/can.txt" "$mm_out/$mm_label.out" "$mm_out/$mm_label.err"

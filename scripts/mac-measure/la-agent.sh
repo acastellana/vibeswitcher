@@ -19,4 +19,5 @@ mm_say "The job is booted out when this ends. Nothing else is changed."
 mm_go "Ready?"
 mm_bootstrap_and_start
 mm_wait_for "$mm_out/$mm_label.out" '^outcome=' 90
+mm_seen="the dialog's words as shown (its first line first), and whether it offered Touch ID"
 mm_record "$mm_out/$mm_label.out" "$mm_out/$mm_label.err"

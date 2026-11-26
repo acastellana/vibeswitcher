@@ -1,0 +1,9 @@
+== la-agent (2026-11-26 19:31, run from: a shell session of the app's host (a shell card))
+la: pid=48951 ppid=1 at=2026-11-26T18:31:15Z
+availability=available
+deviceOwnerAuthentication=true error=none
+deviceOwnerAuthenticationWithBiometrics=true error=none
+biometryType=touchID
+asking at=2026-11-26T18:31:15Z timeout=60s reason=MEASURE-1 approve setting x to y
+outcome=approved after=2.7s at=2026-11-26T18:31:17Z
+seen: (nothing typed)

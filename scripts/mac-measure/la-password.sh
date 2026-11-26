@@ -18,4 +18,5 @@ mm_say "Never type the password in this Terminal."
 mm_go "Ready?"
 mm_bootstrap_and_start
 mm_wait_for "$mm_out/$mm_label.out" '^outcome=' 90
+mm_seen="how you reached the password (the button's words), and whether the dialog took it"
 mm_record "$mm_out/$mm_label.out" "$mm_out/$mm_label.err"

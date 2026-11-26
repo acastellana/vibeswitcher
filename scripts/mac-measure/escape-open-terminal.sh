@@ -20,4 +20,5 @@ mm_go "Ready?"
 if [[ $mm_dry == 1 ]]; then mm_say "dry run done: nothing was opened"; exit 0; fi
 "$mm_bin/detach" /usr/bin/open -a Terminal "$tool_scratch/escape.command" > /dev/null
 mm_wait_for "$mm_out/escaped.txt" '^== its chain' 60
+mm_seen="did a new Terminal window open and say the process completed?"
 mm_record "$mm_out/mine.txt" "$mm_out/escaped.txt"
