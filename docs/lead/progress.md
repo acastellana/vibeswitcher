@@ -4838,3 +4838,4 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-26 19:58 Started a worker on v2-on-the-mac-9
 - 2026-11-26 19:58 Started a worker on v2-what-is-left
 - 2026-11-26 19:58 Started a worker on re-check-v2-s-4
+- 2026-11-26 20:03 Planned review-v2-s-device-3: Review v2's device keys slice 4 (branch v2-keys-vault: the vault's devices, unlocks, challenges and knocks) as an independent security reviewer: report only
