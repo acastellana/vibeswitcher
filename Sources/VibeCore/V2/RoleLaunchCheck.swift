@@ -8,16 +8,20 @@ import Foundation
 /// environment), so the node can't vouch for what ran. Judged at the bind (`LeadVault.Book`, `.bind`), from what the
 /// host saw (`WorkerLaunch.BindFacts`); without that floor nothing here applies.
 public enum RoleLaunchCheck {
-    /// The flags Claude Code's launch builder emits (`LeadLaunch.prepare`, `LinuxLaunch.inline`'s inline prompt and
-    /// settings, `LinuxLaunch.permissionMode`).
+    /// The flags Claude Code's launch builder emits for a worker, verifier or finder (`LeadLaunch.prepare`,
+    /// `LinuxLaunch.inline`'s inline prompt and settings, `LinuxLaunch.permissionMode`). Not `--resume`: only the lead's
+    /// launch carries it, and it takes a value only when the next word doesn't start with `-` (`[value]`), so a role's
+    /// `--resume --fallback-model …` hides the next flag from a reading that takes it greedily.
     public static let claudeFlags: Set<String> = [
-        "--append-system-prompt-file", "--append-system-prompt", "--mcp-config", "--settings", "--setting-sources", "--strict-mcp-config",
-        "--permission-mode", "--name", "--model", "--advisor", "--effort", "--resume",
+        "--append-system-prompt-file", "--append-system-prompt", "--mcp-config", "--settings", "--permission-mode", "--name", "--model",
+        "--advisor", "--effort",
     ]
+    /// A verifier's (and a finder's) own, each required, `--setting-sources` with the value `user` exactly: without them
+    /// it loads the branch's `.claude/settings.local.json` and project MCP servers, whose env can route it anywhere. A
+    /// worker carries neither.
+    public static let verifierFlags: [String: String?] = ["--setting-sources": "user", "--strict-mcp-config": nil]
     /// The flags Codex's launch builder emits (`LeadLaunch.prepareCodex`).
     public static let codexFlags: Set<String> = ["--no-daemon", "--cd", "--sandbox", "--ask-for-approval", "-c", "--model"]
-    /// The flags above that take no value; every other one takes the word after it (or its `=` part).
-    static let switches: Set<String> = ["--strict-mcp-config", "--no-daemon", "--dangerously-skip-permissions"]
     /// The base command's own flags allowed beside them (a launch preset's): `--dangerously-skip-permissions`, a
     /// permission mode that doesn't change the model. The presets' defaults hold none (`LaunchPresets.builtIns`).
     public static let baseFlags: Set<String> = ["--dangerously-skip-permissions"]
@@ -52,57 +56,78 @@ public enum RoleLaunchCheck {
     /// Where the way out of a refusal is said.
     static let wayOut = "remove it from the launch preset, or lower `floor_verifier_different`"
 
-    /// Why a `role` session launched with `command` (its spawn environment's names `environment`, nil: the host didn't
-    /// say; `settings`: the text of a `--settings` file the bind read, nil when none was read) isn't judged under the
-    /// floor; nil when it is. One plain sentence, naming what it found and the way out.
-    public static func refusal(command: String, agent: Agent, role: LeadLaunch.Role, environment: [String]?, settings: SettingsRead?) -> String? {
-        let words = WorkerLaunch.tokens(command).map(\.text).prefix { $0 != "--" }
-        // The program and `env` (with its options) before it, as `WorkerLaunch.program(of:)` reads them.
-        var rest = words[...]
-        if let first = rest.first, first == "env" || first == "/usr/bin/env" || first == "/bin/env" {
-            rest = rest.dropFirst()
-            while let option = rest.first, option.hasPrefix("-") {
-                rest = rest.dropFirst()
-                if option == "-u" || option == "--unset" { rest = rest.dropFirst() }
-            }
+    /// The launch's `--settings` file as the bind can check it, where settings aren't inline (the Mac's, S10): the
+    /// digest of what the launch builder wrote (`LeadLaunch.Prepared.settingsDigest`, given with the bind) and the
+    /// launch's own folder it must lie in (`LeadVault.runPrefix`).
+    public struct SettingsFile: Equatable, Sendable {
+        public var digest: String?
+        public var folder: String
+        public init(digest: String?, folder: String) {
+            self.digest = digest
+            self.folder = folder
         }
-        rest = rest.dropFirst()
-        let allowed = (agent == .codex ? codexFlags : claudeFlags).union(baseFlags)
+    }
+
+    /// Why a `role` session launched with `command` (its spawn environment's names `environment`, nil: the host didn't
+    /// say; `settings`: a `--settings` file as the bind read it; `file`: what that file must be; `inline`: whether this
+    /// platform's launches put their settings inline, so that a file is never theirs; `full`: whether the host had the
+    /// command in full) isn't judged under the floor; nil when it is. One plain sentence, naming what it found and the
+    /// way out. The options read as the agent reads them (`WorkerLaunch.options(of:)`).
+    public static func refusal(command: String, agent: Agent, role: LeadLaunch.Role, environment: [String]?, settings: SettingsRead?,
+                               file: SettingsFile? = nil, inline: Bool = Platform.Tools.roleSettingsInline, full: Bool = true) -> String? {
+        guard full else {
+            return "This session's full command isn't known to the host (it restarted or took over after the session started), so it can't be judged under your review rules: start it again."
+        }
+        let options = WorkerLaunch.options(of: command, agent: agent)
+        let verifier = agent == .claude && role == .verifier
+        let allowed = (agent == .codex ? codexFlags : claudeFlags.union(verifier ? Set(verifierFlags.keys) : [])).union(baseFlags)
+        let arity = agent == .codex ? WorkerLaunch.codexArity : WorkerLaunch.claudeArity
         var seen: Set<String> = []
-        var index = rest.startIndex
-        while index < rest.endIndex {
-            let word = rest[index]
-            index = rest.index(after: index)
-            guard word.hasPrefix("-") else { continue }
-            let name = String(word.prefix { $0 != "=" })
-            let inlineValue = word.contains("=") ? String(word.drop { $0 != "=" }.dropFirst()) : nil
+        for option in options {
+            let name = option.flag
             guard allowed.contains(name) else { return said("`\(clip(name))`") }
             // Each once, as the builders write them: the program takes the last of a repeated one, and only `--model` is
             // read that way here (`WorkerLaunch.launchModel`); Codex's `-c` is one per key.
             guard seen.insert(name).inserted || name == "-c" || name == "--model" else { return said("`\(name)` more than once") }
-            // The word a flag takes is its value, never a flag, even when it starts with `-` (a prompt, a name).
-            var value: String?
-            if switches.contains(name) {
-                guard inlineValue == nil else { return said("`\(clip(word))`") }
-            } else if let inlineValue {
-                value = inlineValue
-            } else if index < rest.endIndex {
-                value = rest[index]
-                index = rest.index(after: index)
+            let takes = arity[name] ?? .none
+            if takes == .none {
+                guard option.value == nil else { return said("`\(clip(name))` given a value") }
+                continue
+            }
+            guard let value = option.value else { return said("`\(name)` without its value") }
+            // A value the builders never write: `--` or a word starting with `-` (`--name -- --model x`: the program takes
+            // the `--` as the name and reads on).
+            guard !value.hasPrefix("-") else { return said("`\(name)` given `\(clip(value))`") }
+            if let wanted = verifierFlags[name], verifier, let wanted, value != wanted {
+                return said("`\(name) \(clip(value))` (a verifier's launch carries `\(name) \(wanted)`)")
             }
             switch name {
             case "--settings":
-                let given = value ?? ""
-                if let why = settingsRefusal(given.hasPrefix("{") ? .text(given) : (settings ?? .unread(given)), role: role,
-                                             model: WorkerLaunch.launchModel(command: command)) { return said(why) }
+                if value.hasPrefix("{") {
+                    if let why = settingsRefusal(.text(value), role: role, model: WorkerLaunch.launchModel(command: command)) { return said(why) }
+                    continue
+                }
+                if inline { return said("a `--settings` file (VibeSwitcher's launch here gives its settings inline)") }
+                guard let file, value.hasPrefix(file.folder), !value.contains("/../"), (value as NSString).lastPathComponent == "settings.json" else {
+                    return said("a `--settings` file outside its launch's own folder")
+                }
+                guard case .text(let text)? = settings, let digest = file.digest, WalletStamp.digest(Data(text.utf8)) == digest else {
+                    return said(settings.map { if case .unread = $0 { return "a `--settings` file the node couldn't read" } else { return "a `--settings` file that isn't the one VibeSwitcher wrote for it" } }
+                                ?? "a `--settings` file the node couldn't read")
+                }
+                if let why = settingsRefusal(.text(text), role: role, model: WorkerLaunch.launchModel(command: command)) { return said(why) }
             case "-c" where agent == .codex:
-                let key = String((value ?? "").prefix { $0 != "=" })
+                let key = String(value.prefix { $0 != "=" })
                 guard codexConfigKeys.contains(key) || key.hasPrefix(codexConfigPrefix) else {
                     return said("`-c \(clip(key))` (a Codex setting VibeSwitcher's launch doesn't set)")
                 }
             default:
                 break
             }
+        }
+        if verifier, let missing = verifierFlags.keys.sorted().first(where: { !seen.contains($0) }) {
+            let wanted = verifierFlags[missing].flatMap { $0.map { " \($0)" } } ?? ""
+            return "This verifier's command lacks `\(missing)\(wanted)`, which keeps the branch's settings and MCP servers out, so the node can't vouch for it under your review rules: start it from VibeSwitcher's launch, or lower `floor_verifier_different`."
         }
         if let environment {
             let names = environmentNames(role: role, agent: agent)
@@ -151,13 +176,9 @@ public enum RoleLaunchCheck {
 
     static func clip(_ text: String) -> String { text.count > 80 ? String(text.prefix(80)) + "…" : text }
 
-    /// The `--settings` path a command names, when it names a file rather than inline JSON: what the bind reads.
+    /// The `--settings` path a command names, when it names a file rather than inline JSON: what the bind reads. Read
+    /// as the agent reads its options (`WorkerLaunch.options(of:)`).
     public static func settingsPath(in command: String) -> String? {
-        let words = Array(WorkerLaunch.tokens(command).map(\.text).prefix { $0 != "--" })
-        for (index, word) in words.enumerated() {
-            if word == "--settings", index + 1 < words.count, words[index + 1].hasPrefix("/") { return words[index + 1] }
-            if word.hasPrefix("--settings=/") { return String(word.dropFirst("--settings=".count)) }
-        }
-        return nil
+        WorkerLaunch.options(of: command).first { $0.flag == "--settings" }?.value.flatMap { $0.hasPrefix("/") ? $0 : nil }
     }
 }

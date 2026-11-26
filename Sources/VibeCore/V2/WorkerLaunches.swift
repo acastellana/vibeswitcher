@@ -23,11 +23,15 @@ public enum WorkerLaunch {
         public var links: [Agent: [String]]?
         /// The names (never the values) of the environment its spawn request gave it; nil: not told.
         public var environmentNames: [String]?
-        public init(command: String?, cwd: String? = nil, links: [Agent: [String]]? = nil, environmentNames: [String]? = nil) {
+        /// Whether `command` is the request's in full (false: the host's recorded one, long values as `'…'`, after a
+        /// restart or a handover between the spawn and the bind).
+        public var full: Bool
+        public init(command: String?, cwd: String? = nil, links: [Agent: [String]]? = nil, environmentNames: [String]? = nil, full: Bool = true) {
             self.command = command
             self.cwd = cwd
             self.links = links
             self.environmentNames = environmentNames
+            self.full = full
         }
     }
 
@@ -65,11 +69,14 @@ public enum WorkerLaunch {
 
     /// The `env` each team session's `--settings` carries under the floor (`LeadLaunch.prepare`'s `pinModels`): each
     /// family's alias pinned to its id
-    /// (ANTHROPIC_DEFAULT_<FAMILY>_MODEL), and ANTHROPIC_MODEL to the model the session is launched with (`model`, as
-    /// its id; none without one). Whether a project's or a worktree's settings `env` can still win key by key is
-    /// unverified (the security architecture's open list).
+    /// (ANTHROPIC_DEFAULT_<FAMILY>_MODEL), ANTHROPIC_MODEL to the model the session is launched with (`model`, as its
+    /// id; none without one), and ANTHROPIC_BASE_URL to Anthropic's own API (`baseURL`: a gateway the user's or the
+    /// branch's settings name could serve another model under the name). Whether a project's or a worktree's settings
+    /// `env` can still win key by key is unverified (the security architecture's open list); a worker's project
+    /// settings naming a routing key are refused at its bind (`routingKeys`).
     public static func pins(model: String?) -> [String: String] {
         var pins = Dictionary(uniqueKeysWithValues: currentIDs.map { ("ANTHROPIC_DEFAULT_\($0.key.uppercased())_MODEL", $0.value) })
+        pins["ANTHROPIC_BASE_URL"] = baseURL
         if let model { pins["ANTHROPIC_MODEL"] = fullID(model) }
         return pins
     }
@@ -160,36 +167,133 @@ public enum WorkerLaunch {
         return true
     }
 
+    /// Anthropic's own API, the base URL the pins hold.
+    public static let baseURL = "https://api.anthropic.com"
+
+    /// The `env` names that send Claude Code to another endpoint or provider than the one its `--model` names there:
+    /// a base URL, Bedrock, Vertex or Foundry and theirs, a proxy and the certificates that let one read it. A worker
+    /// whose project settings name one is refused at its bind under the floor (its record would say its `--model`).
+    public static let routingKeys: Set<String> = [
+        "ANTHROPIC_BASE_URL", "ANTHROPIC_BEDROCK_BASE_URL", "ANTHROPIC_VERTEX_BASE_URL", "ANTHROPIC_FOUNDRY_BASE_URL", "ANTHROPIC_FOUNDRY_RESOURCE",
+        "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY", "CLAUDE_CODE_SKIP_BEDROCK_AUTH", "CLAUDE_CODE_SKIP_VERTEX_AUTH",
+        "HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy", "NODE_EXTRA_CA_CERTS", "ANTHROPIC_CUSTOM_HEADERS",
+    ]
+
     /// The model names a session's project settings in `cwd` give Claude Code (their "model", and their `env`'s
-    /// ANTHROPIC_MODEL and ANTHROPIC_DEFAULT_*_MODEL): branch content, read the careful way (`settings`) only to add;
-    /// with why a file wasn't read.
-    static func projectModels(cwd: String?) -> (models: [String], notes: [String]) {
-        guard let cwd else { return ([], []) }
-        var found: [String] = [], notes: [String] = []
+    /// ANTHROPIC_MODEL and ANTHROPIC_DEFAULT_*_MODEL), and the routing names their `env` holds (`routingKeys`, with the
+    /// file): branch content, read the careful way (`settings`) only to add; with why a file wasn't read.
+    static func projectModels(cwd: String?) -> (models: [String], notes: [String], routing: [String]) {
+        guard let cwd else { return ([], [], []) }
+        var found: [String] = [], notes: [String] = [], routing: [String] = []
         for file in ["settings.json", "settings.local.json"] {
             let read = settings(in: cwd, [".claude", file])
             if let note = read.note { notes.append(note) }
             guard let object = read.object else { continue }
             if let model = object["model"] as? String { found.append(model) }
-            for (key, value) in object["env"] as? [String: Any] ?? [:]
-            where key == "ANTHROPIC_MODEL" || (key.hasPrefix("ANTHROPIC_DEFAULT_") && key.hasSuffix("_MODEL")) {
+            let env = object["env"] as? [String: Any] ?? [:]
+            for (key, value) in env where key == "ANTHROPIC_MODEL" || (key.hasPrefix("ANTHROPIC_DEFAULT_") && key.hasSuffix("_MODEL")) {
                 if let value = value as? String { found.append(value) }
             }
+            routing += env.keys.filter(routingKeys.contains).sorted().map { "\($0) in .claude/\(file)" }
         }
-        return (found, notes)
+        return (found, notes, routing)
     }
 
-    /// The `--model` (or `--model=`) a launch command passes before its `--` (what follows is the start message: the
-    /// brief's words, never options): the last one, as Claude Code's own option parsing takes it; nil when none. The
-    /// command split as a shell splits it (`words`).
+    /// The `--model` (or `--model=`) a launch command passes (`options(of:)`): the last one, as Claude Code's own option
+    /// parsing takes it; nil when none.
     public static func launchModel(command: String) -> String? {
-        let options = words(command).prefix { $0 != "--" }
-        var found: String?
-        for (index, word) in options.enumerated() {
-            if word == "--model", index + 1 < options.count { found = options[options.startIndex + index + 1] }
-            if word.hasPrefix("--model=") { found = String(word.dropFirst("--model=".count)) }
+        options(of: command).last { $0.flag == "--model" }?.value.flatMap { $0.isEmpty ? nil : $0 }
+    }
+
+    // MARK: A launch's options, as its agent reads them
+
+    /// One option of a launch command: its flag (the long or short name, without `=value`), the value it took (nil: none),
+    /// and whether that value was joined to it (`--model=x`, `-mx`).
+    public struct Option: Equatable, Sendable {
+        public var flag: String
+        public var value: String?
+        public var joined: Bool
+    }
+
+    /// How many words a flag takes: none, one whatever it is (`<value>`: Claude Code's commander and Codex's clap take
+    /// the next word even when it is `--` or starts with `-`), one only when the next word doesn't start with `-`
+    /// (`[value]`), or one and every next word that doesn't (`<values...>`).
+    public enum Arity: Sendable { case none, required, optional, variadic }
+
+    /// Claude Code's flags that take a value, from its own option definitions (2.1.332's `.option(…)` and `new Option(…)`
+    /// texts, read from its binary; no session started): `[value]` ones optional. Every other flag takes none.
+    static let claudeArity: [String: Arity] = [
+        "--model": .required, "--fallback-model": .required, "--advisor": .required, "--effort": .required, "--name": .required, "-n": .required,
+        "--settings": .required, "--setting-sources": .required, "--permission-mode": .required, "--agents": .required, "--agent": .required,
+        "--append-system-prompt": .required, "--append-system-prompt-file": .required, "--system-prompt": .required, "--system-prompt-file": .required,
+        "--mcp-config": .variadic, "--add-dir": .variadic, "--allowedTools": .variadic, "--allowed-tools": .variadic,
+        "--disallowedTools": .variadic, "--disallowed-tools": .variadic, "--tools": .variadic, "--plugin-dir": .required,
+        "--session-id": .required, "--output-format": .required, "--input-format": .required, "--max-turns": .required,
+        "--resume": .optional, "-r": .optional, "--debug": .optional, "-d": .optional, "--worktree": .optional, "-w": .optional, "--from-pr": .optional,
+    ]
+    /// Codex's, from its `--help` (0.x, run in a scratch home): every one of these takes one value; `--no-daemon`,
+    /// `--oss`, `--search` and the rest none.
+    static let codexArity: [String: Arity] = [
+        "--config": .required, "-c": .required, "--model": .required, "-m": .required, "--profile": .required, "-p": .required,
+        "--sandbox": .required, "-s": .required, "--cd": .required, "-C": .required, "--add-dir": .required,
+        "--ask-for-approval": .required, "-a": .required, "--enable": .required, "--disable": .required,
+        "--image": .variadic, "-i": .variadic, "--local-provider": .required,
+    ]
+
+    /// `command`'s options as its agent's parser reads them, the one reading every check here uses (`launchModel`,
+    /// `RoleLaunchCheck`): after its program (leading assignments and `env` with its options passed over, as
+    /// `program(of:)` reads them), each flag takes the words its arity says (`claudeArity`, `codexArity`; `agent` nil:
+    /// Codex's when the program's name starts with `codex`), and only a `--` where a flag could start ends them (what
+    /// follows is the start message). A word that is neither is a positional, passed over.
+    public static func options(of command: String, agent: Agent? = nil) -> [Option] {
+        var words = tokens(command)[...]
+        while words.first?.assignment == true { words = words.dropFirst() }
+        if let first = words.first?.text, first == "env" || first == "/usr/bin/env" || first == "/bin/env" {
+            words = words.dropFirst()
+            while let option = words.first?.text, option.hasPrefix("-") {
+                words = words.dropFirst()
+                if option == "-u" || option == "--unset" { words = words.dropFirst() }
+            }
+            while words.first?.assignment == true { words = words.dropFirst() }
         }
-        return found.flatMap { $0.isEmpty ? nil : $0 }
+        guard let program = words.first?.text else { return [] }
+        let rest = Array(words.dropFirst().map(\.text))
+        let codex = agent.map { $0 == .codex } ?? (program as NSString).lastPathComponent.hasPrefix("codex")
+        let arity = codex ? codexArity : claudeArity
+        var options: [Option] = []
+        var index = 0
+        while index < rest.count {
+            let word = rest[index]
+            index += 1
+            if word == "--" { break }
+            guard word.hasPrefix("-"), word != "-" else { continue }
+            var flag = word, joined: String?
+            if word.hasPrefix("--") {
+                if let equals = word.firstIndex(of: "=") { flag = String(word[..<equals]); joined = String(word[word.index(after: equals)...]) }
+            } else if word.count > 2 {
+                flag = String(word.prefix(2))
+                let tail = word.dropFirst(2)
+                joined = String(tail.hasPrefix("=") ? tail.dropFirst() : tail)
+            }
+            var option = Option(flag: flag, value: joined, joined: joined != nil)
+            switch arity[flag] ?? .none {
+            case .none:
+                break
+            case .required, .variadic:
+                if joined == nil, index < rest.count {
+                    option.value = rest[index]
+                    index += 1
+                }
+                if arity[flag] == .variadic { while index < rest.count, !rest[index].hasPrefix("-") { index += 1 } }
+            case .optional:
+                if joined == nil, index < rest.count, !rest[index].hasPrefix("-") {
+                    option.value = rest[index]
+                    index += 1
+                }
+            }
+            options.append(option)
+        }
+        return options
     }
 
     /// The agent a launch command starts, judged by what runs, never by a scan of its words: the command must be one
@@ -435,6 +539,9 @@ public enum WorkerLaunch {
         public var command: String?
         public var environmentNames: [String]?
         public var settings: RoleLaunchCheck.SettingsRead?
+        public var full = true
+        /// The routing names a worker's project settings hold (`routingKeys`), each with its file.
+        public var projectRouting: [String] = []
         public var notes: [String] = []
     }
 
@@ -446,6 +553,7 @@ public enum WorkerLaunch {
         var facts = BindFacts(known: true)
         facts.command = seen.command
         facts.environmentNames = seen.environmentNames
+        facts.full = seen.full
         let settingsPath = seen.command.flatMap(RoleLaunchCheck.settingsPath(in:))
         facts.model = seen.command.flatMap(launchModel(command:)).flatMap { $0.lowercased() == "default" ? nil : $0 }
         // The agent: a bare name told now; a path resolved in the bounded block below (a hung mount never holds the
@@ -466,7 +574,8 @@ public enum WorkerLaunch {
                                                                                             limit: settingsLimit)) {
                 settingsText = String(data: data, encoding: .utf8)
             }
-            result.set((home.object?["model"] as? String, project.models, home.note.map { [$0] } ?? [], project.notes, home.note == nil, agent, settingsText))
+            result.set((home.object?["model"] as? String, project.models, home.note.map { [$0] } ?? [], project.notes, home.note == nil, agent, settingsText,
+                        project.routing))
             done.signal()
         }
         if done.wait(timeout: .now() + limit) == .success, let read = result.get() {
@@ -475,6 +584,7 @@ public enum WorkerLaunch {
             if case .path = told { facts.agent = read.agent }
             if let settingsPath { facts.settings = read.settingsText.map { .text($0) } ?? .unread(settingsPath) }
             facts.notes = read.homeNotes + read.projectNotes
+            facts.projectRouting = read.projectRouting
             facts.unread = !read.projectNotes.isEmpty
             facts.families = Array(Set(ran(facts) + read.projectModels.flatMap(runsOn))).sorted()
         } else {
@@ -512,7 +622,7 @@ public enum WorkerLaunch {
     /// The bounded reads' result, handed between two queues.
     private final class Found: @unchecked Sendable {
         typealias Read = (defaultModel: String?, projectModels: [String], homeNotes: [String], projectNotes: [String], homeRead: Bool, agent: Agent?,
-                          settingsText: String?)
+                          settingsText: String?, projectRouting: [String])
         private let lock = NSLock()
         private var value: Read?
         func set(_ found: Read) { lock.withLock { value = found } }

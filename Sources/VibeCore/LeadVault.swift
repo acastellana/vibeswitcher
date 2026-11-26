@@ -154,7 +154,9 @@ public struct LeadVault: Sendable {
         /// audits (and the same finder of its own).
         case issue(role: LeadLaunch.Role, root: String, task: String?, auditing: String?, finder: Finder? = nil, agent: Agent? = nil)
         case rotateLead(root: String, expected: String, session: String, restoring: Member? = nil)
-        case bind(grant: String, root: String, session: String)
+        /// `settings`: the digest of the `--settings` file the launch builder wrote, where settings aren't inline (the
+        /// Mac's: `LeadLaunch.Prepared.settingsDigest`); nil otherwise.
+        case bind(grant: String, root: String, session: String, settings: String? = nil)
         case revoke(grant: String, root: String)
         /// The task is over: its worker's and verifier's grants and its verdict go (the lead).
         case retire(root: String, task: String)
@@ -332,8 +334,8 @@ public struct LeadVault: Sendable {
     }
 
     /// Ties a grant to the session it was issued for (once the session host started it).
-    public func bind(_ grant: String, root: String, session: String) throws {
-        _ = try call(.bind(grant: grant, root: root, session: session))
+    public func bind(_ grant: String, root: String, session: String, settings: String? = nil) throws {
+        _ = try call(.bind(grant: grant, root: root, session: session, settings: settings))
     }
 
     /// Withdraws a grant (its session didn't start).
@@ -529,6 +531,12 @@ public struct LeadVault: Sendable {
     static let unexpected = Refused("The session host answered something else; it may be older than the app.")
 
     // MARK: Files
+
+    /// The folder every launch of `root`'s roles writes its files under, the standard vault's (`runFolder`), ending in
+    /// `/`: where a launch's `--settings` file must lie for the bind (`RoleLaunchCheck.SettingsFile`).
+    public static func runPrefix(root: String) -> String {
+        standard.folder.appendingPathComponent("run/\(key(root))", isDirectory: true).path + "/"
+    }
 
     /// Where a role's launch files go.
     public func runFolder(root: String, name: String) -> URL {
@@ -864,7 +872,7 @@ extension LeadVault {
                 exclusionDefault = WorkerLaunch.bindFacts(seen: .init(command: nil), home: configHome, limit: WorkerLaunch.bindLimit)
             }
             var launch: WorkerLaunch.BindFacts?
-            if case .bind(_, _, let session) = request {
+            if case .bind(_, _, let session, _) = request {
                 // The command's model from its argv; the files read the careful way, off this queue, bounded.
                 let facts = WorkerLaunch.bindFacts(seen: bound ?? seenOf?(session), home: configHome, limit: WorkerLaunch.bindLimit)
                 launch = facts
@@ -1018,7 +1026,7 @@ extension LeadVault {
                     team.members.append(member)
                 }
                 return .ok
-            case .bind(let grant, let root, let session):
+            case .bind(let grant, let root, let session, let settingsDigest):
                 guard let member = team(root)?.members.first(where: { $0.id == grant }), member.issuer == caller else {
                     return .refused("That grant isn't yours to bind (or it was withdrawn).")
                 }
@@ -1050,10 +1058,17 @@ extension LeadVault {
                 }
                 // Under the floor, a worker's, verifier's or finder's launch carries only what VibeSwitcher's own launch does
                 // (`RoleLaunchCheck`: its flags, its spawn environment's names, its `--settings`).
-                if member.role != .lead, team(root)?.floor?.verifierDifferent == true, let launch, launch.known, let command = launch.command,
-                   let why = RoleLaunchCheck.refusal(command: command, agent: launch.agent ?? member.agent ?? .claude, role: member.role,
-                                                     environment: launch.environmentNames, settings: launch.settings) {
-                    return .refused(why)
+                if member.role != .lead, team(root)?.floor?.verifierDifferent == true, let launch, launch.known, let command = launch.command {
+                    if let why = RoleLaunchCheck.refusal(command: command, agent: launch.agent ?? member.agent ?? .claude, role: member.role,
+                                                         environment: launch.environmentNames, settings: launch.settings,
+                                                         file: .init(digest: settingsDigest, folder: LeadVault.runPrefix(root: root)), full: launch.full) {
+                        return .refused(why)
+                    }
+                    // A worker loads its branch's project settings by design: one whose `env` routes it elsewhere
+                    // (`WorkerLaunch.routingKeys`) would run another model than its record says.
+                    if member.role == .worker, (launch.agent ?? member.agent ?? .claude) == .claude, let routing = launch.projectRouting.first {
+                        return .refused("This worker's branch sets \(routing), which can send it to another model than its --model, so the node can't vouch for it under your review rules: remove it from the branch's settings, or lower `floor_verifier_different`.")
+                    }
                 }
                 var allowanceUse: (task: String, by: String, finder: Finder?)?
                 if member.role == .verifier, member.session == nil, let task = member.task,

@@ -3000,7 +3000,7 @@ public final class LeadToolset: MCPToolset {
             }
             let session = try runtime.spawn(cwd: folder, command: launch.command, env: environment, label: label,
                                             agent: codex ? Agent.codex.rawValue : Agent.claude.rawValue)
-            do { try vault.bind(grant, root: root, session: session) } catch {
+            do { try vault.bind(grant, root: root, session: session, settings: launch.settingsDigest) } catch {
                 // A session without its role would run with no tools: it goes.
                 try? runtime.kill(session)
                 runtime.forget(session)

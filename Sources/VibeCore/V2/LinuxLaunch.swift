@@ -89,6 +89,8 @@ public enum LinuxLaunch {
             head = rest + " \(flag) \(quote(value))"
             inlined.append(file)
         }
+        var result = prepared
+        if inlined.contains(prepared.settingsFile) { result.settingsDigest = nil }
         if let rest = without("--append-system-prompt-file", prepared.promptFile, in: head) {
             let withPrompt = rest + " --append-system-prompt \(quote(prompt))"
             if withPrompt.utf8.count + end.utf8.count <= argumentLimit - argumentRoom {
@@ -96,7 +98,6 @@ public enum LinuxLaunch {
                 inlined.append(prepared.promptFile)
             }
         }
-        var result = prepared
         result.command = head + end
         for file in inlined { unlink(file) }
         return result

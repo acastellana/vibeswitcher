@@ -14,6 +14,9 @@ public enum LeadLaunch {
         /// What the session's environment adds (`SpawnRequest.env`): its TMPDIR, a folder of its own (see `SessionTemp`),
         /// and its role (`SessionNote.roleVariable`).
         public var environment: [String: String] = [:]
+        /// The digest of the `--settings` file it names (`WalletStamp.digest`), given with its bind so the vault knows
+        /// the file it reads is the one written here; nil when its settings are inline (Linux: `LinuxLaunch.inline`).
+        public var settingsDigest: String?
     }
 
     static let readOnly = ["Edit", "Write", "NotebookEdit"]
@@ -667,8 +670,8 @@ public enum LeadLaunch {
         // The account's usage windows reach VibeSwitcher only through a status line's input: its own records them and
         // shows yours (see `UsageStatusLine`): for a verifier, only your user settings' (its project settings don't run).
         settings["statusLine"] = UsageStatusLine.settings(server: server, userOnly: role == .verifier)
-        try LeadVault.writePrivate(try JSONSerialization.data(withJSONObject: settings, options: [.prettyPrinted, .sortedKeys]),
-                                   to: URL(fileURLWithPath: settingsFile))
+        let settingsData = try JSONSerialization.data(withJSONObject: settings, options: [.prettyPrinted, .sortedKeys])
+        try LeadVault.writePrivate(settingsData, to: URL(fileURLWithPath: settingsFile))
         let quote = RecentProjects.shellQuote
         let trimmed = base.trimmingCharacters(in: .whitespaces)
         // The model given replaces one the project's command names (`--model x`, `--model=x`): `claude --help` doesn't
@@ -698,6 +701,7 @@ public enum LeadLaunch {
         if let resume { parts.append("--resume \(quote(resume))") }
         parts.append("-- \(quote(start))")
         var prepared = Prepared(command: parts.joined(separator: " "), promptFile: promptFile, mcpFile: mcpFile, settingsFile: settingsFile)
+        prepared.settingsDigest = WalletStamp.digest(settingsData)
         // Marks the role's session: its hook gives it none of the notes plain sessions get (`SessionNote`).
         prepared.environment[SessionNote.roleVariable] = role.rawValue
         // Its updater off, from the start (`autoUpdaterVariable`).
