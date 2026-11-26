@@ -240,6 +240,10 @@ struct NodeAcceptanceTests {
             return live.contains("Do you want to proceed?")
         }
         #expect(live.contains("Do you want to proceed?"), "\(live.debugDescription)")
+        // The fake keeps its state after it draws (`draw`, then `save_state`): the prompt on the page can come before the
+        // state says so, and a state read once at the refusal read "idle" on a loaded runner (v2 linux, core, ff7d80b8).
+        try #require(await eventually(timeout: 60) { EngineEndToEndTests.state(files)["mode"] as? String == "permission" },
+                     "\(EngineEndToEndTests.state(files))")
         // Watch-only: a key from the page goes nowhere.
         try page.type("2", on: stream)
         try #require(await eventually(timeout: 60) { node.said.contains("terminal stream \(stream): input refused") }, "\(node.said)")

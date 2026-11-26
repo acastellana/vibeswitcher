@@ -207,7 +207,15 @@ struct WitnessTests {
         let worker = try await world.host.spawn("exec /bin/sleep 600", cwd: try worktree(world, "no-tools"), label: "Worker: no-tools")
         try task(world, "no-tools", .running) { $0.worker = worker.id.uuidString }
         let bound = Date().timeIntervalSince1970 - LeadWitness.toolsWithin - 60
-        world.queue.sync { world.engine.toolTimes = [worker.id.uuidString: (bound: bound, tools: nil)] }
+        // The role sweep hands the witness the vault's roster times (`makeRoleSweep`'s `tools`), replacing these: one under
+        // way, or one a refresh starts once its 6 s are up, put the roster's times (none for this worker) over the test's
+        // before the witness looked (v2 linux, core, ff7d80b8's rerun: neither ended nor told in 60 s). Off here, once no
+        // look of it is under way: this test is the witness's, given the times.
+        #expect(await eventually(timeout: 60) { world.queue.sync { !world.engine.sweeping } })
+        world.queue.sync {
+            world.engine.roleSweep = nil
+            world.engine.toolTimes = [worker.id.uuidString: (bound: bound, tools: nil)]
+        }
         world.engine.refresh()
         #expect(await eventually(timeout: 60) { listed(world, worker.id)?.isLive == false }, "\(String(describing: listed(world, worker.id)))")
         #expect(await eventually(timeout: 60) { told(world, lead, "never got its tools").count == 1 }, "\(world.pending(lead).map(\.text))")
