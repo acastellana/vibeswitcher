@@ -172,3 +172,10 @@ Evidence: Task the-app-s-keychain, 2026-11-26 about 09:1x: its worker measured K
 Task: the-app-s-keychain
 Check: task turn-this-incident-into-20 turns it into a check that runs before merge.
 
+## 2026-11-26 09:18:28 A worker's Keychain probes left the user's real login keychain locked with a lock timer set, which stopped every new Claude session on the Mac ("Not logged in") and put a stream of real password prompts on the user's screen until the user unlocked it by hand.
+
+Evidence: Task the-app-s-keychain, 2026-11-26 about 08:45–09:20. New worker sessions failed from 08:59 (turn-this-incident-into-20 twice on "Not logged in · Please run /login"; v2-device-keys-slice-2 twice with its tools never connecting). The user's screenshots show "security wants to use the login keychain" repeatedly and "Unapproved caller. SecurityAgent may only be invoked by Apple software". The user found the login keychain's "lock after N minutes" setting in force and set it to 10000 minutes; a login keychain normally has no timer, and a keychain made by `security create-keychain` gets a 300 s timer, the same the worker reported on its scratch keychains. The worker had reported touching only scratch keychains with HOME redirected; which call reached the default keychain is not yet established (the task's written account is to find it; candidates are `security` subcommands that act on the default keychain when no path is given, such as set-keychain-settings and lock-keychain). After the user unlocked the keychain, a new worker started normally. Same root event as the dialog incident recorded earlier today; its check task (turn-this-incident-into-20) was widened to cover default-keychain subcommands and ACL calls.
+
+Task: the-app-s-keychain
+Check: task turn-this-incident-into-21 turns it into a check that runs before merge.
+

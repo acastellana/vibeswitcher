@@ -4721,3 +4721,7 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-26 09:01 Planned v2-device-keys-slice-2: v2 device keys, slice 5: the page's key module (unlock key, read key, signed frames through one ordered queue; JavaScript, in a clone, a branch for v2)
 - 2026-11-26 09:10 Kept v2-on-the-mac-6 unmerged: By design nothing of it merges into main: its commits are on the local branch v2-mac-anchored-cli in its clone (.vibeswitcher/v2-anchored, tip b15e0052), on top of v2-mac-agent 051a8fa9: rows 7 and 10, independently reviewed twice by review-v2-s-mac-4 (last verdict on b15e0052: 'still ready to offer', no finding; the closing pass's one widened case re-run over the 54-combination table). Delivered as a branch for v2 at the user's push. The next Mac piece builds on its clone. No merge and no cleanup until the Mac node work is finished.
 - 2026-11-26 09:17 Started a worker on v2-device-keys-slice-2
+- 2026-11-26 09:17 Review of the-app-s-keychain: none
+- 2026-11-26 09:17 Started a worker on the-app-s-keychain
+- 2026-11-26 09:18 Incident: A worker's Keychain probes left the user's real login keychain locked with a lock timer set, which stopped every new Claude session on the Mac ("Not logged in")… (in the-app-s-keychain); planned turn-this-incident-into-21 to turn it into a check
+- 2026-11-26 09:18 Folded turn-this-incident-into-21 into turn-this-incident-into-20: that task carries its work
