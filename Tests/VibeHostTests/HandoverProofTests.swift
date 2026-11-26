@@ -153,7 +153,7 @@ struct HandoverProofTests {
         let book = scene.storage.book(handedOver: received.secrets)
         #expect(book.appKey.map { $0.withUnsafeBytes { Data($0) } } == scene.yours)
         #expect(try Data(contentsOf: scene.file) == scene.kept)
-        guard case .grant = book.answer(.issue(role: .lead, root: "/tmp/handover-proof-repo", task: nil, auditing: nil), from: .app) else {
+        guard case .grant = book.answer(.issue(role: .lead, root: scene.folder.path, task: nil, auditing: nil), from: .app) else {
             Issue.record("no grant"); return
         }
         #expect(try Data(contentsOf: scene.file) != scene.kept)
