@@ -457,8 +457,8 @@ or decided. Done on Linux, tested on both systems (`ApprovalJudgmentTests`, `App
    (a plist in `~/Library/LaunchAgents` not tried); `launchctl print`'s `state`, `runs`, `last exit code` and `last
    terminating signal`; `bootout` (and a killed job process) ends the job's process group and nothing outside it (a
    session-leader child runs on): AG-1's question, answered from an agent's session with a scratch job. *A real Mac
-   proved* (`MacAgentTests`, `MacCheckedSessionsTests`, `MacSwitchedHostTokenTests`, red on `01d34331` and green from
-   `4c2f76b5`): start, status and stop of a scratch job leaving nothing; a changed plist and another program refused and
+   proved* (`MacAgentTests`, `MacCheckedSessionsTests`, `MacSwitchedHostTokenTests`; which were red on the seams
+   `01d34331` and which weren't, the design's "What a real Mac proved" says): start, status and stop of a scratch job leaving nothing; a changed plist and another program refused and
    left alone; the host by token and code and a look-alike with the host's path refused; a killed host not started
    again by launchd; a session's environment from the login shell and launchd, not the starter; a switched host's new
    connections' token running the new image. *Not reached while `macUnbuilt` and `isCheckedMacNode` are off:* a real

@@ -587,7 +587,10 @@ pins for that build, with the Hardened Runtime, and the process the same before 
 (`Link.isProcess(of:)`); then the host's welcome, whose pid must be the token's; and the process's command line (the
 kernel's, to its own user) exactly the job's (`Steps.jobArguments`: `NodeUnit.execStart` for the user's node). Only then
 "the node runs". `status` and `stop` check the same, a switched node's process allowed the keeper's two flags and their
-numbers after it (`NodeAgent.keeperFlags`, a checked node's next image's). While it
+numbers after it (`NodeAgent.keeperFlags`): read from the switch, not run (no checked node runs here), a checked node's
+next image is started as `<target build>/bin/vibeswitcher-host` with `NodeUnit.execStart`'s arguments for that build,
+then `--handover-keeper-channel FD --handover-keeper-pid PID` (`MacHandoverSwitch.keeperArguments`, then
+`HostHandover.exec`). While it
 waits, a job whose process ended (`state = not running`) refuses at once with the end of `node.log`; at the limit
 (30 s) it refuses; and every refusal after the load boots out what `start` loaded, so it leaves no job behind.
 
@@ -627,7 +630,9 @@ server child is started with:
 
 - `SSH_AUTH_SOCK`: launchd's own value for the user's domain, `launchctl getenv SSH_AUTH_SOCK`, read by the host at its
   start (`/bin/launchctl`, `Platform.Service.launchctl`): taken only when it is an absolute path to a socket the user
-  owns, not a link; else the sessions have none. *Residual:* the domain's value is any process of the user's to set
+  owns, not a link; else the sessions have none. Measured: a scratch job in `gui/501` running `launchctl getenv
+  SSH_AUTH_SOCK` gets the same socket (`/var/run/com.apple.launchd.<random>/Listeners`) as a process outside launchd,
+  and launchd gives the job the same in its own environment. *Residual:* the domain's value is any process of the user's to set
   (`launchctl setenv`), as for every Terminal opened after it; the Mac seal list (step 8) watches launchctl's user
   environment.
 - `__CF_USER_TEXT_ENCODING`: `0x<uid>:<encoding>:<region>` as launchd gives it, from the user's
@@ -651,13 +656,18 @@ scratch `.zprofile`, never the user's.
 
 **`SWIFT_BACKTRACE`, which the reset drops.** The plist keeps `enable=no`: the Swift runtime reads it at load, so it acts
 on the host itself before the reset. For the host's children a checked node puts `SWIFT_BACKTRACE=enable=no` in its base
-environment as a fixed value (the server child, the launchers and the parsers get it, as Linux's
-`sessionEnvironmentFixed` gives it): no Swift child of the node starts the backtracer, which reads the crashed process's
+environment as a fixed value (the server child, the launchers, the parsers and the sessions get it, as Linux's
+`sessionEnvironmentFixed` gives it; `MacCheckedSessionsTests` sees it in a session): no Swift child of the node starts the backtracer, which reads the crashed process's
 memory into its stderr (the server's is `node.log`). A crash of any of them still goes to the system's crash reporter
 (`~/Library/Logs/DiagnosticReports`), as every process's does.
 
-**What a real Mac proved (2026-11-26, this Mac, macOS 27.2, SIP on; `MacAgentTests`, each red on the seams
-`01d34331` and green from `4c2f76b5`).** With a scratch label in `gui/501`, a scratch plist folder and data root, and a
+**What a real Mac proved (2026-11-26, this Mac, macOS 27.2, SIP on).** Red and green, exactly: `MacAgentTests`' five
+launchd tests (a) to (e) and its three first function tests were red on the seams `01d34331` and are green from
+`4c2f76b5`; in `MacCheckedSessionsTests` (f) the session's `SSH_AUTH_SOCK`, `SWIFT_BACKTRACE` and umask were red there,
+while its `PATH`, locale and the dropped planted names were already green (the login shell and the session's list by
+name gave them); `NodeAgentTests`' new cases were green on the seams (the plist as data came with them);
+`MacSwitchedHostTokenTests` is a measurement, green when written; the four function tests the blind check's findings
+added (`3abd3048`) use the steps that fix adds, so no run before the fix exists. With a scratch label in `gui/501`, a scratch plist folder and data root, and a
 scratch record pinning hardened copies of the built host, server and command line: `start` writes and checks the plist,
 loads the job, and its host comes up from the plist's exact arguments (the job's pid's arguments are them), known by its
 socket's audit token and running code; `status` says so with its build; `stop` unloads it and leaves no job, no process

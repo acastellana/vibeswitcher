@@ -81,7 +81,7 @@ public struct MacAgent {
                     say: @escaping (String) -> Void, confirm: @escaping (_ what: String) -> Result<Void, StartRefusal>,
                     serverStop: @escaping () -> Void, children: @escaping (pid_t) -> [Platform.Processes.Link],
                     alive: @escaping (Platform.Processes.Link) -> Bool, lockFree: @escaping (String) -> Bool,
-                    patience: TimeInterval = 30, now: @escaping () -> Date = Date.init, pause: @escaping () -> Void = { usleep(50_000) },
+                    patience: TimeInterval = 30, now: @escaping () -> Date = Platform.Clock.steadyDate, pause: @escaping () -> Void = { usleep(50_000) },
                     arguments: @escaping (pid_t) -> [String] = Platform.Processes.arguments,
                     jobArguments: @escaping (NodePins.Build) -> [String]? = { _ in nil }, liveSessions: @escaping () -> Int? = { nil }) {
             self.launchctl = launchctl
@@ -319,8 +319,8 @@ public struct MacAgent {
         }
         var decoder = HostFrameDecoder()
         var chunk = [UInt8](repeating: 0, count: 64 * 1024)
-        let deadline = Date().addingTimeInterval(5)
-        while Date() < deadline {
+        let deadline = Platform.Clock.steadyDate().addingTimeInterval(5)
+        while Platform.Clock.steadyDate() < deadline {
             var watched = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
             let woke = poll(&watched, 1, 200)
             if woke < 0, errno == EINTR { continue }
