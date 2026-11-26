@@ -4866,3 +4866,4 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-26 20:55 Planned v2-bring-main-s: v2: bring main's commits since the last merge into v2 (GitHub's main e02ece00 merged into GitHub's v2; in a clone, a branch for v2)
 - 2026-11-26 20:56 Planned the-lead-s-records-2: The lead's records make one commit where they now make many ("Lead: decisions and progress" commits unified) (review audit)
 - 2026-11-26 20:58 Audit of the-command-guard-fails: complete, clean, round 3: 3 Important closed, 2 Nit (1 open), 1 Pre-existing open
+- 2026-11-26 20:58 Planned fix-refusedgit-swift-333: Fix RefusedGit.swift:333: `"sudo": Wrapper(valued: ["-u", "-g"])` doesn't li… (review audit, for security)
