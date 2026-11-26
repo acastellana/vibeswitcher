@@ -96,10 +96,24 @@ mm_where() {
     else echo "${TERM_PROGRAM:-an unknown terminal}"; fi
 }
 
+# Throws away whatever was typed at the terminal before a question (a Return pressed twice, or a password typed into
+# Terminal by mistake while a dialog was up, Return or not): only what is typed after the question answers it, and no
+# such keys reach a record. The terminal's input queue is flushed (tcflush); without python3, complete lines are read
+# off and dropped.
+mm_drain() {
+    [[ -t 0 ]] || return 0
+    if ! /usr/bin/python3 -I -c 'import sys, termios; termios.tcflush(sys.stdin.fileno(), termios.TCIFLUSH)' 2> /dev/null; then
+        local dropped
+        while IFS= read -r -t 1 dropped; do :; done
+    fi
+    return 0
+}
+
 # Return goes on; anything else (or end of input) stops, nothing done. Dry runs don't ask.
 mm_go() {
     [[ $mm_dry == 1 ]] && { mm_say "(dry run: would ask \"$*\" and wait for Return)"; return 0; }
     local answer
+    mm_drain
     printf '%s [Return goes on, anything else stops] ' "$*"
     IFS= read -r answer || mm_stop "no answer"
     [[ -z $answer ]] || mm_stop "stopped at your word"
@@ -165,8 +179,12 @@ PLIST
 }
 
 # Whether the job has a running process (`pid = ` one tab in, as AG-1 reads launchctl print).
+# The print is taken whole first: `| grep -q` under pipefail could fail on launchctl's SIGPIPE and say "not running"
+# while the job runs.
 mm_job_running() {
-    /bin/launchctl print "gui/$mm_uid/$mm_label" 2> /dev/null | /usr/bin/grep -qE '^	pid = [0-9]+'
+    local printed
+    printed=$(/bin/launchctl print "gui/$mm_uid/$mm_label" 2> /dev/null) || return 1
+    /usr/bin/grep -qE '^	pid = [0-9]+' <<< "$printed"
 }
 
 mm_bootout() {
@@ -246,6 +264,7 @@ mm_record() {
     if [[ -n $mm_seen ]]; then
         mm_say ""
         mm_say "One line for the record (never a password): $mm_seen"
+        mm_drain
         printf '> '
         IFS= read -r seen || seen=""
         printf 'seen: %s\n' "${seen:-(nothing typed)}" >> "$file"

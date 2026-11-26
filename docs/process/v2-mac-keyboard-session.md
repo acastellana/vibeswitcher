@@ -14,13 +14,13 @@ cd /Users/albert/dev/vibeswitcher/.vibeswitcher/worktrees/v2-on-the-mac-8/.vibes
 ```
 
 **How each step goes.** It builds its probes (a few seconds), says what will appear, and waits: press **Return** to go
-on (anything else stops it, nothing done). At the end it asks for **one line of what you saw**: type it and Return
-(never a password there). Its record is printed and saved in `.build/mac-measure-records/<script>.txt` of this
+on (anything else stops it, nothing done). A step that shows something asks at the end for **one line of what you
+saw**: type it and Return (never a password there; anything typed into Terminal before that question is thrown away). Its record is printed and saved in `.build/mac-measure-records/<script>.txt` of this
 checkout (a run again replaces it; a run that stopped saves `<script>.stopped.txt`).
 
 **While a dialog is up, answer the dialog, not Terminal.** Don't press Ctrl-C then: the script waits for the dialog to
-end before it removes its job (it never kills a process inside an authentication), and every dialog ends by itself
-within 60 s. A job left behind is named with its `launchctl bootout` line; the undo list below catches it too.
+end before it removes its job (it never kills a process inside an authentication), and every approval dialog ends by
+itself within 60 s (LA-7's and ESC-2's consent questions wait for your answer). A job left behind is named with its `launchctl bootout` line; the undo list below catches it too.
 
 ## A. Needs nothing (about 12 minutes)
 
@@ -234,8 +234,8 @@ owned `root wheel`, `drwxr-xr-x` and `-rw-r--r--`.
 /bin/mkdir -p .build/mac-measure-records; { /bin/ls -lde / /Library "/Library/Application Support" "/Library/Application Support/VibeSwitcher-trial" "/Library/Application Support/VibeSwitcher-trial/node-501.pins"; /bin/cat "/Library/Application Support/VibeSwitcher-trial/node-501.pins"; echo x >> "/Library/Application Support/VibeSwitcher-trial/node-501.pins" && echo "WRITE ALLOWED"; /usr/bin/touch "/Library/Application Support/VibeSwitcher-trial/x" && echo "CREATE ALLOWED"; } > .build/mac-measure-records/sudo-trial.txt 2>&1; cat .build/mac-measure-records/sudo-trial.txt
 ```
 
-Look for two lines ending `permission denied` (any case: the shell's for the write, `touch`'s for the create) and no
-`ALLOWED`.
+Look for two lines saying `permission denied` (zsh's `zsh: permission denied: …` for the write, `touch: …: Permission
+denied` for the create) and no `ALLOWED`.
 
 **T3. Undo the trial** (one `sudo` password again), file first, then its folder:
 
