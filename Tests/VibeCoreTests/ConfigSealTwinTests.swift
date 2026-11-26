@@ -196,4 +196,19 @@ struct ConfigSealTwinTests: LeadTeamFixture {
         }
         #expect(watched.filter { $0.name.contains(".zwc") }.count == 5)
     }
+
+    /// Blind check: a twin's hash and its per-key hashes (which say whether it's there) come from one read, so a look
+    /// never records a present twin's hash beside keys that say it's absent.
+    @Test func aTwinsHashAndItsKeysAgree() throws {
+        let item = try #require(ConfigSeal.homeWatched(home: home).first { $0.name == twin(".zshrc") })
+        let key = ConfigSeal.keyPrefix + item.name
+        let absent = ConfigSeal.hashes(of: [item])
+        #expect(absent[ConfigSeal.keysKey(of: key)].map(ConfigSeal.decode) == [:])
+        try write("code\n", home + "/.zshrc.zwc")
+        let present = ConfigSeal.hashes(of: [item])
+        let hash = try #require(present[key])
+        #expect(hash != absent[key])
+        #expect(present[ConfigSeal.keysKey(of: key)].map(ConfigSeal.decode) == [ConfigSeal.twinKey: hash])
+        #expect(ConfigSeal.fingerprint(item) == hash)
+    }
 }

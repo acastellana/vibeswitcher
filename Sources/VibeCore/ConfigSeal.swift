@@ -588,6 +588,12 @@ public enum ConfigSeal {
                 all[keysPrefix + item.name] = encode(Dictionary(parts, uniquingKeysWith: { first, _ in first }))
                 continue
             }
+            // A compiled twin: read once too, so its hash and its per-key hashes (whether it's there) never disagree.
+            if let twin = twinHashes(item) {
+                all[keyPrefix + item.name] = twin.hash
+                all[keysPrefix + item.name] = encode(twin.keys)
+                continue
+            }
             if item.kind == .folder {
                 let folder = readFolder(item)
                 all[keyPrefix + item.name] = folder.hash
@@ -609,10 +615,7 @@ public enum ConfigSeal {
     static func keyHashes(_ watched: Watched) -> [String: String]? {
         if let parts = parts(watched) { return Dictionary(parts, uniquingKeysWith: { first, _ in first }) }
         // A compiled twin: none while absent, so one first watched holds only when it's there (`comesAndGoes`).
-        if watched.kind == .file, isTwin(name: watched.name) {
-            let digest = twinDigest(watched.path)
-            return digest == "absent" ? [:] : [twinKey: hex(SHA256.hash(data: Data(digest.utf8)))]
-        }
+        if let twin = twinHashes(watched) { return twin.keys }
         guard watched.kind == .mcpServers || (watched.kind == .file && watched.path.hasSuffix(".json")) else { return nil }
         var info = stat()
         guard stat(watched.path, &info) == 0 else { return [:] }
@@ -745,7 +748,7 @@ public enum ConfigSeal {
     public static func fingerprint(_ watched: Watched) -> String? {
         switch watched.kind {
         case .plugin, .scripts: return parts(watched).map(partsHash)
-        case .file where isTwin(name: watched.name): return hex(SHA256.hash(data: Data(twinDigest(watched.path).utf8)))
+        case .file where isTwin(name: watched.name): return twinHashes(watched)?.hash
         default: break
         }
         var hasher = SHA256()
@@ -783,6 +786,14 @@ public enum ConfigSeal {
 
     /// A compiled twin's per-key hash (`keyHashes`), as the card names it.
     static let twinKey = "compiled code"
+
+    /// A compiled twin's hash and per-key hashes (none while absent), from one read: nil for anything else.
+    static func twinHashes(_ watched: Watched) -> (hash: String, keys: [String: String])? {
+        guard watched.kind == .file, isTwin(name: watched.name) else { return nil }
+        let digest = twinDigest(watched.path)
+        let hash = hex(SHA256.hash(data: Data(digest.utf8)))
+        return (hash, digest == "absent" ? [:] : [twinKey: hash])
+    }
 
     /// A zsh startup file's compiled twin as watched: "absent", or its link's target and its contents' hash. What
     /// can't be read whole (unreadable, not a regular file, past `scriptLimit`) is told by its size, times (ctime too:
