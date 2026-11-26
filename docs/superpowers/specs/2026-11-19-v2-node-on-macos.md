@@ -827,7 +827,7 @@ waited for; and `limitAnAncestorSwappedAndBackWithAnUnshownKey` (with `Debug`, a
 (`MacAgentGrammarTests`): the fixtures cut from this Mac's captures placed in each state and refused for every line the
 grammar can't place; a job with a control character or a non-ASCII byte not written; this Mac's real launchd printing
 the scratch host's job as the grammar says when running, killed and loaded (the canary for a newer release); one real
-job per key `print` shows refused, the six it shows nothing of placed; only no listener is no server; a failed bootout
+job per key `print` shows refused, the six it shows nothing of tested there placed (`JetsamProperties`, the seventh, measured by the final re-check); only no listener is no server; a failed bootout
 said as failed; and `HostLockLinkTests` (a lock that is a link refuses the host's start, nothing made where it points).
 
 **What the round proved on this Mac** (red on `5dfbde9b`, green from `abab3abd`): `MacAgentRoundTests`, the reviewer's

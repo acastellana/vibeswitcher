@@ -489,7 +489,7 @@ or decided. Done on Linux, tested on both systems (`ApprovalJudgmentTests`, `App
    ordered grammar of macOS 27.2's format derived from the job start wrote (every line placed, nothing searched for, its
    path by `lstat` against the file start holds); the job is written in printable ASCII only; a newer macOS that prints
    otherwise refuses until someone looks (the canary `thisMacsLaunchdPrintsTheJobAsTheGrammarSays`). Notes: the keys
-   `print` shows nothing of corrected (six, measured); ACLs refused; a link at the lock refused and `HostServer` opens
+   `print` shows nothing of corrected (six then, seven with `JetsamProperties` since the final re-check); ACLs refused; a link at the lock refused and `HostServer` opens
    `--lock` with `O_NOFOLLOW` (the app's host too: shared code); only no listener is no server for `stop`; a failed
    bootout said as failed; session ids read at every look. What start still can't bind is the design's table. *Owed for
    a later step:* a host-side record of its sessions' ids, so `stop` can find an orphan whose session leader ended before
