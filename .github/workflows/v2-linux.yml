@@ -82,6 +82,13 @@ jobs:
           swift --version
           bash scripts/ci/check-versions.sh swift node chrome
       - name: Tests
+        # Three tests at once, not one a core (scripts/test.sh's default): most of this job's tests start a scratch node
+        # (a host, its server child and their parsers) or the page checks' Chrome, and four of them at once on the
+        # runner's four cores starved one now and then into a 60 s wait (2026-11-26: A10, the witness's no-tools test, the
+        # relay's spawn). Back to four once that load is gone: the page checks in a job of their own
+        # (docs/process/v2-flaky-tests.md, "Under load on the runner"), or a runner with more cores.
+        env:
+          SWT_EXPERIMENTAL_MAXIMUM_PARALLELIZATION_WIDTH: 3
         run: bash scripts/test.sh --filter 'VibeCoreTests|VibeNodeTests'
   host:
     runs-on: ubuntu-24.04
