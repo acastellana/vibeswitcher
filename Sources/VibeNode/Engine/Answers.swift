@@ -616,7 +616,7 @@ extension LeadEngine {
             let held = ConfigHoldStore.held(root: root, vault: vault, home: home, snapshot: snapshot.projects[root])
                 .map { SessionPresets.withPresetsToAccept($0, vault: vault, home: home, nodeRoot: node) }
             // The home folder's watched things' names (the Mac-wide seal's): what another root's open card may show too.
-            let homeNames = Set(ConfigSeal.homeWatched(home: home).map(\.name))
+            let homeNames = Set(ConfigSeal.homeWatched(home: home, macList: MacSealList.namedByTheNode).map(\.name))
             let difference: [String]? = {
                 guard case .success(let shown) = held, let diff else { return nil }
                 // The presets file: what changed in presets since the user's accept, not its text (`SessionPresets.difference`).
@@ -664,7 +664,7 @@ extension LeadEngine {
         let (vault, home, node) = (cardVault, self.home, self.root)
         work.async { [weak self] in
             let snapshot = AcceptedSnapshot.load(root: node)
-            let homeNames = Set(ConfigSeal.homeWatched(home: home).map(\.name))
+            let homeNames = Set(ConfigSeal.homeWatched(home: home, macList: MacSealList.namedByTheNode).map(\.name))
             let found = roots.sorted().reduce(into: [String: ConfigHoldStore.Shown]()) { found, root in
                 if case .success(let shown) = ConfigHoldStore.held(root: root, vault: vault, home: home, look: false,
                                                                    snapshot: snapshot.projects[root]) { found[root] = shown }

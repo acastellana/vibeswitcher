@@ -754,6 +754,16 @@ extension LeadVault {
         }
         private var keepsRecord = !Platform.CodeIdentity.isAvailable
 
+        /// Whether this book's seal watches the Mac node's list too (`MacSealList`, the node on macOS's step 8): only the
+        /// book of a checked Mac node host, which sets it once it is one (`HostServer.isMacNodeHost`, beside
+        /// `recordsActions`), never the Mac app's, never another book in the same process; Linux's list is every book's
+        /// already. Under the vault's lock.
+        public var watchesMacList: Bool {
+            get { lock.withLock { macList } }
+            set { lock.withLock { macList = newValue } }
+        }
+        private var macList = false
+
         /// The node's record (`HostRequest.vaultV2`, V2/LeadVaultV2.swift): `body` on it under the vault's lock, saved
         /// when it changed.
         public func v2<T>(_ body: (inout LeadVaultV2.Book?) -> T) -> T {
@@ -801,9 +811,9 @@ extension LeadVault {
             if case .setGuarded(let root, let hashes) = request {
                 // A branch run's end is a look as well (`sealConfig`).
                 if hashes[ConfigSeal.checkKey] != nil || hashes[ConfigSeal.runEndKey] != nil {
-                    config = ConfigSeal.hashes(home: configHome, root: root)
+                    config = ConfigSeal.hashes(home: configHome, root: root, macList: watchesMacList)
                 } else if hashes[ConfigSeal.wroteKey] != nil {
-                    config = ConfigSeal.hashes(of: ConfigSeal.homeWatched(home: configHome))
+                    config = ConfigSeal.hashes(of: ConfigSeal.homeWatched(home: configHome, macList: watchesMacList))
                 }
             }
             var held: [String] = []

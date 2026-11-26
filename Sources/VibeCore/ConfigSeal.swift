@@ -56,6 +56,10 @@ public enum ConfigSeal {
             /// A folder read as `folder` whose entries come and go with every session: an entry added or removed is no
             /// change, one changed in place is (`LinuxSealList.cameOrWent`; the start plan's ST-D19). Linux's list only.
             case entries
+            /// An app's preferences (a property list, binary or XML) and each `ByHost/<domain>.*.plist` beside it: every
+            /// top-level key but the ones the app rewrites as it runs, by its parsed value (`MacSealList.preferencesHash`;
+            /// the lead's approval of 2026-11-26). The Mac's list only (Terminal's).
+            case preferences
         }
 
         public var name: String
@@ -257,7 +261,7 @@ public enum ConfigSeal {
     public static func isHome(key: String) -> Bool {
         let rest = key.hasPrefix(keysPrefix) ? key.dropFirst(keysPrefix.count) : key.hasPrefix(gonePrefix) ? key.dropFirst(gonePrefix.count)
             : key.hasPrefix(bookkeepingPrefix) ? key.dropFirst(bookkeepingPrefix.count) : key.hasPrefix(keyPrefix) ? key.dropFirst(keyPrefix.count) : ""
-        return rest.hasPrefix("~/") || rest.hasPrefix("/mnt/") || rest.hasPrefix("/run/user/")
+        return rest.hasPrefix("~/") || rest.hasPrefix("/mnt/") || rest.hasPrefix("/run/user/") || MacSealList.isOutsideName(rest)
     }
 
     /// The key of the per-key hashes of the thing `key` (a watched key) hashes.
@@ -459,8 +463,9 @@ public enum ConfigSeal {
     static let settingsFiles = [".claude/settings.json", ".claude/settings.local.json"]
 
     /// What's watched in your home at `home` (every team's alike): the files, the scripts your settings name, and the
-    /// plugins they enable.
-    public static func homeWatched(home: String) -> [Watched] {
+    /// plugins they enable. `macList`: the Mac node's list too (`MacSealList`; a checked Mac node host's book,
+    /// `LeadVault.Book.watchesMacList`, and the node's own code on the Mac); never the Mac app's, empty on Linux.
+    public static func homeWatched(home: String, macList: Bool = false) -> [Watched] {
         let files = homeFiles.map { file in
             let name = "~/" + file.0
             return Watched(name: name, path: (home as NSString).appendingPathComponent(file.0), kind: file.1, executes: !instructions.contains(name))
@@ -471,12 +476,13 @@ public enum ConfigSeal {
         }
         return files + scripts + plugins(home: home, enabledIn: settingsFiles.map { (home as NSString).appendingPathComponent($0) })
             + LinuxSealList.watched(home: home, uid: getuid())
+            + (macList ? MacSealList.watched(home: home, uid: getuid()) : [])
     }
 
     /// Everything watched for the team of the repository at `root`, with your home at `home`: your home's, the main
     /// checkout's files, the scripts its settings name, and the plugins they enable that yours don't.
-    public static func watched(home: String, root: String) -> [Watched] {
-        let mine = homeWatched(home: home)
+    public static func watched(home: String, root: String, macList: Bool = false) -> [Watched] {
+        let mine = homeWatched(home: home, macList: macList)
         var all = mine
         let checkout = URL(fileURLWithPath: (root as NSString).standardizingPath).resolvingSymlinksInPath().path
         all += checkoutFiles.map { Watched(name: $0.0 + " (main checkout)", path: (checkout as NSString).appendingPathComponent($0.0), kind: $0.1) }
@@ -563,8 +569,8 @@ public enum ConfigSeal {
     /// left out: neither recorded nor compared, so it holds nothing until it reads whole.
     /// With each JSON one's per-key hashes (`keysKey`, `keyHashes`) and each folder's per-path ones (`FolderRead`), for
     /// the vault alone; and each folder's hash with the bookkeeping counted (`countingKey`), never kept.
-    public static func hashes(home: String, root: String) -> [String: String] {
-        hashes(of: watched(home: home, root: root))
+    public static func hashes(home: String, root: String, macList: Bool = false) -> [String: String] {
+        hashes(of: watched(home: home, root: root, macList: macList))
     }
 
     /// `hashes` of `items`.
@@ -597,6 +603,7 @@ public enum ConfigSeal {
     /// doesn't read as JSON now.
     static func keyHashes(_ watched: Watched) -> [String: String]? {
         if let parts = parts(watched) { return Dictionary(parts, uniquingKeysWith: { first, _ in first }) }
+        if watched.kind == .preferences { return MacSealList.preferenceKeys(watched.path) }
         guard watched.kind == .mcpServers || (watched.kind == .file && watched.path.hasSuffix(".json")) else { return nil }
         var info = stat()
         guard stat(watched.path, &info) == 0 else { return [:] }
@@ -752,6 +759,8 @@ public enum ConfigSeal {
             return readFolder(watched).hash
         case .listing:
             return LinuxSealList.listingHash(watched.path)
+        case .preferences:
+            return MacSealList.preferencesHash(watched.path)
         case .mcpServers:
             var servers = mcpServers(watched.path)
             for _ in 1..<3 where servers == nil {
