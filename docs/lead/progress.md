@@ -4673,3 +4673,6 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-26 06:02 Started a worker on re-check-v2-s-3
 - 2026-11-26 06:41 Kept re-check-v2-s-3 unmerged: Report only, delivered: verdict 'ready to offer for v2' on v2-mac-agent 67382c9c (A, B and notes 1, 2, 4–7 closed; note 3 the agreed stated limit; five non-blocking Notes A–E). Its worktree holds the re-check copy, tests and notes (.vibeswitcher/v2-agent-recheck3/.review-notes/findings.md). Nothing merges; clean up once v2-mac-agent is delivered.
 - 2026-11-26 06:42 Planned v2-web-day-lines: v2 web: day lines in a session's chat, the loading skeleton under 760 px with a mouse, and an embed that strips comments (the page's last leftovers; in a clone)
+- 2026-11-26 06:42 Started a worker on v2-web-day-lines
+- 2026-11-26 06:43 Planned v2-design-device-keys: v2 design: device keys, the Devices list, QR pairing, the 12-hour unlock and per-change biometrics (a design document for v2, in a clone; reviewed separately before anything is built)
+- 2026-11-26 06:43 Started a worker on v2-design-device-keys
