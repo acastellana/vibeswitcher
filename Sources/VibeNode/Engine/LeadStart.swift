@@ -8,6 +8,23 @@ struct PendingStart {
     var replace: Bool
     /// Reopen the lead a host restart ended, in its same conversation (`RestartResume.swift`).
     var resume = false
+    /// The caller's pin (`startLead`'s `stillMade`): asked again, off the engine's queue, when a start that waited is
+    /// taken up (`startPending`) and just before the launch (`prepare`), so a start held for the host's welcome goes
+    /// nowhere else. Asked with the repository's top.
+    var stillMade: ((_ root: String?) -> String?)?
+
+    /// The starts that waited for one root, as they're taken up after the welcome: one with every flag asked, the first
+    /// goal (a new lead's first prompt says it) and every waiting start's pin (any that no longer holds refuses it, and
+    /// with it what joined it); each other goal a start of its own, with its own pin, which joins that one and then is
+    /// held for the lead it leaves (`finish`). In the order asked.
+    static func taken(_ waited: [PendingStart]) -> [PendingStart] {
+        let pins = waited.compactMap(\.stillMade)
+        let goals = waited.filter { $0.goal != nil }
+        let first = PendingStart(goal: goals.first?.goal, takeHead: waited.contains { $0.takeHead }, replace: waited.contains { $0.replace },
+                                 resume: waited.contains { $0.resume },
+                                 stillMade: pins.isEmpty ? nil : { root in pins.lazy.compactMap { $0(root) }.first })
+        return [first] + goals.dropFirst().map { PendingStart(goal: $0.goal, takeHead: false, replace: false, stillMade: $0.stillMade) }
+    }
 }
 
 /// A request waiting on a start under way (`LeadEngine.starting`): what it asked, the program found for it, and who
@@ -87,7 +104,8 @@ extension LeadEngine {
                     self.note("lead: not started in \(ConfigSeal.inert(folder, limit: 200)): \(why)")
                     return completion(.refused(why))
                 }
-                self.begin(root: root, program: program, start: PendingStart(goal: goal, takeHead: takeHead, replace: replace, resume: resume),
+                self.begin(root: root, program: program,
+                           start: PendingStart(goal: goal, takeHead: takeHead, replace: replace, resume: resume, stillMade: stillMade),
                            completion: completion)
             }
         }
@@ -157,21 +175,39 @@ extension LeadEngine {
         let pending = pendingStarts
         pendingStarts = [:]
         for (root, waited) in pending {
-            // One start with every flag asked and the first goal (a new lead's first prompt says it); each other goal
-            // a start of its own, which joins that one and then is held for the lead it leaves (`finish`). In the
-            // order asked, here on the queue.
-            let goals = waited.starts.compactMap(\.goal)
-            let first = PendingStart(goal: goals.first, takeHead: waited.starts.contains { $0.takeHead },
-                                     replace: waited.starts.contains { $0.replace }, resume: waited.starts.contains { $0.resume })
-            for start in [first] + goals.dropFirst().map({ PendingStart(goal: $0, takeHead: false, replace: false) }) {
-                let begun: @Sendable () -> Void = { [weak self] in
-                    self?.begin(root: root, program: waited.program, start: start) { [weak self] outcome in
-                        self?.note("lead: the start of \(LeadMail.project(of: root)) that waited for the welcome: \(Self.word(outcome))")
+            // In the order asked, here on the queue (`PendingStart.taken`).
+            let starts = PendingStart.taken(waited.starts)
+            let beginAll: () -> Void = { [weak self] in
+                guard let self else { return }
+                for start in starts {
+                    let begun: @Sendable () -> Void = { [weak self] in
+                        self?.begin(root: root, program: waited.program, start: start) { [weak self] outcome in
+                            self?.note("lead: the start of \(LeadMail.project(of: root)) that waited for the welcome: \(Self.word(outcome))")
+                        }
+                    }
+                    // A reopen is decided on the restart this welcome brings (`welcomed` looks for it after this): next on
+                    // the queue, after the welcome.
+                    if start.resume { self.queue.async { begun() } } else { begun() }
+                }
+            }
+            // A pinned start (`project.new`'s) is asked its pin again first, off the queue (it runs git): the folder may
+            // have been swapped while it waited. The first start carries every pin.
+            guard let pin = starts.first?.stillMade else {
+                beginAll()
+                continue
+            }
+            work.async { [weak self] in
+                let why = pin(root)
+                self?.queue.async {
+                    guard let self else { return }
+                    guard let why else { return beginAll() }
+                    let outcome = StartOutcome.refused(why)
+                    self.note("lead: the start of \(LeadMail.project(of: root)) that waited for the welcome: \(Self.word(outcome))")
+                    self.leads.lead(root: root) {
+                        $0.lastStart = Self.word(outcome)
+                        $0.lastStartAt = Date()
                     }
                 }
-                // A reopen is decided on the restart this welcome brings (`welcomed` looks for it after this): next on
-                // the queue, after the welcome.
-                if start.resume { queue.async { begun() } } else { begun() }
             }
         }
     }
@@ -269,6 +305,8 @@ extension LeadEngine {
             var notes: [String] = []
             var resumed: (conversation: String, transcript: String)?
             let prepared = Result<(grant: String, launch: LeadLaunch.Prepared, run: LeadLaunch.Run), Error> {
+                // The caller's pin, once more before anything is written in the root or launched there (N-r2).
+                if let why = start.stillMade?(root) { throw Refused(why) }
                 let boardStore = BoardStore(root: root)
                 let workflowPath = try boardStore.prepare()
                 var workflow = LeadWorkflow.load(from: workflowPath)
