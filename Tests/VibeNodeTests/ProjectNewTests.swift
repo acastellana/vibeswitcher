@@ -172,6 +172,109 @@ struct ProjectNewTests {
         #expect(listing(world.projects) == before)
     }
 
+    // MARK: The independent review's (review-v2-s-new, 2026-11-26)
+
+    /// Invisible characters beyond control and format (a variation selector, a combining grapheme joiner, Hangul fillers,
+    /// the braille blank) would make a name that looks like an existing project's: refused as `name`, nothing made beside
+    /// it (the review's r03, N1).
+    @Test func invisibleLookAlikesOfAProjectAreRefused() throws {
+        let world = try world()
+        _ = try make(world, "shop").get()
+        for name in ["shop\u{FE0F}", "shop\u{034F}", "shop\u{3164}", "shop\u{2800}", "shop\u{115F}", "shop\u{FFA0}", "shop\u{180B}"] {
+            let refused = refusal(make(world, name))
+            #expect(refused?.reason == .name, "\(name.unicodeScalars.map { String(format: "U+%04X", $0.value) }.last ?? ""): \(String(describing: refused))")
+        }
+        #expect(listing(world.projects).filter { !$0.hasPrefix("shop/") } == ["shop"], "\(listing(world.projects))")
+    }
+
+    /// The location's folder, once the walk has opened it, moved out of the projects folder with a link left in its place
+    /// (triggered by the project's folder appearing in it; the window widened by a full node scratch): refused, or made in
+    /// the projects folder, and nothing of a repository left outside (the review's r12, I1). The Mac's folder events only.
+    @Test func theSameFolderMovedOutAndReachedThroughALinkIsRefused() throws {
+        #if canImport(Darwin)
+        let world = try world()
+        let real = world.projects + "/real"
+        let outside = world.base + "/outside"
+        try FileManager.default.createDirectory(atPath: real, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(atPath: outside, withIntermediateDirectories: true)
+        for number in 0..<20_000 { mkdir(world.nodeScratch.path + "/lead-init-fill-\(number)", 0o700) }
+        let name = "moved"
+        let watched = open(real, O_EVTONLY)
+        #expect(watched >= 0)
+        let swapped = Locked<String?>(nil)
+        let queue = DispatchQueue(label: "moved-out")
+        let source = DispatchSource.makeFileSystemObjectSource(fileDescriptor: watched, eventMask: .write, queue: queue)
+        source.setEventHandler {
+            guard swapped.value == nil, LeadInit.kind(real + "/" + name) == S_IFDIR else { return }
+            let moved = rename(real, outside + "/moved-real") == 0
+            let linked = symlink(outside + "/moved-real", real) == 0
+            swapped.value = "moved \(moved), linked \(linked)"
+            source.cancel()
+        }
+        source.setCancelHandler { close(watched) }
+        source.resume()
+        let result = make(world, name, in: real)
+        source.cancel()
+        let atSwap = queue.sync { swapped.value }
+        #expect(atSwap == "moved true, linked true", "the swap didn't happen: \(atSwap ?? "none")")
+        switch result {
+        case .success(let made):
+            #expect(made.folder.hasPrefix(LeadInit.resolved(world.projects) + "/"), "made outside the projects folder, its lead to start there: \(made.folder)")
+        case .failure(let refused):
+            #expect(LeadInit.kind(outside + "/moved-real/" + name + "/.git") == nil, "refused (\(refused.message)) but a repository left outside: \(listing(outside))")
+        }
+        #endif
+    }
+
+    /// A Where with a hidden folder in it (as `~/.claude/commands` would be with the projects folder at `~`), or a projects
+    /// folder set to a hidden one: refused as `hidden`, nothing made.
+    @Test func aHiddenFolderOnTheWayIsRefused() throws {
+        let world = try world()
+        try FileManager.default.createDirectory(atPath: world.projects + "/.claude/commands", withIntermediateDirectories: true)
+        for location in [world.projects + "/.claude", world.projects + "/.claude/commands"] {
+            let refused = refusal(make(world, "Deploy Now", in: location))
+            #expect(refused?.reason == .hidden, "\(location): \(String(describing: refused))")
+        }
+        let hiddenRoot = world.base + "/.config/projects"
+        try FileManager.default.createDirectory(atPath: hiddenRoot, withIntermediateDirectories: true)
+        let refused = refusal(ProjectMaker.make(name: "Deploy Now", location: nil, projectsFolder: hiddenRoot, home: world.home, scratch: world.nodeScratch))
+        #expect(refused?.reason == .hidden, "\(String(describing: refused))")
+        #expect(listing(world.projects) == [".claude", ".claude/commands"] && listing(hiddenRoot).isEmpty)
+    }
+
+    /// The lead's start is pinned to what was made: nil while the folder is the one made, holding the commit made, and
+    /// (once git found it) the top of its own repository; else why not: another folder by its path (a link to another
+    /// repository in its place), another commit, another top (the review's I1 (b)).
+    @Test func theLeadStartIsPinnedToTheFolderAndCommitMade() throws {
+        let world = try world()
+        let made = try make(world, "Shop").get()
+        #expect(ProjectMaker.stillMade(made, root: nil, home: world.home, scratch: world.nodeScratch) == nil)
+        #expect(ProjectMaker.stillMade(made, root: made.folder, home: world.home, scratch: world.nodeScratch) == nil)
+        #expect(ProjectMaker.stillMade(made, root: world.projects, home: world.home, scratch: world.nodeScratch) != nil, "another repository's top")
+        // Another commit on top: not the repository made.
+        try "more\n".write(toFile: made.folder + "/more.txt", atomically: true, encoding: .utf8)
+        #expect(LeadInit.git(["add", "more.txt"], in: made.folder, home: world.home, scratch: world.nodeScratch).ok)
+        #expect(LeadInit.git(["commit", "-q", "-m", "more"], in: made.folder, home: world.home, scratch: world.nodeScratch).ok)
+        #expect(ProjectMaker.stillMade(made, root: nil, home: world.home, scratch: world.nodeScratch) != nil, "another commit")
+        // The folder moved away and a link to another repository left by its name.
+        let other = try make(world, "Other").get()
+        #expect(rename(made.folder, world.base + "/away") == 0 && symlink(other.folder, made.folder) == 0)
+        let why = ProjectMaker.stillMade(made, root: nil, home: world.home, scratch: world.nodeScratch)
+        #expect(why?.contains("isn't the folder made") == true, "\(why ?? "nil")")
+    }
+
+    /// What the Mac's dialog (and a passkey's phrase) says: the project's name and the folder it will be made in, by its
+    /// resolved path, the projects folder named when Where is empty; the goal whole.
+    @Test func theApprovalPhraseNamesTheResolvedFolder() throws {
+        let world = try world()
+        let projects = LeadInit.resolved(world.projects)
+        let plain = Requests.projectNewPhrase(name: "Shop", location: nil, goal: nil, projectsFolder: world.projects, home: world.home)
+        #expect(plain == "make the project “Shop” in \(projects)/shop and start its lead", "\(plain)")
+        try FileManager.default.createDirectory(atPath: world.projects + "/clients", withIntermediateDirectories: true)
+        let placed = Requests.projectNewPhrase(name: "Acme Site", location: world.projects + "/clients", goal: "ship it", projectsFolder: world.projects, home: world.home)
+        #expect(placed == "make the project “Acme Site” in \(projects)/clients/acme-site and start its lead with the goal “ship it”", "\(placed)")
+    }
+
     // MARK: The server's work
 
     /// What `project.new` does with its arguments: with no claude for the lead nothing is made (and no lead asked for);
@@ -185,7 +288,8 @@ struct ProjectNewTests {
             let answered = Locked<WireKinds.ProjectNew.Result?>(nil)
             Requests.makeProject(name: name, location: nil, goal: goal, claudeMissing: claudeMissing, projectsFolder: world.projects, home: world.home,
                                  scratch: world.nodeScratch, note: { _ in },
-                                 startLead: { folder, goal, initialized, done in
+                                 startLead: { folder, goal, initialized, stillMade, done in
+                                     #expect(stillMade(nil) == nil && stillMade(folder) == nil, "pinned to the folder just made")
                                      asked.mutate { $0.append("\(folder)|\(goal ?? "-")|\(initialized)") }
                                      done(outcome)
                                  }) { answered.value = $0 }

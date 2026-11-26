@@ -58,20 +58,28 @@ extension LeadEngine {
     /// delivers it). `resume`: reopen the lead a host restart ended, in its same conversation (`RestartResume.swift`).
     /// `initialized`: `lead --init` made the repository at `folder` just now (`LeadInit`): before any git of the guard's
     /// runs there, its hooks baseline is recorded empty (`GitGuard.accept(only: [])`), so a hook a session put in its
-    /// `.git` between the install and this start is listed, never run, until the lead accepts it. From any thread.
+    /// `.git` between the install and this start is listed, never run, until the lead accepts it.
+    /// `stillMade`: why `folder` is no longer what its caller made (nil: it is), asked before the baseline is recorded (with
+    /// no root) and again once the repository is found (with its top), off the engine's queue: `project.new`'s pin
+    /// (`ProjectMaker.stillMade`), so a folder swapped after the make sends the start nowhere else. From any thread.
     public func startLead(folder: String, goal: String?, takeHead: Bool, replace: Bool, resume: Bool = false, initialized: Bool = false,
-                          completion: @escaping (StartOutcome) -> Void) {
+                          stillMade: ((_ root: String?) -> String?)? = nil, completion: @escaping (StartOutcome) -> Void) {
         let (preflight, looked) = (self.preflight, preflightLooked)
         // git can be slow: the repository is found off the engine's queue, and first what's missing (without git, git
         // below would only say the folder isn't a repository).
         work.async { [weak self] in
+            if let why = stillMade?(nil) {
+                self?.queue.async { completion(.refused(why)) }
+                return
+            }
             if initialized {
                 do { _ = try GitGuard.accept(root: folder, only: [], baseline: true) } catch {
                     self?.queue.async { completion(.refused("the new repository's hooks baseline couldn't be recorded (\(error)): the lead wasn't started")) }
                     return
                 }
             }
-            let found = Self.repository(folder, preflight: preflight, looked: looked)
+            var found = Self.repository(folder, preflight: preflight, looked: looked)
+            if let root = found.root, let why = stillMade?(root) { found = (nil, nil, why) }
             guard let self else { return }
             self.queue.async {
                 guard let root = found.root, let program = found.program else {

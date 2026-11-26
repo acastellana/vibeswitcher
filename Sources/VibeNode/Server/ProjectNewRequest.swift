@@ -11,11 +11,14 @@ import VibeCore
 /// - **Only in the projects folder.** The parent is the node's projects folder (`projects_folder`, else `~/dev`) or a
 ///   folder inside it, named without `.` or `..`; each folder below the projects folder is opened from its parent's
 ///   descriptor with `O_NOFOLLOW`, so a link on the way (to anywhere, inside or out) refuses. The projects folder itself is
-///   the user's setting, taken as it resolves; `/` refuses.
+///   the user's setting, taken as it resolves (checked to be the folder opened); `/` refuses. A hidden folder on the way
+///   (`.claude`), in Where or in the projects folder, refuses. What `LeadInit` plans must be the folder made by its path
+///   too, not only by its inode (a folder moved out and reached through a link in its place refuses), and the lead's
+///   start is pinned to it (`stillMade`).
 /// - **Never over anything.** The project's folder is made with `mkdirat` on the parent's descriptor: anything with its
 ///   name there (a folder, a file, a link, a dangling one) refuses. Its README is made `O_CREAT|O_EXCL|O_NOFOLLOW` in it.
 /// - **The name as the app's.** `ProjectCreation.plan`'s rules (a letter or number, no `/` or `:`, not hidden), and no
-///   control or format character, at most `maxName` characters.
+///   control, format or default-ignorable character (nor the braille blank), at most `maxName` characters.
 /// - **Nothing left on a refusal.** What was made is removed through the same descriptors (only while it is still what was
 ///   made); what something else put there meanwhile stays, and the refusal says so.
 public enum ProjectMaker {
@@ -38,6 +41,8 @@ public enum ProjectMaker {
             case repository
             /// No claude for the lead: nothing is made for a lead that can't start.
             case noClaude
+            /// A hidden folder (its name starts with “.”) on the way: in Where, or the projects folder's own path.
+            case hidden
             /// Anything else: the step that failed says what.
             case failed
         }
@@ -61,6 +66,9 @@ public enum ProjectMaker {
         public var commit: String
         /// What the first commit holds.
         public var files: [String]
+        /// The folder's device and inode as made: the lead's start is pinned to them (`stillMade`).
+        public var device: UInt64 = 0
+        public var inode: UInt64 = 0
     }
 
     /// The longest name taken, in characters.
@@ -83,6 +91,9 @@ public enum ProjectMaker {
         let root = ProjectCreation.expand(projectsFolder, home: home)
         guard root.hasPrefix("/") else {
             return .failure(Refusal(.failed, "The node's projects folder, \(ConfigSeal.inert(projectsFolder, limit: 200)), isn't a full path: set it again (projects_folder)."))
+        }
+        if root.split(separator: "/").contains(where: { $0.hasPrefix(".") }) {
+            return .failure(Refusal(.hidden, "The projects folder, \(ConfigSeal.inert(shown(root, home), limit: 200)), is in a hidden folder: a project from here isn't made there; set projects_folder to a folder of its own."))
         }
         let below: [String]
         switch place(location, root: root, home: home) {
@@ -122,6 +133,12 @@ public enum ProjectMaker {
             return .failure(Refusal(.location, "The projects folder \(shown(root, home)) isn't a folder that can be opened (errno \(errno))."))
         }
         let real = LeadInit.resolved(root)
+        var openedTop = stat(), atReal = stat()
+        guard fstat(top, &openedTop) == 0, stat(real, &atReal) == 0, openedTop.st_dev == atReal.st_dev, openedTop.st_ino == atReal.st_ino else {
+            close(top)
+            undoLevels()
+            return .failure(Refusal(.failed, "The projects folder changed while it was opened: nothing was made; try again."))
+        }
         guard real != "/" else {
             close(top)
             undoLevels()
@@ -184,11 +201,15 @@ public enum ProjectMaker {
             return .failure(Refusal(.failed, "The project's folder changed as it was made: look at \(shown(folder, home)); nothing of the project was written."))
         }
         defer { close(project) }
-        var madeReadme = false
+        var readme: stat?
         func undo(_ refusal: Refusal) -> Refusal {
-            if madeReadme { unlinkat(project, "README.md", 0) }
+            // The README only while it is the one made (by its inode): one put in its place stays, and the folder with it.
             var now = stat()
-            let same = fstatat(parent, folderName, &now, AT_SYMLINK_NOFOLLOW) == 0 && now.st_ino == madeInfo.st_ino && now.st_dev == madeInfo.st_dev
+            if let made = readme, fstatat(project, "README.md", &now, AT_SYMLINK_NOFOLLOW) == 0, now.st_dev == made.st_dev, now.st_ino == made.st_ino {
+                unlinkat(project, "README.md", 0)
+            }
+            var atName = stat()
+            let same = fstatat(parent, folderName, &atName, AT_SYMLINK_NOFOLLOW) == 0 && atName.st_ino == madeInfo.st_ino && atName.st_dev == madeInfo.st_dev
             guard same, unlinkat(parent, folderName, AT_REMOVEDIR) == 0 else {
                 return Refusal(refusal.reason, refusal.message + " \(shown(folder, home)) stays: something else was put in it meanwhile; look at it before trying again.")
             }
@@ -198,7 +219,11 @@ public enum ProjectMaker {
         guard LeadInit.Descriptors.create(project, "README.md", Data(ProjectCreation.readme(name: title).utf8), mode: 0o644) else {
             return .failure(undo(Refusal(.failed, "The project's README couldn't be written (errno \(errno)).")))
         }
-        madeReadme = true
+        var written = stat()
+        guard fstatat(project, "README.md", &written, AT_SYMLINK_NOFOLLOW) == 0, written.st_mode & S_IFMT == S_IFREG else {
+            return .failure(undo(Refusal(.failed, "The project's README changed as it was written: nothing was committed.")))
+        }
+        readme = written
 
         // Its repository and first commit, as `lead --init` makes them: the folder planned (its README, and the
         // .gitignore made), then made through its descriptor.
@@ -207,20 +232,29 @@ public enum ProjectMaker {
         case .failure(let why): return .failure(undo(Refusal(.failed, why.message)))
         case .success(let planned): plan = planned
         }
+        // The folder made, by its path as well as its inode: one moved out and reached through a link left in its place is
+        // the same inode somewhere else (the review's I1).
+        guard plan.folder == folder else {
+            return .failure(undo(Refusal(.failed, "The folder the project was made in moved while it was made: nothing was committed.")))
+        }
         guard plan.device == UInt64(madeInfo.st_dev), plan.inode == UInt64(madeInfo.st_ino), plan.files == [".gitignore", "README.md"], plan.addsGitignore,
               plan.leftOut.isEmpty else {
             return .failure(undo(Refusal(.failed, "The project's folder changed before its first commit (something was added to it): nothing was committed.")))
         }
         switch LeadInit.make(plan, home: home, scratch: scratch) {
         case .failure(let why): return .failure(undo(Refusal(.failed, why.message)))
-        case .success(let made): return .success(Made(name: title, folder: plan.folder, commit: made.commit, files: made.files))
+        case .success(let made):
+            return .success(Made(name: title, folder: plan.folder, commit: made.commit, files: made.files, device: plan.device, inode: plan.inode))
         }
     }
 
     /// Why `title` isn't a name taken here (before the app's own rules): a control or format character (a direction
     /// mark, a zero-width one), or more than `maxName` characters.
     static func nameRefusal(_ title: String) -> Refusal? {
-        if title.unicodeScalars.contains(where: { [.control, .format, .lineSeparator, .paragraphSeparator, .surrogate, .privateUse, .unassigned].contains($0.properties.generalCategory) }) {
+        // Default-ignorable code points (variation selectors, the combining grapheme joiner, Hangul fillers) and the braille
+        // blank draw as nothing: a name with one looks like another project's.
+        if title.unicodeScalars.contains(where: { [.control, .format, .lineSeparator, .paragraphSeparator, .surrogate, .privateUse, .unassigned].contains($0.properties.generalCategory)
+                                                 || $0.properties.isDefaultIgnorableCodePoint || $0.value == 0x2800 }) {
             return Refusal(.name, "A project name can't hold a control or invisible character.")
         }
         guard title.count <= maxName else { return Refusal(.name, "A project name is at most \(maxName) characters.") }
@@ -245,9 +279,34 @@ public enum ProjectMaker {
         // The projects folder by the path it is set as, or the one it resolves to (a person may type either).
         let real = LeadInit.kind(root) == nil ? base : LeadInit.resolved(root).split(separator: "/", omittingEmptySubsequences: true).map(String.init)
         for prefix in [base, real] where parts.count >= prefix.count && Array(parts.prefix(prefix.count)) == prefix {
-            return .success(Array(parts.dropFirst(prefix.count)))
+            let below = Array(parts.dropFirst(prefix.count))
+            // A hidden folder below it (`.claude`, `.git`): never a project's place, as a hidden name isn't a project's.
+            if let hidden = below.first(where: { $0.hasPrefix(".") }) {
+                return .failure(Refusal(.hidden, "\(ConfigSeal.inert(hidden, limit: 100)) is a hidden folder: a project from here isn't made in one."))
+            }
+            return .success(below)
         }
         return .failure(Refusal(.outside, "A project from here is made in your projects folder, \(shown(root, home)), or a folder inside it; \(ConfigSeal.inert(shown(full, home), limit: 200)) isn't."))
+    }
+
+    /// Why the lead's start for `made` would go elsewhere (nil: it wouldn't): its folder by its path isn't the folder made
+    /// (moved, or a link in its place), or its HEAD isn't the first commit made, or (once git found it) `root`, the top of
+    /// the repository holding it, isn't the folder. Checked by the lead's start before it records the hooks baseline and
+    /// again before it begins (`LeadEngine.startLead`'s `stillMade`). Runs git: off the queues.
+    public static func stillMade(_ made: Made, root: String?, home: String, scratch: URL) -> String? {
+        let shown = ConfigSeal.inert(made.folder, limit: 200)
+        var now = stat()
+        guard lstat(made.folder, &now) == 0, now.st_mode & S_IFMT == S_IFDIR, UInt64(now.st_dev) == made.device, UInt64(now.st_ino) == made.inode else {
+            return "\(shown) isn't the folder made a moment ago (it moved, or something is in its place): its lead wasn't started"
+        }
+        let head = LeadInit.git(["rev-parse", "--verify", "--quiet", "HEAD"], in: made.folder, home: home, scratch: scratch)
+        guard head.ok, head.trimmed == made.commit else {
+            return "\(shown) doesn't hold the first commit made a moment ago: its lead wasn't started"
+        }
+        if let root, LeadInit.resolved(root) != made.folder {
+            return "\(shown) is found inside another repository (\(ConfigSeal.inert(root, limit: 200))): its lead wasn't started"
+        }
+        return nil
     }
 
     /// Whether the user's global git config names them (the first commit's author), asked as `LeadInit` asks it.
@@ -285,8 +344,9 @@ extension Requests {
             Self.makeProject(name: name, location: args.location, goal: goal, claudeMissing: missing,
                              projectsFolder: NodeSettings.projectsFolder(files: NodeSettings.Files(root: nodeRoot)), home: home,
                              scratch: nodeRoot.appendingPathComponent("scratch", isDirectory: true), note: note,
-                             startLead: { folder, goal, initialized, done in
-                                 engine.startLead(folder: folder, goal: goal, takeHead: false, replace: false, initialized: initialized, completion: done)
+                             startLead: { folder, goal, initialized, stillMade, done in
+                                 engine.startLead(folder: folder, goal: goal, takeHead: false, replace: false, initialized: initialized, stillMade: stillMade,
+                                                  completion: done)
                              }) { result in queue.async { reply(.init(re: request.id, typed: result)) } }
         }
     }
@@ -296,7 +356,8 @@ extension Requests {
     /// is new); `answer` hears the result once (from any thread).
     static func makeProject(name: String, location: String?, goal: String?, claudeMissing: String?, projectsFolder: String, home: String,
                             scratch: URL, note: @escaping (String) -> Void,
-                            startLead: (_ folder: String, _ goal: String?, _ initialized: Bool, _ done: @escaping (LeadEngine.StartOutcome) -> Void) -> Void,
+                            startLead: (_ folder: String, _ goal: String?, _ initialized: Bool, _ stillMade: @escaping (String?) -> String?,
+                                        _ done: @escaping (LeadEngine.StartOutcome) -> Void) -> Void,
                             answer: @escaping (WireKinds.ProjectNew.Result) -> Void) {
         // Nothing is made for a lead the engine would refuse to start.
         if let claudeMissing {
@@ -310,7 +371,10 @@ extension Requests {
         case .success(let done): made = done
         }
         note("project.new: made \(ConfigSeal.inert(made.folder, limit: 200)) with its first commit \(made.commit.prefix(8)); starting its lead")
-        startLead(made.folder, goal, true) { outcome in answer(projectMade(made, home: home, outcome)) }
+        // Pinned to what was made: a folder swapped or moved after the make sends the start nowhere else.
+        startLead(made.folder, goal, true, { root in ProjectMaker.stillMade(made, root: root, home: home, scratch: scratch) }) { outcome in
+            answer(projectMade(made, home: home, outcome))
+        }
     }
 
     /// A project not made: its reason, and why in the node's words.

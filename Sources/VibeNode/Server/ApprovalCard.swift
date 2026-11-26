@@ -121,9 +121,11 @@ extension Requests {
             return .success(("\(how) \(Self.place(folder))" + (text("goal").map { " with the goal \(whole($0))" } ?? ""), nil))
         case "project.new":
             guard let name = text("name") else { return .failure(.init(why: "project.new needs a name: nothing was asked")) }
-            // The name, where and the goal (told to the lead as the user's): decisive, whole.
-            let place = text("location").flatMap { $0.isEmpty ? nil : $0 }.map { "in \(Self.place($0))" } ?? "in your projects folder"
-            return .success(("make the project \(whole(name)) \(place) and start its lead" + (text("goal").map { " with the goal \(whole($0))" } ?? ""), nil))
+            // The name, the folder it will be made in by its resolved path (the projects folder read now, which a page may
+            // have just set) and the goal (told to the lead as the user's): decisive, whole.
+            return .success((Self.projectNewPhrase(name: name, location: text("location"), goal: text("goal"),
+                                                   projectsFolder: NodeSettings.projectsFolder(files: NodeSettings.Files(root: root)),
+                                                   home: engine?.home ?? home), nil))
         case "stop":
             let live = link.sessions.filter(\.isLive).count
             return .success(("stop the node, ending \(live) live session\(live == 1 ? "" : "s")", nil))
@@ -293,6 +295,17 @@ extension Requests {
             shown.append(folder)
         }
         return head + shown.joined(separator: ", ")
+    }
+
+    /// `project.new`'s dialog text: the project's name and the folder it will be made in, by its resolved path (Where, else
+    /// the projects folder, `~` the user's home), and the goal, each whole.
+    static func projectNewPhrase(name: String, location: String?, goal: String?, projectsFolder: String, home: String) -> String {
+        let typed = location.flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 }
+        let place = ProjectCreation.expand(typed ?? projectsFolder, home: home)
+        let resolved = LeadInit.kind(place) == nil ? place : LeadInit.resolved(place)
+        let folder = (resolved as NSString).appendingPathComponent(ProjectCreation.folderName(for: name))
+        return "make the project \(whole(name.trimmingCharacters(in: .whitespacesAndNewlines))) in \(ConfigSeal.inert(folder, limit: .max)) and start its lead"
+            + (goal.map { " with the goal \(whole($0))" } ?? "")
     }
 
     static func place(_ path: String) -> String {
