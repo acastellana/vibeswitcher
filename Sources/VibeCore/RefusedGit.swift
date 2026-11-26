@@ -406,8 +406,12 @@ public enum RefusedGit {
                 let option = words[index]
                 // `command -v x` (`-V`) says what `x` is, and runs nothing.
                 if name == "command", option.dropFirst().contains(where: { $0 == "v" || $0 == "V" }) { return nil }
-                // `env -S '…'`: its string is text handed over (`refusal(command:)`), not a program read here.
-                if name == "env", split(option) != nil { return nil }
+                // `env -S '…'`: its string is text handed over (`refusal(command:)`), not read here; the word after it
+                // is env's program all the same (`env -S '' setsid ls`).
+                if name == "env", let string = split(option) {
+                    index += string.isEmpty ? 2 : 1
+                    continue
+                }
                 if name == "xargs", wrapper.valued.contains(option) || starts(option, with: "-I") || starts(option, with: "-J") {
                     var values = wrapper.valued.contains(option) && index + 1 < words.count ? [words[index + 1]] : []
                     for valued in ["-I", "-J"] where option.utf8.count > 2 && starts(option, with: valued) {
@@ -985,10 +989,11 @@ enum ShellWords {
 
         /// Reads commands until `terminator` (`)` of a subshell or `$(`, or a backtick) or the line's end; past it.
         /// `array`: the words of an array's parentheses; `input`: the list's commands take the input of the subshell
-        /// they're in; `group`: the words of zsh's glob group or qualifier; `parenthesized`: a plain test's `( … )`,
-        /// whose words are its operands.
-        mutating func list(until terminator: Character?, array: Bool = false, group: Bool = false, input inherited: Bool = false,
-                           parenthesized: Bool = false) {
+        /// they're in; `group`: the words of zsh's glob group or qualifier, and `inert` when they are never a command's
+        /// (not after a keyword, `if(…)`, `{(…)`, `!(…)`, where the shell reads a subshell); `parenthesized`: a plain
+        /// test's `( … )`, whose words are its operands.
+        mutating func list(until terminator: Character?, array: Bool = false, group: Bool = false, inert: Bool = false,
+                           input inherited: Bool = false, parenthesized: Bool = false) {
             guard enter() else { return }
             // The word this list is read inside of (`a$(…)b`) keeps how it was made.
             let outer = made
@@ -1104,7 +1109,7 @@ enum ShellWords {
                 // A test still open, or a test's parentheses that its `]]` closed inside (`[[ ( a ]] )`), or that never closed.
                 if parenthesized ? !testing || !closed : testing { oddTest = true }
                 if pattern || arms > 0 { oddPattern = true }
-                if group, closed, !spaced {
+                if group, inert, closed, !spaced {
                     for index in mine { commands[index].kinds = commands[index].words.map { _ in .group } }
                 }
                 // An array's parentheses with a separator in them, or never closed: the shell doesn't read them as an
@@ -1225,9 +1230,12 @@ enum ShellWords {
                     let input = command.input
                     // A plain test's own parentheses, `[[ -n $a && ( $b || $c ) ]]`: spaced, and read as operands.
                     let parenthesized = testing && word == nil && (peek(1) == " " || peek(1) == "\t")
+                    // A keyword glued to it (`{($x);}`, `if($x);then …`, `!($x)`, `time($x)`): bash, and zsh after `{`,
+                    // read a subshell, whose words may run.
+                    let inert = group && !(word.map { RefusedGit.keywords.contains($0) || ShellWords.opening.contains($0) || $0 == "time" } ?? false)
                     endCommand()
                     i += 1
-                    list(until: ")", array: array, group: group, input: input && !array, parenthesized: parenthesized)
+                    list(until: ")", array: array, group: group, inert: inert, input: input && !array, parenthesized: parenthesized)
                     fresh = false
                     // A pattern's group (`@(a|b))`) is its alternative's.
                     if pattern, group { alternative = true }

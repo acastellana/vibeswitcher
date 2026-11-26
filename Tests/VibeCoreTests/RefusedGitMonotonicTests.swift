@@ -152,12 +152,14 @@ struct RefusedGitMonotonicTests {
                         "$((1))", "[", "]", "time", "env", "--", "\\(", "\\)", "=(", "a(", "]]x", "x]]", "[[x", "$'x'", "function", "f()",
                         "<(true)", "{a,b}", "~", "-e", "a=(x y)", "a=(", "\\\n"]
     static let separators = [" || ", " && ", "; ", " | ", " & ", "\n", " ||", "&&", ";", "|", " |& "]
-    static let refused = ["git -C /tmp status", "setsid ls", "$EDITOR f", "/usr/bin/gi? push origin main", "script -q /dev/null security list-keychains"]
+    static let refused = ["git -C /tmp status", "setsid ls", "$EDITOR f", "/usr/bin/gi? push origin main", "script -q /dev/null security list-keychains",
+                          "setsid${IFS}ls", "$EDITOR"]
     /// Where the command goes after the separator: plainly, in a substitution, a subshell, a group, a test's substitution,
     /// behind a keyword.
     static let placings: [(String) -> String] = [
         { $0 }, { "echo $(\($0))" }, { "(\($0))" }, { "{ \($0); }" }, { "echo `\($0)`" }, { "[[ -n $(\($0)) ]]" }, { "if \($0); then :; fi" },
-        { "while \($0); do :; done" }, { "! \($0)" }, { "x=\"$(\($0))\"" },
+        { "while \($0); do :; done" }, { "! \($0)" }, { "x=\"$(\($0))\"" }, { "{(\($0));}" }, { "if(\($0));then :;fi" }, { "!(\($0))" },
+        { "env -S '' \($0)" }, { "time(\($0))" },
     ]
     /// What may follow it: none holds `]]`, which could close a test the noise opened and make the command its operand.
     static let suffixes = ["", "; :", " &", " # c", ")", " )", " x", "\n:", " ;;", "; done", " }"]

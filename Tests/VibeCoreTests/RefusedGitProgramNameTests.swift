@@ -36,6 +36,11 @@ struct RefusedGitProgramNameTests {
         "=ls -l", "$'\\x67it' push", "cd src && ${g}t push", "true; $(echo gi)t push", "(${g}t push)",
         "echo $(${g}t push)", "timeout 60 ${g}t push", "env ${g}t push", "noglob /usr/bin/gi? push", "FOO=1 ${g}t push",
         "if true; then ${g}t push; fi", "find . -name x -exec ${g}t push \\;", "for f in a; do $f push; done",
+        // The blind check's: a keyword glued to a subshell's `(`, and the program after env's `-S` string.
+        "{($EDITOR);}", "if($EDITOR);then :;fi", "!($EDITOR)", "{(setsid${IFS}ls);}", "g=gi; c=\"${g}t push origin main\"; {($c);}",
+        "g=gi; c=\"${g}t push origin main\"; {(${=c});}", "s=securit; c=\"${s}y list-keychains\"; {($c);}", "while($EDITOR);do :;done",
+        "env -S '' $EDITOR notes.md", "env -S '' /usr/bin/gi? push origin main", "g=gi; env -S '' ${g}t push origin main",
+        "env -S -v /usr/bin/securit? list-keychains", "env -S'' x ${g}t push", "env --split-string= ${g}t push",
         "xargs -I{} ${g}t {}", "vs-heavy --timeout 2h $cmd", "sudo -u x $cmd", "command $cmd", "exec \"$@\"",
         // `case … in` as an argument doesn't make what follows a pattern.
         "(echo case x in; /usr/bin/gi? push origin main)", "echo case x in; (g=gi; ${g}t push origin main)",
@@ -68,7 +73,7 @@ struct RefusedGitProgramNameTests {
         "taskpolicy -b git push", "unbuffer git push", "su -c 'make' root", "doas git push", "flock .build/x.lock git push",
         "SCRIPT -q /dev/null git push", "(echo case x in; script -q /dev/null git push origin main)", "echo case x in; (setsid git push)",
         "[[ a ]] && script -q /dev/null git push", "[[ -n a ]] && setsid ls", "case x in a) setsid ls ;; esac",
-        "case x in a) :;; [[ ) setsid ls ;; esac", "case x in (a) setsid ls;; esac", "case x in a|b) :;; c d) setsid ls;; esac",
+        "case x in a) :;; [[ ) setsid ls ;; esac", "env -S '' setsid ls", "{(setsid ls);}", "case x in (a) setsid ls;; esac", "case x in a|b) :;; c d) setsid ls;; esac",
     ]
 
     /// The `[[ … ]]` tests the contract names, read as tests: none is refused.
@@ -121,7 +126,7 @@ struct RefusedGitProgramNameTests {
         "[[ $a < $b || $c > $d ]] && echo ok", "[[ $(git rev-parse HEAD) == $x ]] && echo same", "[[ -n $a ]]; echo $?",
         // docs/guide/development.md's heavy jobs: text handed to sh that doesn't name git, its variable an argument.
         "vs-heavy sh -c 'node --test --test-concurrency=\"$VS_HEAVY_CORES\"'", "vs-heavy sh -c 'make -j \"$VS_HEAVY_CORES\"'",
-        "vs-heavy sh -c 'swift build -j 2 -Xswiftc -j$(( (VS_HEAVY_CORES + 1) / 2 ))'", "f() { echo \"$1\"; }; f x", "[ \"$a\" = \"$b\" ] && echo same",
+        "vs-heavy sh -c 'swift build -j 2 -Xswiftc -j$(( (VS_HEAVY_CORES + 1) / 2 ))'", "env -S 'swift build' --help", "f() { echo \"$1\"; }; f x", "[ \"$a\" = \"$b\" ] && echo same",
     ]
 
     @Test func theFindingsAndTheAuditsLinesAreRefusedByTheHook() throws {
