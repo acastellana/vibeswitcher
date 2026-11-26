@@ -128,11 +128,12 @@ test('C1: a refusal says why in a sentence of the page’s own, nothing opens, a
 });
 
 test('C1: every reason the node gives has a sentence in both languages, with no command, id or internal name', () => {
-  const reasons = ['name', 'outside', 'link', 'exists', 'location', 'identity', 'repository', 'noClaude', 'failed', 'something-new'];
+  const reasons = ['name', 'outside', 'link', 'exists', 'location', 'identity', 'repository', 'noClaude', 'hidden', 'failed', 'something-new'];
   for (const code of ['en', 'es']) {
     setLanguage(code);
     for (const reason of reasons) {
       const words = projectWords({ made: false, refused: reason, said: 'the node’s words' }, { name: 'Shop', folder: 'shop', where: '~/projects' });
+      if (reason !== 'failed' && reason !== 'something-new') assert.doesNotMatch(words, /the node’s words/, `${code} ${reason}: the page’s own sentence`);
       assert.ok(words.length > 20 && !/\{|\}|undefined|drNew/.test(words), `${code} ${reason}: ${words}`);
       assert.doesNotMatch(words, /vibeswitcher|project\.new|noClaude|git config/, `${code} ${reason}: ${words}`);
     }
@@ -155,7 +156,11 @@ test('C1: a name the node would refuse is said under it before anything is sent,
       assert.equal(primary(form.el).disabled, true, name);
       assert.match(form.el.shownText, new RegExp(t(key).slice(0, 20)), name);
     }
+    // Invisible beyond control and format (the review's N1): a variation selector, the combining grapheme joiner, Hangul
+    // fillers, the braille blank, a Mongolian variation selector.
+    for (const mark of ['\ufe0f', '\u034f', '\u3164', '\u2800', '\u115f', '\uffa0', '\u180b']) assert.equal(projectNameProblem('shop' + mark), 'drNameInvisible', mark.codePointAt(0).toString(16));
     assert.equal(projectNameProblem('My App'), null);
+    assert.equal(projectNameProblem('Café 東京'), null);
     assert.equal(r.sent.length, 0);
   }
   setLanguage('en');
@@ -231,7 +236,8 @@ test('the mock lists project.new (not with ?older), makes the project and lists 
   const again = await mock.request({ kind: 'project.new', args: { name: 'Shop' }, action: crypto.randomUUID() });
   assert.equal(again.result.made, false);
   assert.equal(again.result.refused, 'exists');
-  for (const [args, reason] of [[{ name: 'a/b' }, 'name'], [{ name: 'Shop', location: '/etc' }, 'outside'], [{ name: 'Elsewhere', location: '/home/dev/projects/../x' }, 'outside']]) {
+  for (const [args, reason] of [[{ name: 'a/b' }, 'name'], [{ name: 'Shop', location: '/etc' }, 'outside'], [{ name: 'Elsewhere', location: '/home/dev/projects/../x' }, 'outside'],
+    [{ name: 'Deploy', location: '/home/dev/projects/.claude' }, 'hidden'], [{ name: 'shop\u2800' }, 'name']]) {
     const reply = await mock.request({ kind: 'project.new', args, action: crypto.randomUUID() });
     assert.equal(reply.result.refused, reason, JSON.stringify(args));
   }

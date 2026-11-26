@@ -1008,6 +1008,7 @@ const EN = {
   drNewRefusedIdentity: "Nothing was made: git doesn’t know your name and email yet, and the first commit needs them. Set them once in git, then try again.",
   drNewRefusedRepository: "Nothing was made: {where} is inside another git repository, and a new project needs one of its own. Choose another place.",
   drNewRefusedNoClaude: "Nothing was made: this node can’t find Claude Code for the project’s lead. Install it on this node, then try again.",
+  drNewRefusedHidden: "Nothing was made: {where} is a hidden folder, or inside one. Choose a visible folder in your projects folder, or leave Where empty.",
   drNewRefusedOther: "Nothing was made: {why}",
   drNameInvisible: "A project’s name can’t hold an invisible or control character.",
   drNameTooLong: "A project’s name is at most 100 characters.",

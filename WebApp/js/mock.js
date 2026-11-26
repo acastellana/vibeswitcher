@@ -1169,13 +1169,16 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
       const not = (reason, said) => ({ ok: true, result: { made: false, name: null, folder: null, commit: null, lead: null, session: null, refused: reason, said, notes: [] } });
       const folderName = name.split(/\s+/).filter(Boolean).join('-').toLowerCase();
       // eslint-disable-next-line no-control-regex
-      if (/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u2064\ufeff]/.test(name) || [...name].length > 100) return not('name', 'A project name can’t hold a control or invisible character.');
+      if (/[\u0000-\u001f\u007f-\u009f\u2028\u2029]|\p{Cf}|\p{Default_Ignorable_Code_Point}|\u2800/u.test(name) || [...name].length > 100) return not('name', 'A project name can’t hold a control or invisible character.');
       if (/[/:]/.test(folderName)) return not('name', 'A folder name can’t contain “/” or “:”.');
       if (!/[\p{L}\p{N}]/u.test(folderName)) return not('name', 'A project name needs at least one letter or number.');
       if (folderName.startsWith('.')) return not('name', 'A folder name can’t start with “.”: the folder would be hidden.');
       const root = `${HOME}/projects`;
       const typed = typeof args.location === 'string' ? args.location.trim().replace(/\/+$/, '') : '';
       const where = typed || root;
+      if (where.slice(root.length).split('/').some((part) => part.startsWith('.') && part !== '.' && part !== '..') && where.startsWith(root + '/')) {
+        return not('hidden', 'A hidden folder isn’t a project’s place.');
+      }
       if (where.split('/').some((part) => part === '.' || part === '..') || !(where === root || where.startsWith(root + '/'))) {
         return not('outside', `A project from here is made in your projects folder, ~/projects, or a folder inside it; ${where.replace(HOME, '~')} isn’t.`);
       }

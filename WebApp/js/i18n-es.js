@@ -996,6 +996,7 @@ export const ES = {
   drNewRefusedIdentity: "No se creó nada: git aún no sabe tu nombre ni tu correo, y el primer commit los necesita. Configúralos una vez en git y vuelve a intentarlo.",
   drNewRefusedRepository: "No se creó nada: {where} está dentro de otro repositorio git, y un proyecto nuevo necesita uno propio. Elige otro sitio.",
   drNewRefusedNoClaude: "No se creó nada: este nodo no encuentra Claude Code para el líder del proyecto. Instálalo en este nodo y vuelve a intentarlo.",
+  drNewRefusedHidden: "No se creó nada: {where} es una carpeta oculta o está dentro de una. Elige una carpeta visible dentro de tu carpeta de proyectos, o deja Dónde vacío.",
   drNewRefusedOther: "No se creó nada: {why}",
   drNameInvisible: "El nombre de un proyecto no puede llevar caracteres invisibles ni de control.",
   drNameTooLong: "El nombre de un proyecto tiene como mucho 100 caracteres.",

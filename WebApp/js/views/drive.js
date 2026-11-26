@@ -735,9 +735,10 @@ export function newLeadForm(app) {
 export function projectNameProblem(name) {
   const title = String(name || '').trim();
   if (!title) return null;
-  // Control and invisible characters (direction marks, zero-width ones), which the node refuses in a name.
+  // Control and invisible characters (direction marks, zero-width ones, default-ignorable ones such as variation selectors
+  // and Hangul fillers, the braille blank), which the node refuses in a name.
   // eslint-disable-next-line no-control-regex
-  if (/[\u0000-\u001f\u007f-\u009f\u00ad\u061c\u180e\u200b-\u200f\u2028-\u202e\u2060-\u2064\u2066-\u206f\ufeff\ufff9-\ufffb]/.test(title)) return 'drNameInvisible';
+  if (/[\u0000-\u001f\u007f-\u009f\u2028\u2029\ufff9-\ufffb]|\p{Cf}|\p{Default_Ignorable_Code_Point}|\u2800/u.test(title)) return 'drNameInvisible';
   if ([...title].length > 100) return 'drNameTooLong';
   const folder = projectFolderName(title);
   if (/[/:]/.test(folder)) return 'drNameSeparator';
@@ -752,7 +753,7 @@ export function projectNameProblem(name) {
 export function projectWords(result, { name, folder, where }) {
   if (!result?.made) {
     const key = { name: 'drNewRefusedName', outside: 'drNewRefusedOutside', link: 'drNewRefusedLink', exists: 'drNewRefusedExists', location: 'drNewRefusedLocation',
-      identity: 'drNewRefusedIdentity', repository: 'drNewRefusedRepository', noClaude: 'drNewRefusedNoClaude' }[result?.refused];
+      identity: 'drNewRefusedIdentity', repository: 'drNewRefusedRepository', noClaude: 'drNewRefusedNoClaude', hidden: 'drNewRefusedHidden' }[result?.refused];
     return key ? t(key, { name, folder, where }) : t('drNewRefusedOther', { why: result?.said || '' });
   }
   const shown = { name: result.name || name, folder: result.folder || folder };
