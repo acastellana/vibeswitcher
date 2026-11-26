@@ -102,6 +102,137 @@ struct MacAgentSwitchTests {
         }
         #expect(refusedSwitch.text.contains("doesn't run a host the node's record pins") || refusedSwitch.text.contains("no plist"), "\(refusedSwitch.text)")
     }
+
+    // MARK: Function level
+
+    /// Two rows and their jobs, a plist on disk of either, launchd's word for either, and the process at the socket
+    /// running either build's host with or without the keeper's flags: what `status`, `stop` and `switched` take.
+    struct Pair {
+        let a = NodePins.Build(commit: String(repeating: "a", count: 40), host: Data(repeating: 1, count: 20), server: Data(repeating: 2, count: 20),
+                               cli: Data(repeating: 3, count: 20))
+        let b = NodePins.Build(commit: String(repeating: "b", count: 40), host: Data(repeating: 4, count: 20), server: Data(repeating: 5, count: 20),
+                               cli: Data(repeating: 6, count: 20))
+        let place: NodeAgent.Place
+
+        init(_ dir: String) {
+            place = NodeAgent.Place(label: "dev.vibeswitcher.node.test-fn", plistFolder: dir + "/la", dataRoot: dir + "/node",
+                                    lock: dir + "/node/host.lock", uid: getuid(), launchctl: "/bin/launchctl")
+            try? FileManager.default.createDirectory(atPath: place.plistFolder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o755])
+        }
+
+        func job(_ build: NodePins.Build) -> NodeAgent.Job {
+            NodeAgent.Job(label: place.label, programArguments: ["/bin/sleep", "--node-" + build.commit.prefix(1)], environment: [:],
+                          standardErrorPath: place.log, atLogin: false)
+        }
+
+        func write(_ build: NodePins.Build) throws { try NodeAgent.plist(job(build)).get().write(to: URL(fileURLWithPath: place.plistPath)) }
+        var onDisk: Data? { try? Data(contentsOf: URL(fileURLWithPath: place.plistPath)) }
+        func bytes(_ build: NodePins.Build) -> Data? { try? NodeAgent.plist(job(build)).get() }
+
+        /// The agent: launchd's word `printed()` (nil: not loaded), the host at the socket `runs`'s, its command line
+        /// that build's job's, with the keeper's flags when `switched`.
+        func agent(log: MacAgentTests.Recorder, printed: @escaping () -> String?, runs: NodePins.Build, switched: Bool) -> MacAgent {
+            let (a, b) = (a, b)
+            let jobs = [a.commit: job(a), b.commit: job(b)]
+            let arguments = jobs[runs.commit]!.programArguments + (switched ? [NodeAgent.keeperFlags.channel, "5", NodeAgent.keeperFlags.pid, "77"] : [])
+            var steps = MacAgent.Steps(launchctl: { words in
+                                           log.add(words)
+                                           if words.first == "print" { return printed().map { MacAgent.Ran(status: 0, output: $0) } ?? MacAgent.Ran(status: 113, output: "") }
+                                           return MacAgent.Ran(status: words.first == "getenv" ? 1 : 0, output: "")
+                                       },
+                                       pins: { .success(NodePins(uid: getuid(), builds: [a, b])) },
+                                       cdhashOf: { path in
+                                           let row = path.contains("/" + b.commit + "/") ? b : a
+                                           return path.hasSuffix(BuildInfo.host) ? row.host : row.server
+                                       },
+                                       see: { _, pid, _ in .host(MacAgent.Host(commit: runs.commit, pid: pid, startedAt: nil)) },
+                                       say: { log.say($0) }, confirm: { log.say($0); return .failure(StartRefusal("not typed")) },
+                                       serverStop: { _ in .none("no server answers") },
+                                       children: { _ in [] }, alive: { _ in false }, lockFree: { _ in true }, patience: 2,
+                                       arguments: { _ in arguments }, job: { jobs[$0.commit] })
+            steps.executable = { _ in "/bin/sleep" }
+            return MacAgent(place: place, steps: steps)
+        }
+
+        func print(_ build: NodePins.Build) -> String { MacAgentTests.printed(job(build), place: place, pid: 4242) }
+    }
+
+    /// After a switch A → B: launchd's job A's, the plist B's, the host B's switched in place: `status` passes naming B.
+    /// The same without the keeper's flags (B started otherwise under A's job), or with the host still A (a plist
+    /// rewritten without a switch), is refused; with the plist still A's (a switch not followed up) `status` refuses,
+    /// saying how to finish it, and `stop` takes the host (it is refused only at its prompt here). A rollback's B → A:
+    /// the host A switched in place under A's job with B's plist is rewritten back. Red with the change reverted (the
+    /// judge took only the plist's job, and any pinned build's host under it).
+    @Test func statusFollowsThePlistTheSwitchRewrote() throws {
+        let pair = Pair(try scratch.shortFolder("vsfa").path)
+        try pair.write(pair.b)
+        let log = MacAgentTests.Recorder()
+        let passed = pair.agent(log: log, printed: { pair.print(pair.a) }, runs: pair.b, switched: true).status()
+        #expect((try? passed.get())?.contains("build \(pair.b.commit)") == true, "\(passed)")
+        guard case .failure(let fresh) = pair.agent(log: log, printed: { pair.print(pair.a) }, runs: pair.b, switched: false).status() else {
+            Issue.record("B without the keeper's flags under A's job passed"); return
+        }
+        #expect(fresh.text.contains("keeper's flags"), "\(fresh.text)")
+        guard case .failure(let unswitched) = pair.agent(log: log, printed: { pair.print(pair.a) }, runs: pair.a, switched: false).status() else {
+            Issue.record("the host A under B's plist passed"); return
+        }
+        #expect(unswitched.text.contains("runs build \(pair.a.commit) while the agent's plist is build \(pair.b.commit)'s"), "\(unswitched.text)")
+        try pair.write(pair.a)
+        guard case .failure(let stale) = pair.agent(log: log, printed: { pair.print(pair.a) }, runs: pair.b, switched: true).status() else {
+            Issue.record("a switch not followed up passed status"); return
+        }
+        #expect(stale.text.contains("vibeswitcher switch \(pair.b.commit)"), "\(stale.text)")
+        guard case .failure(let stopped) = pair.agent(log: log, printed: { pair.print(pair.a) }, runs: pair.b, switched: true).stop() else {
+            Issue.record("stop went on past its prompt"); return
+        }
+        #expect(stopped.text == "not typed", "stop refused the switched host: \(stopped.text)")
+        #expect(log.bootouts == 0)
+        // A rollback B → A whose plist is B's: rewritten back to A's.
+        try pair.write(pair.b)
+        let back = pair.agent(log: log, printed: { pair.print(pair.a) }, runs: pair.a, switched: true).switched(to: pair.a, folder: "/x/" + pair.a.commit)
+        #expect((try? back.get()) != nil, "\(back)")
+        #expect(pair.onDisk == pair.bytes(pair.a))
+    }
+
+    /// `switched` rewrites nothing unless the job's process is the target's host: the host still A (no handover) leaves
+    /// the plist A's; nothing is loaded or unloaded either way.
+    @Test func aRewriteIsRefusedUnlessTheHostRunsTheTarget() throws {
+        let pair = Pair(try scratch.shortFolder("vsfb").path)
+        try pair.write(pair.a)
+        let log = MacAgentTests.Recorder()
+        guard case .failure(let why) = pair.agent(log: log, printed: { pair.print(pair.a) }, runs: pair.a, switched: false).switched(to: pair.b, folder: "/x/" + pair.b.commit) else {
+            Issue.record("rewritten for B while A runs"); return
+        }
+        #expect(why.text.contains("runs build \(pair.a.commit), not \(pair.b.commit)") && why.text.contains("left as build \(pair.a.commit)'s"), "\(why.text)")
+        #expect(pair.onDisk == pair.bytes(pair.a))
+        #expect(!log.calls.contains { ["bootout", "bootstrap", "kickstart"].contains($0.first ?? "") }, "\(log.calls)")
+    }
+
+    /// A rewrite that fails partway: the new file can't be made (the plist's folder not writable): the old plist whole,
+    /// said; the new one written but launchd's word no longer the job's (looked at again after the rename): the old
+    /// bytes put back, said. Neither loads or unloads anything.
+    @Test func aRewriteThatFailsPartwayLeavesTheOldPlistAndJobWhole() throws {
+        let pair = Pair(try scratch.shortFolder("vsfc").path)
+        try pair.write(pair.a)
+        let log = MacAgentTests.Recorder()
+        chmod(pair.place.plistFolder, 0o555)
+        let unwritable = pair.agent(log: log, printed: { pair.print(pair.a) }, runs: pair.b, switched: true).switched(to: pair.b, folder: "/x/" + pair.b.commit)
+        chmod(pair.place.plistFolder, 0o755)
+        guard case .failure(let why) = unwritable else { Issue.record("rewritten in a folder it can't write"); return }
+        #expect(why.text.contains("left as build \(pair.a.commit)'s") && why.text.contains("runs on untouched"), "\(why.text)")
+        #expect(pair.onDisk == pair.bytes(pair.a))
+        // launchd's word changes once B's plist is there (another job's print).
+        let other = MacAgentTests.printed(NodeAgent.Job(label: pair.place.label, programArguments: ["/bin/zsh"], environment: [:],
+                                                        standardErrorPath: pair.place.log, atLogin: false), place: pair.place, pid: 4242)
+        let changed = pair.agent(log: log, printed: { pair.onDisk == pair.bytes(pair.b) ? other : pair.print(pair.a) }, runs: pair.b, switched: true)
+            .switched(to: pair.b, folder: "/x/" + pair.b.commit)
+        guard case .failure(let after) = changed else { Issue.record("rewritten though launchd's word changed"); return }
+        #expect(after.text.contains("put back as build \(pair.a.commit)'s"), "\(after.text)")
+        #expect(pair.onDisk == pair.bytes(pair.a))
+        #expect(!log.calls.contains { ["bootout", "bootstrap", "kickstart"].contains($0.first ?? "") }, "\(log.calls)")
+        let left = try FileManager.default.contentsOfDirectory(atPath: pair.place.plistFolder)
+        #expect(left == [pair.place.label + ".plist"], "\(left)")
+    }
 }
 
 /// Two scratch builds, A and B, each a hardened copy of the built host and server signed under identifiers of their own

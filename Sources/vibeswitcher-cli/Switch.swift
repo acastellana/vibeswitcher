@@ -48,9 +48,14 @@ enum SwitchCommand {
         context.sayScratch()
         let home = VibePaths.accountHome
         let prefix = NodeFolders.defaultPrefix(accountHome: home)
-        // ST-D3: the user's node's follow-up writes; nothing is asked before this check.
+        // ST-D3: the user's node's follow-up writes; nothing is asked before this check. The Mac's: this command line is a
+        // build the node's record pins, by its own running code (its follow-up rewrites the LaunchAgent's plist).
         if !context.isScratch, !Platform.CodeIdentity.isAvailable,
            case .failure(let refused) = NodeFolders.installedBuild(executable: "/proc/self/exe", prefix: prefix) {
+            return Say.refused("\(command): \(refused.text)")
+        }
+        if !context.isScratch, Platform.CodeIdentity.isAvailable,
+           case .failure(let refused) = MacAgent.ownBuild(own: Platform.CodeIdentity.ownCdhash(), pins: NodePins.read(), prefix: prefix) {
             return Say.refused("\(command): \(refused.text)")
         }
         let client: NodeClient
@@ -220,7 +225,7 @@ enum SwitchCommand {
     static func rewrites(_ context: NodeContext) -> NodeTexts.SwitchRewrites {
         switch context.mode {
         case .scratch: return .nothing("a scratch node: no unit to rewrite")
-        case .node where Platform.CodeIdentity.isAvailable: return .nothing("the Mac: no unit to rewrite")
+        case .node where Platform.CodeIdentity.isAvailable: return .nothing("the Mac: no unit; the LaunchAgent's plist is rewritten for it once its host runs it")
         case .node: return .unitAndCurrent
         case .detached: return .currentOnly
         }
@@ -243,8 +248,9 @@ enum SwitchCommand {
             Say.out("scratch node: no unit to rewrite")
             return nil
         case .node where Platform.CodeIdentity.isAvailable:
-            Say.out("the Mac: no unit to rewrite")
-            return nil
+            // The LaunchAgent's plist rewritten for the build the host now runs, checked by token and code
+            // (`MacAgent.switched`): the next `start` runs it.
+            return MacAgentCommand.switched(commit: commit)
         case .node:
             let tools = NodeStarter.node(accountHome: accountHome, uid: getuid())
             if !handedOver, SwitchFollowUp.isDone(tools: tools, prefix: prefix, commit: commit) { return nil }

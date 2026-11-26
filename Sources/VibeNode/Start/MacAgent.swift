@@ -155,27 +155,22 @@ public struct MacAgent {
         guard pins.builds.contains(build) else {
             return .failure(StartRefusal("the node's record doesn't pin build \(build.commit): nothing was started", exitCode: 1))
         }
-        for (name, cdhash) in [(BuildInfo.host, build.host), (BuildInfo.server, build.server)] {
-            let path = NodeFolders.join(folder, "bin/" + name)
-            guard steps.cdhashOf(path) == cdhash else {
-                return .failure(StartRefusal("\(ConfigSeal.inert(path, limit: .max)) isn't the \(name) the node's record pins for build \(build.commit): nothing was started", exitCode: 1))
-            }
-        }
-        // A job of the label already there, judged by launchd's whole word (the design's "The re-check's round").
-        switch judge(candidates(pins.builds)) {
+        if let why = filesRefusal(build, folder: folder) { return .failure(StartRefusal("\(why): nothing was started", exitCode: 1)) }
+        // A job of the label already there, judged by launchd's whole word (the design's "The re-check's round"), a
+        // switched one's too (`switched`).
+        switch judge(candidates(pins.builds), switchedFrom: pins.builds) {
         case .notLoaded: break
         case .notOurs(let why):
             return .failure(StartRefusal("a job labelled \(place.label) is loaded that isn't the node's: \(why); it was left as it is", exitCode: 77))
-        case .ours(let printed, let loaded):
+        case .ours(let printed, let loaded, let onDisk):
             if let pid = printed.pid {
-                switch node(pid, builds: pins.builds) {
+                switch node(pid, builds: pins.builds, loaded: loaded, onDisk: onDisk) {
                 case .success(let host): return .success(say("the node runs already: \(Self.describe(host))"))
                 case .failure(let why):
                     return .failure(StartRefusal("a job labelled \(place.label) runs pid \(pid), which isn't the node's host: \(why.text); it was left as it is", exitCode: 77))
                 }
             }
             // The agent's own job, not running: unloaded, so the plist checked below is what launchd loads.
-            _ = loaded
             if let why = bootout() { return .failure(why) }
         }
         for name in NodeAgent.refusedManagerNames {
@@ -197,7 +192,7 @@ public struct MacAgent {
         guard let bootstrapped, bootstrapped.status == 0 else {
             if bootstrapped == nil || (bootstrapped?.status ?? 0) >= 128 {
                 let what: String
-                switch judge([job], held: held.fd) {
+                switch judge([Candidate(build: build, job: job)], held: held.fd) {
                 case .notLoaded: what = "nothing of it is loaded"
                 case .ours: what = unloaded(bootout())
                 case .notOurs(let why): what = "a job of the label that isn't start's is loaded (\(why)): it was left as it is"
@@ -212,7 +207,7 @@ public struct MacAgent {
         let deadline = steps.now().addingTimeInterval(steps.patience)
         var last = "no host took a connection"
         while true {
-            switch judge([job], held: held.fd) {
+            switch judge([Candidate(build: build, job: job)], held: held.fd) {
             case .notLoaded:
                 return .failure(StartRefusal("the job \(place.target) went from launchd while start waited for its host", exitCode: 1))
             case .notOurs(let why):
@@ -223,13 +218,13 @@ public struct MacAgent {
                     return .failure(StartRefusal("launchd's word for the job it loaded isn't the job start wrote: \(why); \(unloaded(bootout()))", exitCode: 77))
                 }
                 last = why
-            case .ours(let printed, _):
+            case .ours(let printed, _, _):
                 if let pid = printed.pid {
                     switch steps.see(place.socket, pid, [build]) {
                     case .host(let host):
                         // Its code is the pinned host's; its command line and program the job's; the file launchd read the
                         // one start checked and holds, unchanged; launchd's word the job's (placed above).
-                        if let why = runsTheJob(pid, build: build, switched: false) ?? runsTheProgram(pid, build: build) ?? held.changed(place: place) {
+                        if let why = runsTheJob(pid, job: job, switched: .no) ?? runsTheProgram(pid, job: job) ?? held.changed(place: place) {
                             return .failure(StartRefusal("the job's process (pid \(pid)) isn't the host start meant: \(why); \(unloaded(bootout()))", exitCode: 77))
                         }
                         return .success(say("the node runs: \(Self.describe(host))"))
@@ -262,21 +257,24 @@ public struct MacAgent {
         case .success(let read): builds = read.builds
         }
         let pid: pid_t
-        switch judge(candidates(builds)) {
+        let judged: (loaded: Candidate, onDisk: Candidate)
+        switch judge(candidates(builds), switchedFrom: builds) {
         case .notLoaded:
             return .failure(StartRefusal("the node isn't running: no job labelled \(place.label) is loaded", exitCode: 69))
         case .notOurs(let why):
             return .failure(StartRefusal("a job labelled \(place.label) is loaded that isn't the node's: \(why); nothing was stopped", exitCode: 77))
-        case .ours(let printed, _):
+        case .ours(let printed, let loaded, let onDisk):
             guard let running = printed.pid else {
                 if let why = bootout() { return .failure(why) }
                 removeStaleSocket()
                 return .success(say("the node wasn't running (\(printed.lastExit ?? "not started")): its job was unloaded"))
             }
             pid = running
+            judged = (loaded, onDisk)
         }
         let host: Host
-        switch node(pid, builds: builds) {
+        // A host that switched in place whose plist wasn't rewritten yet is still the node to stop (`node`'s `stale`).
+        switch node(pid, builds: builds, loaded: judged.loaded, onDisk: judged.onDisk, stale: true) {
         case .success(let seen): host = seen
         case .failure(let why):
             return .failure(StartRefusal("a job labelled \(place.label) runs pid \(pid), which isn't the node's host: \(why.text); nothing was stopped", exitCode: 77))
@@ -340,25 +338,27 @@ public struct MacAgent {
     }
 
     /// The node's host as `status` finds it, said to no one: the job of the label judged by launchd's whole word, its
-    /// process the node's host by the connection's audit token and running code (`node`). The command line's server
-    /// check takes the host's pid from this (`ServerCheck`), never from `launchctl print`'s text alone.
-    public func runningHost() -> Result<Host, StartRefusal> {
+    /// process the node's host by the connection's audit token and running code (`node`), the build the agent's plist
+    /// names. The command line's server check takes the host's pid from this (`ServerCheck`), never from `launchctl
+    /// print`'s text alone, with `afterASwitch`: a host that switched in place before its plist was rewritten (between
+    /// a switch's handover and its follow-up, `switched`) is taken too, as `stop` takes it; `status` doesn't.
+    public func runningHost(afterASwitch stale: Bool = false) -> Result<Host, StartRefusal> {
         if notLoaded() { return .failure(StartRefusal("the node isn't running: no job labelled \(place.label) is loaded", exitCode: 69)) }
         let builds: [NodePins.Build]
         switch steps.pins() {
         case .failure(let why): return .failure(StartRefusal("the node's record can't be read: \(why.description)", exitCode: 1))
         case .success(let read): builds = read.builds
         }
-        switch judge(candidates(builds)) {
+        switch judge(candidates(builds), switchedFrom: builds) {
         case .notLoaded:
             return .failure(StartRefusal("the node isn't running: no job labelled \(place.label) is loaded", exitCode: 69))
         case .notOurs(let why):
             return .failure(StartRefusal("a job labelled \(place.label) is loaded that isn't the node's: \(why)", exitCode: 77))
-        case .ours(let printed, _):
+        case .ours(let printed, let loaded, let onDisk):
             guard let pid = printed.pid else {
                 return .failure(StartRefusal("the node isn't running: its job is loaded and not running (\(printed.lastExit ?? "never started"))", exitCode: 69))
             }
-            switch node(pid, builds: builds) {
+            switch node(pid, builds: builds, loaded: loaded, onDisk: onDisk, stale: stale) {
             case .success(let host): return .success(host)
             case .failure(let why):
                 return .failure(StartRefusal("a job labelled \(place.label) runs pid \(pid), which isn't the node's host: \(why.text)", exitCode: 77))
@@ -366,10 +366,68 @@ public struct MacAgent {
         }
     }
 
-    /// The switch's follow-up on the Mac (`vibeswitcher switch`, once the host handed over): the agent's plist rewritten
-    /// for the build `target` (in `folder`) the host now runs. The seam: not built yet, so a switch rewrites no plist.
+    /// The switch's follow-up on the Mac (`vibeswitcher switch`, once the host handed over; item 15's owed "a switch must
+    /// rewrite the plist"): the agent's plist rewritten for the build `target` (in `folder`) the host now runs, by the
+    /// job start writes for it (`Steps.job`: `NodeAgent.Job.node` for the user's node), its `RunAtLoad` kept. In order:
+    /// the record pins `target` and its files; launchd's word for the job of the label judged as `start` judges it (the
+    /// job it loaded, a build's of the record; the plist on disk, a build's of the record); the job's process the
+    /// target's host by token and code, its command line the target's job's (the keeper's flags after it when it
+    /// switched in place) and its program that job's; then the plist replaced (a new file renamed over it: a reader sees
+    /// the old bytes or the new, never a mix), checked as `start` checks it with its descriptor held, and launchd's word
+    /// and the host looked at again. Anything unusual refuses; a refusal after the rename puts the old plist's bytes back
+    /// (said whether it could). It loads and unloads nothing: launchd's job, loaded as the build the host was started as,
+    /// runs on untouched whatever happens.
     public func switched(to target: NodePins.Build, folder: String) -> Result<String, StartRefusal> {
-        .failure(StartRefusal("the Mac's switch rewrites no plist yet", exitCode: 1))
+        func refused(_ why: String, _ code: Int32 = 1) -> Result<String, StartRefusal> { .failure(StartRefusal(why, exitCode: code)) }
+        if notLoaded() { return refused("no job labelled \(place.label) is loaded: no plist was rewritten (`vibeswitcher start` writes the plist for the build it starts)", 69) }
+        let pins: NodePins
+        switch steps.pins() {
+        case .failure(let why): return refused("the node's record can't be read: \(why.description); no plist was rewritten")
+        case .success(let read): pins = read
+        }
+        guard pins.builds.contains(target) else { return refused("the node's record doesn't pin build \(target.commit): no plist was rewritten") }
+        if let why = filesRefusal(target, folder: folder) { return refused("\(why): no plist was rewritten") }
+        let printed: NodeAgent.Printed, loaded: Candidate, onDisk: Candidate
+        switch judge(candidates(pins.builds), switchedFrom: pins.builds) {
+        case .notLoaded: return refused("no job labelled \(place.label) is loaded: no plist was rewritten", 69)
+        case .notOurs(let why):
+            return refused("a job labelled \(place.label) is loaded that isn't the node's: \(why); it and its plist were left as they are", 77)
+        case .ours(let read, let job, let disk): (printed, loaded, onDisk) = (read, job, disk)
+        }
+        guard let pid = printed.pid else {
+            return refused("the node's job is loaded and not running (\(printed.lastExit ?? "not started")): no plist was rewritten", 69)
+        }
+        guard var made = steps.job(target) else { return refused("there is no job for build \(target.commit): no plist was rewritten") }
+        made.atLogin = onDisk.job.atLogin
+        let goal = Candidate(build: target, job: made)
+        if let why = hostRuns(goal, pid: pid, builds: pins.builds, loaded: loaded) {
+            return refused("the job's process (pid \(pid)) isn't build \(target.commit)'s host: \(why); the plist was left as build \(onDisk.build.commit)'s", 77)
+        }
+        if onDisk == goal { return .success(say("the agent's plist already names build \(target.commit): nothing to rewrite")) }
+        if let why = replacePlist(with: goal.job) {
+            return refused("the agent's plist couldn't be rewritten for build \(target.commit) (\(why)): it was left as build \(onDisk.build.commit)'s, and launchd's job runs on untouched")
+        }
+        func putBack(_ why: String) -> Result<String, StartRefusal> {
+            let back = replacePlist(with: onDisk.job)
+            return refused("the agent's plist was rewritten for build \(target.commit), but \(why): "
+                           + (back.map { "the old one couldn't be put back (\($0)): `vibeswitcher switch \(target.commit)` again rewrites it" }
+                              ?? "it was put back as build \(onDisk.build.commit)'s")
+                           + "; launchd's job runs on untouched", 77)
+        }
+        let held: HeldPlist
+        switch writtenPlist(goal.job) {
+        case .failure(let why): return putBack("start's check of it refused it (\(why.text))")
+        case .success(let checked): held = checked
+        }
+        defer { Sys.close(held.fd) }
+        switch judge([goal], held: held.fd, switchedFrom: pins.builds) {
+        case .ours(let again, let still, let disk) where still == loaded && disk == goal && again.pid == pid: break
+        case .ours: return putBack("launchd's word for the job changed meanwhile")
+        case .notLoaded: return putBack("the job went from launchd meanwhile")
+        case .notOurs(let why): return putBack("launchd's word for the job isn't the one it loaded with this plist: \(why)")
+        }
+        if let why = hostRuns(goal, pid: pid, builds: pins.builds, loaded: loaded) ?? held.changed(place: place) { return putBack(why) }
+        return .success(say("the agent's plist names build \(target.commit) now: the next start runs it (launchd's job, loaded as build \(loaded.build.commit)'s, runs on untouched)"))
     }
 
     /// The build the command line `own` (its running code) is in the record `pins` (the row whose `cli` it is), and its
@@ -484,43 +542,94 @@ public struct MacAgent {
     // MARK: Helpers
 
     /// The node's host in the job of the label running at `pid` (the review's I2, the job already judged ours by
-    /// launchd's whole word): the process at the socket runs a pinned host by token and code (`see`), its command line
-    /// that build's job's (a switched one with the keeper's two flags after it) and its program that job's program by
-    /// device and inode.
-    func node(_ pid: pid_t, builds: [NodePins.Build]) -> Result<Host, StartRefusal> {
+    /// launchd's whole word, launchd having loaded `loaded` and the agent's plist on disk being `onDisk`): the process at
+    /// the socket runs a pinned host by token and code (`see`), and that host's build must be the plist's (what the next
+    /// `start` starts); then its command line that job's and its program that job's program by device and inode. Where
+    /// launchd's job is another build's than the plist's (a switch's rewrite, `switched`), the process must have
+    /// switched in place: the keeper's two flags follow its command line. `stale` (a stop's look, and the command line's
+    /// server check between a switch's handover and its follow-up) also takes a host whose build isn't the plist's when
+    /// launchd's job and the plist are the same build's and the host switched in place from it (keeper's flags): a
+    /// switch whose rewrite didn't happen yet. Anything else is refused, the builds named.
+    func node(_ pid: pid_t, builds: [NodePins.Build], loaded: Candidate, onDisk: Candidate, stale: Bool = false) -> Result<Host, StartRefusal> {
         switch steps.see(place.socket, pid, builds) {
         case .nothing(let why), .other(let why): return .failure(StartRefusal(why))
         case .host(let host):
             guard let build = builds.first(where: { $0.commit == host.commit }) else { return .failure(StartRefusal("its build isn't the record's")) }
-            if let why = runsTheJob(pid, build: build, switched: true) ?? runsTheProgram(pid, build: build) { return .failure(StartRefusal(why)) }
+            let job: NodeAgent.Job
+            let switched: Switched
+            if build == onDisk.build {
+                (job, switched) = (onDisk.job, loaded == onDisk ? .may : .must)
+            } else if stale, loaded == onDisk, var other = steps.job(build) {
+                other.atLogin = onDisk.job.atLogin
+                (job, switched) = (other, .must)
+            } else {
+                return .failure(StartRefusal("it runs build \(build.commit) while the agent's plist is build \(onDisk.build.commit)'s job, so the next start "
+                                             + "would start \(onDisk.build.commit): `vibeswitcher switch \(build.commit)` rewrites the plist for the build that runs"))
+            }
+            if let why = runsTheJob(pid, job: job, switched: switched) ?? runsTheProgram(pid, job: job) { return .failure(StartRefusal(why)) }
             return .success(host)
         }
+    }
+
+    /// Why the job's process `pid` isn't `goal`'s host (the switch's target, `switched`), or nil: by token and code
+    /// (`see`) a host of `goal`'s build, its command line `goal`'s job's (the keeper's flags after it unless launchd's
+    /// job, `loaded`, is that build's) and its program that job's.
+    func hostRuns(_ goal: Candidate, pid: pid_t, builds: [NodePins.Build], loaded: Candidate) -> String? {
+        switch steps.see(place.socket, pid, builds) {
+        case .nothing(let why), .other(let why): return why
+        case .host(let host):
+            guard host.commit == goal.build.commit else { return "it runs build \(host.commit), not \(goal.build.commit)" }
+            return runsTheJob(pid, job: goal.job, switched: loaded.build == goal.build ? .may : .must) ?? runsTheProgram(pid, job: goal.job)
+        }
+    }
+
+    /// Why a build's files in `folder` aren't the ones the record pins for it (its host and server, by cdhash), or nil.
+    func filesRefusal(_ build: NodePins.Build, folder: String) -> String? {
+        for (name, cdhash) in [(BuildInfo.host, build.host), (BuildInfo.server, build.server)] {
+            let path = NodeFolders.join(folder, "bin/" + name)
+            guard steps.cdhashOf(path) == cdhash else {
+                return "\(ConfigSeal.inert(path, limit: .max)) isn't the \(name) the node's record pins for build \(build.commit)"
+            }
+        }
+        return nil
+    }
+
+    /// A job `start` writes, and the build of the record it is for.
+    struct Candidate: Equatable {
+        let build: NodePins.Build
+        let job: NodeAgent.Job
     }
 
     /// What launchd's word for the job of the label came to (the design's "The re-check's round": one reader).
     enum Judged {
         /// `print` said "Could not find service" (exit 113, measured): no job of the label.
         case notLoaded
-        /// The whole output placed as `job`'s, its plist the agent's by `lstat` and file.
-        case ours(NodeAgent.Printed, NodeAgent.Job)
+        /// The whole output placed as `loaded`'s job, its plist the agent's by `lstat` and file, whose bytes on disk are
+        /// `onDisk`'s job: the same, or, after a switch's rewrite (`switched`), another build's of the record.
+        case ours(NodeAgent.Printed, loaded: Candidate, onDisk: Candidate)
         /// Loaded, and not placed as any job start writes (or `print` failed otherwise): why.
         case notOurs(String)
     }
 
     /// The jobs a job of the label may be of ours: start's for a pinned build whose bytes the agent's plist on disk is
     /// (`RunAtLoad` either way); none when the plist is another's or unreadable.
-    func candidates(_ builds: [NodePins.Build]) -> [NodeAgent.Job] {
+    func candidates(_ builds: [NodePins.Build]) -> [Candidate] {
         guard let data = Self.readPlist(place.plistPath) else { return [] }
-        return builds.compactMap(steps.job).flatMap { job -> [NodeAgent.Job] in
+        return builds.flatMap { build -> [Candidate] in
+            guard let job = steps.job(build) else { return [] }
             var other = job
             other.atLogin = !job.atLogin
-            return [job, other]
-        }.filter { NodeAgent.check(data, job: $0) == nil }
+            return [Candidate(build: build, job: job), Candidate(build: build, job: other)]
+        }.filter { NodeAgent.check(data, job: $0.job) == nil }
     }
 
     /// The job of the label judged by launchd's whole word against `candidates`, its plist's path then compared by
     /// `lstat` (no link followed) with the file `held` (start's descriptor) or the agent's plist, by device and inode.
-    func judge(_ candidates: [NodeAgent.Job], held: Int32? = nil) -> Judged {
+    /// With `switchedFrom` (the record's builds), a word placed as none of them may be placed as another of those
+    /// builds' jobs, the same `RunAtLoad`, when exactly one candidate is the plist on disk: launchd holds the job it
+    /// loaded across an in-place switch, and a switch's follow-up rewrites the plist for the build it went to. What the
+    /// host then must be is `node`'s to say.
+    func judge(_ candidates: [Candidate], held: Int32? = nil, switchedFrom builds: [NodePins.Build] = []) -> Judged {
         guard let ran = steps.launchctl(["print", place.target]) else { return .notOurs("launchctl print couldn't run") }
         if ran.status == 113 { return .notLoaded }
         guard ran.status == 0 else { return .notOurs("launchctl print exited \(ran.status)") }
@@ -529,13 +638,23 @@ public struct MacAgent {
                             + "another build's: `launchctl bootout \(place.target)`, remove \(ConfigSeal.inert(place.plistPath, limit: .max)), and run `vibeswitcher start` again)")
         }
         let path = Self.canonicalPlistPath(place)
+        let output = Data(ran.output.utf8)
         var first: String?
-        for job in candidates {
-            switch NodeAgent.placed(Data(ran.output.utf8), job: job, plistPath: path, uid: place.uid) {
+        for candidate in candidates {
+            switch NodeAgent.placed(output, job: candidate.job, plistPath: path, uid: place.uid) {
             case .success(let printed):
                 if let why = pathIsTheAgents(path, held: held) { return .notOurs(why) }
-                return .ours(printed, job)
+                return .ours(printed, loaded: candidate, onDisk: candidate)
             case .failure(let why): first = first ?? why.description
+            }
+        }
+        if candidates.count == 1, let disk = candidates.first {
+            for build in builds where build != disk.build {
+                guard var job = steps.job(build) else { continue }
+                job.atLogin = disk.job.atLogin
+                guard case .success(let printed) = NodeAgent.placed(output, job: job, plistPath: path, uid: place.uid) else { continue }
+                if let why = pathIsTheAgents(path, held: held) { return .notOurs(why) }
+                return .ours(printed, loaded: Candidate(build: build, job: job), onDisk: disk)
             }
         }
         return .notOurs(first ?? "launchd's print isn't the job start wrote")
@@ -555,27 +674,77 @@ public struct MacAgent {
         return nil
     }
 
-    /// Why `pid` doesn't run the job's command line for `build` (`Steps.job`), or nil: exactly that, or, where it may
-    /// have switched in place, that followed by the keeper's two flags and their numbers (a checked node's next image
-    /// is started so: `NodeAgent.keeperFlags`).
-    func runsTheJob(_ pid: pid_t, build: NodePins.Build, switched: Bool) -> String? {
-        guard let expected = steps.job(build)?.programArguments else { return "the job has no command line for build \(build.commit)" }
+    /// Whether a job's process may, or must, have switched in place (`runsTheJob`).
+    enum Switched {
+        /// Started by launchd from the job: exactly its command line.
+        case no
+        /// Either.
+        case may
+        /// Handed over in place to the job's build (launchd's job is another build's): the keeper's flags after it.
+        case must
+    }
+
+    /// Why `pid` doesn't run `job`'s command line, or nil: exactly that, or, where it may have switched in place, that
+    /// followed by the keeper's two flags and their numbers (a checked node's next image is started so:
+    /// `NodeAgent.keeperFlags`); where it must have, only the latter.
+    func runsTheJob(_ pid: pid_t, job: NodeAgent.Job, switched: Switched) -> String? {
+        let expected = job.programArguments
         let given = steps.arguments(pid)
-        if given == expected { return nil }
+        if given == expected {
+            return switched == .must ? "pid \(pid) runs the job's command line without the keeper's flags: it didn't switch in place, so it isn't the host launchd's job started" : nil
+        }
         let rest = Array(given.dropFirst(expected.count))
-        if switched, Array(given.prefix(expected.count)) == expected, rest.count == 4, rest[0] == NodeAgent.keeperFlags.channel,
+        if switched != .no, Array(given.prefix(expected.count)) == expected, rest.count == 4, rest[0] == NodeAgent.keeperFlags.channel,
            rest[2] == NodeAgent.keeperFlags.pid, [rest[1], rest[3]].allSatisfy({ !$0.isEmpty && $0.allSatisfy(\.isNumber) }) { return nil }
         return "pid \(pid) runs \(ConfigSeal.inert(given.joined(separator: " "), limit: 512)), not the job's command line"
     }
 
-    /// Why `pid`'s program (the kernel's path of its image) isn't the job's program for `build` by device and inode, or
-    /// nil: a byte copy of the pinned host elsewhere is another file (the review's I2).
-    func runsTheProgram(_ pid: pid_t, build: NodePins.Build) -> String? {
-        guard let expected = steps.job(build)?.programArguments.first else { return "the job has no program for build \(build.commit)" }
+    /// Why `pid`'s program (the kernel's path of its image) isn't `job`'s program by device and inode, or nil: a byte
+    /// copy of the pinned host elsewhere is another file (the review's I2).
+    func runsTheProgram(_ pid: pid_t, job: NodeAgent.Job) -> String? {
+        guard let expected = job.programArguments.first else { return "the job has no program" }
         guard let running = steps.executable(pid) else { return "pid \(pid)'s program can't be read" }
         var a = stat(), b = stat()
         guard stat(running, &a) == 0, stat(expected, &b) == 0, a.st_dev == b.st_dev, a.st_ino == b.st_ino else {
             return "pid \(pid) runs \(ConfigSeal.inert(running, limit: 512)), not the job's program \(ConfigSeal.inert(expected, limit: 512))"
+        }
+        return nil
+    }
+
+    /// The agent's plist replaced by `job`'s bytes, start's own (`NodeAgent.plist`): written to a new file beside it
+    /// (`O_EXCL`, no link followed, `0644`), synced, then renamed over it, in a folder of the user's only the user can
+    /// write that stayed the same folder meanwhile; never written in place, so a reader sees the old bytes or the new.
+    /// Why not, or nil. What is there after is for `writtenPlist` to check.
+    func replacePlist(with job: NodeAgent.Job) -> String? {
+        let data: Data
+        switch NodeAgent.plist(job) {
+        case .failure(let why): return why.text
+        case .success(let made): data = made
+        }
+        let folder = place.plistFolder
+        var before = stat(), existing = stat(), after = stat()
+        guard lstat(folder, &before) == 0, before.st_mode & S_IFMT == S_IFDIR, before.st_uid == place.uid, before.st_mode & 0o022 == 0, !Self.hasACL(folder) else {
+            return "the agent's folder isn't a folder of the user's that only the user can write"
+        }
+        guard lstat(place.plistPath, &existing) == 0, existing.st_mode & S_IFMT == S_IFREG else { return "the agent's plist isn't a regular file" }
+        let temporary = NodeFolders.join(folder, ".\(place.label).plist.\(UUID().uuidString.prefix(8).lowercased())")
+        let fd = open(temporary, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o644)
+        guard fd >= 0 else { return "a new plist couldn't be made beside it (errno \(errno))" }
+        let wrote = data.withUnsafeBytes { write(fd, $0.baseAddress, $0.count) }
+        let synced = fsync(fd) == 0
+        Sys.close(fd)
+        guard wrote == data.count, synced else {
+            unlink(temporary)
+            return "the new plist couldn't be written"
+        }
+        guard lstat(folder, &after) == 0, after.st_dev == before.st_dev, after.st_ino == before.st_ino else {
+            unlink(temporary)
+            return "the agent's folder changed while the new plist was written"
+        }
+        guard rename(temporary, place.plistPath) == 0 else {
+            let failed = errno
+            unlink(temporary)
+            return "the new plist couldn't be renamed over the old (errno \(failed))"
         }
         return nil
     }

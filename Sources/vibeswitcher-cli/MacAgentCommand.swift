@@ -115,6 +115,26 @@ enum MacAgentCommand {
         }
     }
 
+    /// The switch's follow-up (`SwitchCommand.followUp`, once the host handed over to `commit`, or when it runs it
+    /// already): the user's node's plist rewritten for that build (`MacAgent.switched`), the build the record's row of
+    /// that commit, its folder under the user's builds. Says its line; the refusal otherwise.
+    static func switched(commit: String) -> StartRefusal? {
+        guard let place = place() else { return StartRefusal("this system has no launchctl: no plist was rewritten", exitCode: 69) }
+        let home = VibePaths.accountHome
+        let pins = NodePins.read()
+        guard case .success(let record) = pins else {
+            if case .failure(let why) = pins { return StartRefusal("the node's record can't be read: \(why.description); no plist was rewritten", exitCode: 1) }
+            return StartRefusal("the node's record can't be read: no plist was rewritten", exitCode: 1)
+        }
+        guard let build = record.builds.first(where: { $0.commit == commit }) else {
+            return StartRefusal("the node's record doesn't pin build \(commit): no plist was rewritten", exitCode: 1)
+        }
+        let agent = MacAgent(place: place, steps: .system(place: place, pins: { pins }, say: { Say.out($0) }, confirm: { _ in .success(()) },
+                                                          serverStop: { _ in .none("no server is asked") }, job: MacAgentCommand.job))
+        if case .failure(let why) = agent.switched(to: build, folder: (NodeFolders.defaultPrefix(accountHome: home) as NSString).appendingPathComponent(commit)) { return why }
+        return nil
+    }
+
     static func said(_ why: StartRefusal) -> Int32 {
         if why.exitCode == 77 { return Say.refused(why.text) }
         Say.err("vibeswitcher: \(ConfigSeal.inert(why.text, limit: .max))")
