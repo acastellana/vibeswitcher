@@ -1310,12 +1310,15 @@ still a change: a sparse file's size costs no disk, and `truncate -s 100T ~/.zsh
 hash 100 TB of zeros (the round's blind check; `aSparseFilesRowIsBoundedAndStillSeesAWrite`); a preferences file is
 parsed whole only up to 16 MB (past it, by its bytes, to that limit); a `.entries` row by `ConfigSeal.maxEntries` (cut,
 held); a listing walks every entry, uncapped, one `lstat` each (Homebrew's `bin`, the largest, 1,213 here); the
-sessions and ByHost folders read every matching file. The uncapped ones are linear in entries on disk, each of which a
-worker must make first; none grows faster.
+sessions and ByHost folders read every matching file. That caps each file, not a row's total: a sparse file just under
+256 MB costs an inode and no disk, and hashing one took 0.22 s here (`openssl dgst -sha256` of a 255 MB sparse file,
+2026-11-26), so 20,000 of them in a `.entries` row (`maxEntries`) is about 73 minutes, and the sessions and ByHost
+folders have no count cap at all. Owed (below): a total budget per row.
 
 Shared code, for Linux: `LinuxSealList.sourced` keeps a set (same result, linear); `addSourced` caps as above (no twins
-on Linux: bash reads none), so a Linux startup file that reaches a cap shows the cap's row once where it named nothing
-before; a `.zwc` entry coming into or going from any `.entries` row (the snapshots, the hooks, the launch folders, the
+on Linux: bash reads none), so a Linux startup file that reaches a cap adds the cap's row where it named nothing before
+(held at its first read in a book that holds its first look; elsewhere recorded as it is, the crossing held through the
+startup file's own row, whose change made it); a `.zwc` entry coming into or going from any `.entries` row (the snapshots, the hooks, the launch folders, the
 manager's `transient`) is held; a listing's link target holding a newline is said in hex; a file past 256 MB is hashed by
 its metadata wherever the seal hashes contents (the app's seal on v2 too: one card for such a file, none exists here). A Linux listing's hash bytes
 are otherwise unchanged (`MacSealRecheckTests.aListingsHashBytesAreUnchanged`, run here). What Linux must run:
@@ -1336,6 +1339,26 @@ are otherwise unchanged (`MacSealRecheckTests.aListingsHashBytesAreUnchanged`, r
   removed", so its own test stays red; keeping the first 4,096 keys contradicts its `aPaddedListingStillHashesEveryEntry`
   (no keys past the cap): either way a re-check test changes, the lead's call.
   `aListingsCardAtTheCapDoesntSayItsEntriesWereRemoved` stands as a known issue.
+- A stalled look, in two parts that must both close before `isCheckedMacNode` is lifted (the second fix round's blind
+  check and its follow-up, 2026-11-26):
+  1. *A total budget per row*, so no look can be stalled: every row has one, in bytes hashed and in entries read, and a
+     row past it is held as changed, never hashed without bound. Today each file is capped (256 MB, past it by its
+     metadata), not a row's total: a 255 MB sparse file costs an inode and no disk and hashed in 0.22 s here, so 20,000
+     of them in one row is about 73 minutes. The rows: the sessions row and the preferences row's ByHost files
+     (`MacSealList.sessionFiles`, `preferenceFiles`: no count cap), the `.entries` rows (`LinuxSealList.readEntries`:
+     up to 20,000 entries), and `ConfigSeal.readFolder`'s folders (the app's `~/.claude/skills`, agents, commands,
+     hooks and `~/.vibeswitcher/bin`, the same walk: they need it too).
+  2. *A look that fails or times out counts as something held*, for every gate that reads the record. Today the look
+     hashes before it decides, so a stalled look seals and holds nothing; but the vault's calls carry a timeout, and
+     `ConfigHoldStore.held` swallows the look's failure (`_ = try? vault.checkConfig`) and then reads the last completed
+     record, as `LeadVault.heldConfig` reads it: while every look stalls, a later change (to `~/.zshrc`, say) is never
+     recorded as held there. Traced: `HeldChange.refusal` (the switch's and the builds folder's) re-hashes in the server
+     and blocks rather than passes; `ConfigHoldStore.held` (`config held`, the server's `lookAtConfig`) shows the stale
+     record; `heldConfig` returns it. Not traced: whether `start_worker`'s and a merge's refusals need a look that
+     finished, or pass on that record.
+  The Mac rows are dormant while the list is off; `readFolder`'s folders and the `.entries` rows are read today (the
+  app's seal, Linux's node), and the node's code above is the node's on Linux too, so there both parts are
+  pre-existing.
 - What lies past a sourcing cap (`addSourced`): after the cap's row is accepted, the files past it are unwatched until
   the startup files are under the caps again; and a compiled twin is hashed, never read for what it sources (as R6b).
 - `$ZDOTDIR`'s startup files and their twins when `ZDOTDIR` is set (zsh reads them there, not in the home).
