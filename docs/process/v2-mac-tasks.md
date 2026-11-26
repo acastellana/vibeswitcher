@@ -201,6 +201,14 @@ or decided. Done on Linux, tested on both systems (`ApprovalJudgmentTests`, `App
    2026-11-25, branch `v2-mac-step4`'s M6: refused with `--options runtime`);
    the connect-write-exec race (a process connects, the command line's code then execs in its place: Security's dynamic
    check on a token after exec); Accessibility driving the password fallback (synthetic typing into the dialog).
+   **Row 7 (2026-11-26, `v2-mac-anchored-cli`): already closed, proven through every place.** The places that take the
+   command line's identity: the server's anchor at its start, a connection's hello voice, each request's voice before
+   the dialog, the command line's own build (`start`, and now `switch` before anything is asked). Each refuses a command
+   line renamed over `<root>/bin/vibeswitcher` after the start, with its reason, and takes the genuine one, with real
+   images and tokens (`NodePinsAnchorTests/everyPlaceTakingTheCommandLinesIdentityRefusesOneSwappedInTheBuild`; red
+   with `b3849695`'s hunk reverted). Nothing re-reads a file under the node's root for it; the list, and what takes no
+   command line identity, in the design's "Rows 7 and 10". *Still owed:* the signing with `--options runtime` (step 7),
+   the real record (a `sudo` trial), and the real-Mac items above.
 4. **(MEDIUM, done in `6f367200`)** Values per kind: send's words cut only saying how many there are, presets' env
    values shown, sessions by terminal and folder, no forgeable "; key value" (no key is shown).
 5. **(MEDIUM, done in `6f367200`)** The uid, code, Hardened Runtime and guard-rail checks before the one dialog's place;
@@ -362,6 +370,18 @@ or decided. Done on Linux, tested on both systems (`ApprovalJudgmentTests`, `App
    `NodeAgent.printed` parses, measured on macOS 27.2: `v2-mac-step4`'s M11). Proved by
    `NodePinsAnchorTests/aSwitchToAPinnedBuildPassesAndToAnotherIsRefused`: with the job's program naming the next build
    while this build's server runs, the server passes (red on the old check). Unproven: a real in-place switch.
+   **Row 10 (2026-11-26, `v2-mac-anchored-cli`; off with the rest; needs a review)**, as the design's "Rows 7 and 10"
+   says. *Built:* the command line's server check takes the job's host from `MacAgent.runningHost` (launchd's whole word,
+   the host by token and code), never from `print`'s text; a switch's Mac follow-up rewrites the plist for the build the
+   host went to (`MacAgent.switched`: the host the target's by token and code first, the plist replaced by a new file
+   renamed over it, `start`'s own checks with its descriptor held, launchd's word and the host again, the old bytes put
+   back on a refusal after the rename, nothing loaded or unloaded); launchd's job may be another pinned build's than the
+   plist's only while the host is the plist's build and switched in place; `status` and `start` refuse a host whose
+   build isn't the plist's, naming the remedy. `program` is still read only by the grammar (a mismatch refuses) and the
+   lenient reader in `start`'s wait (only to refuse sooner). *A real Mac proved:* an in-place switch of a scratch
+   launchd job through a keeper (`MacAgentSwitchTests`, red with the change reverted): launchd's word stays the first
+   build's job across it; the plist rewritten; `status` passes for the new build; after `stop`, the old build's `start`
+   is refused and the new one's starts it; a print naming the pinned host while another image runs refused.
 13. **(Owed, the review of 2026-11-21)** The Mac's checked node start (`HostImages.isCheckedMacNode`, false): until it
    exists no Mac host runs a `--server` child on the account's locks, none is a node host, and the record of the
    user's actions, its hooks and the vaultV2 capability stay off on the Mac (fixes `6e0798d9`, `a0a596d8`,
@@ -498,6 +518,15 @@ or decided. Done on Linux, tested on both systems (`ApprovalJudgmentTests`, `App
    swap; the seven keys `print` shows nothing of, `JetsamProperties` among them, with their other values); and a
    `launchctl bootstrap` that didn't finish (no answer within its limit, or ended by a signal) is judged and start's own
    job booted out (`e7cd6467` red, `6f04d1e2` green).
+   *A switch rewrites the plist (2026-11-26, `v2-mac-anchored-cli`; rows 7 and 10; item 12 above):* closed. After a
+   switch the plist names the build the host runs, written by `start`'s code under its checks; a switch whose follow-up
+   didn't run is refused by `status` (and the next `start` of the new build refuses the old plist, as before) with
+   `vibeswitcher switch <build>` to finish it, while `stop` and the server check still take the node. *What can't be
+   bound,* added to the design's table: the loaded job's keys `print` shows nothing of after a rewrite; the scratch
+   test's `--handover` pair; a plist a process of the user's renames over afterwards (it can only make `start` and
+   `status` refuse). *For the installer (step 7):* an upgrade that switches the running node needn't write the plist: `vibeswitcher switch`
+   rewrites it. *Owed:* a real `--node` job's switch, the command line's Mac arm end to end, the plist's row in the seal's
+   Mac list (step 8).
 
 ## What `v2` found on the Mac and doesn't change
 

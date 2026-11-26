@@ -23,7 +23,9 @@ import VibeNode
 ///    `current` lag behind it (a follow-up a failure left unfinished: `vs switch <target>` again finishes it): on a node
 ///    under systemd `apply` (the unit's `ExecStart`, `daemon-reload`, `current`); on a node started detached
 ///    `applyDetached` (`current` only: its `start` starts the build `vs` runs from). Each checks the host first through
-///    a fresh, checked connection (`hostCheck`). A scratch node has no unit: "scratch node: no unit to rewrite".
+///    a fresh, checked connection (`hostCheck`). A scratch node has no unit: "scratch node: no unit to rewrite". The
+///    Mac's user's node: its LaunchAgent's plist rewritten for the build the host now runs, the host checked by token
+///    and code (`MacAgentCommand.switched`, `MacAgent.switched`); its command line a build the record pins, first.
 /// 6. The host's start line (ST-D24), read back and shown: from the journal (`NodeJournal.events`), or on a node
 ///    started detached from the host's log (`NodeJournal.hostLogStart`).
 enum SwitchCommand {

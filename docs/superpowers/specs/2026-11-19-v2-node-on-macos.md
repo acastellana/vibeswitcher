@@ -266,7 +266,8 @@ no start, no switch.
    (`Image.checked`, as before, now holding the pinned value).
 3. **The command line's anchor (item 3's owed half).** The server takes the command line's cdhash from the record's
    row whose server is its own running code, read once at its start: never from `<root>/bin/vibeswitcher`, so a
-   command line swapped there after the start is not the installed one.
+   command line swapped there after the start is not the installed one. Every place that takes the command line's
+   identity, each checked: "Rows 7 and 10" in the LaunchAgent's section.
 4. **A switch or a rollback.** The target's host image must be a host pinned in the record (its file's cdhash for this
    Mac's slice, checked by path before the handover), and the new image, once running, finds its row by its own
    running code (2) before it starts a server. A rollback goes only to a build the record still holds: one dropped
@@ -859,10 +860,11 @@ the user's). The plist written at the user's login (`--at-login`, `RunAtLoad`).
 - *The plist between its check and `bootstrap`* is read again by launchd by path: a file swapped in that gap is started
   by launchd, then refused by the binding after the load (the review's round, I1) and booted out. It ran, as any
   program of the user's can; an ancestor folder swapped and back with a key `print` doesn't show is the residual.
-- *A switch rewrites no plist.* After an in-place switch the job's `ProgramArguments` still name the build it was
-  started as, while another runs; `status` and `stop` check the host against every build the record pins, so they
-  pass, but the next `start` after a `stop` starts the plist's build and refuses the plist once the command line is
-  another build's. The switch (or `start`) must rewrite the plist for the build it goes to: owed with the Mac's switch.
+- *A switch rewrote no plist* (until rows 7 and 10, below: built, `v2-mac-anchored-cli`). After an in-place switch the
+  job's `ProgramArguments` still named the build it was started as, while another ran; `status` and `stop` passed, and
+  the next `start` after a `stop` started the plist's build, or refused the plist once the command line was another
+  build's. The switch's follow-up now rewrites the plist for the build it went to, and `status` refuses a host whose
+  build isn't the plist's.
 - *`launchctl getenv SSH_AUTH_SOCK`* is any process of the user's to set (`launchctl setenv`), as for every Terminal
   opened after it (the Mac seal list, step 8).
 - *Sessions keep a hard core limit of 0* (the reset's): soft-only in the reset would give `ulimit -c` back.
@@ -878,6 +880,110 @@ the user's). The plist written at the user's login (`--at-login`, `RunAtLoad`).
   `start` look again until its 30 s, then refuse and unload it.
 - *Two `start`s at once* have no lock between them: the second's plist write (`O_EXCL`) or `bootstrap` fails and it
   refuses, touching nothing; a start lock as Linux's is an idea for the reviewer.
+
+### Rows 7 and 10: the command line's anchor, and the host check across a switch (2026-11-26, `v2-mac-anchored-cli`)
+
+The measurement record's rows 7 (item 3's owed half) and 10 (item 12, with item 15's owed "a switch must rewrite the
+plist"). Off as the rest: `NodeSystem.macUnbuilt`, `HostImages.isCheckedMacNode`, `approvalMeasured` and
+`macServerRefusal` untouched; proven on scratch labels, roots and records.
+
+**Row 7 was already closed** (`v2-mac-anchor`, `b3849695`): nothing on the Mac takes the command line's identity from a
+file under the node's root. The places that take it, each a path to "this request is the user's voice" or "this command
+line may act for the node", and the check each now has with real signed images and audit tokens
+(`NodePinsAnchorTests/everyPlaceTakingTheCommandLinesIdentityRefusesOneSwappedInTheBuild`: a command line renamed over
+`<root>/bin/vibeswitcher` after the start refused by each with its reason, the genuine one taken; red with
+`b3849695`'s hunk reverted, 14 issues):
+
+1. the server's anchor, read once at its start (`ServerStart` → `ApprovalVoice.commandLineAnchor`: the record's row
+   whose server is the server's own running code, `Platform.CodeIdentity.ownCdhash`, the kernel's);
+2. a connection's hello, whose voice is the rule's read (`Requests.hello` → `ApprovalVoice.judge("status")`);
+3. each request's voice before the one dialog's place (`Requests.approvalJudgment` → `ApprovalVoice.callerRefusal`):
+   a swapped command line never reaches the person at the Mac;
+4. the command line's own build (`MacAgent.ownBuild`, by its own running code): for `start`, and now for `switch`
+   before anything is asked (its follow-up rewrites the plist).
+
+What takes no command line identity on the Mac: `NodeFolders.installedBuild` (`/proc/self/exe`, Linux's: `start`,
+`stop`, `switch` and `update` reach it only without code identity), `AppCode` (the app's code, and a checked node host
+has none: `appExecutableInForce`), `vibeswitcher agent-plist` (prints a build's plist from its arguments), `stop` and
+`status` (they take the record's builds and the host by its code, not the command line's row).
+
+**Row 10: the host check across a switch.** launchd holds the job it loaded across an in-place switch: after a scratch
+host's handover from build A to B its `print` is still placed, line for line, as A's job (measured here, the test
+below), while the host at the socket runs B's code at the same pid. The rule, written before the code:
+
+- *Which job.* `judge` places launchd's word against the job of the plist on disk first, as before. Only when it isn't
+  that, and exactly one build's job of the record is the plist's bytes, it is placed against the record's other builds'
+  jobs (the same `RunAtLoad`): the job launchd loaded may be another pinned build's than the plist's.
+- *Which host.* `node`: the host's build, by the connection's audit token and running code (`see`), must be the plist's
+  build, the one the next `start` starts; its command line that build's job's and its program that job's by device and
+  inode. When launchd's job is another build's than the plist's, the host must have switched in place: the keeper's two
+  flags follow its command line (`Switched.must`). A host whose build isn't the plist's is refused by `status` and
+  `start`, naming both builds and the remedy (`vibeswitcher switch <the host's build>`); `stop` and the command line's
+  server check take it only when launchd's job and the plist are the same build's and the host switched in place from it
+  (a switch whose follow-up hasn't run: the window between the handover and the rewrite, which the switch's own server
+  checks cross).
+- *The rewrite* (`MacAgent.switched(to:folder:)`, the switch's Mac follow-up in `SwitchCommand.followUp`, after the
+  handover, or when the host runs the target already): the record pins the target and its files; launchd's word judged
+  as above; the job's process the target's host by token and code with the target's job's command line (the keeper's
+  flags after it unless launchd's job is the target's) and program; then the plist replaced: the job `start` writes for
+  the target (`Steps.job`, `NodeAgent.Job.node` for the user's node), its `RunAtLoad` kept, written to a new file beside
+  it (`O_EXCL`, no link followed, `0644`, synced) in the folder `start` checks, renamed over the old (a reader sees the
+  old bytes or the new); then `start`'s own checks of what is there with its descriptor held (`writtenPlist`), launchd's
+  word judged again against the file held (still the job it loaded, the same pid), the host looked at again and the held
+  file unchanged (`HeldPlist.changed`). It loads and unloads nothing. A refusal before the rename leaves the plist the old
+  build's; one after puts the old bytes back the same way, said whether it could; launchd's job runs on untouched
+  either way. Run again with nothing to do, it says so.
+- *The command line's server check* (`ServerCheck`): the listener's expected parent is the host `MacAgent.runningHost`
+  finds (`afterASwitch: true`), by token and code, never `launchctl print`'s text: before, the pid came from the lenient
+  print and the host's code was checked only by the server, at its own start (F7).
+- *Where `launchctl print`'s `program` is still read, and that it can only refuse:* `NodeAgent.placed` (the grammar: the
+  line is a literal made from the job, a mismatch refuses); `NodeAgent.printed` (lenient), whose one reader is
+  `MacAgent.printed()` in `start`'s wait, where a pid read decides only when to refuse sooner; `NodeCheck.macServerCode`
+  takes a `job` that chooses nothing. No decision accepts on it.
+
+**What a real Mac proved** (this Mac, macOS 27.2; `MacAgentSwitchTests`, red with the change reverted, `git diff 95d9f0b1
+09d73c96 | git apply -R`, green from `09d73c96`): a scratch job of build A started; its host handed over in place to B
+through a keeper, asked by this test process as the host's app (its code at the build's `bin/VibeSwitcher`, the key
+enrolled on a keyless host); `status` refused while the plist was still A's, naming A, B and the remedy; `switched`
+rewrote the plist to exactly B's job while launchd's job stayed A's; `status` and `runningHost` then took the host as B's
+at the same pid; a second `switched` had nothing to do; `stop` left nothing; A's `start` was refused with nothing loaded
+and the plist as it was; B's `start` started B from the plist's exact arguments
+(`aSwitchRewritesThePlistAndStatusAndTheNextStartFollowIt`). A job whose `print` names A's pinned host's path while the
+file there is another image (renamed over it before launchd started it again) is refused by `status`, `runningHost` and
+`switched`, though its program is the job's by device and inode: only the token tells
+(`aJobWhosePrintNamesThePinnedHostWhileAnotherImageRunsIsRefused`, green before as after; red with `see`'s check of the
+token's code mutated away). At function level: B without the keeper's flags under A's job refused; A's host under B's
+plist refused; `stop` takes a switch not followed up; a rollback's rewrite back to A; a rewrite refused while A still
+runs; one whose new file can't be made leaves the old whole; one whose launchd word changes after the rename puts the old
+back, no file left over, nothing loaded or unloaded (`statusFollowsThePlistTheSwitchRewrote`,
+`aRewriteIsRefusedUnlessTheHostRunsTheTarget`, `aRewriteThatFailsPartwayLeavesTheOldPlistAndJobWhole`).
+
+**What the switch-on review can rely on:** a switch's plist names the build the host runs once its follow-up ran, by
+`start`'s own code and checks, and the next `start` starts that build and refuses the old build's command line; the
+job's host is known by token and code in `start`, `status`, `stop`, `switched` and the command line's server check, and
+no decision takes `launchctl print`'s `program` text; nothing of a switch's follow-up loads or unloads a job.
+
+**What this can't bind:**
+
+- *The loaded job after a rewrite.* Once the plist is the next build's, the job launchd loaded is bound by its `print`
+  alone: the seven keys `print` shows nothing of are bound for it by nothing until the next `start` (before, a job found
+  loaded bound them by the plist's bytes on disk, themselves the user's to write: the same reach, one file fewer).
+- *The scratch host's switched command line.* A scratch host's next image carries `--handover <state>`, which a checked
+  node's doesn't (its grammar takes none); the real-launchd test drops that pair from the kernel's arguments and nothing
+  else. A checked node's switched command line is still tested as data (no `--node` job runs here).
+- *The plist after the rewrite* is a file in a folder of the user's, as before the switch: any process of the user's can
+  rename another over it; `start` and `status` refuse what isn't a pinned build's job, so this can only make them refuse
+  (or name another pinned build's job, which `status` refuses while that build's host doesn't run).
+- *A follow-up that never runs* (the command line ended after the handover): the plist stays the old build's; `status`
+  refuses saying so, and `vibeswitcher switch <build>` finishes it.
+- *An older build's `start`* while the node runs a newer one says the node runs already, naming the newer build: it
+  loads and writes nothing.
+- *The record written by `sudo`* is a scratch record here (the anchor's seam): a trial at the user's keyboard would add
+  the record's real owner and parents, an unprivileged write refused, and these checks against it.
+
+**Owed:** a real `--node` job switched (`isCheckedMacNode` off: its switched command line, its server child's restart
+and connector check across the switch); the command line's Mac arm of `switch` end to end (behind `usersNodeRefusal`:
+no user's node runs); the plist's row in the seal's Mac list (step 8: a rewrite is then a held change until accepted).
 
 **Where it is built.** `NodeAgent` (the plist as data: `Job`, `Place`, `check`, the `launchctl` lines and `print`'s
 lines), `MacAgent` (VibeNode: `start`, `stop`, `status` with every step injected, and the host check by token and
