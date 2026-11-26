@@ -677,14 +677,10 @@ the label, are now bound as follows; each is a refusal that boots out only what 
   or its folder while launchd read it (a rename over it, one away and back, a write and a write back, a folder swapped
   and back) refuses. And launchd's own word for what it loaded must be the job's: `path` the agent's plist by device and
   inode, `arguments` the job's, the `environment` block the job's variables and launchd's two, `stdout path` and
-  `stderr path` the job's, `properties` exactly the measured line for its `RunAtLoad` and no `keepalive`. launchd's text
-  is a refusal only, never what accepts a host: that is the token's.
-- *What can't be bound.* A folder above the plist's folder (`~/Library`, the home) swapped away and back while launchd
-  read the path: compared by inode only (their ctimes move with every file made in them, so a ctime there would refuse
-  most starts), so a swap and a swap back of an ancestor isn't caught by the file check; launchd's `properties`,
-  `arguments` and `environment` lines still are, for every key they show. A key launchd's `print` shows nothing of
-  (`ThrottleInterval`, `Nice`, `ExitTimeOut` within the measured `exit timeout = 5`, `SoftResourceLimits`) is bound only
-  by the file check. launchd's text format is the release's (measured on 27.2): another format refuses.
+  `stderr path` the job's, `properties` exactly the measured line for its `RunAtLoad` and no `keepalive`. (Superseded by
+  the re-check's round below: that reading was partial, and launchd's raw text let a value add a `path` line.)
+- *What can't be bound:* see the re-check's round below (its list replaces this one, whose keys `print` "shows
+  nothing of" were wrong: `ThrottleInterval`, `Nice`, `ExitTimeOut` and `SoftResourceLimits` all print a line).
 - *I2, a job of the label that runs.* `start`'s "runs already", `status`'s "runs" and `stop` take a running job only when
   launchd loaded it from the agent's own plist (`print`'s `path`, by device and inode), launchd's word for it is the
   job's (as in I1), its process's executable (the kernel's path of its image) is the job's program by device and inode
@@ -740,6 +736,63 @@ carried across the exec), a connection made afterwards has a token whose running
 old's, hardened, at the same pid (`MacSwitchedHostTokenTests`): so `see`, and with it `status` and `stop`, know a switched
 host by the build it now runs. No Background Task Management item and no notification came of any of these loads (the
 unified log after the runs).
+
+**The re-check's round (2026-11-26, "not yet"): launchd's word read by one grammar.** The round above read `print`
+leniently (lines found by their key, the last `path =` taken, any line it didn't know passed over), and launchd prints
+values raw: a job's variable whose value holds a newline printed a `path` line of its choosing, and a key the reader
+didn't know (a `KeepAlive` dictionary's `semaphores`) was never seen. The rule now, one of its kind for every reading of
+launchd's word:
+
+- **Nothing is searched for.** `print`'s whole output is read against a template derived from the job `start` wrote, line
+  by line in launchd's order, as bytes (split at 0x0A; any byte but a tab, a newline or printable ASCII refuses). Each
+  template line is either a literal made from the job (its label, its plist's path as launchd resolves it, its program,
+  arguments, output paths, variables, `properties`) or a strict pattern for what launchd counts (`pid`, `runs`, `forks`,
+  `active count`, `asid`, the coalition IDs, `jetsam …`). A line the template can't place, a line after the closing `}`,
+  or a value that differs is a refusal. Optional are only the groups measured coming and going: the running group (`pid`
+  to `checked allocations flags`), the two coalition blocks, and one of the four last-exit lines. The `environment` block
+  must hold exactly the job's variables and launchd's two, each once, any order (launchd's own order is by hash);
+  `inherited environment` (the user domain's `launchctl setenv`, the job's to ignore: the reset drops it) only lines
+  `NAME => VALUE` with a name, each name once; `default environment` exactly `PATH => /usr/bin:/bin:/usr/sbin:/sbin`.
+- **Why a value can't cause an accept.** launchd prints every one of its own lines after an injected value too, so a
+  value that adds lines adds them to a whole the template already fixes: the real lines then don't fit, or come after
+  the closing `}`. No key is looked up, so an added line can't be "the" path.
+- **The path** printed must be the agent's plist as launchd resolves it (`realpath` of the folder, then the file's name),
+  and that path, by `lstat` (no link followed), the file `start` holds open (in `start`) or the agent's plist (`status`,
+  `stop`) by device and inode: a link, a hard link elsewhere, another file refuses.
+- **One reader, three answers.** `launchctl print`: exit 113 with "Could not find service" (measured) is "not loaded";
+  exit 0 and placed is the job; anything else (exit 0 and unplaceable, another exit) is "loaded, not ours": refused,
+  and in `start`'s wait it is "not yet" until the wait's limit, then the job is booted out. The bootout's own wait asks
+  "not loaded" (113) and nothing else: a bootout that didn't unload says so (note 7).
+- **The job refuses to be written** with anything but printable ASCII in its label, arguments, variables and paths (a
+  home with a non-ASCII name then refuses: said with the reason).
+- **The format is macOS 27.2's** (measured with scratch jobs, below). On another release a line that changed refuses: the
+  node then doesn't start until someone looks, which is the intended failure.
+
+*Measured (macOS 27.2, scratch jobs of the node's key set, under `/tmp`):* the states `not running` (loaded, never run:
+`last exit code = (never exited)`), `xpcproxy` and `running` (with the running group), and after an exit `last exit code
+= 0`, a kill `last terminating signal = Killed: 9`, a code-signing refusal `last exit reason = OS_REASON_CODESIGNING`;
+the coalition blocks from the first run on; `path` resolved (`/private/tmp/…`), `program`, `arguments` and `stderr path`
+as the plist gives them; `immediate reason = non-ipc demand` after a `kickstart`, `speculative` with `RunAtLoad`. One job
+per `launchd.plist` key, diffed against that baseline: `Nice` (`nice`), `ThrottleInterval` (`minimum runtime`),
+`ExitTimeOut` (`exit timeout`), `Soft`/`HardResourceLimits` (`resource limits`), `Umask` (`umask`), `WorkingDirectory`
+(`working directory`), `StandardInPath` (`stdin path`), `StartInterval` (`run interval`), `StartCalendarInterval`,
+`WatchPaths` and `QueueDirectories` (`event triggers`, `event channels`), a `KeepAlive` dictionary (`semaphores`, and it
+runs at load), `MachServices` (`endpoints`), `Sockets` (`sockets`, and it runs), `ProcessType` (`spawn type`), and in
+`properties` `AbandonProcessGroup`, `EnableTransactions`, `EnablePressuredExit`, `inetdCompatibility`, `LaunchOnlyOnce`,
+`LegacyTimers`, `LowPriorityIO`, `LowPriorityBackgroundIO`, `MaterializeDatalessFiles`, `SessionCreate`, `StartOnMount`,
+`WaitForDebugger` and an unknown key (`partial import`): each a line the template refuses. No line at all:
+`AssociatedBundleIdentifiers`, `Debug`, `Disabled` false, `InitGroups`, `LimitLoadToSessionType` (a list too) and
+`POSIXSpawnType` `Interactive`.
+
+*What start still can't bind, and what an attacker must already be able to do for each:*
+
+| Not bound | What it takes |
+| --- | --- |
+| A key `print` shows nothing of (`AssociatedBundleIdentifiers`, `Debug`, `Disabled`, `InitGroups`, `LimitLoadToSessionType`, `POSIXSpawnType`) in a plist launchd read through an ancestor of the plist's folder swapped away and back | a process of the user's renaming `~/Library` (or the home) away and back in the instant launchd reads the plist, with every app's files there gone meanwhile; and what it gets is at most those keys, none of which restarts or reconfigures the host |
+| A disk image mounted over the plist's folder for launchd's read (the covered folder keeps its inode and ctime); not run here (attaching may show UI) | a process of the user's attaching an image at that instant (`hdiutil attach -mountpoint`); its gain as in the row above, since every key `print` shows is still compared |
+| Two different plists that print identically | a difference only in the keys of the first row |
+| An orphan in a session whose leader ended before stop's first look, its parent gone (stop's words stay "every process of it stop could find") | nothing: any session's program can leave such a child; found once a host-side record of its sessions' ids exists (owed) |
+| A process that left its session and lost its parent before a look, with no readable session id | as the row above |
 
 **What the round proved on this Mac** (red on `5dfbde9b`, green from `abab3abd`): `MacAgentRoundTests`, the reviewer's
 tests taken over (a swap to `KeepAlive` true or an extra variable at the bootstrap; the pinned host's exact command
