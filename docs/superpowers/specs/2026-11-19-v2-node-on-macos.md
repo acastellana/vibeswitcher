@@ -1186,7 +1186,8 @@ the round's own tests, `MacSealFixRoundTests`, on top):
   (`for f in ~/.zsh.d/*.zsh; do source "$f"; done`) name no row; and a startup file past 16 MB names none (its own row
   holds the padding). `MacSealReviewTests.sourceFormsThePatternMissesAreWatched` stands as a known issue
   (`withKnownIssue`), so it says when it starts passing.
-- `$ZDOTDIR/.zsh_sessions` when `ZDOTDIR` is set (above).
+- `$ZDOTDIR/.zsh_sessions` when `ZDOTDIR` is set (above), and bash's `~/.bash_sessions`, which
+  `/etc/bashrc_Apple_Terminal` restores the same way (absent here: the user's shell is zsh).
 - A real checked node host's book watching the list (`isCheckedMacNode` is false: `MacCheckedStartTests` proves the
   flag on a checked start's host built by hand).
 - On Linux, `MacSealListTests.theListIsEmptyOnLinux` and `LinuxSealListTests` once there: this Mac reads none of

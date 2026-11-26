@@ -594,7 +594,9 @@ struct MacSealFixRoundTests {
     /// The restore line the seal takes for a window's close is the one this Mac's `/etc/zshrc_Apple_Terminal` writes
     /// and checks (read, never run).
     @Test(MacSealListTests.mac) func theRestoreLineIsTheSystemFilesForm() throws {
-        guard let text = try? String(contentsOfFile: "/etc/zshrc_Apple_Terminal", encoding: .utf8) else { return }
+        // A Mac whose file restores no session this way (another macOS's) has nothing to compare.
+        guard let text = try? String(contentsOfFile: "/etc/zshrc_Apple_Terminal", encoding: .utf8),
+              text.contains("SHELL_SESSION_RESTORE_PREFIX=") else { return }
         #expect(text.contains("SHELL_SESSION_RESTORE_PREFIX='" + MacSealList.restorePrefix + "'"))
         #expect(text.contains("SHELL_SESSION_RESTORE_SUFFIX='" + MacSealList.restoreSuffix.dropLast() + "'"))
         #expect(text.contains("$SHELL_SESSION_DIR/$TERM_SESSION_ID.session"))
