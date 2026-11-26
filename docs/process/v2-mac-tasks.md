@@ -534,7 +534,28 @@ or decided. Done on Linux, tested on both systems (`ApprovalJudgmentTests`, `App
    test's `--handover` pair; a plist a process of the user's removes or renames over afterwards (it can make every
    command refuse the node, `stop` included, never pass). *For the installer (step 7):* an upgrade that switches the running node needn't write the plist: `vibeswitcher switch`
    rewrites it. *Owed:* a real `--node` job's switch, the command line's Mac arm end to end, the plist's row in the seal's
-   Mac list (step 8).
+   Mac list (step 8: built since, item 16).
+16. **(Row 13 of the measurement record's "What stands between this Mac and `vibeswitcher start`": step 8, the Mac seal
+   list; built 2026-11-26, `v2-mac-seal-list`, on `v2-mac-anchored-cli`; off: only a checked Mac node host's book
+   watches it, and `isCheckedMacNode` is false; needs a review)**, as the node on the Mac's design's "Built:
+   `MacSealList`" says. *Built:* `MacSealList`, the rows as data in `LinuxSealList`'s shape (the LaunchAgents folder,
+   the node's plist, Terminal's preferences, what the zsh files source, Homebrew's `bin` and `sbin`, the Xcode link, nvm,
+   `~/bin`, `~/.local/bin`, Claude Code's versions, the shell snapshots), appended by `ConfigSeal.homeWatched(home:macList:)`
+   only for a book with `watchesMacList` (set beside `recordsActions` by a checked node host) and held until accepted by
+   the vault's own look and accept, Linux's path; the lead-approved `.preferences` kind (Terminal's keys but the measured
+   churn: `LastTerminalStartTime`, `NSWindow Frame …`). *Measured first, on this Mac:* each row's owner, mode, parents,
+   links and ACLs, and what writes it in use (the design's table). *Proven on scratch roots* (`MacSealListTests`,
+   `MacSealVaultTests`, red on the seam, green with the rows): every row detects each change its kind reads (contents, a
+   file renamed over, a link in its place; for folders a rewrite kept to size and mtime, an entry replaced, a link, a mode,
+   an ACL); a change held, accepted, then the next held again; an accept seals only what its card showed; Terminal's start
+   and window moves and a session's snapshot hold nothing; a row removed or unreadable is held; a book that isn't a
+   checked node host's watches nothing of it, and the app's seal is today's. *What the switch-on review can rely on:* a
+   change to any row holds the team until accepted, on the node's book alone. *Can't be sealed:* launchctl's user
+   environment (memory, not a file; the node takes one name of it at its host's start, checked), what Homebrew's links
+   point at, the user's own PATH folders, cfprefsd's cache before its write, a row's owner (not the user's to change).
+   *Owed:* the node root's own folders (Linux's quiet rules key on Linux's names; the builds folder's row turns on the
+   switch's refusals), `appWrite` around `start`'s and a switch's plist writes (until then each is a held change), a real
+   checked node host, the Linux run of `theListIsEmptyOnLinux`.
 
 ## What `v2` found on the Mac and doesn't change
 

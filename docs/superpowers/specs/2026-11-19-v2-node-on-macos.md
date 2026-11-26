@@ -1021,6 +1021,112 @@ Apple Silicon and early on PATH: by listing), `~/.nvm` as on Linux, `~/.gitconfi
 (`~/Library/Preferences/com.apple.Terminal.plist`), `launchctl`'s user environment, and the Xcode selection
 (`xcode-select -p`). Each row measured on a real Mac before it is added, as Linux's were.
 
+### Built: `MacSealList` (step 8, 2026-11-26, `v2-mac-seal-list`; the measurement record's row 13)
+
+Off as the rest: `NodeSystem.macUnbuilt`, `HostImages.isCheckedMacNode`, `approvalMeasured` and `macServerRefusal`
+untouched; proven on scratch homes, roots and vaults.
+
+**What is built.** `MacSealList` (`Sources/VibeCore/V2/MacSealList.swift`) is the Mac's list in `LinuxSealList`'s shape:
+the rows as data (`homeEntries`, `startupFiles`, `outsideEntries`), the same `ConfigSeal.Watched` kinds, Linux's
+`sourced` reader, the rows outside the home read only for the account's own home (an `outside:` root for tests), every
+row executing (a change waits for the user's accept whoever made it). It reaches the seal by the one path Linux's list
+does: `ConfigSeal.homeWatched(home:macList:)` appends it, the vault's book hashes it at each look
+(`LeadVault.Book.answer`), and its `judge` holds a change until the user's accept (`config held`, `config accept`, the
+app's accept), as for every watched thing; no second mechanism. *Off unless asked:* only a book with `watchesMacList`
+watches it, and only a checked Mac node host sets that, in the same place and on the same condition as
+`recordsActions` (`HostServer.serverChild`'s `isMacNodeHost`: never the app's host, never a scratch host, never another
+book in the process). The node's own code (its server's cards and refusals: `HeldChange`, `ConfigHoldStore`,
+`Answers`) names the rows on the Mac (`MacSealList.namedByTheNode`), a superset of what its book holds: a row with
+nothing recorded is no refusal and no card. The app's seal, and the Mac's `homeWatched` without `macList`, are today's
+(`theMacListIsOnlyWhereAsked`, `LinuxSealListTests.theMacsListIsEmpty`). On Linux the list is empty whatever is asked.
+
+One shared-code addition, approved by the lead (2026-11-26): `ConfigSeal.Watched.Kind.preferences`, an app's
+preferences read as a property list: every top-level key but the ones measured to change as the app runs, each by its
+parsed value in a canonical form (format and key order don't matter, a type does, nested values whole), and each
+`ByHost/<domain>.*.plist` beside it (CFPreferences reads the current host's domain first); a link at the path, an
+unreadable file, a non-plist, a ByHost file coming or going, or the ByHost folder unreadable each hash as themselves,
+never as nothing to compare. Used by Terminal's row alone.
+
+**A folder's mode.** A `.folder` item doesn't see a folder's mode (`ConfigSeal.readFolder`; the security document's S11
+item 8, main's to change). No Mac row is a `.folder`: the folders are `.listing` (each entry's name, type, mode, size,
+inode, times with nanoseconds and link target, never contents) or `.entries` (Linux's shell snapshots, whose walk reads
+every folder's mode), so a mode changed in place, of the folder or under it, is a change (`everyRowDetectsAChange`).
+
+**What a real Mac measured** (this Mac, macOS 27.2, 2026-11-26; `stat`, `ls -le`, reading files; uid 501). Owner and mode
+`owner:group mode`; "ACL" where `ls -le` lists one.
+
+| Row | Kind | Measured: the thing, its parents | What writes it in normal use | Decided |
+| --- | --- | --- | --- | --- |
+| `~/Library/LaunchAgents` | listing | `501:staff drwx------`, xattrs `com.apple.provenance`, `com.apple.quarantine`, no ACL; `~/Library` `501:staff drwx------` (hidden) ACL `everyone deny delete`; `~` `501:staff drwxr-x---` ACL `everyone deny delete`; 11 plists of 7 vendors and the user's own tools, none a link | an app installing or updating its agent: the folder's last change 2026-11-09, one agent rewritten in place on 2026-11-15 (Steam's, ctime) | a row: each such write is code launchd runs at login, so it holds; `.listing` for the folder's and entries' modes, links and a rewrite kept to size and mtime (ctime); no `.DS_Store` there (one Finder writes would hold) |
+| `~/Library/LaunchAgents/dev.vibeswitcher.node.plist` | file | absent (no node here); `start` writes it `0644` (`O_EXCL`, no link followed) in the folder above, which `start` requires the user's and writable by no one else | `start`, and a switch's rewrite (`MacAgent.switched`) | a row of its own, so a card names it; its contents and a link at it; a same-bytes replace, its mode and its folder are the folder's row |
+| `~/Library/Preferences/com.apple.Terminal.plist` | preferences | `501:staff -rw-------`, binary; `~/Library/Preferences` `501:staff drwx------` ACL `everyone deny delete`; no `ByHost/com.apple.Terminal.*` file | cfprefsd, at each Terminal start and window move (rewritten 2026-11-24): against its `.bak` two weeks older only `LastTerminalStartTime` and `NSWindow Frame TTWindow Homebrew` differed; "Window Settings", "Default Window Settings", "Startup Window Settings" byte for byte the same; no `CommandString` or `Shell` set | a row by keys: `LastTerminalStartTime` and `NSWindow Frame …` left out (`MacSealList.churnKeys`, `churnPrefix`), every other key hashed, so a key no one listed holds |
+| What the zsh files source | file | `~/.zshenv`, `.zprofile`, `.zshrc` `501:staff -rw-r--r--` (`.zlogin`, `.zlogout` absent; all of them `homeFiles` rows already); sourced: `~/.cargo/env` (`501:staff -rw-r--r--`, `~/.cargo` `drwxr-xr-x`, from `.zshenv`) and a key file under `~/.config/` (from `.zshrc`) | the user, by hand | a row each, by Linux's `sourced`; a key file is hashed, never shown (the card's difference masks secrets as for any file) |
+| `/opt/homebrew/bin`, `/opt/homebrew/sbin` | listing | `501:admin drwxrwxr-x` (the user's, and the admin group's); `/opt/homebrew` `501:admin drwxr-xr-x`; `/opt` `root:wheel drwxr-xr-x`; `bin` 1,213 entries (1,205 links into the Cellar); on the login shell's PATH ahead of `/usr/bin` | `brew install` and `upgrade`: 24 entries of `bin` changed on 2026-11-18; none of the prefix's 487,688 entries in the 7 days before | a row each, the account's own home only; its links' targets aren't read (below) |
+| `/var/db/xcode_select_link` | file | `root:wheel lrwxr-xr-x` → `/Applications/Xcode.app/Contents/Developer` (`root:wheel drwxr-xr-x`); `/private/var/db` `root:wheel drwxr-xr-x`; `/var` a root link | `sudo xcode-select -s` only | a row (cheap, no churn), the account's own home only: only an administrator changes it; `DEVELOPER_DIR`, which overrides it, is the startup files' (their rows) |
+| `~/.nvm` (`nvm.sh`, `versions/node`, `alias`) | file, listing | absent here | `nvm install`, `nvm alias` | Linux's rows, by its names: absent hashes as absent, made is a change |
+| `~/bin`, `~/.local/bin`, `~/.local/share/claude/versions` | listing | `~/bin` absent; `~/.local/bin` `501:staff drwxr-xr-x`, 7 entries, `claude` a link into the versions (`501:staff drwxr-xr-x`, 5 versions); both on the login shell's PATH ahead of `/usr/bin` | Claude Code's update: the `claude` link rewritten on 2026-11-25 | Linux's rows (listings here, Linux's `~/bin` is a `.folder`): an update holds once, as on Linux, being new code every session runs |
+| `~/.claude/shell-snapshots`, `~/.codex/shell-snapshots` | entries | `501:staff drwxr-xr-x`, 18 snapshots, none rewritten after it was made (one's ctime 1 s after its birth); Codex's absent | each session's start writes one | Linux's rows by Linux's names, so an entry coming or going is no change and one changed in place is (`LinuxSealList.cameOrWent`) |
+| `~/.gitconfig`, `~/.config/git/config` | (file) | `501:staff -rw-r--r--`; no `include`, `hooksPath` or `sshCommand` line | the user, `git config` | the Mac's `homeFiles` rows already: nothing added |
+| `launchctl`'s user environment | none | no file: launchd keeps `launchctl setenv` in memory; `launchctl config user` persists under `/private/var/db/com.apple.xpc.launchd/config` (`root:wheel drwxr-xr-x`, empty) | any process of the user's | not a row (below) |
+
+**Ordinary churn that doesn't fire** (`MacSealVaultTests.ordinaryChurnHoldsNothing`): Terminal's start and window
+moves (cfprefsd's rewrite renamed over), and a session's shell snapshot coming and going. *What fires by design:* an
+app's agent written into `~/Library/LaunchAgents`, `brew install` and `upgrade`, and Claude Code's update (as on Linux);
+and each `start` and switch rewrite of the node's plist (below).
+
+**The plist's row and step 5's rule.** `start` believes only the plist it wrote (its bytes, inode, ctime and folder,
+checked against launchd's own word); the seal adds that a change to the plist holds the team's workers, verifiers and
+merges until the user accepts it. A seal accept never makes `start`, `status`, `stop` or a switch take a plist: they
+check it by their own rules whatever the seal says. Since nothing of step 5 tells the seal it wrote the plist
+(`appWrite`), each `start` that writes it and each switch that rewrites it is a held change until accepted (the spec's
+"a rewrite is then a held change"): left so, fail closed. Telling the seal (an `appWrite` around `MacAgent`'s two
+writes, sealing only the bytes `start`'s checks then hold) changes step 5's code: for the switch-on review.
+
+**What the switch-on review can rely on:** on a checked Mac node host, a change to any row (a file's contents, a file
+replaced, a link put in its place, a folder's entries, modes, links and ctimes, Terminal's hashed keys) is held at the
+vault's next look until the user's accept, and the next change after an accept is held again
+(`aChangeToEachRowIsHeldUntilAcceptedThenTheNextAgain`); an accept with a card's hashes seals only what the card showed
+(`anAcceptSealsOnlyWhatTheCardShowed`); a row removed or unreadable is held, never left out (no Mac row's fingerprint is
+nil: `anUnreadableOrMissingRowFailsClosed`); no other host's book watches the list
+(`aBookThatIsntANodeHostsWatchesNoneOfIt`, `MacCheckedStartTests`).
+
+**What can't be sealed, and why:**
+
+- *`launchctl`'s user environment.* It is launchd's memory, not a file, so no look reads it; reading it would mean the
+  vault running `launchctl` at each look. What of it reaches the node: a checked node's host rebuilds its environment
+  from a fixed list, and takes one name from launchd, `SSH_AUTH_SOCK`, once at its start, only as an absolute path to a
+  socket the user owns (`CheckedSessions`); a later `setenv` reaches no session until the host's next start, and a
+  planted socket then is one a session of the user's could already talk to. Its persistent forms are sealed or root's:
+  an agent that runs `launchctl setenv` at login is the LaunchAgents row; `launchctl config user` writes a root-owned
+  file.
+- *What Homebrew's links point at.* `bin` and `sbin` are read by metadata; the Cellar files behind their links, the
+  `opt` links (`/opt/homebrew/opt/libpq/bin` is on this Mac's PATH) and Homebrew's own code that `brew shellenv` runs
+  from `.zprofile` aren't: the prefix's 487,688 entries would be a 1.5 s listing at every look. A Cellar file rewritten
+  in place is unseen.
+- *A PATH folder of the user's own tools.* This Mac's login shell puts `~/.grok/bin` and `~/.antigravity/…/bin` ahead of
+  `/usr/bin`; the list can't know such folders. The startup file that adds one is a row; the folder isn't.
+- *cfprefsd's cache.* A `defaults write com.apple.Terminal …` reaches cfprefsd first, and Terminal reads it from there;
+  the seal reads the file, which cfprefsd writes after. A change Terminal took before the file was written is seen at the
+  first look after it is.
+- *A row's owner.* No kind reads one: a process of the user's can't give a file to another user (`chown` refused,
+  `aRowsOwnerIsntAProcessOfTheUsersToChange`), and a group changed among the user's own changes ctime, which a listing
+  reads (a file row reads contents only, which a group doesn't change).
+- *A change made and undone between two looks*, as on Linux.
+
+**Owed:**
+
+- The node's own folders under its root (`~/.vibeswitcher/v2/node`): the launch presets, the allowed projects, the
+  roles' launch folders and the lead's accepted hooks, which Linux's list seals at `~/.vibeswitcher/…`; and the builds
+  folder (`~/.vibeswitcher/v2/builds`). Linux's quiet rules for them (`cameOrWent`'s hooks and launch rules,
+  `SessionPresets.sealName`, `SwitchSeal.buildsName` and the switch's refusals) key on Linux's names, so on the Mac
+  they need the node root's names first; the builds folder's row turns on the switch's refusals, a change of step 5's
+  switch. For the step that lifts `isCheckedMacNode`.
+- `appWrite` around `start`'s and a switch's plist writes (above), for the switch-on review.
+- A real checked node host's book watching the list (`isCheckedMacNode` is false: `MacCheckedStartTests` proves the
+  flag on a checked start's host built by hand).
+- On Linux, `MacSealListTests.theListIsEmptyOnLinux` and `LinuxSealListTests` once there: this Mac reads none of
+  Linux's paths (`LinuxSealListTests` skip their Linux-only cases here).
+
 ## The order of work
 
 Each step is small, keeps the app unchanged, and says what it needs from a real Mac.
