@@ -301,6 +301,33 @@ struct ProjectNewTests {
         #expect(why?.contains("isn't the folder made") == true, "\(why ?? "nil")")
     }
 
+    /// The re-check's N-r2, its pure part (the engine's flow is LeadStartTests', Linux only): a start held for the host's
+    /// welcome carries its pin, and the starts taken up after the welcome carry every waiting start's pin, so `project.new`'s
+    /// pin (`ProjectMaker.stillMade`) refuses one whose folder was swapped while it waited.
+    @Test func aStartThatWaitsCarriesItsPinAndIsTakenUpWithEveryPin() throws {
+        let world = try world()
+        let made = try make(world, "Shop").get()
+        let other = try make(world, "Other").get()
+        let pin: (String?) -> String? = { ProjectMaker.stillMade(made, root: $0, home: world.home, scratch: world.nodeScratch) }
+        let waited = [PendingStart(goal: nil, takeHead: false, replace: false, stillMade: pin),
+                      PendingStart(goal: "first goal", takeHead: true, replace: false),
+                      PendingStart(goal: "second goal", takeHead: false, replace: true, stillMade: { _ in "the second's pin" })]
+        let taken = PendingStart.taken(waited)
+        #expect(taken.map(\.goal) == ["first goal", "second goal"])
+        #expect(taken.first?.takeHead == true && taken.first?.replace == true)
+        // The first carries every pin: the second's refuses it while the folder is still the one made.
+        #expect(taken.first?.stillMade?(made.folder) == "the second's pin")
+        #expect(taken.last?.stillMade?(made.folder) == "the second's pin")
+        // Only the folder's own pin: nil while it is the one made, refused once another repository is in its place.
+        let pinned = PendingStart.taken([waited[0], waited[1]])
+        #expect(pinned.count == 1)
+        #expect(pinned.first?.stillMade?(made.folder) == nil)
+        #expect(rename(made.folder, world.base + "/away") == 0 && symlink(other.folder, made.folder) == 0)
+        #expect(pinned.first?.stillMade?(nil)?.contains("isn't the folder made") == true)
+        // No pin waited: none taken up.
+        #expect(PendingStart.taken([waited[1]]).first?.stillMade == nil)
+    }
+
     /// What the Mac's dialog (and a passkey's phrase) says: the project's name and the folder it will be made in, by its
     /// resolved path, the projects folder named when Where is empty; the goal whole.
     @Test func theApprovalPhraseNamesTheResolvedFolder() throws {
