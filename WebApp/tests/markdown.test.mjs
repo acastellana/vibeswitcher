@@ -101,6 +101,9 @@ test('markdown: a very long line, a long run of markers and deep nesting stay qu
   let node = chat(deep)[0];
   for (let i = 0; i < 59; i++) node = node.items[0][1];
   assert.deepEqual(node.items[0], [p('level 59')]);
+  // A run of unclosed brackets (each one a link that might close) stays linear.
+  const brackets = '[a '.repeat(20000) + '] and [x](https://example.com)';
+  assert.equal(chat(brackets)[0].c.at(-1).href, 'https://example.com/');
   // Quick enough to draw as it streams: well under a frame's budget per kilobyte on any machine that runs the tests.
   assert.ok(performance.now() - started < 3000, `${Math.round(performance.now() - started)} ms`);
 });

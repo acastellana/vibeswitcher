@@ -29,7 +29,7 @@ function open(fields = {}) {
   store.connect({ request: () => Promise.resolve({ ok: true, result: {} }), subscribeChat() {}, unsubscribeChat() {}, resync() {} });
   store.setKinds(['send', 'chat.page'], null, ['read', 'draft', 'watch', 'act']);
   store.apply({ v: 1, kind: 'snapshot', epoch: 'e', seq: 0, state: { node: { home: '/home/dev', ended: [] }, sessions: [session], leads: [], cards: [], boards: [] } });
-  const chat = chatView({ store, ui: { state: { route: { name: 'session', id: SID } }, subscribe() {}, go() {} } });
+  const chat = chatView({ store, ui: { state: { route: { name: 'session', id: SID } }, subscribe() {}, go() {} }, later: () => () => {} });
   chat.show(SID);
   return { chat, store };
 }
@@ -50,6 +50,60 @@ test('D14: a session’s question is held back until the chat’s rows are drawn
   chat.reveal();
   assert.ok(!card.classList.contains('waiting-rows'));
   assert.ok(!card.hidden);
+});
+
+test('D14: a chat the node never serves still shows its question, once its moment of waiting is over', () => {
+  setLanguage('en');
+  const timers = [];
+  const session = { id: SID, terminal: 'pts/7', agent: 'claude', cwd: '/home/dev/x', status: 'needs-you', hosted: true, sendWays: ['step', 'now'],
+    prompt: { question: 'Proceed?', options: ['Yes', 'No'], text: [] } };
+  const store = createStore();
+  store.connect({ request: () => Promise.resolve({ ok: true, result: {} }), subscribeChat() {}, unsubscribeChat() {}, resync() {} });
+  store.setKinds(['send', 'chat.page'], null, ['read', 'draft', 'watch', 'act']);
+  store.apply({ v: 1, kind: 'snapshot', epoch: 'e', seq: 0, state: { node: { home: '/home/dev', ended: [] }, sessions: [session], leads: [], cards: [], boards: [] } });
+  const chat = chatView({ store, ui: { state: { route: { name: 'session', id: SID } }, subscribe() {}, go() {} }, later: (fn, ms) => { timers.push({ fn, ms }); return () => {}; } });
+  chat.show(SID);
+  const card = find(chat.el, byClass('session-prompt'));
+  assert.ok(card.classList.contains('waiting-rows'));
+  assert.equal(timers.length, 1);
+  assert.ok(timers[0].ms <= 2000, 'a moment, not a wait');
+  // The node refused the chat: no snapshot ever comes. The moment is over: the question shows, answerable.
+  timers[0].fn();
+  assert.ok(!card.classList.contains('waiting-rows'));
+});
+
+test('a send refused after you moved to another session waits for that session: its words back in its box, why, Try again', async () => {
+  setLanguage('en');
+  const OTHER = 'local:5a0c7de9-4f6a-4c1e-9b7d-2e5a8c0d1f3b';
+  const kept = new Map();
+  const before = globalThis.sessionStorage;
+  globalThis.sessionStorage = { getItem: (k) => kept.get(k) ?? null, setItem: (k, v) => kept.set(k, v), removeItem: (k) => kept.delete(k) };
+  try {
+    let answer = null;
+    const store = createStore();
+    store.connect({ request: () => new Promise((resolve) => { answer = resolve; }), subscribeChat() {}, unsubscribeChat() {}, resync() {} });
+    store.setKinds(['send', 'chat.page'], null, ['read', 'draft', 'watch', 'act']);
+    const one = (id) => ({ id, terminal: 'pts/7', agent: 'claude', cwd: '/home/dev/x', status: 'idle', hosted: true, sendWays: ['step', 'now'] });
+    store.apply({ v: 1, kind: 'snapshot', epoch: 'e', seq: 0, state: { node: { home: '/home/dev', ended: [] }, sessions: [one(SID), one(OTHER)], leads: [], cards: [], boards: [] } });
+    const chat = chatView({ store, ui: { state: { route: { name: 'session', id: SID } }, subscribe() {}, go() {} }, later: () => () => {} });
+    chat.show(SID);
+    const input = find(chat.el, (node) => node.tag === 'textarea');
+    input.value = 'Deploy it';
+    input.dispatch('input');
+    input.dispatch('keydown', { key: 'Enter', shiftKey: false, altKey: false, metaKey: false, ctrlKey: false, isComposing: false, keyCode: 13, preventDefault() {} });
+    assert.equal(input.value, '');
+    chat.show(OTHER);
+    answer({ ok: false, error: { code: 'refused', message: 'it was busy' } });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(input.value, '', 'nothing of it in the other session’s box');
+    chat.show(SID);
+    assert.equal(input.value, 'Deploy it', 'back in its own box');
+    const notice = find(chat.el, byClass('composer-notice'));
+    assert.ok(!notice.hidden);
+    assert.match(notice.textContent, /Not sent: .*it was busy/);
+  } finally {
+    globalThis.sessionStorage = before;
+  }
 });
 
 test('D13: one failure in a run of tools is its count in the failure’s colour; the summary stays quiet', () => {

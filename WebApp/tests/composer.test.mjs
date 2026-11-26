@@ -155,7 +155,7 @@ async function sessionChat({ rights = ['read', 'draft', 'watch', 'act'], session
     subscribeChat() {}, unsubscribeChat() {}, resync() {}, reached: () => new Promise(() => {}) });
   store.setKinds(['send', 'session.draft', 'chat.page'], null, rights);
   store.apply({ v: 1, kind: 'snapshot', epoch: 'e', seq: 0, state: { node: { home: '/home/dev', ended: [] }, sessions: [session], leads: [], cards: [], boards: [] } });
-  const app = { store, ui: { state: { route: { name: 'session', id: SID } }, subscribe() {}, go() {} } };
+  const app = { store, ui: { state: { route: { name: 'session', id: SID } }, subscribe() {}, go() {} }, later: () => () => {} };
   const chat = chatView(app);
   chat.show(SID);
   const input = find(chat.el, (node) => node.tag === 'textarea');
@@ -279,6 +279,38 @@ test('the lead’s box is the same box: a textarea, Enter tells the lead, Shift+
   assert.equal(app.sent.length, 0);
   key(box, {});
   assert.deepEqual(app.sent.at(-1), { kind: 'tell', args: { folder: '/home/dev/projects/example-site', text: 'Ship it\nafter the tests' } });
+});
+
+test('a lead’s message refused after you opened another project stays with its own project: never in the other box, never sent to its lead', async () => {
+  setLanguage('en');
+  const { projectView } = await import('../js/views/project.js');
+  const A = 'local:project:A', B = 'local:project:B';
+  const kept = new Map();
+  const before = globalThis.sessionStorage;
+  globalThis.sessionStorage = { getItem: (k) => kept.get(k) ?? null, setItem: (k, v) => kept.set(k, v), removeItem: (k) => kept.delete(k) };
+  try {
+    const lead = (project) => ({ project, root: '/home/dev/projects/' + project.slice(-1), questions: { open: 0, blocking: 0 }, cards: [] });
+    const app = fakeApp({ route: { name: 'project', id: A, view: 'lead' }, kinds: ['tell'],
+      state: { leads: new Map([[A, lead(A)], [B, lead(B)]]), boards: new Map([[A, { project: A, root: '/home/dev/projects/A', tasks: [], counts: {} }], [B, { project: B, root: '/home/dev/projects/B', tasks: [], counts: {} }]]) } });
+    let answer = null;
+    app.store.request = (kind, args) => { app.sent.push({ kind, args }); return new Promise((resolve) => { answer = resolve; }); };
+    const view = projectView(app, { sheet: { open() {}, close() {}, shown: () => false } });
+    view.render();
+    const box = find(view.el, (node) => node.tag === 'textarea');
+    box.value = 'For A only';
+    box.dispatch('input');
+    key(box, {});
+    app.ui.state.route = { name: 'project', id: B, view: 'lead' };
+    view.render();
+    answer({ ok: false, error: { code: 'refused', message: 'the disk is full' } });
+    await flush();
+    assert.equal(box.value, '', 'nothing of A’s in B’s box');
+    assert.ok(find(view.el, byClass('composer-notice')).hidden, 'no Try again in B that would send it to B’s lead');
+    assert.equal(kept.get('vibeswitcher.composer.lead:' + A), 'For A only', 'its words wait in A’s box');
+    assert.deepEqual(app.sent.map((one) => one.args.folder), ['/home/dev/projects/A']);
+  } finally {
+    globalThis.sessionStorage = before;
+  }
 });
 
 test('a card’s answer box is the same box: Enter answers, Shift+Enter a new line, a composing Enter never', async () => {

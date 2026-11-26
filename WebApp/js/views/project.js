@@ -28,7 +28,7 @@ import { pluginFacts } from '../plugincard.js';
 import { actsFor, doButton, cardArgs, refusalWords } from '../acting.js';
 import { waysFor, sendArgs, sentWords } from '../sendways.js';
 import { sendMenu } from './sendmenu.js';
-import { composer as messageBox } from './composer.js';
+import { composer as messageBox, keepFor } from './composer.js';
 
 // The line marks: a diamond for a question (filled while open, an outline once answered), a check for a result, a
 // small dot for a status update.
@@ -232,8 +232,10 @@ export function projectView(app, { sheet }) {
         // What became of it, in the node's words where it gives them.
         entry.result = reply.ok ? reply.result || {} : null;
         entry.said = reply.ok ? reply.result?.said || null : null;
-        // Refused: why, beside the box, with Try again; the words back in it.
-        if (!reply.ok) box.refused(t('cmRefused', { why: entry.why }), text, () => note({ way: chosen }));
+        // Refused: why, beside the box, with Try again, the words back in it; but only in this project's box. Moved to
+        // another project meanwhile, the words wait in this one's (its conversation says it was refused).
+        if (!reply.ok && ui.state.route.name === 'project' && ui.state.route.id === route.id) box.refused(t('cmRefused', { why: entry.why }), text, () => note({ way: chosen }));
+        else if (!reply.ok) keepFor('lead:' + route.id, text);
         drawn = '';
         render();
       });

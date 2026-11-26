@@ -78,10 +78,12 @@ function trimAddress(text) {
 }
 
 // `[words](address "title")` at `at`: { end, label, href } or null (then it is shown as typed).
-function readLink(src, at) {
+function readLink(src, at, lastClose = src.lastIndexOf(']')) {
+  if (at > lastClose) return null;
   let depth = 0;
   let close = -1;
-  for (let i = at; i < src.length; i++) {
+  // A link's words are short: looked for over the next 1000 characters only, so a run of unclosed [ stays linear.
+  for (let i = at, end = Math.min(src.length, at + 1000); i < end; i++) {
     const c = src[i];
     if (c === '\\') { i++; continue; }
     if (c === '`') { const run = /^`+/.exec(src.slice(i))[0]; const shut = src.indexOf(run, i + run.length); if (shut < 0) break; i = shut + run.length - 1; continue; }
@@ -112,6 +114,7 @@ export function inline(src, opts = {}) {
   const tokens = [];
   let text = '';
   const push = () => { if (text) tokens.push(text); text = ''; };
+  const lastClose = src.lastIndexOf(']');
   for (let i = 0; i < src.length;) {
     const c = src[i];
     if (c === '\\' && ESCAPABLE.test(src[i + 1] || '')) { text += src[i + 1]; i += 2; continue; }
@@ -129,7 +132,7 @@ export function inline(src, opts = {}) {
       continue;
     }
     if (opts.links && c === '[') {
-      const link = readLink(src, i);
+      const link = readLink(src, i, lastClose);
       if (link?.href) {
         push();
         tokens.push({ t: 'a', href: link.href, c: inline(link.label, { ...opts, links: false }) });

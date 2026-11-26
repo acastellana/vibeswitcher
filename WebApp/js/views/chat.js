@@ -41,8 +41,11 @@ import { pluginCard } from './cards.js';
 import { t } from '../i18n.js';
 import { actsFor, doButton, refusalWords } from '../acting.js';
 import { sendArgs, sentWords, waysFor } from '../sendways.js';
-import { composer } from './composer.js';
+import { composer, keepFor } from './composer.js';
 
+// How long a session's question waits for the chat's rows before it shows anyway (D14: drawn under rows still coming,
+// it would jump down as they arrive; a chat the node doesn't serve never comes).
+const HOLD_MS = 1500;
 // How close to the end counts as being at the end.
 const NEAR = 48;
 // How far beyond what you see rows are drawn, in viewports, above and below.
@@ -490,6 +493,11 @@ export function chatView(app) {
   let stack = null;
   let stackProject = null;
   let jump = true;
+  // What follows the rows waits for them at most `HOLD_MS` (a chat the node refuses never loads): `app.later` is the
+  // tests' clock.
+  let heldOut = false;
+  let stopHold = null;
+  const afterMs = app.later || ((fn, ms) => { const timer = setTimeout(fn, ms); return () => clearTimeout(timer); });
   let shownQuestions = 0;
   let structural = true;
   // Where each chat was left, by session: its top row's key and how far it was above the view's top (this page only).
@@ -627,7 +635,8 @@ export function chatView(app) {
     empty.hidden = !following || !loaded || list.length > 0 || !!stack;
     // What follows the rows (a session's question, a lead's cards, a plugin's) waits for the rows: drawn before them it
     // would jump down as they arrive (D14, 213 px measured); the skeleton holds the place meanwhile.
-    const placed = loaded || !following;
+    // Held a moment at most: a chat the node doesn't serve never loads, and its question must still be answerable.
+    const placed = loaded || !following || heldOut;
     stackSlot.hidden = !placed;
     pluginSlot.hidden = !placed;
     asking.el.classList.toggle('waiting-rows', !placed);
@@ -871,6 +880,8 @@ export function chatView(app) {
   // Enter, or the button: where the page acts, `send` the way it says (now steers a working Claude, after for after its
   // turn), the box emptied at once and its words back with Try again if the node refuses; else a draft over the box
   // (`session.draft`, a send-now one while a Claude works), or, for a feed that types without drafts, `send` as typed.
+  // Sends refused after the box moved to another session, by session: shown when it comes back.
+  const refusals = new Map();
   function sendFromBox(way, typed) {
     const text = typed ?? input.value.trim();
     const images = attached.filter((item) => item.path).map((item) => item.path);
@@ -885,7 +896,14 @@ export function chatView(app) {
     if (sends()) {
       const chosen = wayFor(session, way);
       return store.request('send', sendArgs(session, text, chosen, images)).then((reply) => {
-        if (view.session !== id) return;
+        if (view.session !== id) {
+          // Moved to another session meanwhile: a refusal waits for this one, its words and images back in its box.
+          if (!reply?.ok) {
+            keepFor('session:' + id, text);
+            refusals.set(id, { why: t('cmRefused', { why: refusalWords(reply?.error) }), text, held, way });
+          }
+          return;
+        }
         if (reply?.ok) {
           // The node's own words where it says something the chat won't show (held behind a question, sent otherwise).
           const words = reply.result?.said || reply.result?.queued ? sentWords(chosen, reply.result) : '';
@@ -1237,6 +1255,13 @@ export function chatView(app) {
       attached = [];
       drawAttached();
       closeSuggestions();
+      const refusal = refusals.get(id);
+      if (refusal) {
+        refusals.delete(id);
+        attached = refusal.held;
+        drawAttached();
+        box.refused(refusal.why, refusal.text, () => sendFromBox(refusal.way, input.value.trim()));
+      }
       closeAttach();
       nodeImage.hidden = true;
       nodePath.value = '';
@@ -1260,6 +1285,9 @@ export function chatView(app) {
       pluginDrawn = '';
       placeStack(store.state.sessions.get(id));
       drawPluginCards();
+      heldOut = false;
+      stopHold?.();
+      stopHold = afterMs(() => { heldOut = true; if (view.session === id) { structural = true; render(); } }, HOLD_MS);
       unsubscribe = store.subscribe('chat:' + id, onChat);
       store.openChat(id);
       render();

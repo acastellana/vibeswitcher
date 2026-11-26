@@ -43,6 +43,12 @@ function keep(storage, key, text) {
   try { if (text) storage?.setItem(KEPT + key, text); else storage?.removeItem(KEPT + key); } catch { /* refused: this page only */ }
 }
 
+// Words kept for a box that isn't the one showing (a send refused after you moved on): they come back with it, unless
+// it holds words of its own already.
+export function keepFor(key, text, storage = globalThis.sessionStorage) {
+  if (text && !kept(storage, key)) keep(storage, key, text);
+}
+
 // Returns { el, input, button, notice, key, value, setMode, setKey, grow, clear, focus, sent, refused }.
 // `className`, `inputClass`: the form's and the box's (the session's `composer`, a card's `answer`); `before` and
 // `after`: what sits either side of the box (the + button, push-to-talk); `button`: a caller's own submit button (a
