@@ -213,6 +213,10 @@ async function main() {
   await open(`${originB}/`);
   await assert('another-port', 'clientDataOrigin', { origin: originB, rpId: 'localhost', registration: main,
     expected: { origin: originA, device: { origin: originA } } });
+  // The same assertion on origin A's listener, its device's record enrolled on origin B: the record's binding refuses
+  // it before its bytes are read (N5).
+  assertions.push({ ...assertions[assertions.length - 1], label: 'another-port-device-enrolled-there', expect: 'enrolledElsewhere',
+    device: device(main, 0, { origin: originB }) });
   // A frame of origin B inside a page of origin A asks: crossOrigin true. Checked as origin B's own listener.
   await open(`${originA}/frame?src=${encodeURIComponent(`${originB}/`)}`);
   try {
@@ -229,19 +233,17 @@ async function main() {
     challenge: first.challenge });
   // Another rpId: a page of sub.localhost, its passkey for rpId sub.localhost. A browser asks only for its own origin's
   // domain or a registrable suffix of it, and `localhost` is no registrable suffix (Chrome refuses rpId `localhost` on
-  // sub.localhost), so an assertion for another rpId always names another origin too: checked as the listener of
-  // `localhost`, the origin refuses it first. Checked as its own listener with the record of a device enrolled on
-  // `localhost`, the device's binding refuses it (N5). With its own listener and record it passes: the vector is genuine.
+  // sub.localhost, below), so an assertion for another rpId always names another origin too: checked as the listener
+  // of `localhost`, the origin refuses it first. The node never listens on sub.localhost (a loopback listener is
+  // `http://localhost:<port>`), so its own listener is refused as such; the tests check its signature directly.
   await open(`${originSub}/`);
-  const own = { origin: originSub, rpId: 'sub.localhost', place: 'loopback' };
   const { record: sub } = await register('another-rpid-registration', 'clientDataOrigin', { origin: originSub, rpId: 'sub.localhost' });
   sub.origin = originA; sub.rpId = 'localhost';
   const subDevice = { ...sub, origin: originSub, rpId: 'sub.localhost' };
   const other = await assert('another-rpid', 'clientDataOrigin', { origin: originSub, rpId: 'sub.localhost', registration: subDevice,
     expected: { origin: originA, rpId: 'localhost', device: { origin: originA, rpId: 'localhost' } } });
-  assertions.push({ ...other, label: 'another-rpid-own-listener', expect: 'ok', listener: own, device: device(subDevice, 0) });
-  assertions.push({ ...other, label: 'another-rpid-device-enrolled-on-localhost', expect: 'enrolledElsewhere', listener: own,
-    device: device(subDevice, 0, { origin: originA, rpId: 'localhost' }) });
+  assertions.push({ ...other, label: 'another-rpid-own-listener', expect: 'listener',
+    listener: { origin: originSub, rpId: 'sub.localhost', place: 'loopback' }, device: device(subDevice, 0) });
   try { await create({ challenge: randomChallenge(), rpId: 'localhost', uv: 'required', algs: [-7], ...user() }); }
   catch (error) { notMade.push(`rpId localhost from ${originSub} (refused by Chrome, as expected): ${error.message.split('.')[0]}`); }
   await open(`${originA}/`);
