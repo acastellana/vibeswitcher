@@ -10,6 +10,9 @@
 //                 session.reply, session.new, session.resume and lead (as a node that doesn't take them from a page)
 //   ?toggle       the asking session's question is Claude's auto-mode popup, whose second option is a setting toggled
 //                 with Space: the node refuses it from a page, as it does there
+//   ?large        the site's lead asks a question too long for a snapshot's part: the cards hold its stub
+//                 (`tooLarge`), and `questions` gives it in parts, as the node does; ?large=changing: it changes between
+//                 its parts every time, so the page says it keeps changing
 //   ?multi        the asking session's question is a multi-select (several ticks, a free-text row, Submit): a page
 //                 that acts answers it with choices, as the node does
 //   ?rich         "Add dark mode…" holds what an agent writes: a heading, emphasis, a quote, links, nested lists, a
@@ -19,6 +22,7 @@
 
 import { diffOps, summaryOf } from './chatops.js';
 import { taskGroup, taskState } from './words.js';
+import { PART_BYTES, sha256 } from './cardparts.js';
 
 const HOME = '/home/dev';
 const SITE = `${HOME}/projects/example-site`;
@@ -185,6 +189,38 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
       proposal: null, decideBy: null, state: 'open', answer: null, answeredVersion: null, withdrawReason: null, task: null,
     },
   }]]);
+
+  // `?large`: a lead's question too long for a snapshot's part. The cards stream holds its stub, as the node's
+  // (`CardStore.Card.tooLargeStub`); `questions` gives the whole value, and in parts.
+  const CARD_LONG = 'local:card:10e60000-0000-4000-8000-0000000010e6';
+  const wholeCards = new Map();
+  if (options.large && !options.empty) {
+    const tables = ['accounts', 'payouts', 'invoices', 'webhooks', 'regions', 'schedules', 'audit_log', 'tokens'];
+    const steps = Array.from({ length: 2600 }, (_, at) => `${at + 1}. Copy ${tables[at % tables.length]} rows ${at * 500 + 1}–${at * 500 + 500} into the new schema, check their totals, then mark the batch done.`);
+    const full = {
+      id: CARD_LONG, kind: 'question', project: SITE_PROJECT, root: SITE, open: true, closed: null, notice: null, at: ago(600), blocking: false, draft: null, seen: 'long-1',
+      question: {
+        id: 'q-long-migration', short: 'q-long', text: `The data migration is planned in ${steps.length} batches, each checked before the next:\n\n${steps.join('\n')}\n\nRun all of them tonight, or only the first hundred to see how long they take?`,
+        options: ['Run all of them tonight', 'Only the first hundred'], priority: 'important', whyNow: 'The maintenance window opens at 22:00.', version: 1, revisionNote: null,
+        proposal: null, decideBy: null, state: 'open', answer: null, answeredVersion: null, withdrawReason: null, task: null,
+      },
+    };
+    wholeCards.set(CARD_LONG, full);
+    cards.set(CARD_LONG, longStub(full));
+  }
+  function longStub(full) {
+    const stub = {};
+    for (const key of ['id', 'kind', 'project', 'root', 'open', 'closed', 'at', 'blocking']) stub[key] = full[key] ?? null;
+    stub.tooLarge = { bytes: new TextEncoder().encode(JSON.stringify(full)).length + 40, command: 'vibeswitcher questions' };
+    return stub;
+  }
+  // The card's bytes as one string a byte a character, for btoa.
+  const base64 = (bytes) => {
+    let binary = '';
+    for (let at = 0; at < bytes.length; at += 8192) binary += String.fromCharCode(...bytes.subarray(at, at + 8192));
+    return btoa(binary);
+  };
+  let longChanges = 0;
 
   const CARD_HELD = 'local:card:c0f1a2b3-0000-4000-8000-00000000c0f1';
   const CARD_BASE = 'local:card:ba5e0000-0000-4000-8000-00000000ba5e';
@@ -918,6 +954,27 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
       emit(put('cards', cards, card.id));
       return { ok: true, result: { card: card.id, held: true } };
     }
+    // The cards (`questions`): with `card` alone one card whole; with `part` that part of its bytes, as
+    // `Requests.cardPart` gives it (an `?older` node takes no part: it gives the card whole, as before parts).
+    if (message.kind === 'questions') {
+      if (args.card === undefined) return { ok: true, result: { cards: clone(cards).filter((card) => card.open), more: 0 } };
+      const full = wholeCards.get(args.card) || cards.get(args.card);
+      if (args.part === undefined || options.older) return { ok: true, result: { cards: full ? [structuredClone(full)] : [], more: 0 } };
+      if (!full) return { ok: false, error: { code: 'gone', message: `no card ${args.card}` } };
+      if (!Number.isInteger(args.part) || args.part < 0) return badArgs('questions’ part is a part’s number from 0');
+      if (args.part > 0 && !args.version) return badArgs('questions with a part after the first needs the version the first part gave');
+      // `?large=changing`: a draft left on it between its parts, every time.
+      if (options.large === 'changing' && args.part > 0 && full.id === CARD_LONG) full.draft = { text: `Draft ${++longChanges}`, version: longChanges, at: new Date().toISOString(), action: 'mock-draft' };
+      const bytes = new TextEncoder().encode(JSON.stringify(full));
+      return sha256(bytes).then((hashed) => {
+        const version = hashed ?? `mock-${bytes.length}-${longChanges}`;
+        if (args.version && args.version !== version) return { ok: false, error: { code: 'changed', message: 'the card changed while it was being read: read it again from its first part' } };
+        const parts = Math.max(1, Math.ceil(bytes.length / PART_BYTES));
+        if (args.part >= parts) return badArgs(`the card has ${parts} parts, from 0: not ${args.part}`);
+        const data = base64(bytes.subarray(args.part * PART_BYTES, (args.part + 1) * PART_BYTES));
+        return { ok: true, result: { part: { card: full.id, version, part: args.part, parts, bytes: bytes.length, data } } };
+      });
+    }
     // A session's own question answered (`session.reply`, as `Requests.replySession`): the question on its screen read
     // again, refused unless it is the one the page was shown; then the keys typed, and the question closes a moment
     // after the reply, as the node's next read of the screen finds it gone.
@@ -1398,7 +1455,7 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
   const KINDS = ['chat.page',
     'answer', 'answer.replace', 'tell', 'tell.retract', 'hold', 'send', 'session.draft', 'session.draft.clear', 'session.complete',
     'session.attach', 'session.usage', 'stats', 'session.ports', 'board.task', 'board.image', 'chat.image', 'session.presets', 'brief', 'recent',
-    'mail', 'settings', 'seen', 'push', 'push.decline', 'set', 'stop', ...STARTS, ...BUTTONS].filter((kind) => !options.older || (!STARTS.includes(kind) && !BUTTONS.includes(kind)));
+    'mail', 'settings', 'seen', 'push', 'push.decline', 'set', 'stop', 'questions', ...STARTS, ...BUTTONS].filter((kind) => !options.older || (!STARTS.includes(kind) && !BUTTONS.includes(kind)));
   // The node's own words for refusing each (`?refuse=KIND,…`).
   const REFUSE = new Set(options.refuse || []);
   const REFUSALS = {

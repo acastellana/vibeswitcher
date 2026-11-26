@@ -45,7 +45,8 @@ export function firstLine(text, limit = 120) {
 const CARD_TITLES = { question: t('ntAQuestionForYou'), approval: t('ntAnApprovalForYou'), config: t('ntAgentsConfigHeld'), base: t('ntTheBaseMoved') };
 
 function cardBody(card) {
-  if (card.tooLarge) return t('ntACardTooLargeFor') + (card.tooLarge.command || 'vibeswitcher questions');
+  // A long card: nothing of what it asks, and no command; the page reads it whole.
+  if (card.tooLarge) return t('ntALongCard');
   if (card.question) return firstLine(card.question.text || card.question.short);
   if (card.approval) return firstLine(card.approval.subject || t('ntMerge', { commit: String(card.approval.commit || '').slice(0, 8) }));
   if (card.config) return firstLine((card.config.items || []).map((item) => item.name).join(', '));

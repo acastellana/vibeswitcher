@@ -29,6 +29,7 @@
 import { applyOps, reindex } from './chatops.js';
 import { parts as imageParts } from './composing.js';
 import { assert as passkeyAssert } from './passkey.js';
+import { readCardParts } from './cardparts.js';
 
 const KEYS = { sessions: 'id', cards: 'id', leads: 'project', boards: 'project' };
 // How long a session's answered question is shown closed while the node's value still shows it.
@@ -94,6 +95,10 @@ export function createStore(options = {}) {
     drafts: new Map(),
     // Why the node refused a card's last draft, by card id, until the next one.
     draftRefused: new Map(),
+    // A card the node withheld from the stream whole (`tooLarge`) as read in parts, by card id (`wholeCard`): { key (the
+    // stub it was read for), status: 'loading' | 'loaded' | 'changing' | 'failed' | 'older', got, of, retries,
+    // card (the whole value, once loaded), error }.
+    wholeCards: new Map(),
     // The same for a message drafted for a session (`session.draft`), by session id: the overlay, and why the node
     // refused the last one.
     sessionDrafts: new Map(),
@@ -614,7 +619,39 @@ export function createStore(options = {}) {
       }, REPLIED_MS);
       emit(new Map([['sessions', [{ in: 'sessions', id, value: state.sessions.get(id) }]]]));
     },
+    // The whole of a card withheld from the stream (`stub`, its `tooLarge` stand-in), read in parts once for that stub
+    // and kept (`state.wholeCards`): the entry as it is now, its read started when there is none for this stub. A card
+    // that changes while it is read is read again from its start, up to WHOLE_RETRIES times, then it says so; a stub
+    // that changes (the card did) is read again. Each step is told as a change of the card.
+    wholeCard(stub, { again = false, retries = 0 } = {}) {
+      const key = JSON.stringify(stub);
+      const known = state.wholeCards.get(stub.id);
+      if (known && known.key === key && !again) return known;
+      const entry = { key, status: 'loading', got: 0, of: null, retries, changedOnce: retries > 0, card: null, error: null };
+      state.wholeCards.set(stub.id, entry);
+      const mine = () => state.wholeCards.get(stub.id) === entry;
+      const told = () => { if (mine()) cardsTouched(stub.id); };
+      readCardParts(request, stub.id, { progress: (got, of) => { entry.got = got; entry.of = of; told(); } }).then((read) => {
+        if (!mine()) return;
+        if (read.card) Object.assign(entry, { status: 'loaded', card: read.card });
+        else if (read.older) entry.status = 'older';
+        else if (read.changed && entry.retries < WHOLE_RETRIES) {
+          // Read again from its first part, saying why meanwhile.
+          this.wholeCard(stub, { again: true, retries: entry.retries + 1 });
+          return;
+        } else if (read.changed) entry.status = 'changing';
+        else Object.assign(entry, { status: 'failed', error: read.error || null });
+        told();
+      });
+      // Asked again (a click, or a card that changed while it was read): told now. A first read is asked while a view
+      // draws, which draws its loading line itself.
+      if (again) cardsTouched(stub.id);
+      return entry;
+    },
     setConnection: (connection) => setConnection(connection),
     connect(source) { feed = source; },
   };
 }
+
+// How many times a card that changed while it was read in parts is read again before the page says it keeps changing.
+export const WHOLE_RETRIES = 2;

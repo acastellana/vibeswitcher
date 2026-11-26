@@ -176,13 +176,35 @@ function keyFacts(approval) {
 }
 
 // A card the node withheld from the page whole, too large for a snapshot's part (`tooLarge`): what it asks is never cut,
-// so it is read whole in a terminal. Its place and title only; nothing of what it asks.
-export function tooLargeCard(card) {
-  const command = card.tooLarge?.command || 'vibeswitcher questions';
-  return h('article', { class: 'card too-large' + (card.open ? '' : ' closed') },
-    h('header', { class: 'card-head' }, h('span', { class: 'priority important' }, card.plugin?.title || (card.kind === 'approval' ? t('cMergeToApprove') : t('cAQuestion')))),
-    h('p', { class: 'card-notice' }, t('cTooLarge'), h('code', null, command), '.'),
-    copyLine(command, 'the command that shows it whole'));
+// so it is read whole in parts (`store.wholeCard`, js/cardparts.js) and drawn whole once it is in. Meanwhile its place
+// and title only, nothing of what it asks, and what the read is doing: loading (how far), read again because the card
+// changed while it was read, still changing (Read it again), or couldn't be read (Try again). A node from before parts
+// (`older`) has it read in a terminal.
+export function tooLargeCard(card, whole = null, app = null) {
+  const head = h('header', { class: 'card-head' }, h('span', { class: 'priority important' }, card.plugin?.title || (card.kind === 'approval' ? t('cMergeToApprove') : t('cAQuestion'))));
+  const article = (...rest) => h('article', { class: 'card too-large' + (card.open ? '' : ' closed') }, head, ...rest);
+  const again = (label) => kit.button('plain', { size: 's', class: 'whole-again', onclick: () => app?.store?.wholeCard?.(card, { again: true }) }, label);
+  if (!whole || whole.status === 'older') {
+    const command = card.tooLarge?.command || 'vibeswitcher questions';
+    return article(h('p', { class: 'card-notice' }, t('cTooLarge'), h('code', null, command), '.'), copyLine(command, 'the command that shows it whole'));
+  }
+  if (whole.status === 'changing') return article(h('p', { class: 'card-notice', role: 'status' }, t('cpKeepsChanging')), again(t('cpReadAgain')));
+  if (whole.status === 'failed') {
+    const why = whole.error ? refusalWords(whole.error) : t('cpOdd');
+    return article(h('p', { class: 'card-notice', role: 'alert' }, t('cpCouldntRead', { why })), again(t('cpTryAgain')));
+  }
+  // Loading (or loaded, drawn by the caller): how far, as a share of the card, so nothing of the node's parts is named.
+  const share = whole.of ? Math.round((100 * whole.got) / whole.of) : 0;
+  return article(h('p', { class: 'card-notice whole-loading', role: 'status', 'aria-busy': 'true' },
+    whole.changedOnce ? t('cpChangedReadingAgain') : t('cpLoading'), ' ', h('span', { class: 'whole-share' }, t('cpShare', { n: share }))));
+}
+
+// The whole card in place of its stub, once read (`store.wholeCard`); the stub (and the read started) until then. A
+// view that draws cards asks here.
+export function wholeOf(app, card) {
+  if (!card?.tooLarge || !app?.store?.wholeCard || !app.store.can?.('questions')) return { card, whole: null };
+  const whole = app.store.wholeCard(card);
+  return { card: whole.status === 'loaded' ? whole.card : card, whole };
 }
 
 // How long a Blocking card's answer waits to be taken back before it goes.
@@ -192,6 +214,8 @@ export const UNDO_MS = 5000;
 export function questionCard(app, first, { expand = null } = {}) {
   const el = h('article', { class: 'card', tabindex: -1 });
   let card = first;
+  // The read of a card too large for the stream (`wholeOf`), or null.
+  let whole = null;
   // One of several open questions, not the one shown whole: its question line only, which opens it.
   let collapsed = false;
   let shape = '';
@@ -224,7 +248,7 @@ export function questionCard(app, first, { expand = null } = {}) {
 
   function build() {
     if (card.tooLarge) {
-      el.replaceChildren(...tooLargeCard(card).childNodes);
+      el.replaceChildren(...tooLargeCard(card, whole, app).childNodes);
       el.className = 'card too-large' + (card.open ? '' : ' closed');
       keys = { buttons: [], hold: null };
       return;
@@ -387,11 +411,13 @@ export function questionCard(app, first, { expand = null } = {}) {
 
   // The card is built again only when what it shows changed, so typing into it survives every other delta.
   function update(next, fold = collapsed) {
-    card = next;
+    // A card too large for the stream: drawn whole once read in parts, its stub (and how the read goes) until then.
+    ({ card, whole } = wholeOf(app, next));
     collapsed = fold;
     const acting = app.store.state.acting.get(card.id);
     const drafting = [app.store.draftOf(card.id), app.store.state.draftRefused.get(card.id) || null, app.store.can('draft')];
-    const now = JSON.stringify([card, acting || null, actsFor(app, 'answer'), drafting, collapsed, app.ui?.state?.route?.id || null]);
+    const reading = whole && whole.status !== 'loaded' ? [whole.status, whole.got, whole.of, !!whole.changedOnce] : null;
+    const now = JSON.stringify([card, acting || null, actsFor(app, 'answer'), drafting, collapsed, app.ui?.state?.route?.id || null, reading]);
     if (now === shape) return;
     const focused = el.contains(document.activeElement);
     // The option that had the focus keeps it (a pick never sends it to the text box, nor opens a phone's keyboard).
@@ -632,8 +658,9 @@ export function questionStack(app, project, { onChange = () => {}, now = () => D
 
 // A feature plugin's card (js/plugincard.js): who asks, the node's facts, what it asks whole, the agent's own words,
 // and the lines that settle it. Never acts.
-export function pluginCard(card, app = null) {
-  if (card.tooLarge) return tooLargeCard(card);
+export function pluginCard(stub, app = null) {
+  const { card, whole } = wholeOf(app, stub);
+  if (card.tooLarge) return tooLargeCard(card, whole, app);
   // With the `act` right, each answer word is a button (its request the card, its seen and the word); the command the
   // agent asks for stays shown whole above it.
   const acting = app && actsFor(app, 'answer');
