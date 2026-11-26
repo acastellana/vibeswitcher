@@ -441,12 +441,12 @@ import Testing
         let sandboxOption = (ProcessInfo.processInfo.environment["CODEX_SANDBOX"] ?? "").isEmpty ? "" : " --disable-sandbox"
         // A Mac as loaded as it has cores: vs-heavy gives the slot's share.
         #expect(try build(["VIBESWITCHER_HEAVY_NCPU": "12", "VIBESWITCHER_HEAVY_SLOTS": "3", "VS_HEAVY_CORES": nil, "VIBESWITCHER_HEAVY_LOAD": "12"])
-                == "build --build-system native\(sandboxOption) -j 2 -Xswiftc -j2 --build-tests")
+                == "build --build-system native --only-use-versions-from-resolved-file\(sandboxOption) -j 2 -Xswiftc -j2 --build-tests")
         // vs-heavy's command itself: the slot held (VIBESWITCHER_TEST_LOCK) and started by this process.
         let inner: [String: String?] = ["TEST_UNDER_LOAD_INNER": "\(ProcessInfo.processInfo.processIdentifier)",
                      "VIBESWITCHER_TEST_LOCK": locks.appendingPathComponent("test-build.lock").path]
-        #expect(try build(inner.merging(["VS_HEAVY_CORES": "5"]) { $1 }) == "build --build-system native\(sandboxOption) -j 2 -Xswiftc -j3 --build-tests")
-        #expect(try build(inner.merging(["VS_HEAVY_CORES": nil]) { $1 }) == "build --build-system native\(sandboxOption) --build-tests")
+        #expect(try build(inner.merging(["VS_HEAVY_CORES": "5"]) { $1 }) == "build --build-system native --only-use-versions-from-resolved-file\(sandboxOption) -j 2 -Xswiftc -j3 --build-tests")
+        #expect(try build(inner.merging(["VS_HEAVY_CORES": nil]) { $1 }) == "build --build-system native --only-use-versions-from-resolved-file\(sandboxOption) --build-tests")
     }
 
     /// A suite run's record, .build/test-under-load/result.json, is what a worker's done report is checked against

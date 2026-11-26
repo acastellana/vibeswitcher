@@ -36,7 +36,9 @@ jobs:
           swiftly install --use --assume-yes "$wanted"
           echo "$HOME/.local/share/swiftly/bin" >> "$GITHUB_PATH"
       - name: Versions
-        run: swift --version
+        run: |
+          swift --version
+          bash scripts/ci/check-versions.sh node
       - name: The host probe, config held on fresh scratch nodes
         run: bash scripts/ci/host-probe.sh 300
       - name: The parsers fuzzed, long, on a seed of the night

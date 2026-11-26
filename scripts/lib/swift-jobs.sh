@@ -44,8 +44,13 @@ swiftpm_sandbox() {
 # needs Xcode's Metal Toolchain component (a download), and puts its products in .build/out, not .build/<triple>.
 # The native one warns it's deprecated, on stderr, which module-cache.sh's swift puts in its output: a
 # --show-bin-path's caller takes the last line.
+# And Package.resolved as it is (`--only-use-versions-from-resolved-file`, the user's word of 2026-11-26: "we need to be
+# careful here"): a build takes the versions the lock file names and fails, never re-resolves, when it no longer
+# matches Package.swift ("an out-of-date resolved file was detected"); without it SwiftPM resolves afresh and rewrites
+# the file. A global option: build, test, run and package (before or after its subcommand) all take it.
 swiftpm_options() {
     echo --build-system native
+    echo --only-use-versions-from-resolved-file
     swiftpm_sandbox
     [[ -n ${swiftpm_cache:-} ]] && echo --cache-path "$swiftpm_cache"
     return 0

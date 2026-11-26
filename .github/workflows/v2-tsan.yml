@@ -42,7 +42,7 @@ jobs:
       - name: Versions
         run: |
           swift --version
-          node --version
+          bash scripts/ci/check-versions.sh node
       - name: Tests under the thread sanitizer
         run: bash scripts/test.sh --tsan --filter 'VibeNodeTests' 2>&1 | tee test.log
         env:
@@ -86,7 +86,7 @@ jobs:
       - name: Versions
         run: |
           swift --version
-          node --version
+          bash scripts/ci/check-versions.sh node
       - name: Tests under the thread sanitizer
         run: bash scripts/test.sh --tsan --filter 'VibeHostTests' 2>&1 | tee test.log
         env:
@@ -130,7 +130,7 @@ jobs:
       - name: Versions
         run: |
           swift --version
-          node --version
+          bash scripts/ci/check-versions.sh node
       - name: Tests under the thread sanitizer
         run: bash scripts/test.sh --tsan --filter 'VibePlatformTests' 2>&1 | tee test.log
         env:

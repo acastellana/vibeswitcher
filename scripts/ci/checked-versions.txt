@@ -1,0 +1,10 @@
+# The major versions the page tests (Node.js, every job's scripts/test.sh) and the browser checks (Google Chrome, the
+# Linux CI's core job) last passed on, each a range of majors, both ends included. The runner images bring their own
+# and move on without asking; scripts/ci/check-versions.sh fails a job loudly on a major outside its range, so a new
+# one is seen before it is trusted. Widen a range only after a green run on the new major. Read by
+# DependencyLockLintTests too.
+#
+# On 2026-11-26: ubuntu-24.04 had Node v22.23.5 and Chrome 157.0.8103.78; xcode-27 had Node v24.22.2 and v24.22.3
+# (the Mac runs no browser check).
+node 22-24
+chrome 157-157
