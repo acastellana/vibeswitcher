@@ -7,7 +7,7 @@ import Testing
 ///
 /// An assertion is signed over everything the check reads, so every mutation must be refused. A registration's
 /// attestation object is signed by nothing (attestation `none`), so changing its AAGUID, sign count, BE and BS flags or
-/// credential id's bytes is another valid registration, not a forgery: such a mutation may pass, and then the result
+/// reserved flag bits or credential id's bytes is another valid registration, not a forgery: such a mutation may pass, and then the result
 /// must say exactly what the mutated bytes say. Anything else that passes is a failure.
 struct WebAuthnFuzzTests {
     /// SplitMix64: the same mutations on every run and system.
@@ -81,7 +81,7 @@ struct WebAuthnFuzzTests {
         let challenge = WebAuthnSupport.bytes(vector["challenge"] as! String)
         let original = try WebAuthnSupport.registration(vector).get()
         // Where the authenticator data starts inside the object (`{"fmt":"none","attStmt":{},"authData":` and the
-        // byte string's two-byte head), and the unsigned places in it: the flags' BE and BS bits, the sign count, the
+        // byte string's two-byte head), and the unsigned places in it: the flags' BE, BS and reserved bits, the sign count, the
         // AAGUID, the credential id's bytes.
         let object = [UInt8](valid.attestationObject)
         let start = 30
@@ -111,7 +111,7 @@ struct WebAuthnFuzzTests {
                 let changed = (0..<object.count).filter { mutated.count == object.count && mutated[$0] != object[$0] }
                 #expect(clientData.prefix(checked) == valid.clientDataJSON.prefix(checked) && mutated.count == object.count && unsigned.isSuperset(of: changed),
                         "round \(round) passed with \(changed)")
-                #expect(mutated[start + 32] & 0xE7 == object[start + 32] & 0xE7)
+                #expect(mutated[start + 32] & 0xC5 == object[start + 32] & 0xC5) // only BE, BS and the reserved bits
                 #expect(verified.credentialId == Data(mutated[(start + 55)..<(start + 55 + idLength)]))
                 #expect(verified.aaguid == Data(mutated[(start + 37)..<(start + 53)]))
                 #expect(verified.signCount == UInt32(mutated[start + 33]) << 24 | UInt32(mutated[start + 34]) << 16

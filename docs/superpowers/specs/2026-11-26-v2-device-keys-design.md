@@ -283,11 +283,14 @@ closed on anything it doesn't name, in this order:
 4. **`authenticatorData`.** An assertion's is exactly 37 bytes (rpIdHash, flags, sign count: no attested data, no
    extensions). A registration's is rpIdHash, flags, sign count, AAGUID, the credential id's length and the id (16
    to 1023 bytes), then the COSE key, and nothing after it. `rpIdHash` is SHA-256 of the listener's rpId. The flags:
-   UP and UV set; AT clear on an assertion and set on a registration; ED and the reserved bits 0x02 and 0x20 clear
+   UP and UV set; AT clear on an assertion and set on a registration; ED clear
    (the page asks for no extension; **a stated limit to measure:** a browser may ask one itself, as Chromium is
    expected to ask a security key for `credProtect` when `residentKey` is `required`, and such a registration is
    refused until a look with a real security key says what it sends; Chrome's virtual authenticator has no
-   `credProtect` and sends no ED); BS only with BE (§6.1.3: "This combination is not allowed"); on an assertion, BE
+   `credProtect` and sends no ED); BS only with BE (§6.1.3: "This combination is not allowed"); the reserved bits
+   0x02 and 0x20 ignored (the lead's call: the signature covers them, so refusing them stops no forgery, and the day
+   a later WebAuthn level defines one and an OS starts setting it, refusing them would lock out every unlock on that
+   device); on an assertion, BE
    equal to the record's (§6.1.3: BE "MUST NOT change"). The AAGUID is returned as claimed, never checked: with
    attestation `none` it proves nothing.
 5. **The assertion's signature:** ASN.1 DER parsed by the node itself, strictly (a SEQUENCE with a short-form length
@@ -298,8 +301,9 @@ closed on anything it doesn't name, in this order:
 6. **The sign count**, checked after the signature (so a refusal here means a genuine key whose counter didn't
    advance): when the stored or the new count is non-zero, the new one must exceed the stored one. Both zero passes
    (authenticators without a counter, Apple's passkeys among them); a counter that goes back to zero after a non-zero
-   one is refused, as WebAuthn Level 3 §7.2's counter step treats it (a possibly cloned authenticator): "a non-zero
-   sign count must exceed the stored one" above left that case open.
+   one is refused. That rule is ours, stricter than this design's first wording ("a non-zero sign count must exceed
+   the stored one", which let it pass) and, as far as it was read here, than the spec's text (WebAuthn Level 3 §7.2's
+   counter step was not read: the fetch of the spec stopped before it); the lead's call, 2026-11-26.
 7. **The registration's attestation object**, at most 2048 bytes, is exactly the CBOR map `{"fmt": "none",
    "attStmt": {}, "authData": <bytes>}`: three members in that (CTAP2 canonical) order, `fmt` the text `none` and
    `attStmt` the empty map (else refused as another attestation), nothing after it. The reader (`WebAuthnCBOR`) takes

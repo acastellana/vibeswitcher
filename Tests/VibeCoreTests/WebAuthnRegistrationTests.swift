@@ -266,8 +266,11 @@ struct WebAuthnRegistrationTests {
         #expect(Self.refusal(Self.object(authData(flags: 0x44))) == .userPresence)
         #expect(Self.refusal(Self.object(authData(flags: 0x41))) == .userVerification)
         #expect(Self.refusal(Self.object(authData(flags: 0x55))) == .flags)                   // BS without BE
-        #expect(Self.refusal(Self.object(authData(flags: 0x47))) == .flags)                   // reserved bit
-        #expect(Self.refusal(Self.object(authData(flags: 0x65))) == .flags)                   // reserved bit
+        #expect(Self.refusal(Self.object(authData(flags: 0x47))) == nil)                      // a reserved bit, ignored
+        #expect(Self.refusal(Self.object(authData(flags: 0x67))) == nil)
+        #expect(Self.refusal(Self.object(authData(flags: 0x66))) == .userPresence)            // and every other check stands
+        #expect(Self.refusal(Self.object(authData(flags: 0x27))) == .flags)
+        #expect(Self.refusal(Self.object(authData(flags: 0x77))) == .flags)
         #expect(Self.refusal(Self.object(authData(rpId: "sub.localhost"))) == .rpIdHash)
         #expect(Self.refusal(Self.object([]))  == .authenticatorData)
     }

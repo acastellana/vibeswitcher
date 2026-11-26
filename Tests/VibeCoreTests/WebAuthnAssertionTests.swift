@@ -158,8 +158,19 @@ struct WebAuthnAssertionTests {
         #expect(valid.with { $0.authenticatorData = WebAuthnSupport.authenticatorData(flags: 0x04) }.refusal == .userPresence)
         #expect(valid.with { $0.authenticatorData = WebAuthnSupport.authenticatorData(flags: 0x01) }.refusal == .userVerification)
         #expect(valid.with { $0.authenticatorData = WebAuthnSupport.authenticatorData(flags: 0x00) }.refusal == .userPresence)
-        #expect(valid.with { $0.authenticatorData = WebAuthnSupport.authenticatorData(flags: 0x07) }.refusal == .flags)
-        #expect(valid.with { $0.authenticatorData = WebAuthnSupport.authenticatorData(flags: 0x25) }.refusal == .flags)
+        // The reserved bits are ignored: signed, they can't be forged, and a later level may define them.
+        #expect(valid.with { $0.authenticatorData = WebAuthnSupport.authenticatorData(flags: 0x07) }.refusal == nil)
+        #expect(valid.with { $0.authenticatorData = WebAuthnSupport.authenticatorData(flags: 0x27) }.refusal == nil)
+        // A reserved bit set changes no other check: each still refuses.
+        #expect(valid.with { $0.authenticatorData = WebAuthnSupport.authenticatorData(flags: 0x26) }.refusal == .userPresence)
+        #expect(valid.with { $0.authenticatorData = WebAuthnSupport.authenticatorData(flags: 0x23) }.refusal == .userVerification)
+        #expect(valid.with { $0.authenticatorData = WebAuthnSupport.authenticatorData(flags: 0x67) }.refusal == .flags)
+        #expect(valid.with { $0.authenticatorData = WebAuthnSupport.authenticatorData(flags: 0x37) }.refusal == .flags)
+        #expect(valid.with { $0.authenticatorData = WebAuthnSupport.authenticatorData(flags: 0x2F) }.refusal == .backupEligibility)
+        #expect(valid.with { $0.authenticatorData = WebAuthnSupport.authenticatorData(rpId: "evil.example", flags: 0x27) }.refusal == .rpIdHash)
+        var unsigned = valid.with { $0.authenticatorData = WebAuthnSupport.authenticatorData(flags: 0x27) }
+        unsigned.authenticatorData = WebAuthnSupport.authenticatorData(flags: 0x05)
+        #expect(unsigned.refusal == .signature) // set when signed, cleared after: the signature refuses it
         // BS without BE is a combination WebAuthn doesn't allow.
         #expect(valid.with { $0.authenticatorData = WebAuthnSupport.authenticatorData(flags: 0x15) }.refusal == .flags)
     }

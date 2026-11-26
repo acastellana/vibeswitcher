@@ -61,8 +61,7 @@ public enum WebAuthnRefusal: Error, Sendable, Equatable {
     case userPresence
     /// The UV flag isn't set.
     case userVerification
-    /// A flag the ceremony never has: AT on an assertion or missing on a registration, ED, a reserved bit, or BS
-    /// without BE.
+    /// A flag the ceremony never has: AT on an assertion or missing on a registration, ED, or BS without BE.
     case flags
     /// BE differs from the device's recorded backup eligibility (it never changes for a credential).
     case backupEligibility
@@ -93,7 +92,7 @@ public enum WebAuthnRefusal: Error, Sendable, Equatable {
 ///    listener's origin and `crossOrigin` false, within 1024 bytes, its tail `}` or `,` … `}` in UTF-8;
 /// 5. `authenticatorData` is exactly 37 bytes (rpIdHash, flags, signCount: no attested data, no extensions);
 /// 6. its rpIdHash is SHA-256 of the listener's rpId;
-/// 7. UP set; UV set; AT, ED and the reserved bits (0x02, 0x20) clear; BS only with BE; BE as the device recorded;
+/// 7. UP set; UV set; AT and ED clear; BS only with BE; BE as the device recorded (the reserved bits ignored);
 /// 8. the signature is strict DER and verifies under the device's key over `authenticatorData || SHA-256(clientDataJSON)`;
 /// 9. the sign count: when the stored or the new one is non-zero, the new one exceeds the stored one.
 public enum WebAuthnAssertion {
@@ -183,7 +182,7 @@ public enum WebAuthnAssertion {
 ///    1023 bytes, WebAuthn L3 §6.5.1), then the credential's COSE key, and nothing after it; truncated, or with
 ///    trailing bytes, it is refused;
 /// 5. its rpIdHash is SHA-256 of the listener's rpId;
-/// 6. UP set; UV set; AT set; ED and the reserved bits clear; BS only with BE;
+/// 6. UP set; UV set; AT set; ED clear; BS only with BE (the reserved bits ignored);
 /// 7. the COSE key is exactly EC2, ES256, P-256 (`{1: 2, 3: -7, -1: 1, -2: x, -3: y}`, x and y 32 bytes) and its point
 ///    is on the curve.
 ///
@@ -442,11 +441,13 @@ enum WebAuthnChecks {
     }
 
     /// The authenticator data flags (WebAuthn L3 §6.1): UP and UV set; AT set exactly when the ceremony carries
-    /// attested credential data (`attested`); ED and the reserved bits 0x02 and 0x20 clear; BS only with BE.
+    /// attested credential data (`attested`); ED clear; BS only with BE. The reserved bits 0x02 and 0x20 are ignored
+    /// (the lead's call): the signature covers them, so refusing them stops no forgery, and a later WebAuthn level that
+    /// defines one would otherwise lock out every device whose OS starts setting it.
     static func flags(_ flags: UInt8, attested: Bool) throws(WebAuthnRefusal) -> (backupEligible: Bool, backupState: Bool) {
         guard flags & 0x01 != 0 else { throw .userPresence }
         guard flags & 0x04 != 0 else { throw .userVerification }
-        guard (flags & 0x40 != 0) == attested, flags & 0x80 == 0, flags & 0x22 == 0 else { throw .flags }
+        guard (flags & 0x40 != 0) == attested, flags & 0x80 == 0 else { throw .flags }
         let eligible = flags & 0x08 != 0, state = flags & 0x10 != 0
         guard eligible || !state else { throw .flags }
         return (eligible, state)
