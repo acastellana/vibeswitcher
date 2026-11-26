@@ -99,6 +99,7 @@ struct MacSealListTests {
     @Test(Self.mac) func aScratchHomeReadsNothingOutsideIt() throws {
         let home = try home()
         let items = MacSealList.watched(home: home, uid: getuid())
+        #expect(items.count == MacSealList.homeEntries.count && !items.isEmpty, "the home's rows: \(items.map(\.name))")
         #expect(!items.contains { !$0.name.hasPrefix("~/") }, "\(items.map(\.name))")
         #expect(!items.contains { !$0.path.hasPrefix(home + "/") })
     }
@@ -113,6 +114,8 @@ struct MacSealListTests {
         try write("[ -f ~/.config/x/key.env ] && source ~/.config/x/key.env\n", home + "/.zshrc")
         let list = { MacSealList.watched(home: home, uid: getuid(), outside: outside) }
         let items = list()
+        // Every row: the home's, the one sourced file, the outside ones (none left out of what follows).
+        #expect(items.count == MacSealList.homeEntries.count + MacSealList.outsideEntries.count + 1 && !items.isEmpty, "\(items.map(\.name))")
         var before = prints(items)
         #expect(!before.values.contains("nil"), "a row the seal would skip: \(before.filter { $0.value == "nil" })")
         let change = { (item: ConfigSeal.Watched, what: String, body: () throws -> Void) in
