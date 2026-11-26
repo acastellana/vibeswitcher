@@ -169,8 +169,26 @@ public enum HostHandover {
     /// secrets once the lock holds. The user's host without its key takes no handover at all.
     public static func receive(from path: String, lockPath: String, userHost: Bool, proof: String?, logPath: String?,
                                key: () -> SymmetricKey?) throws -> Received {
-        var state = try read(from: path)
+        let refuse: (String) -> Failure = { why in
+            HostLog(path: logPath).note("host: handover refused: \(why)")
+            return Failure.refused(why)
+        }
+        let data = try contents(of: path)
+        var state = try decode(data)
+        if let why = Lock.notHeld(state.lockFD, path: lockPath) { throw refuse(why) }
+        guard userHost else { return Received(state: state, secrets: takeSecrets(from: &state)) }
+        // The user's host without its key (the Keychain didn't give it: a locked keychain, a build without the stable
+        // signing identity) can't tell its build before's handover from another process's: it takes none.
+        guard let key = key() else { throw refuse("this host has no vault key to check its proof with") }
+        guard let proof else { throw refuse("it carries no proof that the running host made it (a build from before proofs, or not the host)") }
+        guard let claimed = Proof.Claim(proof), Proof.holds(claimed, key: key, state: data, lockFD: state.lockFD, lockPath: lockPath) else {
+            throw refuse("its proof doesn't hold for this state, this process and this lock")
+        }
         let secrets = takeSecrets(from: &state)
+        // The channel gone (a build that couldn't take over read it before going back): no secrets, the vault as saved.
+        if let secrets, Proof.digest(secrets) != claimed.secrets {
+            throw refuse("its secrets aren't the ones its proof names")
+        }
         return Received(state: state, secrets: secrets)
     }
 

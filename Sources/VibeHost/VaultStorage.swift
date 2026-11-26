@@ -53,8 +53,11 @@ public struct VaultStorage {
             let unopened = there && (!(opened.map(LeadVault.Book.reads) ?? false) || book.awaitsAppKey)
             let saver = Saver(storage: self, log: HostLog(path: logPath), later: retryLater, setAside: unopened)
             book.onChange = { saver.save($0) }
-            // What came from memory goes to disk too (the build before may have had no key to save it with).
-            if handedOver != nil { saver.save(book.serialized) }
+            // What came from memory goes to disk at once only where no vault opens (none there yet, or one that didn't
+            // open, set aside first): a vault that opens is never saved over by the handover itself, only by a change
+            // the vault makes afterwards (the build before saved each of its own).
+            let opens = opened.map(LeadVault.Book.reads) ?? false
+            if handedOver != nil, !opens { saver.save(book.serialized) }
         }
         return book
     }
