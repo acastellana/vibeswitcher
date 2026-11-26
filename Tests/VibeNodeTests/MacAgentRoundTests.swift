@@ -594,7 +594,8 @@ struct MacAgentRoundTests {
 
     /// N1 at function level: a job of the label running at `pid`, and a server that answers (`sessions`) with
     /// `serverStop`'s answer, or none.
-    func stopWith(server: MacAgent.ServerStop?) throws -> (Result<String, StartRefusal>, confirms: Int, bootouts: Int, stops: Int) {
+    func stopWith(server: MacAgent.ServerStop?, status: MacAgent.ServerSeen? = nil, tweak: (inout MacAgent.Steps, Locked<Bool>) -> Void = { _, _ in })
+        throws -> (Result<String, StartRefusal>, confirms: Int, bootouts: Int, stops: Int) {
         let dir = try scratch.shortFolder("vsn1").path
         let place = NodeAgent.Place(label: "dev.vibeswitcher.node.test-fn", plistFolder: dir + "/la", dataRoot: dir + "/node",
                                     lock: dir + "/node/host.lock", uid: getuid(), launchctl: "/bin/launchctl")
@@ -618,8 +619,13 @@ struct MacAgentRoundTests {
                                    serverStop: { _ in counts.value.stops += 1; return server ?? .none("no server answers") },
                                    children: { _ in [] }, alive: { _ in false }, lockFree: { _ in true }, patience: 2,
                                    arguments: { _ in ["/bin/sleep"] }, job: { _ in job },
-                                   liveSessions: { server == nil ? nil : 3 })
+                                   server: { status ?? (server == nil ? .none("no server answers") : .answered(sessions: 3)) })
         steps.executable = { _ in "/bin/sleep" }
+        steps.sessionID = { _ in nil }
+        let confirmed = Locked(false)
+        let confirm = steps.confirm
+        steps.confirm = { what in confirmed.value = true; return confirm(what) }
+        tweak(&steps, confirmed)
         let stopped = MacAgent(place: place, steps: steps).stop()
         return (stopped, counts.value.confirms, counts.value.bootouts, counts.value.stops)
     }
@@ -646,6 +652,79 @@ struct MacAgentRoundTests {
         let (stopped, confirms, bootouts, _) = try stopWith(server: nil)
         #expect((try? stopped.get()) != nil, "\(stopped)")
         #expect(confirms == 1 && bootouts == 1, "confirms \(confirms), bootouts \(bootouts)")
+    }
+
+    /// N1, the blind check's: a server that answers `status` and refuses (or answers unreadably): stop fails, asks no
+    /// code, asks no stop and unloads nothing. Red before: it was taken for no server, and booted out.
+    @Test func aServerThatRefusesStatusStopsNothing() throws {
+        let (stopped, confirms, bootouts, stops) = try stopWith(server: .stopped, status: .refused(StartRefusal("internal: status failed")))
+        guard case .failure(let why) = stopped else { Issue.record("stopped over a refused status"); return }
+        #expect(why.text.contains("status failed"), "\(why.text)")
+        #expect(confirms == 0 && bootouts == 0 && stops == 0, "confirms \(confirms), bootouts \(bootouts), stops \(stops)")
+    }
+
+    /// A live process of the user's for a test's stand-in (`/bin/sleep 600`), ended with the scratch.
+    func sleeper() throws -> pid_t {
+        var spawn = Platform.Spawn(executable: "/bin/sleep", arguments: ["sleep", "600"])
+        spawn.stdin = .path("/dev/null", flags: O_RDONLY)
+        guard case .success(let pid) = spawn.start() else { throw CocoaError(.executableNotLoadable) }
+        return pid
+    }
+
+    func reap(_ pid: pid_t) { kill(pid, SIGKILL); var status: Int32 = 0; waitpid(pid, &status, 0) }
+
+    /// N2, the blind check's: a survivor no parent link or session reaches any more (its leader and parent ended), still
+    /// carrying the session's id: stop names it and fails. Red before: no look by the session's id.
+    @Test func aSurvivorCarryingTheSessionsIdIsNamed() throws {
+        let survivor = try sleeper()
+        defer { reap(survivor) }
+        // The session's program, a child of the host, which the bootout ends; its environment names the session.
+        let program = try sleeper()
+        defer { reap(program) }
+        let (stopped, _, _, _) = try stopWith(server: nil) { steps, _ in
+            let launchctl = steps.launchctl
+            steps.launchctl = { words in
+                if words.first == "bootout" { self.reap(program) }
+                return launchctl(words)
+            }
+            steps.children = { pid in pid == 4242 ? Platform.Processes.link(program).map { [$0] } ?? [] : [] }
+            steps.sessionID = { $0 == program ? "8E2C6A5B-0000-4000-8000-000000000001" : nil }
+            steps.carrying = { ids in ids.contains("8E2C6A5B-0000-4000-8000-000000000001") ? Platform.Processes.link(survivor).map { [$0] } ?? [] : [] }
+            steps.alive = { link in Platform.Processes.link(link.pid).map { $0.startTicks == link.startTicks } ?? false }
+        }
+        guard case .failure(let why) = stopped else { Issue.record("stop said it ended with pid \(survivor) running"); return }
+        #expect(why.text.contains("pid \(survivor)"), "\(why.text)")
+    }
+
+    /// N2, the blind check's: a process the host started while stop's prompt waited is waited for. Red before: the
+    /// snapshot was taken before the prompt only.
+    @Test func whatStartedDuringThePromptIsWaitedFor() throws {
+        let late = Locked<pid_t>(0)
+        defer { if late.value > 0 { reap(late.value) } }
+        let (stopped, _, _, _) = try stopWith(server: nil) { steps, confirmed in
+            let confirm = steps.confirm
+            steps.confirm = { what in
+                late.value = (try? self.sleeper()) ?? 0
+                return confirm(what)
+            }
+            steps.children = { pid in pid == 4242 && confirmed.value && late.value > 0 ? Platform.Processes.link(late.value).map { [$0] } ?? [] : [] }
+            steps.alive = { link in Platform.Processes.link(link.pid).map { $0.startTicks == link.startTicks } ?? false }
+        }
+        guard case .failure(let why) = stopped else { Issue.record("stop said it ended with pid \(late.value) running"); return }
+        #expect(why.text.contains("pid \(late.value)"), "\(why.text)")
+    }
+
+    /// I2, the blind check's: from the agent's own plist, with launchd's word the job's and the command line the job's, a
+    /// process whose program is another file with the same bytes (a copy of the job's program) isn't the node: status
+    /// and stop refuse it. Red before: no test reached the check (every other case stopped earlier).
+    @Test func aCopyOfTheProgramFromTheAgentsOwnPlistIsRefused() throws {
+        let dir = try scratch.shortFolder("vsmp").path
+        let copy = dir + "/sleep-copy"
+        try ScratchAgent.run("/bin/cp", ["/bin/sleep", copy])
+        let (stopped, confirms, bootouts, _) = try stopWith(server: nil) { steps, _ in steps.executable = { _ in copy } }
+        guard case .failure(let why) = stopped else { Issue.record("a copy of the program was taken for the node"); return }
+        #expect(why.text.contains("not the job's program"), "\(why.text)")
+        #expect(confirms == 0 && bootouts == 0)
     }
 
     /// N5: `status --json` checks the host on the Mac as the plain `status` does. Red before: JSON skipped it.

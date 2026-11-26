@@ -74,11 +74,24 @@ enum MacAgentCommand {
                                               }
                                           },
                                           job: MacAgentCommand.job,
-                                          // The server's count (`host.liveSessions`), asked before the confirmation; its
-                                          // connection kept for its stop.
-                                          liveSessions: {
-                                              guard case .answered(let live) = StopCommand.server(context, connection) else { return nil }
-                                              return live
+                                          // The server asked for `status` (its count, `host.liveSessions`), before the
+                                          // prompt; its connection kept for its stop. An answer refused or unreadable
+                                          // is a refusal: no bootout then.
+                                          server: {
+                                              switch NodeClient.connect(context) {
+                                              case .failure(let failure): return .none(failure.message)
+                                              case .success(let client):
+                                                  switch client.read(WireKinds.Status.self, WireNoArgs()) {
+                                                  case .failure(let failure):
+                                                      return .refused(StartRefusal("its answer to status couldn't be read: \(failure.message)", exitCode: 1))
+                                                  case .refused(let reply):
+                                                      let code = reply.error?.code ?? "internal"
+                                                      return .refused(StartRefusal("\(code): \(ConfigSeal.inert(reply.error?.message ?? "no reason", limit: .max))", exitCode: Say.exitCode(replyCode: code)))
+                                                  case .success(let status, _):
+                                                      connection.client = client
+                                                      return .answered(sessions: status.host?.liveSessions ?? 0)
+                                                  }
+                                              }
                                           })
         switch MacAgent(place: place, steps: steps).stop() {
         case .success: return 0

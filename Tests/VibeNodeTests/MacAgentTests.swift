@@ -244,7 +244,7 @@ struct MacAgentTests {
                                        serverStop: { what in log.say(what); return sessions == nil ? .none("no server answers") : .refused(StartRefusal("not typed")) },
                                        children: { _ in [] }, alive: { _ in false }, lockFree: { _ in true }, patience: 2,
                                        arguments: { _ in arguments ?? job.programArguments }, job: { $0 == row ? job : nil },
-                                       liveSessions: { sessions })
+                                       server: { sessions.map { .answered(sessions: $0) } ?? .none("no server answers") })
             var stepped = steps
             stepped.executable = { _ in job.programArguments[0] }
             return MacAgent(place: place, steps: stepped)

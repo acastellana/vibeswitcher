@@ -691,17 +691,22 @@ the label, are now bound as follows; each is a refusal that boots out only what 
   (a byte copy elsewhere, or the same code at another path, is another file), its command line is the job's, and its
   token runs a pinned host. The plist on disk must be start's bytes too. *Residual:* a job loaded earlier from other
   bytes at the agent's path, put back to start's since, whose differing keys `print` doesn't show (above).
-- *N1, stop asks once.* With a server that answers: what ends is said with the server's count, and the server's own stop
-  is asked under the rule the other commands use (`TypedWord.said(approval: client.approvalRule)`: the typed code, or the
-  Mac's dialog once `approvalMeasured` is on), its answer read: taken, the host shuts down in order, then the job is
-  unloaded; refused, or an answer that can't be read (within `Requests.stopWait + 30` s, as on Linux), stop fails, says
-  why and unloads nothing. With no server that answers: stop says what ends and how ("the host ends by launchd's
-  bootout; its sessions lose their terminal"), asks the typed code, and boots out.
-- *N2, everything the host started.* Before the stop, the host's descendants by parent links (every level), and every
-  process in the POSIX session of each of them (a program that forked and lost its parent but kept its session). `stop`
-  waits for all of them within its limit, names what is left, and fails rather than saying it ended. *Can't be found on
-  a Mac:* a process that left its session (`setsid`) and lost its parent before the snapshot: nothing links it to the
-  host any more.
+- *N1, stop asks once.* The server asked for `status` first: it answers, and what ends is said with its count, and the
+  server's own stop is asked under the rule the other commands use (`TypedWord.said(approval: client.approvalRule)`: the
+  typed code, or the Mac's dialog once `approvalMeasured` is on), its answer read: taken, the host shuts down in order,
+  then the job is unloaded; refused, or an answer that can't be read (within `Requests.stopWait + 30` s, as on Linux),
+  stop fails, says why and unloads nothing. A server that answers `status` with an error, or unreadably, is a refusal
+  too (nothing stopped). No server (nothing listens, no hello, a listener that fails the server check): stop says what
+  ends and how ("the host ends by launchd's bootout; its sessions lose their terminal"), asks the typed code, and boots
+  out.
+- *N2, everything the host started that can be found.* Before the prompt, and again after it (what started while it
+  waited), the host's descendants by parent links (every level) and every process in a POSIX session one of them leads;
+  and the session ids in their environments (`VIBESWITCHER_SESSION`, where the kernel gives a process's environment to
+  its user: not for Apple's platform binaries), with which every process still carrying one is found at the wait.
+  `stop` waits for all of them within its limit, names what is left, and fails rather than saying they ended; done, it
+  says "every process of it stop could find has ended". *Can't be found on a Mac:* a process that left its session and
+  lost its parent before a look, and whose environment can't be read or carries no session id (a platform binary
+  started with an emptied environment).
 - *N3.* After a crash, `stop` unloads the dead job and removes the socket's file under the same rule as a live stop
   (a socket, the lock free).
 - *N4.* The plist folder must be a real folder (no link), the user's, writable by neither group nor others, before

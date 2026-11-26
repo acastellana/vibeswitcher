@@ -50,6 +50,16 @@ public struct MacAgent {
         case none(String)
     }
 
+    /// What asking the node's server for `status` came to, before a stop.
+    public enum ServerSeen: Equatable, Sendable {
+        /// It answered, and runs this many sessions (`host.liveSessions`).
+        case answered(sessions: Int)
+        /// It answered and refused, or its answer couldn't be read: why. Nothing is stopped then.
+        case refused(StartRefusal)
+        /// Nothing answered as the node's server (nothing listens, no hello, a listener that fails the server check): why.
+        case none(String)
+    }
+
     public struct Steps {
         /// Runs `/bin/launchctl` with these arguments (the place's `launchctl` first); nil when it couldn't run.
         public var launchctl: ([String]) -> Ran?
@@ -85,9 +95,13 @@ public struct MacAgent {
         public var job: (NodePins.Build) -> NodeAgent.Job?
         /// Every process in these POSIX sessions, by pid and start (`Platform.Processes.allPids`, `getsid`).
         public var inSessions: (Set<pid_t>) -> [Platform.Processes.Link] = MacAgent.processes(inSessions:)
-        /// How many sessions the node's server says the host runs (`status`'s `host.liveSessions`), nil when no server
-        /// answers: the host's own welcome lists only the sessions its caller may end, none for the command line.
-        public var liveSessions: () -> Int?
+        /// The node's server asked for `status` (its `host.liveSessions`: the host's own welcome lists only the sessions
+        /// its caller may end, none for the command line).
+        public var server: () -> ServerSeen
+        /// The session id (`VIBESWITCHER_SESSION`) in a process's environment, where it can be read.
+        public var sessionID: (pid_t) -> String? = MacAgent.sessionID(of:)
+        /// The user's processes carrying one of these session ids (`SessionStrays.carrying`), by pid and start.
+        public var carrying: (Set<String>) -> [Platform.Processes.Link] = MacAgent.carrying
         /// The file a process runs (`Platform.Processes.executable`: the kernel's path of its image).
         public var executable: (pid_t) -> String? = Platform.Processes.executable
 
@@ -99,7 +113,7 @@ public struct MacAgent {
                     alive: @escaping (Platform.Processes.Link) -> Bool, lockFree: @escaping (String) -> Bool,
                     patience: TimeInterval = 30, now: @escaping () -> Date = Platform.Clock.steadyDate, pause: @escaping () -> Void = { usleep(50_000) },
                     arguments: @escaping (pid_t) -> [String] = Platform.Processes.arguments,
-                    job: @escaping (NodePins.Build) -> NodeAgent.Job? = { _ in nil }, liveSessions: @escaping () -> Int? = { nil }) {
+                    job: @escaping (NodePins.Build) -> NodeAgent.Job? = { _ in nil }, server: @escaping () -> ServerSeen = { .none("no server is asked") }) {
             self.launchctl = launchctl
             self.pins = pins
             self.cdhashOf = cdhashOf
@@ -115,7 +129,7 @@ public struct MacAgent {
             self.pause = pause
             self.arguments = arguments
             self.job = job
-            self.liveSessions = liveSessions
+            self.server = server
         }
     }
 
@@ -244,36 +258,46 @@ public struct MacAgent {
         case .failure(let why):
             return .failure(StartRefusal("a job labelled \(place.label) runs pid \(pid), which isn't the node's host: \(why.text); nothing was stopped", exitCode: 77))
         }
-        // Everything the host started, taken while it runs: after the bootout its sessions and server are launchd's
-        // children, outside the job's group.
-        let processes = descendants(of: pid)
+        // Everything the host started, taken while it runs (and again after the prompts): after the bootout its sessions
+        // and server are launchd's children, outside the job's group.
+        var processes = descendants(of: pid)
         var ordered = false
         var withoutServer: String?
-        if let live = steps.liveSessions() {
+        switch steps.server() {
+        case .refused(let why):
+            return .failure(StartRefusal("the node's server answered and refused (\(why.text)): nothing was stopped", exitCode: why.exitCode))
+        case .none(let why):
+            withoutServer = why
+        case .answered(let live):
             let what = "stop ends the node's host (pid \(host.pid), build \(host.commit)), its server and its \(live) session\(live == 1 ? "" : "s") "
                 + "in order, through its server, and unloads \(place.label)"
+            // Taken again just before the server acts: what started while the snapshot above was taken.
+            processes = Self.union(processes, descendants(of: pid))
             switch steps.serverStop(what) {
             case .stopped: ordered = true
             case .refused(let why):
                 return .failure(StartRefusal("the node's server didn't take the stop: \(why.text); nothing was stopped", exitCode: why.exitCode))
             case .none(let why): withoutServer = why
             }
-        } else {
-            withoutServer = "no server answered"
         }
         if let why = withoutServer {
             let what = "the node's server didn't answer (\(why)): stop ends the node's host (pid \(host.pid), build \(host.commit)) by launchd's bootout, "
                 + "its sessions lose their terminal (a hangup) and end, and \(place.label) is unloaded"
             if case .failure(let refused) = steps.confirm(what) { return .failure(refused) }
+            // Taken again after the prompt: what started while it waited.
+            processes = Self.union(processes, descendants(of: pid))
         }
+        // The sessions' ids, read from the processes' environments where they can be: a survivor whose session leader
+        // and parent ended meanwhile still carries one.
+        let ids = Set(processes.compactMap { steps.sessionID($0.pid) })
         if let why = bootout() { return .failure(why) }
         let deadline = steps.now().addingTimeInterval(steps.patience)
         while true {
-            let left = processes.filter(steps.alive)
+            let left = Self.union(processes.filter(steps.alive), ids.isEmpty ? [] : steps.carrying(ids).filter(steps.alive))
             if left.isEmpty, !listening() {
                 removeStaleSocket()
-                return .success(say(ordered ? "the node stopped: its server ended its sessions in order, the host shut down, every process it started has ended, and \(place.label) is unloaded"
-                                            : "the node stopped: its host ended by launchd's bootout, every process it started has ended, and \(place.label) is unloaded"))
+                return .success(say(ordered ? "the node stopped: its server ended its sessions in order, the host shut down, every process of it stop could find has ended, and \(place.label) is unloaded"
+                                            : "the node stopped: its host ended by launchd's bootout, every process of it stop could find has ended, and \(place.label) is unloaded"))
             }
             guard steps.now() < deadline else {
                 let names = left.map { "pid \($0.pid)" }.joined(separator: ", ")
@@ -400,7 +424,8 @@ public struct MacAgent {
             return [job, atLogin]
         }
         guard let loaded = candidates.first(where: { NodeAgent.check(data, job: $0) == nil }) else {
-            return .failure(StartRefusal("the agent's plist isn't the one start writes for any build the node's record pins"))
+            return .failure(StartRefusal("the agent's plist isn't the one start writes for any build the node's record pins (if it is an earlier install's: "
+                                         + "`launchctl bootout \(place.target)`, remove \(ConfigSeal.inert(place.plistPath, limit: .max)) and run `vibeswitcher start` again)"))
         }
         if let why = launchdRefusal(printed, job: loaded) { return .failure(StartRefusal(why)) }
         switch steps.see(place.socket, pid, builds) {
@@ -496,6 +521,22 @@ public struct MacAgent {
         }
         for member in steps.inSessions(seen) where seen.insert(member.pid).inserted { found.append(member) }
         return found
+    }
+
+    /// `a` and the processes of `b` it doesn't hold (by pid and start).
+    static func union(_ a: [Platform.Processes.Link], _ b: [Platform.Processes.Link]) -> [Platform.Processes.Link] {
+        a + b.filter { link in !a.contains { $0.pid == link.pid && $0.startTicks == link.startTicks } }
+    }
+
+    /// The `VIBESWITCHER_SESSION` in `pid`'s environment (the kernel's, to its own user; not for Apple's platform
+    /// binaries), nil without one.
+    public static func sessionID(of pid: pid_t) -> String? {
+        (Platform.Processes.environment(pid) ?? []).first { $0.hasPrefix("VIBESWITCHER_SESSION=") }.map { String($0.dropFirst("VIBESWITCHER_SESSION=".count)) }
+    }
+
+    /// The user's processes carrying one of `ids` (`SessionStrays.carrying`), by pid and start.
+    public static func carrying(_ ids: Set<String>) -> [Platform.Processes.Link] {
+        ids.compactMap(UUID.init(uuidString:)).flatMap { SessionStrays.carrying(session: $0) }.compactMap { Platform.Processes.link($0.pid) }
     }
 
     /// Every process whose POSIX session is one of `leaders` (`getsid`), by pid and start.
@@ -612,8 +653,14 @@ public struct MacAgent {
             return refused("the agent's file \(ConfigSeal.inert(path, limit: .max)) isn't the one start writes for this build: \(why). If it is an earlier install's "
                            + "(its environment holds HOME and PATH) or another build's, remove it (`rm \(ConfigSeal.inert(path, limit: .max))`) and run `vibeswitcher start` again: start writes its own; it was left as it is", 77)
         }
-        guard lstat(folder, &folderStatus) == 0 else { Sys.close(fd); return refused("the agent's folder went") }
-        return .success(HeldPlist(fd: fd, file: file, folder: folderStatus, bytes: bytes))
+        // Its folder looked at again, after the write: the same folder as checked, still a real folder of the user's.
+        var after = stat()
+        guard lstat(folder, &after) == 0, after.st_dev == folderStatus.st_dev, after.st_ino == folderStatus.st_ino,
+              after.st_mode & S_IFMT == S_IFDIR, after.st_uid == place.uid, after.st_mode & 0o022 == 0 else {
+            Sys.close(fd)
+            return refused("the agent's folder \(ConfigSeal.inert(folder, limit: .max)) changed while start wrote the plist", 77)
+        }
+        return .success(HeldPlist(fd: fd, file: file, folder: after, bytes: bytes))
     }
 
     /// The file at `path` when it is a regular file (no link followed) of at most 64 KiB, read from the descriptor checked.
@@ -670,7 +717,7 @@ extension MacAgent.Steps {
     /// confirmation and the server's stop as the caller gives them.
     public static func system(place: NodeAgent.Place, pins: @escaping () -> Result<NodePins, NodePins.Refused>, say: @escaping (String) -> Void,
                               confirm: @escaping (_ what: String) -> Result<Void, StartRefusal>, serverStop: @escaping (_ what: String) -> MacAgent.ServerStop,
-                              job: @escaping (NodePins.Build) -> NodeAgent.Job?, liveSessions: @escaping () -> Int? = { nil }) -> MacAgent.Steps {
+                              job: @escaping (NodePins.Build) -> NodeAgent.Job?, server: @escaping () -> MacAgent.ServerSeen = { .none("no server is asked") }) -> MacAgent.Steps {
         MacAgent.Steps(
             launchctl: { arguments in
                 NodeStarter.run(place.launchctl, arguments, environment: ["PATH=/usr/bin:/bin"], timeout: 30).map { MacAgent.Ran(status: $0.status, output: $0.output) }
@@ -687,6 +734,6 @@ extension MacAgent.Steps {
                 guard flock(fd, LOCK_EX | LOCK_NB) == 0 else { return false }
                 flock(fd, LOCK_UN)
                 return true
-            }, job: job, liveSessions: liveSessions)
+            }, job: job, server: server)
     }
 }
