@@ -97,13 +97,56 @@ struct WebAuthnAssertionTests {
         }
     }
 
-    @Test func crossOriginTrueOrMissingIsRefused() {
+    /// `crossOrigin` true is refused; missing, it is taken (as §5.8.1.1 step 9 reads an absent one: false) only in the
+    /// exact closed form, `}` right after the origin and nothing more, which is what WebKit sends for a same-origin
+    /// ceremony. Any member at all after the origin with no `crossOrigin` first is refused.
+    @Test func crossOriginTrueIsRefusedAndMissingIsTakenOnlyClosed() {
         let o = valid.listener.origin
-        #expect(withClientData(#"{"type":"webauthn.get","challenge":"\#(challenge)","origin":"\#(o)","crossOrigin":true}"#).refusal == .clientDataCrossOrigin)
-        #expect(withClientData(#"{"type":"webauthn.get","challenge":"\#(challenge)","origin":"\#(o)","crossOrigin":true,"topOrigin":"http://localhost:3000"}"#).refusal == .clientDataCrossOrigin)
-        #expect(withClientData(#"{"type":"webauthn.get","challenge":"\#(challenge)","origin":"\#(o)"}"#).refusal == .clientDataNotExact)
-        #expect(withClientData(#"{"type":"webauthn.get","challenge":"\#(challenge)","origin":"\#(o)","crossOrigin":0}"#).refusal == .clientDataNotExact)
-        #expect(withClientData(#"{"type":"webauthn.get","challenge":"\#(challenge)","origin":"\#(o)","crossOrigin":"false"}"#).refusal == .clientDataNotExact)
+        let checked = #"{"type":"webauthn.get","challenge":"\#(challenge)","origin":"\#(o)""#
+        #expect(withClientData(checked + #","crossOrigin":true}"#).refusal == .clientDataCrossOrigin)
+        #expect(withClientData(checked + #","crossOrigin":true,"topOrigin":"http://localhost:3000"}"#).refusal == .clientDataCrossOrigin)
+        #expect(withClientData(checked + "}").refusal == nil)
+        #expect(withClientData(checked + #","crossOrigin":0}"#).refusal == .clientDataNotExact)
+        #expect(withClientData(checked + #","crossOrigin":"false"}"#).refusal == .clientDataNotExact)
+        // Missing, and not closed at once: refused, whatever follows.
+        for tail in ["", "}}", "} ", "}\n", " }", ",", ",}", #","topOrigin":"\#(o)"}"#, #","x":1}"#, #","x":1,"crossOrigin":false}"#,
+                     #","other_keys_can_be_added_here":"do not compare clientDataJSON against a template. See https://goo.gl/yabPex"}"#] {
+            #expect(withClientData(checked + tail).refusal == .clientDataNotExact, "\(tail.debugDescription)")
+        }
+        // The same closed form on the serve gate.
+        let phone = Made(listener: WebAuthnSupport.tailnet)
+        let gate = #"{"type":"webauthn.get","challenge":"\#(Base64URL.encode(phone.challenge))","origin":"\#(phone.listener.origin)""#
+        #expect(phone.with { $0.clientDataJSON = Data((gate + "}").utf8) }.refusal == nil)
+        #expect(phone.with { $0.clientDataJSON = Data((gate + #","x":1}"#).utf8) }.refusal == .clientDataNotExact)
+        #expect(phone.with { $0.clientDataJSON = Data((gate + #","crossOrigin":true}"#).utf8) }.refusal == .clientDataCrossOrigin)
+    }
+
+    /// From the independent review (I1). WebKit's `buildClientDataJson` (Source/WebCore/Modules/webauthn/
+    /// WebAuthenticationUtils.cpp, main): `if (scope != WebAuthn::Scope::SameOrigin) object->setBoolean("crossOrigin"_s, …)`,
+    /// members in insertion order, `/` not escaped (WTF's EscapedFormsForJSON). So Safari on the Mac and every iOS
+    /// browser send exactly this for a same-origin page. Signed by the device's own key: the genuine assertion of the
+    /// enrolled device's user.
+    @Test func findingSafariSameOriginAssertionPasses() {
+        let o = valid.listener.origin
+        let webkit = withClientData(#"{"type":"webauthn.get","challenge":"\#(challenge)","origin":"\#(o)"}"#)
+        #expect(webkit.refusal == nil, "WebKit's same-origin clientDataJSON is refused: every Safari / iPhone unlock")
+        let phone = Made(listener: WebAuthnSupport.tailnet)
+        let phoneWebKit = phone.with {
+            $0.clientDataJSON = Data(#"{"type":"webauthn.get","challenge":"\#(Base64URL.encode(phone.challenge))","origin":"\#(phone.listener.origin)"}"#.utf8)
+        }
+        #expect(phoneWebKit.refusal == nil, "the iPhone's unlock on the serve gate is refused")
+    }
+
+    /// From the independent review (I1): what the absent-`crossOrigin` alternative (`}` right after the origin, nothing
+    /// more) must keep refusing.
+    @Test func theAbsentCrossOriginAlternativeMustStillRefuseTheseShapes() {
+        let o = valid.listener.origin
+        for text in [#"{"type":"webauthn.get","challenge":"\#(challenge)","origin":"\#(o)","topOrigin":"http://evil"}"#,
+                     #"{"type":"webauthn.get","challenge":"\#(challenge)","origin":"\#(o)","crossOrigin":true}"#,
+                     #"{"type":"webauthn.get","challenge":"\#(challenge)","origin":"\#(o)","x":1,"crossOrigin":false}"#,
+                     #"{"type":"webauthn.get","challenge":"\#(challenge)","origin":"\#(o)"} "#] {
+            #expect(withClientData(text).refusal != nil, "\(text)")
+        }
     }
 
     @Test func aTailThatIsntOneObjectsEndIsRefused() {
@@ -333,6 +376,16 @@ struct WebAuthnAssertionTests {
         #expect(valid.with { $0.listener = WebAuthnListener(origin: "http://localhost", rpId: "localhost", place: .loopback)
             $0.deviceOrigin = "http://localhost"; $0.clientDataJSON = WebAuthnSupport.clientData(challenge: $0.challenge, origin: "http://localhost") }
             .refusal == nil)
+    }
+
+    /// From the independent review (N1): browsers omit a scheme's default port from the origin, so a listener naming
+    /// :443 on https or :80 on http could never match a real ceremony; it is refused as a listener.
+    @Test func findingNoteADefaultPortListenerIsRefusedAsSuch() {
+        for listener in [WebAuthnListener(origin: "https://node.tail1234.ts.net:443", rpId: "node.tail1234.ts.net", place: .tailnet),
+                         WebAuthnListener(origin: "http://localhost:80", rpId: "localhost", place: .loopback)] {
+            let made = Made(listener: listener)
+            #expect(made.refusal == .listener, "\(listener.origin) is taken as a listener, though no browser names it so")
+        }
     }
 
     @Test func aChallengeThatIsntThirtyTwoBytesIsRefused() {

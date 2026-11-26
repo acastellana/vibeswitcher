@@ -64,6 +64,14 @@ struct WebAuthnRegistrationTests {
 
     // MARK: The valid one, and its client data
 
+    /// From the independent review (I1): a Safari or iPhone enrolment, whose `clientDataJSON` WebKit closes right
+    /// after the origin on a same-origin page (no `crossOrigin`).
+    @Test func findingSafariSameOriginRegistrationPasses() {
+        let made = Self()
+        let webkit = Data(#"{"type":"webauthn.create","challenge":"\#(Base64URL.encode(Self.challenge))","origin":"\#(Self.listener.origin)"}"#.utf8)
+        #expect(Self.refusal(Self.object(made.authData()), clientData: webkit) == nil, "a Safari / iPhone enrolment is refused")
+    }
+
     @Test func aValidRegistrationPasses() throws {
         let aaguid = Array(repeating: UInt8(0xAA), count: 16)
         let made = Self.object(Self.authData(flags: 0x5D, signCount: 7, aaguid: aaguid, key: cose))
