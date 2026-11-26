@@ -226,7 +226,7 @@ other Windows users' processes as the unlock does.
 
 1. `unlock.begin` `{device?}` → `{challenge}`: 32 random bytes, 120 s, once, for this connection. Passkeys are made
    **discoverable** (`residentKey: 'required'`, amending `passkey.js`'s `'discouraged'`), so a page that lost its
-   storage (Safari clears a site's script storage after 7 days without a visit; to be measured, slice 2) still
+   storage (Safari clears a site's script storage after 7 days without a visit; to be measured on a real phone, owed by slice 2) still
    unlocks as its device: with no `device`, `allowCredentials` is empty, the person picks the passkey, and the server
    finds the device by the assertion's credential id. Losing its storage costs the page its unlock key, its read key
    and its stored list, never its place in the list.
@@ -239,13 +239,79 @@ other Windows users' processes as the unlock does.
    the host checks it too), checks, failing closed on anything else: the challenge is live, this connection's and
    unused; the device is listed, not tombstoned, and **enrolled on this listener's origin and place** (N5: a loopback
    device never unlocks on the serve gate nor a phone on loopback, and a software credential that can assert for any
-   rpId gains nothing); `clientDataJSON` parses as exactly one JSON object whose `type` is `webauthn.get`, `challenge`
-   the recomputed bytes, `origin` exactly this listener's origin, and `crossOrigin` absent or false; `rpIdHash` is
+   rpId gains nothing); `clientDataJSON` passes WebAuthn's limited verification with `type` `webauthn.get`, `challenge`
+   the recomputed bytes, `origin` exactly this listener's origin, and `crossOrigin` present and false; `rpIdHash` is
    SHA-256 of this listener's rpId; the flags have UP and UV; the signature checks under the device's stored key over
-   `authenticatorData || SHA-256(clientDataJSON)`; a non-zero sign count must exceed the stored one. The vault records
+   `authenticatorData || SHA-256(clientDataJSON)`; when the stored or the new sign count is non-zero, the new one must
+   exceed the stored one. The exact bytes of each check are in [The checks' bytes](#the-checks-bytes). The vault records
    `{device, keyId: SHA-256(spki), spki, origin, since, until: since + 12 h}`, at most 3 live per device (a phone's
    home-screen app and its browser tab keep separate storage), the oldest dropped.
 4. The connection is then the device's, as in the handshake's step 2.
+
+### The checks' bytes
+
+Slices 2 and 3 (`Sources/VibeCore/V2/WebAuthn.swift`: `WebAuthnAssertion.check`, `WebAuthnRegistration.check`) fix
+what the steps above leave open, each the strictest choice that a real browser engine's ceremonies pass. They were
+measured with headless Chrome 158's virtual authenticator (`scripts/e2e/webauthn-vectors.cjs`, the vectors in
+`Tests/VibeCoreTests/WebAuthnVectors.swift`); Safari and iOS are owed a look on real devices (below). Each check fails
+closed on anything it doesn't name, in this order:
+
+1. **The listener** (what the server expects, checked before any byte is read): a loopback listener's origin is exactly
+   `http://localhost` with an optional port, its rpId `localhost`; a tailnet listener's is `https://<rpId>` with an
+   optional port; the rpId lower-case letters, digits and `-` in dot-separated labels of 1 to 63 (253 at most), its last
+   label not all digits (an IP address is no rpId), the port 1 to 65535 without a leading zero. The challenge is 32
+   bytes.
+2. **The device's binding (N5), assertions only:** the record's `origin`, `rpId` and `place` equal the listener's, and
+   the assertion's credential id is the record's, 16 to 1023 bytes (WebAuthn Level 3, §4 "Credential ID" and §6.5.1).
+3. **`clientDataJSON`: WebAuthn Level 3's limited verification algorithm** (W3C Recommendation of 25 August 2026,
+   §5.8.1.2, `#clientdatajson-verification`, over §5.8.1.1's serialization). The JSON is never parsed: its bytes must
+   begin exactly with `{"type":T,"challenge":C,"origin":O,"crossOrigin":false`, T, C (the issued challenge in unpadded
+   base64url) and O (the listener's origin) built by the node with §5.8.1.1's CCDToString (`"` and `\` escaped by a
+   backslash, U+0000 to U+001F as `\u` and four lower-case hex digits, everything else as UTF-8), with no `topOrigin`:
+   a ceremony from a frame (`crossOrigin` true) is refused. What follows the prefix must be either `}` and nothing
+   more, or `,"` (the next member's name: §5.8.1.1 step 14 writes any further members there) then anything that is
+   valid UTF-8 and ends with `}`. The whole is at most 1024 bytes (the four members with a 253-byte name come to
+   about 400; Chrome's extra member to 120 more). **Why a prefix and not a template:** Chrome adds a member after the
+   four to about one ceremony in six (measured: 16 of 107 assertions and 26 of 106 registrations,
+   `"other_keys_can_be_added_here":"do not compare clientDataJSON against a template. See https://goo.gl/yabPex"`), its
+   way of saying not to template, and other engines may add their own (`topOrigin`, for one); a fixed form would lock
+   real users out at a later release. Since only the prefix is compared and nothing is parsed, a later member,
+   repeated or not, overrides nothing checked. Refused: anything that touches the prefix (a member before or between
+   the four, reordered members, whitespace anywhere in it, another escape of the origin, another base64 form of the
+   challenge), a missing `crossOrigin` (no measured ceremony omits it; Safari's is owed), `crossOrigin` true, and a
+   tail that isn't one of the two shapes. **A place for the reviewer to attack.**
+4. **`authenticatorData`.** An assertion's is exactly 37 bytes (rpIdHash, flags, sign count: no attested data, no
+   extensions). A registration's is rpIdHash, flags, sign count, AAGUID, the credential id's length and the id (16
+   to 1023 bytes), then the COSE key, and nothing after it. `rpIdHash` is SHA-256 of the listener's rpId. The flags:
+   UP and UV set; AT clear on an assertion and set on a registration; ED and the reserved bits 0x02 and 0x20 clear
+   (no extensions are asked for); BS only with BE (§6.1.3: "This combination is not allowed"); on an assertion, BE
+   equal to the record's (§6.1.3: BE "MUST NOT change"). The AAGUID is returned as claimed, never checked: with
+   attestation `none` it proves nothing.
+5. **The assertion's signature:** ASN.1 DER parsed by the node itself, strictly (a SEQUENCE with a short-form length
+   covering the rest exactly, two INTEGERs of 1 to 33 bytes, positive, minimal, not zero, at most 32 bytes of value),
+   so neither CryptoKit's nor swift-crypto's DER reading decides what is taken; then P-256 ECDSA over
+   `authenticatorData || SHA-256(clientDataJSON)`. Both forms of a signature (s and n − s) verify: nothing relies on
+   one.
+6. **The sign count**, checked after the signature (so a refusal here means a genuine key whose counter didn't
+   advance): when the stored or the new count is non-zero, the new one must exceed the stored one. Both zero passes
+   (authenticators without a counter, Apple's passkeys among them); a counter that goes back to zero after a non-zero
+   one is refused.
+7. **The registration's attestation object**, at most 2048 bytes, is exactly the CBOR map `{"fmt": "none",
+   "attStmt": {}, "authData": <bytes>}`: three members in that (CTAP2 canonical) order, `fmt` the text `none` and
+   `attStmt` the empty map (else refused as another attestation), nothing after it. The reader (`WebAuthnCBOR`) takes
+   only unsigned and negative integers, byte and text strings and maps, each head in its shortest form with a definite
+   length; indefinite lengths, the reserved heads, tags, floats, simple values and arrays are refused. It never
+   recurses: the check reads the one fixed shape item by item, so nothing is nested deeper than two maps, and a key
+   repeated, missing, extra or out of order is refused as the wrong item.
+8. **The registration's key:** exactly the COSE EC2 key `{1: 2, 3: -7, -1: 1, -2: x, -3: y}` (kty EC2, alg ES256, crv
+   P-256), x and y byte strings of 32, in that order and nothing else (77 bytes), and its point on the curve. RSA,
+   EdDSA, other curves, other algorithms and any other member are refused; Chrome's RS256 and EdDSA registrations
+   are among the vectors.
+
+**Not shown here, owed to the user's devices:** Safari's and iOS's bytes (whether WebKit sends `crossOrigin`, its
+flags and sign count, its AAGUID), Safari's passkeys on `http://localhost` (slice 13), and the 7-day storage rule on
+a phone ("Safari clears a site's script storage after 7 days without a visit"), which slice 2 can't measure on this
+Mac: the slice's report holds the steps for that look.
 
 ### What is signed, so a message can't be replayed, reordered, or moved
 
@@ -444,7 +510,8 @@ nothing secret in a URL).
    `SHA-256("vibeswitcher-enrol-v1\n" + origin + "\n" + conn + "\n" + window + "\n" + SPKI(unlock key) + "\n" +
    SPKI(read key))`, and sends `device.enroll` `{window, spki, readSpki, attestationObject, clientDataJSON, name}`.
 2. The server checks the registration as the unlock's assertion (type `webauthn.create`, origin, rpIdHash, UP and UV,
-   the COSE key P-256 and nothing else, attestation format `none`), then **picks a fresh nonce for that enrolment and
+   the COSE key P-256 and nothing else, attestation format `none`; the bytes in [The checks' bytes](#the-checks-bytes)),
+   then **picks a fresh nonce for that enrolment and
    only then derives its words**: three words of `PagePairing.words` from `SHA-256(nonce || credential key || spki)`.
    A worker can't grind keys for chosen words: each try is a knock, and the words are fixed by a nonce that comes
    after the key (24 bits, at most 4 knocks a window). The page shows its words.
@@ -518,7 +585,7 @@ desktop's read key releases only the reads and watching.
 **What ends it early:** the device removed (anyone's), Lock now on the device (`device.lock`), Remove all or
 `vibeswitcher web --revoke`; the page losing its key (on a desktop, its last tab closed or reloaded, since the desktop's
 unlock key is in memory only: the lead's call; the read key keeps the page showing; on a phone, the browser clearing
-its storage, which Safari does after 7 days without a visit: to be measured, slice 2); a host end on Linux (unlocks are
+its storage, which Safari does after 7 days without a visit: to be measured on a real phone, owed by slice 2); a host end on Linux (unlocks are
 never written down); a bad signature or a sequence gap (the connection closes; the unlock stands, since only the key's
 holder can sign).
 
