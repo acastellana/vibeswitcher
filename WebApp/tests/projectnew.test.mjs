@@ -164,16 +164,38 @@ test('C1: a name the node would refuse is said under it before anything is sent,
 test('C1: a page that doesn’t act, or a node without project.new, keeps the line and says why; nothing is sent', () => {
   for (const code of ['en', 'es']) {
     setLanguage(code);
-    for (const [r, why] of [[rig({ rights: ['read', 'draft'] }), 'drStartPageReads'], [rig({ kinds: ['lead'] }), 'drProjectTerminalOnly']]) {
+    // A page that doesn't act is never sent project.new (`WebAccess.kinds`): it says the page doesn't act, not that no page can.
+    for (const [r, why] of [[rig({ rights: ['read', 'draft'], kinds: ['lead'] }), 'drProjectPageReads'], [rig({ kinds: ['lead'] }), 'drProjectTerminalOnly']]) {
       const form = newProjectForm(r.app);
       typeIn(form.el, t('drProjectName'), 'Shop');
       assert.equal(primary(form.el), null, 'no button');
       assert.ok(find(form.el, byClass('copy-line')));
       assert.match(form.el.shownText, new RegExp(t(why).slice(0, 30)));
       assert.equal(r.sent.length, 0);
+      if (why === 'drProjectPageReads') assert.doesNotMatch(form.el.shownText, new RegExp(t('drProjectTerminalOnly').slice(0, 30)));
     }
   }
   setLanguage('en');
+});
+
+test('C1: a name changed while the node works is drawn once it answers: the button then names and sends the new name', async () => {
+  for (const refused of [true, false]) {
+    setLanguage('en');
+    const r = rig();
+    const form = newProjectForm(r.app);
+    typeIn(form.el, t('drProjectName'), 'Shop');
+    primary(form.el).click();
+    typeIn(form.el, t('drProjectName'), 'Shop Two');
+    r.answer(refused ? { ok: true, result: { made: false, name: null, folder: null, commit: null, lead: null, session: null, refused: 'exists', said: 'x', notes: [] } }
+      : { ok: true, result: MADE });
+    await flush();
+    const make = primary(form.el);
+    assert.equal(make.textContent, t('drMakeProjectNamed', { name: 'Shop Two' }), `refused ${refused}`);
+    assert.equal(make.disabled, false);
+    if (!refused) assert.match(form.el.shownText, /“Shop” is made in/, 'what was made for the name sent is still said');
+    make.click();
+    assert.deepEqual(r.sent.at(-1).args, { name: 'Shop Two' });
+  }
 });
 
 // ---- The mock ----

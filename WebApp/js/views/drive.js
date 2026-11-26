@@ -732,6 +732,9 @@ export function newProjectForm(app) {
   // While the request is out the button isn't drawn again under it (an edit then waits for the answer).
   let out = false;
   let stop = () => {};
+  // What the button is drawn for: whether it acts, the name and its problem (and the line's words where it doesn't act).
+  const shownKey = () => JSON.stringify(actsFor(app, 'project.new') ? [true, name.value.trim(), projectNameProblem(name.value)]
+    : [false, name.value, location.value, goal.value, app.store.acts()]);
   function draw() {
     const folder = projectFolderName(name.value);
     const problem = projectNameProblem(name.value);
@@ -739,12 +742,14 @@ export function newProjectForm(app) {
     setText(folderNote, !folder ? '' : t(problem || 'drItsFolder', { folder }));
     setClass(folderNote, 'refused', !!problem);
     const acts = actsFor(app, 'project.new');
-    const key = JSON.stringify(acts ? [true, name.value.trim(), problem] : [false, name.value, location.value, goal.value, app.store.can('project.new')]);
+    const key = shownKey();
     if (out || key === drawn) return;
     drawn = key;
     stop();
     if (!acts) {
-      lineSlot.replaceChildren(h('p', { class: 'confirm-note start-why' }, t(app.store.can('project.new') ? 'drStartPageReads' : 'drProjectTerminalOnly')),
+      // A page that doesn't act is never sent the kind (`WebAccess.kinds`): it says this page doesn't act; a page that
+      // acts on a node without the kind, that no page makes a project there yet.
+      lineSlot.replaceChildren(h('p', { class: 'confirm-note start-why' }, t(app.store.acts() ? 'drProjectTerminalOnly' : 'drProjectPageReads')),
         folder ? copyLine(newProjectLine(name.value, location.value, goal.value), t('drTheCommandThatMakesThe')) : h('p', { class: 'confirm-note' }, t('drGiveItANameThe')));
       return;
     }
@@ -760,9 +765,17 @@ export function newProjectForm(app) {
       settled: (reply) => {
         out = false;
         progress.hidden = true;
+        const result = reply.ok ? reply.result || {} : {};
+        const words = () => projectWords(result, { name: title, folder, where: where() ? tilde(folderOf(app, where()), app.store.state.node?.home) : t('drTheProjectsFolder') });
+        // The name was changed while the node worked: the form as it is now (a new name is a new project), still saying
+        // what was made for the name sent.
+        if (shownKey() !== drawn) {
+          draw();
+          if (result.made) lineSlot.append(h('p', { class: 'confirm-note', role: 'status' }, words()));
+          return;
+        }
         if (!reply.ok) return;
-        const result = reply.result || {};
-        made.say(projectWords(result, { name: title, folder, where: where() ? tilde(folderOf(app, where()), app.store.state.node?.home) : t('drTheProjectsFolder') }));
+        made.say(words());
         if (!result.made) return;
         // Made: no second one from this button (a new name draws a new one); its project opens once the node lists its
         // lead, while you are still here.

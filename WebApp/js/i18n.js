@@ -961,6 +961,7 @@ const EN = {
   drStartTerminalOnly: "This node starts a session only from a terminal: run the line there.",
   drLeadTerminalOnly: "This node starts a project’s lead only from a terminal: run the line there.",
   drProjectTerminalOnly: "A page can’t make a new project’s folder yet: copy this line into a terminal on this node. It makes the folder and starts its lead.",
+  drProjectPageReads: "This page doesn’t act for you here, so it can’t make the project: run the line in a terminal on this node.",
   drMakeProject: "Make the project",
   drMakeProjectNamed: "Make “{name}”",
   drNewMakingShort: "Making…",

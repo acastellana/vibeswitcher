@@ -949,6 +949,7 @@ export const ES = {
   drStartTerminalOnly: "Este nodo solo arranca una sesión desde una terminal: ejecuta allí la línea.",
   drLeadTerminalOnly: "Este nodo solo arranca el líder de un proyecto desde una terminal: ejecuta allí la línea.",
   drProjectTerminalOnly: "Una página aún no puede crear la carpeta de un proyecto nuevo: copia esta línea en una terminal de este nodo. Crea la carpeta y arranca su líder.",
+  drProjectPageReads: "Esta página no actúa por ti aquí, así que no puede crear el proyecto: ejecuta la línea en una terminal de este nodo.",
   drMakeProject: "Crear el proyecto",
   drMakeProjectNamed: "Crear «{name}»",
   drNewMakingShort: "Creando…",
