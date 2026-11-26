@@ -9,6 +9,8 @@ public final class HostedSession {
     public enum Failure: Error, Equatable {
         case noSuchFolder(String)
         case spawnFailed
+        /// Its terminal couldn't be made: the call's errno (out of terminals, or of descriptors).
+        case noTerminal(Int32)
         /// The launcher couldn't be started: what posix_spawn's errno says of it (see `LaunchPreflight.couldntStart`).
         case couldntStart(String)
     }
@@ -182,6 +184,7 @@ public final class HostedSession {
         guard let child = PTYSpawn.spawn(launcher: launcher, executable: args[0], args: args, env: env, directory: request.cwd, size: &size,
                                          failure: &code, launcherFlags: SessionIdentityChecks.launcherFlags(testDelay: launcherTestDelay, umask: sessionUmask),
                                          sandbox: sandbox) else {
+            if code < 0 { throw Failure.noTerminal(-code) }
             throw code == 0 ? Failure.spawnFailed : Failure.couldntStart(LaunchPreflight.couldntStart(launcher, in: request.cwd, code: code))
         }
         // ptsname_r: ptsname's buffer is shared between threads, and sessions start from several at once.

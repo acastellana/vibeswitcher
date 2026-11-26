@@ -236,7 +236,9 @@ struct MacAgentSwitchTests {
         }
         #expect(none.text.contains("isn't running") && none.text.contains("`vibeswitcher start` starts it"), "\(none.text)")
         let check = ServerLintTests.code(try String(contentsOf: ServerLintTests.repo.appendingPathComponent("Sources/vibeswitcher-cli/ServerCheck.swift"), encoding: .utf8))
-        #expect(check.contains("case .failure(let why): return why.text") && check.contains("agent.serverCheckHost()"), "ServerCheck doesn't say the host's line")
+        // Said as a refusal, its text the host's line (web-detail's `Refusal`, `unsettled` false: not a server on its way out).
+        #expect(check.contains("case .failure(let why): return Refusal(text: why.text, unsettled: false)") && check.contains("agent.serverCheckHost()"),
+                "ServerCheck doesn't say the host's line")
     }
 
     /// The review's N2 (a): a host that never switched, running launchd's own job B, whose plist another process
