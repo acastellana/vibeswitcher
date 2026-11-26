@@ -35,7 +35,7 @@ bash scripts/test.sh --web WebApp/tests
 | `/#/p/<project>/lead?show=asks\|all&tab=stats\|files&task=<slug>&sheet=<line>` | A project: you and its lead in the centre (the dial's level, the right column's tab, a task open in place, a line's side sheet). `/#/p/<project>` (the board page's address before) opens it too. |
 | `/#/p/<project>/roadmap?open=<goal>,unsorted,done` | Its roadmap: a row per goal opening in place to its tasks, Unsorted, the done goals folded (each named in `open` is open); with no goals, in motion, blocked and the queue as one band (`open=queue`). |
 | `/#/sessions`, `/#/sessions/new`, `/#/s/<session>` | Your own sessions (outside every project's team) as a list beside the start form, or beside a session's chat, terminal and inspector (a team's session shows alone). |
-| `/#/new`, `/#/node`, `/#/node/<group>` | New project; This node, a group of it chosen (`#/node` opens what needs you, else the first). |
+| `/#/new`, `/#/node`, `/#/node/<group>` | New project; This node, a group of it chosen (`#/node` opens what needs you, else the first); `#/node/logs` its Logs, the node's or the session log, masked by the node. |
 | `/?lang=es` | The page's words in Spanish whatever the browser says (it follows the browser's language otherwise). |
 | `/#/settings`, `/#/settings/node/<section>`, `/#/settings/<project id>[/<section>]`, `/#/settings/terminal` | Settings: the node's and every project's sections beside the chosen one, each change drafted as the `vibeswitcher set` line to run in a terminal (`js/views/settings.js`). |
 | `/?theme=dark`, `/?theme=light` | The other look, whatever the system says. |

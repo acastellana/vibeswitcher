@@ -990,6 +990,9 @@ textarea.answer-input { max-height: 200px; line-height: var(--lh-body); resize: 
 .notices li { display: flex; align-items: flex-start; gap: var(--s-4); padding: var(--s-4) var(--s-5); border-radius: var(--r-2); background: var(--fill); }
 .notices .icon { margin-top: var(--s-1); color: var(--ink-2); }
 .node-says { margin-bottom: var(--s-3); }
+.logs-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--s-3); margin-bottom: var(--s-4); }
+.logs-actions { display: flex; align-items: center; gap: var(--s-3); }
+.log-lines { max-height: 60vh; overflow: auto; padding: var(--s-4) var(--s-5); border-radius: var(--r-2); background: var(--fill); font-family: var(--mono); font-size: var(--t-code); line-height: var(--lh-code); white-space: pre-wrap; overflow-wrap: anywhere; } /* the log as text, newest last, its own scroll */
 .lines { display: grid; gap: var(--s-2); color: var(--ink-2); font-size: var(--t-caption); overflow-wrap: anywhere; }
 /* A build: what the node says of it, the hash after it, quiet (D18). Technical details: pids, the node's name, its
    state folder, folded. A path: shortened, whole on hover. */

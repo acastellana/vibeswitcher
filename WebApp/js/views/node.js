@@ -4,7 +4,7 @@
 import * as kit from '../kit.js';
 import { h, framed } from '../dom.js';
 import { icon } from '../marks.js';
-import { since, plural, tilde, dateTime, elided } from '../words.js';
+import { since, plural, tilde, dateTime, elided, clock } from '../words.js';
 import { usageFacts } from '../settings.js';
 import { dictationGroup } from '../dictate.js';
 import { healthFacts } from '../health.js';
@@ -16,6 +16,7 @@ import { twoColumns, queryWords, holdsAll, marked } from './twocol.js';
 import { settingsHref } from './settings.js';
 import { waitingPlaces } from '../conversation.js';
 import { reopenCard, promptAuditCards } from './offers.js';
+import { copyButton } from '../copying.js';
 
 // A group's address: `#/node/<group>`; `#/node` opens the one that needs you, else the first.
 export const nodeHref = (key) => '#/node' + (key ? '/' + key : '');
@@ -233,6 +234,57 @@ function passkeysPart(acts) {
     keys.map((key, index) => h('p', { class: 'passkey-row' }, h('span', { title: key.id }, t('pkKeyN', { n: index + 1 })), ' · ', t('pkKeyWhen', { added: when(key.added), used: when(key.lastUsed) }))));
 }
 
+// Logs (the no-terminal inventory's C8): what `vibeswitcher logs` shows, the node's (the server's and the session
+// host's) or the session log, masked by the node as the command line masks them (`logs`, a read of the user's). Read
+// when the group is first shown and at Refresh, never on its own; drawn as text, newest last; Copy takes the lines shown.
+// Each read says what happened: when, how many lines, how many older ones were left out, or why there are none.
+// The node's reasons a log has no lines, in the page's words (no tool's name); another reason as the node gave it.
+const WHY = { 'not there yet': 'lgNotYet', 'scratch node: no journal, no manager': 'lgNoJournal', "journalctl --user didn't answer": 'lgJournalSilent' };
+const whyWords = (why) => (WHY[why] ? t(WHY[why]) : why);
+
+export function logsGroup(app) {
+  let which = 'node';
+  let shown = null;
+  let asked = 0;
+  const status = h('p', { class: 'node-says logs-status', role: 'status' });
+  const lines = h('pre', { class: 'log-lines', tabindex: 0, 'aria-label': t('lgTheLines'), hidden: true });
+  const refresh = kit.button('plain', { size: 's', class: 'logs-refresh', onclick: () => load() }, t('lgRefresh'));
+  const copy = copyButton(() => (shown?.lines || []).join('\n'), t('lgCopyTitle'), t('cCopy'), () => lines);
+  const seg = (key, label) => kit.segment({ 'aria-pressed': String(which === key), onclick: () => { if (which !== key) { which = key; mark(); load(); } } }, label);
+  const choices = [seg('node', t('lgNode')), seg('sessions', t('lgSessions'))];
+  const mark = () => choices.forEach((one, index) => one.setAttribute('aria-pressed', String((index === 0 ? 'node' : 'sessions') === which)));
+  const el = h('section', { class: 'node-group logs-group' }, kit.sectionTitle('h2', {}, t('lgTitle')),
+    h('div', { class: 'logs-bar' }, kit.segmented({ 'aria-label': t('lgWhich') }, ...choices), h('span', { class: 'logs-actions' }, refresh, copy)),
+    status, lines);
+  function draw() {
+    copy.hidden = !shown?.lines?.length;
+    lines.hidden = !shown?.lines?.length;
+    lines.textContent = (shown?.lines || []).join('\n');
+  }
+  function load() {
+    const mine = ++asked;
+    refresh.setAttribute('aria-busy', 'true');
+    status.textContent = t('lgReading');
+    app.store.read('logs', which === 'sessions' ? { sessions: true } : {}).then((reply) => {
+      if (mine !== asked) return;
+      refresh.removeAttribute('aria-busy');
+      const at = clock(new Date().toISOString());
+      if (!reply?.ok) {
+        shown = null;
+        status.textContent = t('lgRefused', { why: reply?.error?.message || t('lgNoAnswer') });
+      } else {
+        shown = reply.result || {};
+        const count = shown.lines?.length || 0;
+        status.textContent = shown.why ? t('lgNone', { why: whyWords(shown.why), at })
+          : count ? (count === 1 ? t('lgReadOne', { at }) : t('lgRead', { n: count, at })) + (shown.cut ? ' ' + t('lgCut', { n: shown.cut }) : '') : t('lgEmpty', { at });
+      }
+      draw();
+    });
+  }
+  draw();
+  return { el, refresh(open) { if (open && !asked) load(); } };
+}
+
 export function nodeView(app) {
   const { store } = app;
   // The places This node points to, at the list's foot: each its own screen.
@@ -247,6 +299,7 @@ export function nodeView(app) {
   const again = () => { drawn = ''; render(); };
   const reopen = reopenCard(app, { changed: again });
   const audits = promptAuditCards(app, { changed: again });
+  const logs = logsGroup(app);
   const reopenGroup = h('section', { class: 'node-group' }, kit.sectionTitle('h2', {}, t('roGroup')), reopen.el);
   const auditsGroup = h('section', { class: 'node-group' }, kit.sectionTitle('h2', {}, t('paGroup')), audits.el);
   // With the `act` right: what one plain accept settles (`approve.list`: the held config, the vouched base moves, the
@@ -374,6 +427,8 @@ export function nodeView(app) {
       // With the `act` right: stop the node (every session ends), asked twice.
       actsFor(app, 'stop') ? { key: 'stop', title: t('acStopTitle'), meta: '', el: group(t('acStopTitle'), h('p', { class: 'node-says' }, t('acStopWords')),
         doButton(app, { label: t('acStopNode'), kind: 'stop', danger: true, confirm: t('acStopSure'), args: () => ({}) }).el) } : null,
+      // The node's logs, masked as the command line's (a page that reads).
+      store.can('logs') ? { key: 'logs', title: t('lgTitle'), meta: '', el: logs.el } : null,
       // This page's own: the browser's notifications (js/notify.js) and dictation into a draft (js/dictate.js).
       app.notifications?.el ? { key: 'notifications', title: t('noNotifications'), group: t('noThisBrowser'), meta: app.notifications.enabled?.() ? t('noOn') : t('noOff'), el: app.notifications.el } : null,
       dictation ? { key: 'dictation', title: t('noDictation'), group: t('noThisBrowser'), meta: '', el: dictation } : null,
@@ -436,6 +491,8 @@ export function nodeView(app) {
       // A row found under Technical details: open, so what was found shows.
       for (const fold of foldsOf(chosen.el)) if (rowsOf(fold).some((row) => !row.hidden)) fold.open = true;
     }
+    // Logs are read when their group is first shown, then at Refresh.
+    if (chosen.key === 'logs') logs.refresh(true);
     if (columns.detailBody.firstChild !== chosen.el || columns.detailBody.childNodes.length !== 1) columns.show({ title: chosen.title, sub: chosen.group, top, body: [chosen.el] });
     else columns.show({ title: chosen.title, sub: chosen.group, top });
   }

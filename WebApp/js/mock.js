@@ -954,6 +954,20 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
       emit(put('cards', cards, card.id));
       return { ok: true, result: { card: card.id, held: true } };
     }
+    // The node's logs (`logs`, as `NodeLogs.read`): the server's and the host's, or the session log, each line masked by
+    // the node (a secret shows as •••), at most `lines` of them, newest last.
+    if (message.kind === 'logs') {
+      const count = args.lines ?? 200;
+      if (!Number.isInteger(count) || count < 1 || count > 500) return badArgs('logs’ lines is from 1 to 500');
+      const stamp = (minutes) => new Date(Date.now() - minutes * 60000).toISOString().replace(/\.\d+Z$/, 'Z');
+      const lines = args.sessions
+        ? [`${stamp(52)} session e91d05a3 started for the user in ~/projects/example-api (pts/7)`, `${stamp(40)} session 3f6b8c21 started for the user in ~/projects/example-payouts (pts/8)`,
+          `${stamp(31)} session a47e9d05 ended: exit 0 after 26m`, `${stamp(12)} session 0d5c3e88 env DATABASE_URL=••• kept from its preset`, `${stamp(2)} session 3f6b8c21 resized to 160×48`]
+        : [`${stamp(95)} vibeswitcher-node: listening on 127.0.0.1:8790 (the page) and the node's socket`, `${stamp(94)} host: welcomed the server (build 4ee11d5b)`,
+          `${stamp(60)} lead example-site: started, its base landing-base`, `${stamp(33)} hook: Authorization: Bearer ••• in a tool's output, masked`,
+          `${stamp(20)} cards: a question from the site's lead (blocking)`, `${stamp(4)} web: a page paired on this machine, acting`];
+      return { ok: true, result: { log: args.sessions ? 'sessions' : 'node', lines: lines.slice(-count), cut: 0, why: null } };
+    }
     // The cards (`questions`): with `card` alone one card whole; with `part` that part of its bytes, as
     // `Requests.cardPart` gives it (an `?older` node takes no part: it gives the card whole, as before parts).
     if (message.kind === 'questions') {
@@ -1455,7 +1469,7 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
   const KINDS = ['chat.page',
     'answer', 'answer.replace', 'tell', 'tell.retract', 'hold', 'send', 'session.draft', 'session.draft.clear', 'session.complete',
     'session.attach', 'session.usage', 'stats', 'session.ports', 'board.task', 'board.image', 'chat.image', 'session.presets', 'brief', 'recent',
-    'mail', 'settings', 'seen', 'push', 'push.decline', 'set', 'stop', 'questions', ...STARTS, ...BUTTONS].filter((kind) => !options.older || (!STARTS.includes(kind) && !BUTTONS.includes(kind)));
+    'mail', 'settings', 'seen', 'push', 'push.decline', 'set', 'stop', 'questions', 'logs', ...STARTS, ...BUTTONS].filter((kind) => !options.older || (!STARTS.includes(kind) && !BUTTONS.includes(kind)));
   // The node's own words for refusing each (`?refuse=KIND,…`).
   const REFUSE = new Set(options.refuse || []);
   const REFUSALS = {
