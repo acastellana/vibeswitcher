@@ -57,16 +57,16 @@ wording, and nothing here infers it.
 | Item 6: the five reads with no gate | item 6 | a decision of the user's (below) |
 | Item 7: a link of another user's process, a zombie, a process that execs | item 7 | **taken** (M8, M7) |
 | Item 7: the Mac node host's vault on disk (its Keychain key), across a handover | item 7 | not measurable before item 13: no Mac node host exists |
-| Item 7: the server check against a real job | item 7 | not before step 5 wires `start`; the job's shape in AG-1 |
+| Item 7: the server check against a real job | item 7 | not before step 5 wires `start`; the job's shape in AG-1. **Since:** step 5 is wired and reviewed (row 9), `start` still refused by `NodeSystem.macUnbuilt`, so still not before the switch-on (corrected at the join of `v2-mac-seal-list` and `v2-mac-runbook`, 2026-11-26) |
 | Item 7: gh's token in the login Keychain, GitHub through curl | item 7 | not taken: the user's Keychain item (an install run reads it) |
 | Item 7: an App Store Xcode passing the toolchain check | item 7 | **taken** in part (M12): root-owned throughout |
 | Item 7: launchd taking the written agent; entitlements for the host | item 7 | **taken** for the shape (K-AG-1, twice); the node's own agent waits for step 5 |
 | Item 7: the run paths (macOS 26 or later) | item 7 | **taken** (M12): macOS 27.2 |
-| Item 9: the server gets the web socket; a second process can't bind the port | item 9 | not built (below); nothing to measure |
-| Item 10: an anchor a session can't write | item 10 | a decision of the user's (below) |
+| Item 9: the server gets the web socket; a second process can't bind the port | item 9 | not built (below); nothing to measure. **Since: built and reviewed**, the host holds the web port (row 8; corrected at the join of `v2-mac-seal-list` and `v2-mac-runbook`, 2026-11-26) |
+| Item 10: an anchor a session can't write | item 10 | a decision of the user's (below). **Since:** the user chose the root-owned record (2026-11-25, BCECD1F3), **built and reviewed** (row 4); the `sudo` trial owed (corrected at the join of `v2-mac-seal-list` and `v2-mac-runbook`, 2026-11-26) |
 | Item 11: a chain from Terminal and one from ssh read whole | item 11 | **taken** for root's records (M8) and for an escaped Terminal window's chain (K-ESC-1/2: `login` refused, every link read by the fallback); ANC-1, ANC-2 **not run** |
 | Item 12: `launchctl print`'s lines | item 12 | **taken** (M11): the format `NodeAgent.printed` parses |
-| Item 13: the checked node start | item 13 | the check not built (it waits on item 10); what it gates built and off |
+| Item 13: the checked node start | item 13 | the check not built (it waits on item 10); what it gates built and off. **Since: built and reviewed, off** behind `HostImages.isCheckedMacNode` (row 5; corrected at the join of `v2-mac-seal-list` and `v2-mac-runbook`, 2026-11-26) |
 | The unified log: writing under another image's name; `log show` without admin | step 6 | **taken** (M10) |
 | The design's own tests with SIP on | the tasks' rows | **taken** (M13): 98 of 98 |
 
@@ -733,7 +733,8 @@ What follows is the code as it was read at `b9df9949`, before that change:
   `approvalMeasured` should say so explicitly: on the Mac it is the one path to the user's voice with no dialog.
 - **And item 9 first.** The Mac's server binds the web port itself (`WebBind.forServer` gives `direct` on a stream
   connector, `WebBind.swift` 33-35), and the "keep `web` refused, or behind an opt-in that says the port can be
-  squatted" of item 9 isn't built: once a Mac node starts, `web` would come up squattable between one server and the
+  squatted" of item 9 isn't built (as read at `b9df9949`; since, item 9 is built and reviewed: the host holds the web port,
+  row 8, corrected at the join of `v2-mac-seal-list` and `v2-mac-runbook`, 2026-11-26): once a Mac node starts, `web` would come up squattable between one server and the
   next. An acting page at `trust` on a squatted port is the worst case of item 9. Item 9 (or `web` refused on the Mac)
   belongs before any Mac `start`.
 - **One dialog for the lot** would need a change: e.g. `vibeswitcher web --trust` asking one dialog whose card names
@@ -760,7 +761,7 @@ user's decisions are named.
 | 10 | Item 12: the check reads the host's running image (`proc_pidpath` bound to the token), not `launchctl print`'s `program` | **built and reviewed** on `v2-mac-anchored-cli` (the spec's "Rows 7 and 10": the host check across a switch; the lead's word, 2026-11-26) | `MacAgentSwitchTests` (a scratch switch for real) | **yes** (done for the branch) | — |
 | 11 | Step 6: the unified log for events and the ack rule | **not built** (`Platform.Journal` sends nothing on the Mac) | M10 shows `processImagePath` forgeable by UUID: the ack rule needs another anchor | yes | a worker; the design to change first |
 | 12 | Step 7: `install-node-mac.sh` and signing | **built, unproven** (`install-node-mac.sh`, `lib/mac-sign.sh`, `MacSigningTests` pass here; its dry run runs on the hosted Mac) | an install from a v2 commit on this Mac (gh's token from the login keychain, curl, the App Store Xcode, `find`'s time) | **yes** (it is the Mac's S9) | **the user's decision**: the signing identity (`setup-signing.sh`'s local identity vs ad hoc, which makes the vault's Keychain key ask at each switch); the user at the keyboard for the Keychain read; then a worker |
-| 13 | Step 8: the Mac seal list | **built, in its fix round** on `v2-mac-seal-list` (the lead's word, 2026-11-26) | each row measured, a change held until accepted | yes (the fix round's re-check) | a worker |
+| 13 | Step 8: the Mac seal list | **built, fix round done, re-check running** on `v2-mac-seal-list` (R1–R9, then 01a05734; joined into `v2-mac-joined`; earlier the same day "built, in its fix round", the lead's word; corrected at the join of `v2-mac-seal-list` and `v2-mac-runbook`, 2026-11-26); off, watched only by a checked node host's book | each row measured, a change held until accepted (the spec's "Built: `MacSealList`") | yes (the fix round's re-check, running) | the re-check; then the seal list's owed items (the spec's "Owed") |
 | 14 | Step 9: coexistence: `lead` refusing an app-led project; the hooks | **not built** | a project the app leads refused by `lead` | no (refusal only); the hooks yes | **the user's decision**: how the node and the app share `~/.claude` hooks; then a worker |
 | 15 | `approvalMeasured` on, `macUnbuilt` lifted for a checked install | **off** (`NodeSystem.swift` 34, 26) | the whole path on this Mac: `vibeswitcher start` starts the agent; `set`/`answer` ask once; a session's are refused or its escape's dialog declined | **yes**: the review that flips it | the user's go-ahead |
 
@@ -769,7 +770,8 @@ user's anchor decision**, which 5, 7, 9 and 10 wait on → 8 before any `start` 
 signing decision → 13, 14 → 15.
 
 **Since then (2026-11-26).** The anchor was decided (a root-owned record, 2026-11-25) and rows 4, 5, 7, 8, 9 and 10 are
-built and reviewed on `v2-mac-anchored-cli`; row 13 is on `v2-mac-seal-list`, in its fix round; rows 1 and 2 are partly
+built and reviewed on `v2-mac-anchored-cli`; row 13 is on `v2-mac-seal-list`, its fix round done and its re-check running
+(corrected at the join of `v2-mac-seal-list` and `v2-mac-runbook`, 2026-11-26; written first as "in its fix round"); rows 1 and 2 are partly
 done (the keyboard session above); row 3 is settled in the spec on this branch, its two lines to build and review. What
 is left before 15: the owed keyboard steps (above), row 3's two lines and its review, the five reads (item 6), 11 (the
 log's ack anchor), 12 with the signing decision, 13's re-check, 14 with the hooks decision.

@@ -407,7 +407,9 @@ or decided. Done on Linux, tested on both systems (`ApprovalJudgmentTests`, `App
    cdhash) as a row's host, and its `--server` (opened once, the node root's own file) as that row's server; only a host
    holding that result (`Config.checkedNode`) is a node host (a server child by the row's cdhash, `vaultV2`, the book's
    record and hooks), and a `--node` host without one runs no server child (`MacCheckedStartTests`, red on the seam
-   `80358389`, green from `783e585d`). F6, narrowed and not closed (the fix round's re-check of the review's F1 pending;
+   `80358389`, green from `783e585d`). F6, narrowed and not closed (the fix round's re-check of the review's F1 pending when written; since: re-checked twice,
+   the last verdict "ready to offer for v2" on 2026-11-26, F6 still narrowed and not closed; corrected at the join of
+   `v2-mac-seal-list` and `v2-mac-runbook`, 2026-11-26;
    the design's "What it doesn't cover" says what a swapped file and a wrapper running the genuine image still do): a
    checked node host's switch goes through a keeper whose fresh token runs the
    pinned target's code, and the state, secrets and every descriptor cross the exec only to a new image whose fresh
@@ -567,6 +569,7 @@ or decided. Done on Linux, tested on both systems (`ApprovalJudgmentTests`, `App
    domain stays owed), R6b (a variable other than HOME, a glob loop: owed, its test a known issue), `$ZDOTDIR`'s
    sessions folder. *Owed for the switch-on*, as before plus: the global domain (what a keyboard session would measure,
    and a disk-only candidate, in the design), R6b.
+   *State at the join of 2026-11-26:* built, fix round done (R1–R9, then 01a05734), re-check running.
 
 ## What `v2` found on the Mac and doesn't change
 

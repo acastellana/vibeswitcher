@@ -30,8 +30,17 @@ platform seam (`Platform.Service`) or refused by name, so that on a Mac:
 - A scratch node (`VIBESWITCHER_HOME` naming a folder other than the account's `~/.vibeswitcher`) is not refused: its
   harness starts it, and its tests decide what runs on the Mac, as before.
 
-**It isn't**: a node that runs as the user's on a Mac. No LaunchAgent, no node host beside the app's, no voice rule, no
-Mac seal list, no install script for the Mac. Those are the steps below, each needing a real Mac.
+**It isn't**: a node that runs as the user's on a Mac. When this was written (2026-11-19) there was no LaunchAgent, no
+node host beside the app's, no voice rule, no Mac seal list, no install script for the Mac. **Since (corrected
+2026-11-26, the join of `v2-mac-seal-list` and `v2-mac-runbook`):** each of those is built and off, none of it running
+as the user's: the LaunchAgent (step 5, "The LaunchAgent: start, stop and status"; `start` refused by
+`NodeSystem.macUnbuilt`), the checked node host beside the app's ("The checked node start"; off behind
+`HostImages.isCheckedMacNode` and `macServerRefusal`), the voice rule's `approval` mode (off behind
+`NodeSystem.approvalMeasured`; row 3's two new lines settled, not built: "The rule's lines, settled from the
+measurements"), the Mac seal list (step 8, "Built: `MacSealList`"; watched only by a checked node host's book) and the
+install script (step 7, `install-node-mac.sh`, unproven by a real install). Still not built: the unified log (step 6)
+and living beside the app (step 9). The node runs as the user's on a Mac only when the switch-on review and the user
+turn those flags on.
 
 ## Where the node is Linux-only today
 
@@ -423,7 +432,7 @@ vault keeps the record (item 14, below). No checked start, no node host: the ref
 (`macServerRefusal`) stay as they are. Tests reach the same function with an injected record, own cdhash and home;
 nothing in the node lets a flag, file or variable choose them.
 
-**A switch (F6 narrowed; the fix round's re-check pending).** macOS has no exec from a descriptor, so whatever is checked before the in-place exec, the
+**A switch (F6 narrowed; the fix round's re-check pending, as first written; since: re-checked, "not yet" on 2026-11-25 with I1 and I2, below, then after a second fix round "ready to offer for v2", 2026-11-26, corrected at the join of 2026-11-26).** macOS has no exec from a descriptor, so whatever is checked before the in-place exec, the
 exec runs what the path names then. A checked node host's switch goes through a keeper (`MacHandoverKeeper`):
 
 1. The path check as before (`HandoverTarget.macPinned`): the target's file, read once, is a pinned host; that read's
@@ -578,7 +587,8 @@ take the keeper's switch end to end.
 **What it doesn't cover** (open, in the reviewer's words where they are the reviewer's):
 
 - **A switch's target swapped between check and exec (F6): narrowed, not closed (the fix round of 2026-11-25; the
-  review's re-check of F1 is pending).** The reviewer first: it "is reliable, not a tight race: `HostServer.handOver`
+  review's re-check of F1 was pending when written; since: re-checked twice, the last verdict "ready to offer for v2"
+  on 2026-11-26, with F6 still narrowed and not closed as below; corrected at the join of 2026-11-26).** The reviewer first: it "is reliable, not a tight race: `HostServer.handOver`
   checks the path, then probes the new build off the queue". With the keeper, what the probes show:
   - A file of other code renamed over the target after the path check: refused at the keeper's proof, the old host and
     its sessions as they were (`MacKeeperHandoverTests/aTargetSwappedAfterThePathCheckHandsOverNothing`).
@@ -1115,12 +1125,16 @@ accept), starts from: `~/Library/LaunchAgents` (folder), the node's plist, the z
 `.zprofile`, `.zshrc`, `.zlogin`) and what they source, Homebrew's prefix (`/opt/homebrew/bin` is the user's to write on
 Apple Silicon and early on PATH: by listing), `~/.nvm` as on Linux, `~/.gitconfig`, Terminal's startup command
 (`~/Library/Preferences/com.apple.Terminal.plist`), `launchctl`'s user environment, and the Xcode selection
-(`xcode-select -p`). Each row measured on a real Mac before it is added, as Linux's were.
+(`xcode-select -p`). Each row measured on a real Mac before it is added, as Linux's were. (The plan as written
+2026-11-19. What was built and measured, below, is newer and differs: `launchctl`'s user environment is not a row, being
+launchd's memory and not a file ("What can't be sealed"), and the Xcode selection is read as `/var/db/xcode_select_link`;
+noted at the join of 2026-11-26.)
 
 ### Built: `MacSealList` (step 8, 2026-11-26, `v2-mac-seal-list`; the measurement record's row 13)
 
 Off as the rest: `NodeSystem.macUnbuilt`, `HostImages.isCheckedMacNode`, `approvalMeasured` and `macServerRefusal`
-untouched; proven on scratch homes, roots and vaults.
+untouched; proven on scratch homes, roots and vaults. State at the join of 2026-11-26: built, fix round done (R1–R9
+below, then 01a05734), re-check running.
 
 **What is built.** `MacSealList` (`Sources/VibeCore/V2/MacSealList.swift`) is the Mac's list in `LinuxSealList`'s shape:
 the rows as data (`homeEntries`, `startupFiles`, `outsideEntries`), the same `ConfigSeal.Watched` kinds, Linux's
@@ -1331,6 +1345,16 @@ Step 4 on this Mac (2026-11-25 and 26): the agent's measurements M1 to M14, then
 the runbook, from a shell card: LA-1, 2, 3, 6, 7, ESC-1, 2, 3, AG-1; ANC-1, ANC-2, LA-4, LA-5 and the `sudo` trial not
 run); row 3 settled from them ("The rule's lines, settled from the measurements"), its two lines not built; the page's
 12-hour unlock and the Mac's browser passkey recorded in "The user's voice on the Mac".
+
+**Progress since (corrected 2026-11-26, the join of `v2-mac-seal-list` and `v2-mac-runbook`).** "Step 5's agent is
+built as data, not wired" above is the state of 2026-11-21: step 5 is now wired ("The LaunchAgent: start, stop and
+status": `NodeAgent`, `MacAgent`; independently reviewed three times, last verdict "ready to offer for v2", 2026-11-26)
+and still off, `start` refused by `NodeSystem.macUnbuilt` for the user's node. Built and off besides: the checked node
+start (item 13, re-checked "ready to offer for v2", 2026-11-26), the web port held by the host (item 9), the anchor
+(item 10, root-owned pins, the user's choice of 2026-11-25), rows 7 and 10 (reviewed, "still ready to offer"); step 7's
+install script, unproven by a real install; step 8's seal list ("Built: `MacSealList`": built, fix round done,
+re-check running). Not built: step 6 (the unified log) and step 9 (coexistence). The measurement record's table
+("What stands between this Mac and `vibeswitcher start`") keeps each row's state.
 
 ## Open for the user: the Mac's reads
 
