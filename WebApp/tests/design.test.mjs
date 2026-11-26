@@ -321,7 +321,11 @@ test('sizes: buttons and fields come in three heights (24, 30, 36), and 44 on a 
   // A tab inside its track: the track is the standard height (24 and 3 px either side).
   for (const track of ['.segmented']) {
     const padding = RULES.filter((block) => block.media === '' && block.selector === track).flatMap((block) => block.declarations).filter((d) => d.property === 'padding').at(-1)?.value;
-    if (24 + 2 * parseFloat(padding) !== 30) wrong.push(`${track}: padding ${padding} makes the track ${24 + 2 * parseFloat(padding)} px`);
+    // Its padding in px, the tokens resolved (the spacing scale writes it from the control heights).
+    let text = String(padding);
+    for (let n = 0; n < 5 && /var\(/.test(text); n++) text = text.replace(/var\((--[\w-]+)\)/g, (_, name) => `(${ROOT[name]})`);
+    const side = Function(`return (${text.replace(/calc/g, '').replace(/(\d*\.?\d+)px/g, '$1')})`)();
+    if (24 + 2 * side !== 30) wrong.push(`${track}: padding ${padding} makes the track ${24 + 2 * side} px`);
   }
   // The touch block keeps every control a fingertip, on the token.
   const touch = RULES.filter((block) => block.media === TOUCH);
