@@ -99,11 +99,15 @@ extension Requests {
             let how = args["hours"]?.int.map { "for \($0) hours" } ?? text("for").map { ConfigSeal.inert($0, limit: 30) } ?? ""
             return .success(("pause the reminders of \(sessionLabel(session)) \(how)".trimmingCharacters(in: .whitespaces), nil))
         case "session.reply":
-            guard let session = text("session"), let choice = args["choice"]?.int else {
+            let several = args["choices"]?.array?.compactMap(\.int) ?? []
+            guard let session = text("session"), args["choice"]?.int != nil || !several.isEmpty else {
                 return .failure(.init(why: "session.reply needs a session and a choice: nothing was asked"))
             }
             let typed = text("text").map { " with the words \(whole($0))" } ?? ""
-            return .success(("answer \(sessionLabel(session))'s question with option \(choice)\(typed)", nil))
+            if let choice = args["choice"]?.int {
+                return .success(("answer \(sessionLabel(session))'s question with option \(choice)\(typed)", nil))
+            }
+            return .success(("answer \(sessionLabel(session))'s question by ticking options \(several.map(String.init).joined(separator: ", "))\(typed)", nil))
         case "tell.retract":
             guard let action = text("action") else { return .failure(.init(why: "tell.retract needs the tell's action: nothing was asked")) }
             return .success(("take back your message (action \(ConfigSeal.inert(action, limit: 40))) before the lead has it", nil))
@@ -115,6 +119,13 @@ extension Requests {
             let how = args["resume"]?.bool == true ? "reopen the lead of" : args["replace"]?.bool == true ? "replace the lead of" : "start a lead in"
             // The goal is told to the lead as the user's: decisive, whole.
             return .success(("\(how) \(Self.place(folder))" + (text("goal").map { " with the goal \(whole($0))" } ?? ""), nil))
+        case "project.new":
+            guard let name = text("name") else { return .failure(.init(why: "project.new needs a name: nothing was asked")) }
+            // The name, the folder it will be made in by its resolved path (the projects folder read now, which a page may
+            // have just set) and the goal (told to the lead as the user's): decisive, whole.
+            return .success((Self.projectNewPhrase(name: name, location: text("location"), goal: text("goal"),
+                                                   projectsFolder: NodeSettings.projectsFolder(files: NodeSettings.Files(root: root)),
+                                                   home: engine?.home ?? home), nil))
         case "stop":
             let live = link.sessions.filter(\.isLive).count
             return .success(("stop the node, ending \(live) live session\(live == 1 ? "" : "s")", nil))
@@ -284,6 +295,17 @@ extension Requests {
             shown.append(folder)
         }
         return head + shown.joined(separator: ", ")
+    }
+
+    /// `project.new`'s dialog text: the project's name and the folder it will be made in, by its resolved path (Where, else
+    /// the projects folder, `~` the user's home), and the goal, each whole.
+    static func projectNewPhrase(name: String, location: String?, goal: String?, projectsFolder: String, home: String) -> String {
+        let typed = location.flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 }
+        let place = ProjectCreation.expand(typed ?? projectsFolder, home: home)
+        let resolved = LeadInit.kind(place) == nil ? place : LeadInit.resolved(place)
+        let folder = (resolved as NSString).appendingPathComponent(ProjectCreation.folderName(for: name))
+        return "make the project \(whole(name.trimmingCharacters(in: .whitespacesAndNewlines))) in \(ConfigSeal.inert(folder, limit: .max)) and start its lead"
+            + (goal.map { " with the goal \(whole($0))" } ?? "")
     }
 
     static func place(_ path: String) -> String {

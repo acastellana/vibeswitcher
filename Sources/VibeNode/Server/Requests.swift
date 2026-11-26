@@ -451,11 +451,13 @@ public final class Requests: @unchecked Sendable {
         case "start": start(request, reply: reply)
         case "stop": stop(request, reply: reply)
         case "lead": lead(request, reply: reply)
+        case "project.new": newProject(request, reply: reply)
         case "questions": questions(request, reply: reply)
         case "board": board(request, reply: reply)
         case "settings": settings(request, reply: reply)
         case "recent": recent(request, reply: reply)
         case "brief": brief(request, reply: reply)
+        case "logs": logs(request, reply: reply)
         case "update.check": updateCheck(request, reply: reply)
         case "approve.list": approveList(request, reply: reply)
         case "web.pairing": webPairing(request, reply: reply)
@@ -735,6 +737,7 @@ public final class Requests: @unchecked Sendable {
         case "tell", "tell.retract": return "the lead's chat shows whether the message arrived"
         case "answer.replace": return "`vibeswitcher questions --all` shows the card's answer now"
         case "lead", "session.new", "session.reopen": return "`vibeswitcher status` lists the sessions running now"
+        case "project.new": return "the projects folder shows whether the project's folder was made, and `vibeswitcher status` whether its lead runs"
         case "answer", "approve": return "`vibeswitcher questions` shows whether the card is still open (a shell request's session shows whether its command ran)"
         case "push": return "the repository's remote shows whether the push went"
         case "build.switch": return "`vibeswitcher status` names the build running now"
@@ -861,7 +864,9 @@ public final class Requests: @unchecked Sendable {
 
     /// The card or project a request names, as recorded and shown.
     static func subject(_ request: NodeWire.Request) -> String? {
-        request.args?["card"]?.string ?? request.args?["project"]?.string ?? request.args?["folder"]?.string
+        // A new project by its name (it has no folder yet).
+        if request.kind == "project.new" { return request.args?["name"]?.string }
+        return request.args?["card"]?.string ?? request.args?["project"]?.string ?? request.args?["folder"]?.string
             ?? request.args?["session"]?.string ?? request.args?["key"]?.string ?? request.args?["plugin"]?.string
     }
 

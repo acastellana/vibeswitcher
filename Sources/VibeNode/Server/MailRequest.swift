@@ -14,6 +14,7 @@ extension Requests {
         case "mail": mail(request, reply: reply)
         case "recent": recent(request, reply: reply)
         case "brief": brief(request, reply: reply)
+        case "logs": logs(request, reply: reply)
         default: reply(.init(re: request.id, error: .init(.voice, "\(ConfigSeal.inert(request.kind, limit: 80)) isn't a page's read")))
         }
     }

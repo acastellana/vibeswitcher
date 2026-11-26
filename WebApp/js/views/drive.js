@@ -154,6 +154,8 @@ export function promptCard(app) {
   let key = '';
   let chosen = null;
   let words = '';
+  // A multi-select's ticked options (indices), kept across draws of the same question.
+  let ticks = new Set();
   let shown = null;
   // This page's answer, for the session it was given on: { phase: 'waiting' (Undo still possible) | 'sending' |
   // 'answered' | 'refused' | 'dropped', session, prompt (the click's identity), choice, option, text, cancel, why }.
@@ -168,6 +170,21 @@ export function promptCard(app) {
     if (!prompt || mine?.phase === 'waiting' || mine?.phase === 'sending') return;
     const waiting = { phase: 'waiting', session: session.id, key: promptKey(prompt), question: prompt.question, options: [...prompt.options], choice: index + 1,
       option: prompt.options[index], text };
+    mine = waiting;
+    waiting.cancel = later(() => go(waiting), UNDO_MS);
+    draw(session);
+  }
+
+  // A multi-select's Submit: the ticked options go as `choices` (from 1, in their order), with the words of its free-text
+  // row when that is ticked; shown as their words, joined.
+  function answerTicks(session, indices, text = null) {
+    const prompt = session.prompt;
+    if (!prompt || !indices.length || mine?.phase === 'waiting' || mine?.phase === 'sending') return;
+    const sorted = [...indices].sort((a, b) => a - b);
+    const takes = new Set(prompt.text || []);
+    const said = sorted.map((index) => (takes.has(index) && text ? text : prompt.options[index])).join(', ');
+    const waiting = { phase: 'waiting', session: session.id, key: promptKey(prompt), question: prompt.question, options: [...prompt.options],
+      choices: sorted.map((index) => index + 1), option: said, text: null, words: sorted.some((index) => takes.has(index)) ? text : null };
     mine = waiting;
     waiting.cancel = later(() => go(waiting), UNDO_MS);
     draw(session);
@@ -192,7 +209,9 @@ export function promptCard(app) {
     }
     mine = { ...waiting, phase: 'sending' };
     draw(now);
-    const args = { session: waiting.session, choice: waiting.choice, question: waiting.question, options: waiting.options, ...(waiting.text ? { text: waiting.text } : {}) };
+    const args = waiting.choices
+      ? { session: waiting.session, choices: waiting.choices, question: waiting.question, options: waiting.options, ...(waiting.words ? { text: waiting.words } : {}) }
+      : { session: waiting.session, choice: waiting.choice, question: waiting.question, options: waiting.options, ...(waiting.text ? { text: waiting.text } : {}) };
     app.store.request('session.reply', args).then((reply) => {
       // It no longer needs you: until the node reads its screen again, the answered question counts no more.
       if (reply?.ok) app.store.sessionReplied?.(waiting.session, waiting.key);
@@ -254,7 +273,40 @@ export function promptCard(app) {
       h('header', { class: 'card-head' }, h('span', { class: 'priority blocking' }, t('drIsAsking', { agent }))),
       h('pre', { class: 'ask-text' }, prompt.question),
     ];
-    if (prompt.multiSelect) {
+    const notes = () => {
+      if (mine?.phase === 'refused' && mine.key === promptKey(prompt)) parts.push(h('p', { class: 'card-notice', role: 'alert' }, t('drReplyRefused', { why: mine.why })));
+      if (mine?.phase === 'dropped') parts.push(h('p', { class: 'card-notice', role: 'status' }, t('drReplyChanged')));
+      if (mine?.phase === 'still' && mine.key === promptKey(prompt)) parts.push(h('p', { class: 'card-notice', role: 'alert' }, t('drReplyStillOpen')));
+    };
+    if (prompt.multiSelect && acts) {
+      // Ticks, then Submit (the node ticks each box in the session and submits only once its screen shows them all).
+      // A tick changes this card in place: nothing is drawn again, so the focus stays where it is.
+      const ready = () => ticks.size > 0 && (![...ticks].some((index) => takes.has(index)) || !!words.trim());
+      const submit = kit.button('primary', { class: 'ticks-submit', title: t('drSubmitTicksTitle'),
+        onclick: () => { if (ready()) answerTicks(session, [...ticks], words.trim() || null); } }, t('drSubmitTicks'));
+      const field = kit.field({ class: 'answer-input ticks-words', type: 'text', value: words, placeholder: t('drYourWords'), 'aria-label': t('drYourWordsForThisOption'),
+        oninput: () => { words = field.value; submit.disabled = !ready(); },
+        onkeydown: (event) => { if (event.key === 'Enter' && !event.isComposing) { event.preventDefault(); submit.click(); } } });
+      const rows = prompt.options.map((option, index) => {
+        const label = h('label', { class: 'option option-tick' + (ticks.has(index) ? ' chosen' : '') });
+        const box = kit.checkbox({ checked: ticks.has(index), onchange: (event) => {
+          if (event.target.checked) ticks.add(index); else ticks.delete(index);
+          label.classList.toggle('chosen', ticks.has(index));
+          field.hidden = ![...ticks].some((one) => takes.has(one));
+          submit.disabled = !ready();
+        } });
+        box.checked = ticks.has(index);
+        label.append(...[box, h('span', { class: 'option-key', 'aria-hidden': 'true' }, String(index + 1)), h('span', { class: 'option-text' }, option),
+          prompt.descriptions?.[index] ? h('span', { class: 'option-note' }, prompt.descriptions[index]) : null].filter(Boolean));
+        return h('li', null, label);
+      });
+      field.value = words;
+      field.hidden = ![...ticks].some((one) => takes.has(one));
+      submit.disabled = !ready();
+      parts.push(h('p', { class: 'confirm-note' }, t('drTickAnyThenSubmit')), h('ul', { class: 'options ticks', 'aria-label': t('drTheChoices') }, rows), field,
+        h('div', { class: 'ticks-actions' }, submit));
+      notes();
+    } else if (prompt.multiSelect) {
       parts.push(h('ol', { class: 'options read-only' }, prompt.options.map((option) => h('li', { class: 'option' }, h('span', { class: 'option-text' }, option)))),
         h('p', { class: 'confirm-note' }, t('drItTakesSeveralTicksAnswer')));
     } else if (acts) {
@@ -270,9 +322,7 @@ export function promptCard(app) {
         box.grow();
         parts.push(box.el);
       }
-      if (mine?.phase === 'refused' && mine.key === promptKey(prompt)) parts.push(h('p', { class: 'card-notice', role: 'alert' }, t('drReplyRefused', { why: mine.why })));
-      if (mine?.phase === 'dropped') parts.push(h('p', { class: 'card-notice', role: 'status' }, t('drReplyChanged')));
-      if (mine?.phase === 'still' && mine.key === promptKey(prompt)) parts.push(h('p', { class: 'card-notice', role: 'alert' }, t('drReplyStillOpen')));
+      notes();
     } else {
       parts.push(h('div', { class: 'options' }, buttons));
       if (chosen !== null && takes.has(chosen)) {
@@ -318,7 +368,7 @@ export function promptCard(app) {
       const now = JSON.stringify([session.id, prompt?.question, prompt?.options, prompt?.at, mine?.phase ?? null, acting()]);
       if (now === key) return;
       // Another question (or the same one asked again): nothing picked for it yet.
-      if (!prompt || !key.startsWith(JSON.stringify([session.id, prompt.question]).slice(0, -1))) { chosen = null; words = ''; }
+      if (!prompt || !key.startsWith(JSON.stringify([session.id, prompt.question]).slice(0, -1))) { chosen = null; words = ''; ticks = new Set(); }
       key = now;
       draw(session);
     },
@@ -680,9 +730,44 @@ export function newLeadForm(app) {
   };
 }
 
-// A brand-new project (the Mac's New Project…): a name, where (the node's projects folder when empty) and a goal. No
-// node request makes a project's folder from a page yet (`vibeswitcher new-project` makes it, its repository and first
-// commit, in the terminal's own process): the form says so plainly and ends in that line. Returns { el, update() }.
+// Why a project's name can't be one, as the node's rules say it (`ProjectCreation.plan`, `ProjectMaker.nameRefusal`):
+// the words' key, or null when it can be (or is empty).
+export function projectNameProblem(name) {
+  const title = String(name || '').trim();
+  if (!title) return null;
+  // Control and invisible characters (direction marks, zero-width ones, default-ignorable ones such as variation selectors
+  // and Hangul fillers, the braille blank), which the node refuses in a name.
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001f\u007f-\u009f\u2028\u2029\ufff9-\ufffb]|\p{Cf}|\p{Default_Ignorable_Code_Point}|\u2800/u.test(title)) return 'drNameInvisible';
+  if ([...title].length > 100) return 'drNameTooLong';
+  const folder = projectFolderName(title);
+  if (/[/:]/.test(folder)) return 'drNameSeparator';
+  if (!/[\p{L}\p{N}]/u.test(folder)) return 'drNameNoLetters';
+  if (folder.startsWith('.')) return 'drNameLeadingDot';
+  return null;
+}
+
+// What the node's `project.new` answered, in the page's words: why nothing was made (its `refused` reason; one this page
+// doesn't know, the node's sentence), or what was made and how its lead's start went. `name` and `folder`: the
+// project's as asked; `where`: where, as shown (the projects folder when nothing was typed).
+export function projectWords(result, { name, folder, where }) {
+  if (!result?.made) {
+    const key = { name: 'drNewRefusedName', outside: 'drNewRefusedOutside', link: 'drNewRefusedLink', exists: 'drNewRefusedExists', location: 'drNewRefusedLocation',
+      identity: 'drNewRefusedIdentity', repository: 'drNewRefusedRepository', noClaude: 'drNewRefusedNoClaude', hidden: 'drNewRefusedHidden' }[result?.refused];
+    return key ? t(key, { name, folder, where }) : t('drNewRefusedOther', { why: result?.said || '' });
+  }
+  const shown = { name: result.name || name, folder: result.folder || folder };
+  if (result.lead === 'refused') return t('drNewMadeNoLead', { ...shown, why: (result.notes || [])[0] || '' });
+  if (result.lead === 'waiting') return t('drNewMadeWaiting', shown);
+  return t('drNewMadeStarted', shown);
+}
+
+// A brand-new project (the Mac's New Project…): a name, where (the node's projects folder when empty, or a folder in
+// it) and a goal. Where the page acts and the node lists `project.new`, one button makes it: its folder, git repository
+// and first commit, then its lead. While the node works the form says what it is doing; then what it made, and the
+// project opens once the node lists its lead (the left column lists it then), or why nothing was made, in a sentence. A
+// name the node would refuse is said under it first. Elsewhere (a node from before the kind, a page that doesn't act)
+// the form ends in the `vibeswitcher new-project` line and why. Returns { el, update() }.
 export function newProjectForm(app) {
   const name = kit.field({ class: 'answer-input', type: 'text', placeholder: t('drProjectNamePlaceholder'), 'aria-label': t('drProjectName'), spellcheck: 'false', autocomplete: 'off' });
   const location = kit.field({ class: 'answer-input', type: 'text', placeholder: t('drWhereOptionalTheNodeS'), 'aria-label': t('drWhere'), spellcheck: 'false', autocomplete: 'off' });
@@ -694,12 +779,77 @@ export function newProjectForm(app) {
     startRow(t('drWhere'), location, h('p', { class: 'confirm-note where-hint' }, t('drWhereHint'))),
     startRow(t('drGoalOptional'), goal),
     lineSlot);
+  let drawn = '';
+  // While the request is out the button isn't drawn again under it (an edit then waits for the answer).
+  let out = false;
+  let stop = () => {};
+  // What the button is drawn for: whether it acts, the name and its problem (and the line's words where it doesn't act).
+  const shownKey = () => JSON.stringify(actsFor(app, 'project.new') ? [true, name.value.trim(), projectNameProblem(name.value)]
+    : [false, name.value, location.value, goal.value, app.store.acts()]);
   function draw() {
     const folder = projectFolderName(name.value);
+    const problem = projectNameProblem(name.value);
     folderNote.hidden = !folder;
-    folderNote.textContent = folder ? t('drItsFolder', { folder }) : '';
-    lineSlot.replaceChildren(h('p', { class: 'confirm-note start-why' }, t('drProjectTerminalOnly')),
-      folder ? copyLine(newProjectLine(name.value, location.value, goal.value), t('drTheCommandThatMakesThe')) : h('p', { class: 'confirm-note' }, t('drGiveItANameThe')));
+    setText(folderNote, !folder ? '' : t(problem || 'drItsFolder', { folder }));
+    setClass(folderNote, 'refused', !!problem);
+    const acts = actsFor(app, 'project.new');
+    const key = shownKey();
+    if (out || key === drawn) return;
+    drawn = key;
+    stop();
+    if (!acts) {
+      // A page that doesn't act is never sent the kind (`WebAccess.kinds`): it says this page doesn't act; a page that
+      // acts on a node without the kind, that no page makes a project there yet.
+      lineSlot.replaceChildren(h('p', { class: 'confirm-note start-why' }, t(app.store.acts() ? 'drProjectTerminalOnly' : 'drProjectPageReads')),
+        folder ? copyLine(newProjectLine(name.value, location.value, goal.value), t('drTheCommandThatMakesThe')) : h('p', { class: 'confirm-note' }, t('drGiveItANameThe')));
+      return;
+    }
+    const title = name.value.trim();
+    if (!folder || problem) {
+      lineSlot.replaceChildren(kit.button('primary', { class: 'start-button', disabled: true }, t('drMakeProject')));
+      return;
+    }
+    const progress = h('p', { class: 'confirm-note project-progress', role: 'status', hidden: true }, t('drNewMaking'));
+    const where = () => location.value.trim();
+    const made = doButton(app, { kind: 'project.new', label: t('drMakeProjectNamed', { name: title }), busy: t('drNewMakingShort'), className: 'start-button',
+      args: () => ({ name: title, ...(where() ? { location: folderOf(app, where()) } : {}), ...(goal.value.trim() ? { goal: goal.value.trim() } : {}) }),
+      settled: (reply) => {
+        out = false;
+        progress.hidden = true;
+        const result = reply.ok ? reply.result || {} : {};
+        const words = () => projectWords(result, { name: title, folder, where: where() ? tilde(folderOf(app, where()), app.store.state.node?.home) : t('drTheProjectsFolder') });
+        // The name was changed while the node worked: the form as it is now (a new name is a new project), still saying
+        // what was made for the name sent.
+        if (shownKey() !== drawn) {
+          draw();
+          if (result.made) lineSlot.append(h('p', { class: 'confirm-note', role: 'status' }, words()));
+          return;
+        }
+        if (!reply.ok) return;
+        made.say(words());
+        if (!result.made) return;
+        // Made: no second one from this button (a new name draws a new one); its project opens once the node lists its
+        // lead, while you are still here.
+        made.button.disabled = true;
+        if (typeof result.session !== 'string') return;
+        const from = JSON.stringify(app.ui.state?.route ?? null);
+        const open = () => {
+          const lead = [...app.store.state.leads.values()].find((one) => one.session === result.session);
+          if (!lead) return;
+          stop();
+          if (JSON.stringify(app.ui.state?.route ?? null) === from) app.ui.go(projectHref(lead.project));
+        };
+        const off = app.store.subscribe('leads', open);
+        stop = () => { off?.(); stop = () => {}; };
+        open();
+      } });
+    // The click went out (doButton marks it busy first): the line that says what the node is doing.
+    made.button.addEventListener('click', () => {
+      if (made.button.getAttribute('aria-busy') !== 'true') return;
+      out = true;
+      progress.hidden = false;
+    });
+    lineSlot.replaceChildren(made.el, progress);
   }
   for (const field of [name, location, goal]) field.addEventListener('input', draw);
   draw();
