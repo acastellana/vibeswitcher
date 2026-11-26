@@ -272,15 +272,15 @@ final class HostClient: ObservableObject {
         if reason == AppProof.vaultStartedOver {
             alert.messageText = "The team's vault could not be opened and was started again."
             alert.informativeText = "The session host keeps the team's vault sealed with a key from your Keychain, and the "
-                + "sealed file no longer opens with it: what the vault held is gone, and it holds no key for this VibeSwitcher "
+                + "sealed file no longer opens with it: what the vault held can't be read, and it holds no key for this VibeSwitcher "
                 + "yet. " + off + "\n\nThis happens after a Keychain reset, and it can also mean another program on this Mac "
                 + "replaced the vault's key. Check first: if you didn't reset your Keychain, open Keychain Access and look at "
                 + "the item \u{201C}VibeSwitcher lead vault\u{201D} (when it was modified), and don't teach the host until "
                 + "you're sure what changed it. The file that didn't open is kept as it was, at "
                 + "~/.vibeswitcher/lead/vault.sealed, and nothing is saved over it until you answer. Teaching the host "
-                + "this app's key starts the vault anew, sealed with whatever key your Keychain gives the session host now "
-                + "(if it gives none, the vault lives in memory only), and sets the old file aside beside it as "
-                + "vault.sealed.didnt-open-<date>. " + next
+                + "this app's key starts the vault anew, sealed with whatever key your Keychain gives the session host now, "
+                + "and sets the old file aside beside it as vault.sealed.didnt-open-<date> (if your Keychain gives none, "
+                + "the vault lives in memory only and the old file stays where it is). " + next
         } else {
             alert.messageText = "The session host doesn't recognise this VibeSwitcher."
             alert.informativeText = reason + " " + off + "\n\nThis happens after VibeSwitcher is reinstalled or your "
