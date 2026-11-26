@@ -358,7 +358,9 @@ enum WebAuthnChecks {
 
     /// The listener's shape (`WebAuthnRefusal.listener`): a loopback one `http://localhost[:port]`, a tailnet one
     /// `https://<rpId>[:port]`; the rpId lower-case letters, digits, `-` and `.` in labels of 1 to 63, at most 253,
-    /// its last label not all digits (an IP address is no rpId); the port 1 to 65535, no leading zero.
+    /// its last label not all digits (an IP address is no rpId); the port 1 to 65535, no leading zero, and not the
+    /// scheme's default (80 on http, 443 on https): a browser drops that port from the origin, so no real ceremony
+    /// could match a listener that names it.
     static func listener(_ listener: WebAuthnListener) throws(WebAuthnRefusal) {
         let rpId = listener.rpId
         let labels = rpId.split(separator: ".", omittingEmptySubsequences: false)
@@ -368,14 +370,14 @@ enum WebAuthnChecks {
                       && label.utf8.allSatisfy { (0x61...0x7A).contains($0) || (0x30...0x39).contains($0) || $0 == UInt8(ascii: "-") }
               }),
               let last = labels.last, !last.utf8.allSatisfy({ (0x30...0x39).contains($0) }) else { throw .listener }
-        let scheme: String
+        let scheme: String, defaultPort: Int
         switch listener.place {
         case .loopback:
             guard rpId == "localhost" else { throw .listener }
-            scheme = "http://"
+            (scheme, defaultPort) = ("http://", 80)
         case .tailnet:
             guard labels.count >= 2 else { throw .listener }
-            scheme = "https://"
+            (scheme, defaultPort) = ("https://", 443)
         }
         let base = scheme + rpId
         guard listener.origin.hasPrefix(base) else { throw .listener }
@@ -384,7 +386,7 @@ enum WebAuthnChecks {
         guard rest.first == ":" else { throw .listener }
         let port = rest.dropFirst()
         guard (1...5).contains(port.utf8.count), port.utf8.allSatisfy({ (0x30...0x39).contains($0) }),
-              port.first != "0", let number = Int(port), number <= 65535 else { throw .listener }
+              port.first != "0", let number = Int(port), number <= 65535, number != defaultPort else { throw .listener }
     }
 
     /// WebAuthn L3 §5.8.1.1's CCDToString: a JSON string of `text`, `"` and `\` escaped by a backslash, U+0000 to
