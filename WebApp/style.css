@@ -1059,9 +1059,11 @@ kbd { padding: 1px var(--s-3); border-radius: var(--r-1); box-shadow: var(--e-1-
   .head .segmented { order: 3; width: 100%; }
   .head .segment { flex: 1; }
   .head-title { max-width: 100%; }
-  .strip { padding: var(--s-4) var(--s-6); }
+  .strip { padding: var(--s-4) var(--s-5); }
   .chat-scroll { scrollbar-gutter: auto; }
-  .chat-column { padding: var(--s-6) var(--s-6) var(--s-4); }
+  .chat-column { padding: var(--s-6) var(--s-5) var(--s-4); }
+  /* A list's indent a step less than wider, so a line that fitted beside its bullet still does. */
+  .prose ul, .prose ol { padding-left: var(--s-6); }
   .chat-row.prompt { padding-left: var(--s-8); }
   .chat-row.reply { grid-template-columns: var(--s-7) minmax(0, 1fr); }
   .chat-row.tools, .chat-live { padding-left: var(--s-7); }
@@ -1069,13 +1071,13 @@ kbd { padding: 1px var(--s-3); border-radius: var(--r-1); box-shadow: var(--e-1-
   .ask-row { margin-left: 0; }
   .composer { padding: var(--s-3) var(--s-5) calc(var(--s-4) + var(--s-1) + env(safe-area-inset-bottom)); }
   .composer-hint { padding-bottom: calc(var(--s-6) + env(safe-area-inset-bottom)); }
-  .latest { right: var(--s-6); }
+  .latest { right: var(--s-5); }
   .card { padding: var(--s-5) var(--s-5); }
   .facts dl { grid-template-columns: minmax(0, 1fr); gap: 0; }
   .facts dd { margin-bottom: var(--s-3); }
   .option { padding: var(--s-5) var(--s-5); }
   .answer-input { padding: var(--s-4) var(--s-4); font-size: var(--t-field-touch); }
-  .node-column { padding: var(--s-6) var(--s-6) var(--s-8); }
+  .node-column { padding: var(--s-6) var(--s-5) var(--s-8); }
   /* The inspector: a sheet from the foot of the screen, over everything, its tabs across its top. */
   .inspector, .inspector-sheet .inspector {
     position: fixed; top: auto; left: 0; z-index: 7; width: auto; height: min(78dvh, 640px); padding-bottom: env(safe-area-inset-bottom);
@@ -1430,6 +1432,8 @@ kbd { padding: 1px var(--s-3); border-radius: var(--r-1); box-shadow: var(--e-1-
 .team-strip.open { max-height: none; }
 .team-strip:has(> .strip-fold:not([hidden])) { cursor: pointer; }
 .strip-fold:not([hidden]) { position: absolute; top: var(--s-2); right: var(--s-5); display: inline-flex; align-items: center; justify-content: center; width: var(--ctl-s); height: var(--ctl-s); color: var(--ink-2); }
+.strip-fold .icon { transform: rotate(90deg); transition: transform var(--dur-2) var(--ease-out); }
+.team-strip.open .strip-fold .icon { transform: rotate(-90deg); }
 /* A phone's own parts of the header and the strip (the 760 px block at the columns' end shows them): hidden wider. */
 .head-count, .dial-fold, .strip-fold { display: none; }
 /* The lead view's header (D11): one row at the left and right columns' header height, in Lead and Roadmap alike, the
@@ -1724,7 +1728,7 @@ kbd { padding: 1px var(--s-3); border-radius: var(--r-1); box-shadow: var(--e-1-
   .centre-head .segmented { order: 4; width: 100%; }
   .centre-head .segment { flex: 1; padding: var(--s-2) var(--s-3); line-height: var(--lh-caption); text-align: center; white-space: normal; }
   .dial { order: 5; }
-  .team-strip, .talk, .composer-lead, .quiet-block { padding-left: var(--s-6); padding-right: var(--s-6); }
+  .team-strip, .talk, .composer-lead, .quiet-block { padding-left: var(--s-5); padding-right: var(--s-5); }
   .quiet-words { display: none; }
   .composer-lead { flex-wrap: wrap; gap: var(--s-3); }
   .to { width: 100%; }
@@ -1737,7 +1741,7 @@ kbd { padding: 1px var(--s-3); border-radius: var(--r-1); box-shadow: var(--e-1-
   .col.dated .track { grid-column: 1 / -1; grid-row: 2; }
   .axis-row { grid-template-columns: 0 minmax(0, 1fr) 0 0; gap: 0; padding-left: 0; }
   .road-note { grid-column: 1 / -1; }
-  .screen-col { padding: var(--s-6) var(--s-6) var(--s-8); }
+  .screen-col { padding: var(--s-6) var(--s-5) var(--s-8); }
   .sheet { width: 100%; padding: calc(var(--s-6) + env(safe-area-inset-top)) var(--s-6) var(--s-8); }
   .tdet { margin-left: 0; }
   /* A banner over the header takes the screen's top inset; the header under it doesn't take it twice. */
@@ -1771,15 +1775,13 @@ kbd { padding: 1px var(--s-3); border-radius: var(--r-1); box-shadow: var(--e-1-
   .project-view .centre-head.dial-folded > .dial-fold:not([hidden]) { grid-row: 2; grid-column: 2 / 5; justify-self: end; height: auto; min-height: var(--ctl-touch); }
   .project-view .centre-head.dial-folded > .dial { right: var(--s-3); }
   .project-view .centre-head.dial-folded > .dial .segment { min-height: var(--ctl-touch); }
-  .project-view .team-strip { position: relative; flex-wrap: wrap; align-content: flex-start; gap: 0 var(--s-6); max-height: 44px; padding: 0 var(--ctl-touch) 0 var(--s-6); overflow: hidden; cursor: pointer; }
+  .project-view .team-strip { position: relative; flex-wrap: wrap; align-content: flex-start; gap: 0 var(--s-6); max-height: 44px; padding: 0 var(--ctl-touch) 0 var(--s-5); overflow: hidden; cursor: pointer; }
   .project-view .team-strip > :not(.strip-fold) { display: inline-flex; align-items: center; height: 44px; }
   .project-view .team-strip.open { max-height: none; padding-top: var(--s-3); padding-bottom: var(--s-3); }
   .project-view .team-strip.open > :not(.strip-fold) { height: 30px; }
   .project-view .strip-fold:not([hidden]) { position: absolute; top: 0; right: 0; display: inline-flex; align-items: center; justify-content: center; width: var(--ctl-touch); height: var(--ctl-touch); color: var(--ink-2); }
-  .strip-fold .icon { transform: rotate(90deg); transition: transform var(--dur-2) var(--ease-out); }
-  .team-strip.open .strip-fold .icon { transform: rotate(-90deg); }
-  .project-view .centre-scroll > .talk { padding: var(--s-5) var(--s-6) var(--s-6); }
-  .project-view .centre-scroll > .wait-box { order: -1; padding: var(--s-4) var(--s-6) var(--s-6); border-top: 0; border-bottom: 1px solid var(--line); }
+  .project-view .centre-scroll > .talk { padding: var(--s-5) var(--s-5) var(--s-6); }
+  .project-view .centre-scroll > .wait-box { order: -1; padding: var(--s-4) var(--s-5) var(--s-6); border-top: 0; border-bottom: 1px solid var(--line); }
   .project-view .centre-scroll > .wait-box .asked-title { margin-top: var(--s-1); }
   .project-view.show-asks .centre-scroll > .wait-box { border-bottom: 0; }
   .project-view .composer-lead { flex-wrap: nowrap; gap: var(--s-4); padding: var(--s-4) var(--s-5) calc(var(--s-4) + env(safe-area-inset-bottom)); }
@@ -1789,13 +1791,13 @@ kbd { padding: 1px var(--s-3); border-radius: var(--r-1); box-shadow: var(--e-1-
   .app.keyboard { height: var(--vv-height, 100dvh); transform: translateY(var(--vv-top, 0px)); }
   .app.keyboard .project-view :is(.team-strip, .dial-fold, .centre-head > .segmented) { display: none; }
   /* The load's skeleton in the phone's shape: the header's two rows within the width, the gutters a phone's. */
-  :is(.skeleton-head, .skeleton-strip, .skeleton-composer) { padding-left: var(--s-6); padding-right: var(--s-6); }
+  :is(.skeleton-head, .skeleton-strip, .skeleton-composer) { padding-left: var(--s-5); padding-right: var(--s-5); }
   /* Its rows the real header's: a fingertip, then the switch in its track (2 px round it), so the content arrives
      without a jump (109 px at 390). */
   .skeleton-head { display: grid; grid-template-rows: var(--ctl-touch) calc(var(--ctl-touch) + var(--s-1) * 2); gap: var(--s-2); height: auto; padding-top: calc(var(--s-2) + env(safe-area-inset-top)); padding-bottom: var(--s-4); }
   .frame-skeleton .bone:is(.skeleton-switch, .skeleton-dial) { height: var(--ctl-touch); }
   .skeleton-head > .skeleton-row { display: flex; }
-  .skeleton-lines { padding: var(--s-6) var(--s-6); }
+  .skeleton-lines { padding: var(--s-6) var(--s-5); }
   .frame-skeleton .bone.skeleton-title { width: 50%; }
   .frame-skeleton .bone.skeleton-switch { width: 30%; }
   .frame-skeleton .bone.skeleton-dial { width: 100%; }
@@ -1915,10 +1917,10 @@ mark.found { padding: 0 1px; border-radius: var(--r-1); background: var(--highli
   .tc-row { min-height: 44px; }
   .tc-back { display: inline-flex; }
   .tc-dhead { padding: calc(var(--s-4) + env(safe-area-inset-top)) var(--s-5) var(--s-4); }
-  .tc-dtop { padding: var(--s-4) var(--s-6); }
+  .tc-dtop { padding: var(--s-4) var(--s-5); }
   .node-verdict-words { white-space: normal; }
   .tc-dwords { flex-direction: column; gap: 0; }
-  .tc-dbody { padding: var(--s-6) var(--s-6) var(--s-8); }
+  .tc-dbody { padding: var(--s-6) var(--s-5) var(--s-8); }
   /* A fact's name over its value: the value gets the screen's width, its mark beside its words. */
   .tc-dbody .fact { grid-template-columns: minmax(0, 1fr); gap: 0; padding: var(--s-2) 0; }
   .tc-dbody .fact dt { font-size: var(--t-caption); }
