@@ -140,7 +140,7 @@ struct MacAgentGrammarTests {
         let shown: [(String, Any)] = [("Nice", 5), ("ThrottleInterval", 37), ("ExitTimeOut", 9), ("SoftResourceLimits", ["Core": 1000]),
                                       ("HardResourceLimits", ["Core": 1000]), ("Umask", 0), ("WorkingDirectory", agent.dir), ("StandardInPath", "/dev/null"),
                                       ("StartInterval", 3600), ("StartCalendarInterval", ["Hour": 3]), ("WatchPaths", [agent.dir + "/watched"]),
-                                      ("QueueDirectories", [agent.dir + "/queue"]), ("MachServices", ["dev.vibeswitcher.node.test.mach": true]),
+                                      ("QueueDirectories", [agent.dir + "/queue"]), ("MachServices", [agent.place.label + ".mach": true]),
                                       ("ProcessType", "Standard"), ("AbandonProcessGroup", true), ("EnableTransactions", true), ("LaunchOnlyOnce", true),
                                       ("LowPriorityIO", true), ("SessionCreate", true), ("WaitForDebugger", true), ("UnknownKeyOfTheTest", "x")]
         let unshown: [(String, Any)] = [("AssociatedBundleIdentifiers", ["dev.vibeswitcher.x"]), ("Debug", true), ("Disabled", false),
