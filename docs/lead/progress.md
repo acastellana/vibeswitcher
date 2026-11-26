@@ -4919,3 +4919,4 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-26 23:05 Automatically (auto_advance): Started a worker on the-session-host-s (The session host's --handover can't be used by another process to get a vault of its own sealed under the real key).
 - 2026-11-26 23:05 Started a worker on v2-on-the-mac-11
 - 2026-11-26 23:05 Workflow: disk_headroom_gb = `1`
+- 2026-11-26 23:13 Planned a-host-started-on: A host started on another home can't seal a vault under the real key (the fresh-start variant of the handover gap) (review audit, for security)
