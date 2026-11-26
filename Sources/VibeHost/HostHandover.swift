@@ -169,25 +169,8 @@ public enum HostHandover {
     /// vault in memory only: it takes the secrets once the lock holds.
     public static func receive(from path: String, lockPath: String, userHost: Bool, proof: String?, logPath: String?,
                                key: () -> SymmetricKey?) throws -> Received {
-        let refuse: (String) -> Failure = { why in
-            HostLog(path: logPath).note("host: handover refused: \(why)")
-            return Failure.refused(why)
-        }
-        let data = try contents(of: path)
-        var state = try decode(data)
-        if let why = Lock.notHeld(state.lockFD, path: lockPath) { throw refuse(why) }
-        guard userHost, let key = key() else {
-            return Received(state: state, secrets: takeSecrets(from: &state))
-        }
-        guard let proof else { throw refuse("it carries no proof that the running host made it (a build from before proofs, or not the host)") }
-        guard let claimed = Proof.Claim(proof), Proof.holds(claimed, key: key, state: data, lockFD: state.lockFD, lockPath: lockPath) else {
-            throw refuse("its proof doesn't hold for this state, this process and this lock")
-        }
+        var state = try read(from: path)
         let secrets = takeSecrets(from: &state)
-        // The channel gone (a build that couldn't take over read it before going back): no secrets, the vault as saved.
-        if let secrets, Proof.digest(secrets) != claimed.secrets {
-            throw refuse("its secrets aren't the ones its proof names")
-        }
         return Received(state: state, secrets: secrets)
     }
 
