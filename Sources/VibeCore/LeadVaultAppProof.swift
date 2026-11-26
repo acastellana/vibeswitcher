@@ -27,6 +27,11 @@ public enum AppProof {
 
     public static let keychainService = "dev.vibeswitcher.app-proof"
 
+    /// The session host's refusal of the app's proof while its vault started over and holds no key
+    /// (`LeadVault.Book.awaitsAppKey`): the app's alert says it in its own words (`HostClient.keyResetAlert`).
+    public static let vaultStartedOver = "The team's vault could not be opened and was started again, so the session host "
+        + "takes VibeSwitcher's key only once you confirm it."
+
     /// The app's key in the login Keychain, made the first time (see `AppKeyStore`). The app may ask you (it has a
     /// window to ask from): a rebuild without the stable signing identity (scripts/setup-signing.sh) is another
     /// program to the Keychain. Nil when there's none to be had (you said no): the app then isn't the app to the host.

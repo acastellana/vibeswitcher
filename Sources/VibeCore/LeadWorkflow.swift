@@ -837,6 +837,14 @@ public enum LeadPrompts {
         + "and every leaks and sample on this Mac waits behind it. For a crash, read its report in "
         + "~/Library/Logs/DiagnosticReports; for compiled code, `dyld_info -disassemble`."
 
+    /// What workers and verifiers are told about the Keychain (`LeadLaunch.keychainTool` and the hook refuse
+    /// `security`): on 2026-11-26 probing it crashed the Mac's keychain daemon and locked the user's login keychain.
+    public static let keychain = "Keychain: never run `security` or anything that reads or changes a Keychain item, a "
+        + "scratch keychain's included (refused to every session VibeSwitcher starts): on 2026-11-26 such probing crashed "
+        + "the keychain daemon and locked the user's login keychain. Keychain probes are done only in a keyboard session "
+        + "with the user: tell your lead the exact command (ask_lead or your report), and test on the code's scratch seams "
+        + "(an in-memory key store)."
+
     /// The user's working policy (2026-10-21): one agent owns each change through completion; an audit only where the
     /// risk calls for one; the tests a change affects while editing, and the merge's run as the one full suite; a
     /// re-audit checks only what is still open; cosmetic findings never block and never become tasks. Each role's
@@ -1318,6 +1326,7 @@ public enum LeadPrompts {
         don't push, don't delete branches; the lead merges.
         \(workerFiles)
         \(debuggers)
+        \(keychain)
         When something needs a real terminal (a password or other prompt, an install, an interactive program, anything \
         that asks questions on stdin or files wallet requests), ask_lead with the exact command, working directory and \
         why it needs a real terminal; the lead files the shell card for the user to Run. Wait for the lead's answer. \
@@ -1682,6 +1691,7 @@ public enum LeadPrompts {
         \(heavyWork)
         \(scratchFiles)
         \(debuggers)
+        \(keychain)
         Then call submit_audit with: completion complete / incomplete / blocked; integrity clean, suspect (you're not \
         sure) or violation (edits outside the boundaries that neither the lead's notes nor the worker's listed routine \
         calls accept, tests weakened, results faked, files you changed); tests passed, failed or not_run (how the tests \

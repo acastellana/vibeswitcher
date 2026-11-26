@@ -12,29 +12,8 @@ import VibeCore
 extension TailscaleFakeTests { @MainActor @Suite struct PhoneTailscaleFlowTests {
     private let scratch = Scratch()
 
-    /// A loopback port nothing holds right now, below the range the system hands out for port 0: other suites ask for
-    /// one of those and bind it a moment later, and this one taking it in between fails them. Never the real app's
-    /// phone ports (`PhonePorts.server` and its preview slots after it): a test holding one stops the user's app from
-    /// listening there.
-    private func freePort() throws -> UInt16 {
-        let appsPorts = PhonePorts.server...(PhonePorts.server + UInt16(PhonePorts.previewSlots))
-        for _ in 0..<100 {
-            let port = UInt16.random(in: 40_000..<49_000)
-            if appsPorts.contains(port) { continue }
-            let fd = socket(AF_INET, SOCK_STREAM, 0)
-            defer { close(fd) }
-            var address = sockaddr_in()
-            address.sin_family = sa_family_t(AF_INET)
-            address.sin_addr.s_addr = inet_addr("127.0.0.1")
-            address.sin_port = port.bigEndian
-            let length = socklen_t(MemoryLayout<sockaddr_in>.size)
-            let bound = withUnsafeMutablePointer(to: &address) {
-                $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(fd, $0, length) }
-            }
-            if bound == 0 { return port }
-        }
-        throw CancellationError()
-    }
+    /// A loopback port nothing holds right now, never one of the app's own (`freeLoopbackPort`).
+    private func freePort() throws -> UInt16 { try freeLoopbackPort() }
 
     private func access() throws -> PhoneAccess {
         AppStatus.enabled = false

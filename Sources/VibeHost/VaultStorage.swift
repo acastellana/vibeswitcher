@@ -37,7 +37,10 @@ public struct VaultStorage {
     public func book(handedOver: Data? = nil) -> LeadVault.Book {
         let handedOver = handedOver.flatMap { LeadVault.Book.reads($0) ? $0 : nil }
         let saved = handedOver ?? load()
-        let book = LeadVault.Book(restoring: saved, startingOver: saved == nil && FileManager.default.fileExists(atPath: file.path))
+        // Started over whenever a vault file was there and what came of it doesn't read (it didn't open, or opened as
+        // something that isn't a vault): only a first start, with no file, takes the app's key unasked.
+        let reads = saved.map(LeadVault.Book.reads) ?? false
+        let book = LeadVault.Book(restoring: saved, startingOver: !reads && FileManager.default.fileExists(atPath: file.path))
         if key != nil {
             let saver = Saver(storage: self, log: HostLog(path: logPath), later: retryLater)
             book.onChange = { saver.save($0) }

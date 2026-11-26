@@ -129,9 +129,11 @@ let vaultFile = VibePaths.root.appendingPathComponent("lead/vault.sealed")
 config.vault = ownsLaunchers ? VaultStorage(file: vaultFile, key: VaultStorage.keychainKey(), logPath: config.logPath).book(handedOver: restoredSecrets)
     : LeadVault.Book(restoring: restoredSecrets)
 // The app that started this host gives it its key on stdin (see `AppProof`), and says so: taken while the vault
-// holds none.
+// holds none, but not by a vault that started over (its file no longer opens under the Keychain key): that one waits
+// for your confirmation through the app (`LeadVault.Book.awaitsAppKey`).
 if arguments.contains(HostStart.appKeyFlag), let key = HostStart.appKeyFromStdin(), let vault = config.vault, !vault.adoptAppKey(key) {
-    log("the app key on stdin isn't the one the vault holds: kept the vault's")
+    log(vault.awaitsAppKey ? "the vault started over: the app key on stdin waits for your confirmation"
+        : "the app key on stdin isn't the one the vault holds: kept the vault's")
 }
 
 let server = HostServer(config: config)

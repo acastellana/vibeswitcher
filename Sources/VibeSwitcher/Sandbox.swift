@@ -2186,6 +2186,19 @@ private final class Driver: NSObject, NSApplicationDelegate {
         }),
         // What shows while Apple's installer runs.
         ("installing-tools", { _ in ToolInstaller.waitingPanel(ToolInstaller.waitingText) {} }),
+        // The session host doesn't take the app's proof (another key: a reinstall, a Keychain reset, or a key another
+        // program replaced), and the vault that started over: the alert `HostClient.confirmKeyReset` shows, made here
+        // with the host's own refusals and never answered (nothing is asked of a host).
+        ("key-refused", { _ in
+            let alert = HostClient.keyResetAlert(reason: "That isn't the key this session host knows for VibeSwitcher.", live: 0)
+            alert.layout()
+            return alert.window
+        }),
+        ("vault-started-over", { _ in
+            let alert = HostClient.keyResetAlert(reason: AppProof.vaultStartedOver, live: 0)
+            alert.layout()
+            return alert.window
+        }),
     ] }
 
     /// The `menu-bar-dots` sheet's sessions: made up, one in each status a dot can show.

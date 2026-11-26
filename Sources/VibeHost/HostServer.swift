@@ -308,6 +308,8 @@ public final class HostServer {
                 return .ok
             }
             refusal = "That isn't the key this session host knows for VibeSwitcher."
+        } else if config.vault?.awaitsAppKey == true {
+            refusal = AppProof.vaultStartedOver
         } else {
             refusal = "This session host holds no key for VibeSwitcher yet."
         }
@@ -315,10 +317,18 @@ public final class HostServer {
         return .error(refusal)
     }
 
-    /// A host with no app key takes the first one the app's code gives it (a build before challenges handed over).
+    /// A host with no app key takes the first one the app's code gives it (a build before challenges handed over), but
+    /// not into a vault that started over (`LeadVault.Book.awaitsAppKey`): that one waits for your confirmation, the
+    /// app's `replaceAppKey`.
     private func enroll(_ key: Data, from client: ClientConnection) {
         guard client.runsAppCode, appKey == nil, key.count == AppProof.keySize else { return }
-        if let vault = config.vault { vault.adoptAppKey(key) } else { looseAppKey = SymmetricKey(data: key) }
+        if let vault = config.vault {
+            guard vault.adoptAppKey(key) else {
+                return log.note("host: the vault started over: the app's key waits for your confirmation, \(HostLog.peer(client.peerPID))")
+            }
+        } else {
+            looseAppKey = SymmetricKey(data: key)
+        }
         log.note("host: took the app's first key (it held none), \(HostLog.peer(client.peerPID))")
     }
 
