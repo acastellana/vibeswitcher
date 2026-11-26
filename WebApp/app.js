@@ -13,7 +13,8 @@ import { t } from './js/i18n.js';
 import { register as registerPasskey } from './js/passkey.js';
 import { copyLine } from './js/views/cards.js';
 import { projectsOf, firstProject } from './js/conversation.js';
-import { leftColumn, ownSession } from './js/views/left.js';
+import { leftColumn, ownSession, framePhase, frameShape } from './js/views/left.js';
+import * as frame from './js/views/frame.js';
 import { shortcut, keyCommands, needingHref, nthHref, stepHref } from './js/keys.js';
 import { projectView } from './js/views/project.js';
 import { rightColumn } from './js/views/right.js';
@@ -50,7 +51,7 @@ function ownBuild() {
 }
 const feed = mocked
   ? await import('./js/mock.js').then(
-    ({ createMock }) => createMock(store, { rows: Number(params.get('rows')) || 0, still: params.has('still'), empty: params.has('empty'), older: params.has('older'), toggle: params.has('toggle'), held: params.has('held'), norole: params.has('norole'),
+    ({ createMock }) => createMock(store, { rows: Number(params.get('rows')) || 0, still: params.has('still'), delay: params.get('delay'), empty: params.has('empty'), older: params.has('older'), toggle: params.has('toggle'), held: params.has('held'), norole: params.has('norole'),
       refuse: (params.get('refuse') || '').split(',').filter(Boolean) }),
     (error) => {
       document.body.textContent = 'The mock (?mock) couldn\u2019t be loaded: the node\u2019s own page leaves it out; WebApp/serve.sh serves it.';
@@ -131,9 +132,13 @@ const node = nodeView(app);
 const settings = settingsView(app);
 const stats = statsView(app);
 const mail = mailView(app);
-const offline = h('div', { class: 'offline', role: 'status', hidden: true }, t('apReconnectingToTheNode'));
-// The node doesn't know this page, or dropped it: said once, quietly, with the one thing that fixes it. The rows it
-// had stay readable underneath.
+// The connection dropped after the page had the node's state: a note in the left column's gap (left.notes, below),
+// where nothing moves when it comes or goes; on a phone, where that column is a drawer, a dot on the button that opens
+// it (style.css, `.app.has-note`).
+const offline = h('div', { class: 'note reconnecting', role: 'status', hidden: true },
+  h('span', { class: 'note-words' }, h('strong', null, t('frReconnecting')), ' ', t('frReconnectingSub')));
+// The node dropped this page while its rows were shown: said once, at the top of the centre, with the one thing that
+// fixes it. The rows it had stay readable underneath.
 const unpaired = h('div', { class: 'offline signed-out', role: 'status', hidden: true });
 // A page that just redeemed a pairing code: the words to check against what `vibeswitcher web` shows, until the user
 // confirms it there.
@@ -226,17 +231,48 @@ document.addEventListener('focusin', () => requestAnimationFrame(unscroll));
 // A touch screen's browser shows a press (style.css's :active) only where the page listens for touches; this listener does
 // nothing else.
 document.addEventListener('touchstart', () => {}, { passive: true });
-// What the centre says before there is anything to show: connecting, or not paired.
-const waitingWords = h('h1', { class: 'big' });
-const waitingSub = h('p');
-const waiting = h('section', { class: 'centre screen status-screen', hidden: true }, kit.empty({ size: 'page', class: 'empty-state' }, waitingWords, waitingSub));
-// The reconnecting line, the page not paired and the notifications' offer: a row of their own at the top of the
-// centre, never over the header's controls.
-const centre = h('main', { class: 'centre-wrap' }, offline, unpaired, app.notifications.offer, tabBanner, passkeyOffer, project.el, own.el, newProject.el, node.el, settings.el, stats.el, mail.el, waiting);
+// ---- The frame before there is anything to show (the design review of 2026-11-25, D6, D21) ----
+// Until the node's first snapshot the centre and the right column are skeletons in the shape of the view they will
+// show (left.js draws the left column's); a node that doesn't answer for a while, a page that isn't paired and a node
+// with nothing on it each get a page that says what this is, what to do and what happens then.
+const UNREACHABLE_AFTER = 5000;
+let unreachable = false;
+let reachTimer = null;
+app.unreachable = () => unreachable;
+function watchReach() {
+  if (store.state.connection !== 'connecting') {
+    clearTimeout(reachTimer);
+    reachTimer = null;
+    unreachable = false;
+    return;
+  }
+  if (unreachable || reachTimer) return;
+  reachTimer = setTimeout(() => {
+    reachTimer = null;
+    if (store.state.connection !== 'connecting') return;
+    unreachable = true;
+    route();
+  }, UNREACHABLE_AFTER);
+}
+const { el: centreSkeleton, box: skeletonBox } = frame.centreSkeleton();
+const rightSkeleton = frame.rightSkeleton();
+// A page of the frame's own (views/frame.js): drawn again only when its kind changes.
+const framePage = h('section', { class: 'centre screen frame-page', hidden: true });
+let framePageDrawn = '';
+function drawFramePage(kind) {
+  if (kind === framePageDrawn) return;
+  framePageDrawn = kind;
+  framePage.replaceChildren(frame.framePage(kind));
+}
+// Skip past the left column to what the screen shows: the first stop of the keyboard, shown when it has the focus.
+const centre = h('main', { class: 'centre-wrap', id: 'content', tabindex: '-1' }, unpaired, tabBanner, passkeyOffer, project.el, own.el, newProject.el, node.el, settings.el, stats.el, mail.el, centreSkeleton, framePage);
+const skip = kit.button('plain', { tag: 'a', class: 'skip-link', href: '#content', onclick: (event) => { event.preventDefault(); app.drawer(null); centre.focus(); } }, t('frSkip'));
+// The reconnecting line and the notifications' offer: in the left column's gap, where nothing moves (D5).
+left.notes.append(offline, app.notifications.offer);
 const root = document.getElementById('app');
 const commandPalette = palette(app);
 const scrim = h('div', { class: 'drawer-scrim', onclick: () => app.drawer(null) });
-root.replaceChildren(left.el, centre, right.el, scrim, sheet.scrim, sheet.el, commandPalette.el, confirming, passkeyPill);
+root.replaceChildren(skip, left.el, centre, right.el, rightSkeleton, scrim, sheet.scrim, sheet.el, commandPalette.el, confirming, passkeyPill);
 // A phone's keyboard: the page keeps to what is visible above it, the box being typed in in sight (js/viewport.js).
 const phoneWidth = typeof matchMedia === 'function' ? matchMedia('(max-width: 760px)') : { matches: false };
 followKeyboard({ root, phone: () => phoneWidth.matches });
@@ -248,6 +284,8 @@ function settleHome() {
   const connection = store.state.connection;
   if (connection === 'connecting' || connection === 'unpaired' || connection === 'revoked') return false;
   const first = firstProject(projectsOf(store.state));
+  // A node with no project and no session: home says what this is and how to start.
+  if (!first && store.state.sessions.size === 0) return false;
   location.replace(location.pathname + location.search + (first ? projectHref(first) : '#/sessions'));
   return true;
 }
@@ -261,18 +299,23 @@ function route() {
   const name = r.name;
   root.dataset.route = name;
   const connection = store.state.connection;
-  const blank = name === 'home';
+  watchReach();
+  // What the centre shows: the route's view, or the frame's own (a skeleton while loading; the node out of reach; not
+  // paired; a node with nothing on it).
+  const phase = framePhase(store.state, unreachable);
+  const page = frame.framePageKind({ phase, connection, route: r, sessions: store.state.sessions.size });
   const shown = { project: project.el, sessions: own.el, new: newProject.el, session: own.el, node: node.el, settings: settings.el, stats: stats.el, mail: mail.el };
-  for (const el of new Set(Object.values(shown))) el.hidden = el !== shown[name];
-  waiting.hidden = !blank;
-  if (blank) {
-    const off = connection === 'unpaired' || connection === 'revoked';
-    setText(waitingWords, off ? t('unpaired') : t('connecting'));
-    setText(waitingSub, off ? t('unpairedSub') : '');
-  }
+  for (const el of new Set(Object.values(shown))) el.hidden = page !== null || el !== shown[name];
+  centreSkeleton.hidden = page !== 'loading';
+  skeletonBox.hidden = name === 'project' && r.view === 'roadmap';
+  framePage.hidden = !page || page === 'loading';
+  if (!framePage.hidden) drawFramePage(page);
+  root.classList.toggle('loading', phase === 'loading');
   // The right column: a project's lead conversation's; a session's inspector takes its place in the session view.
+  // While loading, its skeleton where it will be.
   const known = name === 'project' && (store.state.leads.has(r.id) || store.state.boards.has(r.id));
-  root.classList.toggle('with-right', known && r.view === 'lead');
+  const leadShape = page === 'loading' && (name === 'project' ? r.view === 'lead' : frameShape().home === 'project');
+  root.classList.toggle('with-right', (known && r.view === 'lead' && !page) || leadShape);
   // On a phone a task opens where it is drawn: in the right column, a drawer there.
   app.drawer(narrow.matches && known && r.view === 'lead' && r.task ? 'right' : null);
   // The side sheet belongs to the screen it opened on: a project's line stays open only while the address names it.
@@ -291,7 +334,13 @@ function route() {
   app.notifications.refresh?.();
 }
 ui.subscribe((what) => { if (what === 'route') route(); });
-for (const topic of ['sessions', 'leads', 'boards', 'cards', 'connection', 'node']) store.subscribe(topic, () => { if (ui.state.route.name === 'home' || (ui.state.route.name === 'project' && !root.classList.contains('with-right') && ui.state.route.view === 'lead')) route(); else left.render(); });
+for (const topic of ['sessions', 'leads', 'boards', 'cards', 'connection', 'node']) {
+  store.subscribe(topic, () => {
+    // The frame's own pages and skeletons give way as soon as the node says more.
+    const framed = root.classList.contains('loading') || !framePage.hidden || unreachable;
+    if (framed || ui.state.route.name === 'home' || (ui.state.route.name === 'project' && !root.classList.contains('with-right') && ui.state.route.view === 'lead')) route(); else left.render();
+  });
+}
 store.subscribe('sessions', () => { if (ui.state.route.name === 'session') route(); });
 // The screens with a list and a search box: `/` focuses it (views/twocol.js).
 const searchable = () => ({ sessions: own, session: own.alone() ? null : own, node, settings })[ui.state.route.name] || null;
@@ -307,13 +356,13 @@ root.addEventListener('click', (event) => {
 store.subscribe('connection', () => {
   const connection = store.state.connection;
   offline.hidden = connection !== 'reconnecting';
+  root.classList.toggle('has-note', !offline.hidden);
   unpaired.hidden = (connection !== 'unpaired' && connection !== 'revoked') || store.state.sessions.size === 0;
   const phrase = store.state.phrase;
   confirming.hidden = !phrase || connection === 'unpaired' || connection === 'revoked';
   if (!confirming.hidden) confirming.replaceChildren(h('span', null, t('apConfirmInTerminal')), h('strong', { class: 'phrase' }, phrase), h('span', { class: 'sub' }, t('apConfirmSub')));
   if (!unpaired.hidden) {
-    unpaired.replaceChildren(connection === 'revoked' ? t('apThisPageSAccessWas') : t('apThisPageIsnTPaired'),
-      t('apRun'), h('code', null, 'vibeswitcher web'), t('apInATerminalAndOpen'));
+    unpaired.replaceChildren(h('span', null, connection === 'revoked' ? t('frRevokedShort') : t('frUnpairedDo')), copyLine('vibeswitcher web', t('frPairLine')));
   }
 });
 

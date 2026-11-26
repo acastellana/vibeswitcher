@@ -235,9 +235,9 @@ test('U2 phone: the message box is one row, its "To the lead of…" only when th
   const none = projectView(fakeApp({ route: { name: 'project', id: P, view: 'lead', show: 'decisions' }, leads: new Map([[P, { ...lead, root: null }]]) }), { sheet });
   none.render();
   assert.ok(find(none.el, byClass('to')).classList.contains('no-lead'));
-  // The notifications' offer is one row on a phone.
-  assert.equal(under(PHONE, '.centre-wrap > .offline.offer')['flex-wrap'], 'nowrap');
-  assert.equal(under(PHONE, '.centre-wrap > .offline.offer > span')['-webkit-line-clamp'], '2');
+  // The notifications' offer left the centre (the design review's D5): it is a note in the left column's gap, where a
+  // phone's drawer shows it (tests/frame.test.mjs holds where).
+  assert.deepEqual(under(PHONE, '.centre-wrap > .offline.offer'), {});
 });
 
 // ---- The keyboard ----

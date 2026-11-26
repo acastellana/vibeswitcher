@@ -2,6 +2,13 @@
 // state and one line (`2 need you`, `4 in motion`, `quiet`); New project; at the bottom Your own sessions, This node
 // and Settings; and a summary under them: what needs you, its count a link to the next place that waits, and Brief me.
 // Nothing here moves to another column in any state.
+//
+// The frame's calm (the design review of 2026-11-25, D5, D6, D21, D24): until the node's first snapshot the projects,
+// the counts and the foot are skeletons in the shape the last load had (`frameShape`, kept in this browser), never
+// words that aren't known yet; a page that isn't paired, or can't reach its node, shows none of the places that would
+// lead nowhere; the reconnecting line and the notifications' offer sit in the column's gap (`notes`), above the places,
+// so when either comes or goes nothing else moves; the foot is one block of three rows of fixed height: what needs you
+// and what moves, Brief me, and whether this page acts for you with its Turn off.
 
 import * as kit from '../kit.js';
 import { h, s, setText, setClass } from '../dom.js';
@@ -9,8 +16,8 @@ import { icon } from '../marks.js';
 import { projectsOf, teamCounts, waitingPlaces, nextPlace } from '../conversation.js';
 import { projectHref, sessionHref } from '../ui.js';
 import { t, lang } from '../i18n.js';
-import { actsLine } from '../acting.js';
-import { boostMarkText, STATES, stateOf, lastPart } from '../words.js';
+import { actsLine, doButton } from '../acting.js';
+import { boostMarkText, STATES, stateOf, lastPart, dateTime } from '../words.js';
 import { queryWords, holdsAll } from './twocol.js';
 import { typing, shownNow } from '../keys.js';
 
@@ -61,6 +68,29 @@ export function filterItems(state, query) {
 
 // What the left column lists, in its order, for the keys (⌥1–9, next and previous): the filter's rows while it
 // holds words, else the projects.
+// The shape the last loaded page had, for the next load's skeletons: how many projects, whether the foot had Brief me
+// and the acting row, and where `#/` went. Kept in this browser (localStorage, which may refuse: then the defaults).
+const SHAPE = 'vs.frame';
+const SHAPE_DEFAULT = { projects: 1, brief: true, acts: true, home: 'project' };
+export function frameShape(storage = globalThis.localStorage) {
+  try {
+    const kept = JSON.parse(storage?.getItem(SHAPE) || 'null');
+    if (kept && typeof kept === 'object') return { ...SHAPE_DEFAULT, ...kept, projects: Math.max(0, Math.min(6, Number(kept.projects) || 0)) };
+  } catch { /* none kept, or not readable */ }
+  return { ...SHAPE_DEFAULT };
+}
+export function keepShape(shape, storage = globalThis.localStorage) {
+  try { storage?.setItem(SHAPE, JSON.stringify(shape)); } catch { /* a private window: the defaults next time */ }
+}
+
+// What the frame knows: 'off' (not paired, or unpaired by the node), 'loading' (no snapshot yet), 'down' (no snapshot,
+// and the node hasn't answered for a while: app.js's `unreachable`), else 'known'.
+export function framePhase(state, unreachable = false) {
+  if (state.connection === 'unpaired' || state.connection === 'revoked') return 'off';
+  if (state.connection === 'connecting') return unreachable ? 'down' : 'loading';
+  return 'known';
+}
+
 export function leftOrder(state, query = '') {
   if (queryWords(query).length) return filterItems(state, query);
   return projectsOf(state).map((one) => ({ kind: 'project', id: one.project, href: projectHref(one.project) }));
@@ -70,6 +100,10 @@ export function leftOrder(state, query = '') {
 export function leftColumn(app, { brief }) {
   const { store, ui } = app;
   const list = h('div', { class: 'projects', role: 'list' });
+  // Until the first snapshot: a skeleton row a project, as many as the last load had.
+  const skeleton = h('div', { class: 'projects-skeleton', 'aria-hidden': 'true', hidden: true });
+  // The reconnecting line and the notifications' offer (app.js puts them here), in the column's gap.
+  const notes = h('div', { class: 'left-notes' });
   const empty = kit.empty({ tag: 'p', class: 'left-empty', hidden: true });
   // The filter's field and rows, over the projects (they stand in for them while it holds words).
   const filter = kit.field({ kind: 'search', class: 'left-filter', type: 'search', placeholder: t('lfPlaceholder'), 'aria-label': t('lfLabel'), autocomplete: 'off', spellcheck: 'false', hidden: true });
@@ -78,10 +112,13 @@ export function leftColumn(app, { brief }) {
   const place = (route, iconName, key) => h('a', { class: 'place', href: route, data: { place: key } }, icon(iconName, 16), h('span', null, t(key)));
   const newProject = place('#/new', 'plus', 'newProject');
   const own = place('#/sessions', 'chat', 'ownSessions');
-  // How many sessions are yours (plain), or, when some need you, how many in words ("1 needs you", in the asking colour).
+  // Under its name, as a project's line: how many sessions are yours, or, when some need you, how many in words ("1
+  // needs you", in the asking colour); a bar while it isn't known.
   const ownWaiting = h('span', { class: 'place-waiting' });
   const ownCount = h('span', { class: 'place-count' });
-  own.append(ownWaiting, ownCount);
+  const ownBone = h('span', { class: 'bone short place-bone', hidden: true });
+  own.classList.add('two-line');
+  own.append(ownWaiting, ownCount, ownBone);
   const nodeLink = place('#/node', 'node', 'thisNode');
   // The node's notices beside This node, in words ("1 notice"), and Boost while it's on (a bolt that opens Settings).
   const notices = h('span', { class: 'place-count tone-text-working' });
@@ -90,18 +127,26 @@ export function leftColumn(app, { brief }) {
   const places = [newProject, own, nodeLink, place('#/settings', 'settings', 'settings')];
   // The summary: what needs you, as a link to the next place that waits (another project, a session of yours, This
   // node); what moves; and Brief me.
+  // Three rows, each its own height whatever it says: the words (what needs you; what moves), Brief me, the acting row.
   const summaryCount = h('a', { class: 'summary-count' });
   const summaryRest = h('span', { class: 'summary-rest' });
+  const countBone = h('span', { class: 'bone summary-bone', hidden: true });
+  const restBone = h('span', { class: 'bone short summary-bone', hidden: true });
   const briefButton = h('button', { class: 'summary-brief', type: 'button', onclick: () => brief() }, icon('note', 14), t('briefMe'));
+  const briefBone = h('span', { class: 'bone brief-bone', hidden: true });
   const actsSlot = h('div', { class: 'acts-slot' });
-  const summary = h('div', { class: 'left-summary' }, h('span', { class: 'summary-words' }, summaryCount, summaryRest), briefButton, actsSlot);
+  const actsBone = h('span', { class: 'bone short acts-bone', hidden: true });
+  const summary = h('div', { class: 'left-summary' }, h('span', { class: 'summary-words' }, h('span', { class: 'summary-line' }, summaryCount, countBone),
+    h('span', { class: 'summary-line' }, summaryRest, restBone)), briefButton, briefBone, actsSlot, actsBone);
+  const colTitle = kit.sectionTitle('h2', { class: 'col-title' }, t('projects'));
   let actsDrawn = '';
+  let actsShown = false;
   const el = h('nav', { class: 'left', 'aria-label': t('projects') },
     h('div', { class: 'colhead' }, h('a', { class: 'brand', href: '#/' }, 'VibeSwitcher'), h('span', { class: 'grow' }), boost,
       // A phone has no ⌘K: the palette from the drawer's head.
       kit.iconButton({ class: 'phone-only palette-open', 'aria-label': t('paGoToASessionOr'), title: t('paGoToASessionOr'),
         onclick: () => { app.drawer?.(null); app.ui.setPalette(true); } }, icon('search', 16))),
-    h('div', { class: 'colbody' }, kit.sectionTitle('h2', { class: 'col-title' }, t('projects')), filter, results, filterEmpty, list, empty, newProject, h('span', { class: 'left-gap' }), ...places.slice(1)),
+    h('div', { class: 'colbody' }, colTitle, filter, results, filterEmpty, skeleton, list, empty, newProject, h('span', { class: 'left-gap' }), notes, ...places.slice(1)),
     summary);
   const rows = new Map();
 
@@ -193,10 +238,44 @@ export function leftColumn(app, { brief }) {
     };
   }
 
+  // The skeleton's rows: a ring and two bars each, `n` of them.
+  let skeletonRows = -1;
+  function drawSkeleton(n) {
+    if (n === skeletonRows) return;
+    skeletonRows = n;
+    skeleton.replaceChildren(...Array.from({ length: n }, () => h('span', { class: 'project skeleton-row' }, h('span', { class: 'skeleton-ring' }),
+      h('span', { class: 'project-text' }, h('span', { class: 'bone' }), h('span', { class: 'bone short' })))));
+  }
+
+  // Whether this page acts for the user: one quiet row, its mark and its words, with Turn off; since when in its title.
+  function actsRow(state) {
+    const acts = state.node?.web?.acts;
+    if (!acts) return null;
+    const level = acts.level ?? (acts.on ? 'trust' : 'off');
+    if (level === 'off') return null;
+    // Acting is on but not in this tab (the banner over the centre says why), or only from another address.
+    if (!store.acts()) return actsLine(app, { compact: true });
+    const since = acts.since ? dateTime(acts.since, { date: null }) : '';
+    const off = store.can?.('set') ? doButton(app, { label: t('acTurnOff'), kind: 'set', plain: true, size: 's', className: 'acts-off', args: () => ({ key: 'web_acts', value: 'off' }) }).el : null;
+    return h('div', { class: 'acts-row', title: level === 'confirm' ? t('acConfirmShort', { since }) : t('frActsSince', { since }) },
+      icon('send', 12), h('span', { class: 'acts-words' }, t('frActs')), off);
+  }
+
+  let kept = '';
   function render() {
     const state = store.state;
     const projects = projectsOf(state);
     const route = ui.state.route;
+    const phase = framePhase(state, app.unreachable?.());
+    const shape = phase === 'loading' ? frameShape() : null;
+    setClass(el, 'loading', phase === 'loading');
+    // Not paired, or the node out of reach: no place that would lead nowhere, no count, no foot.
+    const away = phase === 'off' || phase === 'down';
+    for (const placeLink of places) placeLink.hidden = away;
+    colTitle.hidden = away && projects.length === 0;
+    summary.hidden = away;
+    skeleton.hidden = phase !== 'loading';
+    if (phase === 'loading') drawSkeleton(shape.projects);
     // While the filter holds words, its rows stand in for the projects.
     const filtering = queryWords(query).length > 0;
     list.hidden = filtering;
@@ -214,7 +293,8 @@ export function leftColumn(app, { brief }) {
     for (const [id, r] of rows) if (!next.has(id)) r.el.remove();
     rows.clear();
     for (const [id, r] of next) rows.set(id, r);
-    empty.hidden = filtering || projects.length > 0 || state.connection === 'connecting';
+    list.hidden = list.hidden || phase === 'loading';
+    empty.hidden = filtering || projects.length > 0 || phase !== 'known';
     setText(empty, t('noProjectsSub'));
     for (const placeLink of places) {
       if (!placeLink.dataset.place) continue;
@@ -226,29 +306,35 @@ export function leftColumn(app, { brief }) {
     const needs = waits.reduce((sum, place) => sum + place.count, 0);
     const moving = projects.reduce((sum, project) => sum + project.motion, 0);
     const upNext = nextPlace(waits, route);
-    setText(summaryCount, needs ? t('needYouInAll', { n: needs }) : t('nothingNeedsYou'));
+    // Nothing is said before it is known: bars where the words will be.
+    const known = phase === 'known';
+    summaryCount.hidden = !known;
+    summaryRest.hidden = !known;
+    countBone.hidden = known;
+    restBone.hidden = known;
+    setText(summaryCount, !known ? '' : needs ? t('needYouInAll', { n: needs }) : t('nothingNeedsYou'));
     if (upNext) {
       summaryCount.setAttribute('href', upNext.kind === 'project' ? projectHref(upNext.id) : upNext.kind === 'session' ? sessionHref(upNext.id) : '#/node');
       summaryCount.title = t('nextWaiting');
     } else { summaryCount.removeAttribute('href'); summaryCount.title = ''; }
     setClass(summaryCount, 'asked', needs > 0);
-    setText(summaryRest, moving ? ` · ${t('inMotion', { n: moving })}` : '');
+    setText(summaryRest, !known ? '' : moving ? t('inMotion', { n: moving }) : t('frNothingMoving'));
     // A page the node doesn't know (not paired, or its access taken back) knows nothing to count or brief.
-    const off = state.connection === 'unpaired' || state.connection === 'revoked';
-    summaryCount.hidden = off;
-    summaryRest.hidden = off;
-    briefButton.hidden = off || !store.can?.('brief');
-    // Whether this page acts for the user, and since when, with the switch that turns it off.
-    const actsKey = JSON.stringify([state.node?.web?.acts, store.acts(), state.phrase, lang()]);
-    if (actsKey !== actsDrawn) { actsDrawn = actsKey; actsSlot.replaceChildren(...[actsLine(app, { compact: true })].filter(Boolean)); }
+    briefButton.hidden = !known || !store.can?.('brief');
+    briefBone.hidden = !(phase === 'loading' && shape.brief);
+    // Whether this page acts for the user, with the switch that turns it off.
+    const actsKey = JSON.stringify([known, state.node?.web?.acts, store.acts(), state.phrase, lang()]);
+    if (actsKey !== actsDrawn) { actsDrawn = actsKey; const row = known ? actsRow(state) : null; actsShown = !!row; actsSlot.replaceChildren(...(row ? [row] : [])); }
+    actsBone.hidden = !(phase === 'loading' && shape.acts);
     // The places that hold what waits carry the asking colour, so the user sees where it is.
     const ownWaits = waits.filter((place) => place.kind === 'session').reduce((sum, place) => sum + place.count, 0);
     setClass(own, 'asked', ownWaits > 0);
     // Two numbers side by side read as nothing: what needs you, in words, else how many are yours.
     setText(ownWaiting, ownWaits ? t('ownWaiting', { n: ownWaits }) : '');
-    ownWaiting.hidden = !ownWaits;
-    setText(ownCount, !ownWaits && mine.length ? String(mine.length) : '');
-    ownCount.hidden = !!ownWaits || !mine.length;
+    ownWaiting.hidden = !known || !ownWaits;
+    setText(ownCount, !known || ownWaits ? '' : mine.length ? t('owCount', { n: mine.length }) : t('frOwnNone'));
+    ownCount.hidden = !known || !!ownWaits;
+    ownBone.hidden = phase !== 'loading';
     own.title = mine.length ? t('owCount', { n: mine.length }) : '';
     setClass(nodeLink, 'asked', waits.some((place) => place.kind === 'node'));
     const count = state.node?.notices?.length || 0;
@@ -257,9 +343,16 @@ export function leftColumn(app, { brief }) {
     const mark = boostMarkText(state.node?.boost);
     boost.hidden = !mark;
     if (mark) { boost.title = mark.help; boost.setAttribute('aria-label', mark.label); }
+    // The shape this load has, for the next one's skeletons.
+    if (known && state.connection === 'live') {
+      const now = { projects: Math.min(6, projects.length), brief: !briefButton.hidden, acts: actsShown,
+        home: projects.length ? 'project' : state.sessions.size ? 'sessions' : 'empty' };
+      const key = JSON.stringify(now);
+      if (key !== kept) { kept = key; keepShape(now); }
+    }
   }
 
-  return { el, render, focusFilter: () => focusFilter(), order: () => leftOrder(store.state, query) };
+  return { el, render, notes, focusFilter: () => focusFilter(), order: () => leftOrder(store.state, query) };
 }
 
 // A session of the user's own: outside every project's team (no role), or a lead session that leads nothing now

@@ -109,7 +109,8 @@ test('U17: the left column’s places say what they count, in words: what needs 
     assert.equal(shown(find(place(left, 'thisNode'), byClass('place-count'))), notice);
     const calm = leftColumn(app([1, 2, 3, 4, 5].map((i) => own('idle', i)), ['a', 'b']), { brief() {} });
     calm.render();
-    assert.equal(shown(find(place(calm, 'ownSessions'), byClass('place-count'))), '5', 'nothing waits: how many are yours');
+    // Under its name, as a project's line (the design review's D24): how many are yours, in words.
+    assert.equal(shown(find(place(calm, 'ownSessions'), byClass('place-count'))), code === 'en' ? '5 sessions of yours' : '5 sesiones tuyas', 'nothing waits: how many are yours');
     assert.equal(shown(find(place(calm, 'ownSessions'), byClass('place-waiting'))), '');
     assert.equal(shown(find(place(calm, 'thisNode'), byClass('place-count'))), notices);
     const none = leftColumn(app([], []), { brief() {} });

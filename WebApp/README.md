@@ -19,10 +19,11 @@ bash scripts/test.sh --web WebApp/tests
 | Address | Shows |
 | --- | --- |
 | `/#pair=CODE` | The node, live: what `vibeswitcher web` prints. The code is taken off the address bar and exchanged for a token this tab keeps. |
-| `/` | The node again in this tab (its token), or "Not paired" with what to run. |
+| `/` | The node again in this tab (its token), or "Pair this page with your node": what this is, the line to run in a terminal, what happens then. A node that doesn't answer for 5 s gets "The node isn't answering" with Try again now; until the first snapshot every column is a skeleton in the shape the last load had. |
 | `/?mock` | The mock node: a lead's team moves tasks across its board, a question arrives, sessions finish. |
 | `/?still` | The mock's snapshot with nothing happening after it (for screenshots). |
-| `/?empty` | A mock node with no sessions. |
+| `/?empty` | A mock node with no sessions: home says what this is and offers Start a session and New project. |
+| `/?mock&delay=MS`, `/?mock&delay=never` | The mock as a slow node (its first snapshot MS late: the skeletons, then the content without a jump), or one that never answers (the page that says so). |
 | `/?older` | A mock node that doesn't take a session's answer or a start from a page (it lists no `session.reply`, `session.new`, `session.resume` or `lead`): their lines, and why. |
 | `/?toggle` | The mock's asking session shows Claude's auto-mode popup, whose Space-toggled option the node refuses from a page. |
 | `/?rows=10000` | One mock session ("Add dark mode…") with a 10,000-row chat: its newest 200 first, the rest paged in as you scroll up. |
@@ -68,7 +69,8 @@ Screenshots of each main state, light and dark, wide and at 390 px, are in `shot
 | `js/terminal.js` | A session's terminal over the socket (the contract's §9): the binary frames, and the stream's life (open, the replay drawn whole, live, resync, reconnect, close). |
 | `vendor/` | xterm.js and its fit add-on, at the versions and hashes `vendor/README.md` records; nothing else is vendored. |
 | `js/viewport.js` | A phone's on-screen keyboard: while a box is being typed in, the page keeps to the visible part above the keyboard (`keyboard`, `--vv-height`, `--vv-top` on the root, style.css's 760 px blocks) and the box stays in sight. |
-| `js/notify.js` | The browser's notifications while the page is open (a card opens, a session's prompt waits, a lead stops), asked once and toggled on This node; the title bar's count of what needs you. |
+| `js/notify.js` | The browser's notifications while the page is open (a card opens, a session's prompt waits, a lead stops), asked once (a note in the left column's gap, where nothing moves; "Not now" kept) and toggled on This node; the title bar's count of what needs you. |
+| `js/views/frame.js` | The frame before there is anything to show: the centre's and the right column's skeletons until the first snapshot, and the pages for a page not paired, a node out of reach and a node with nothing on it (what this is, what to do, what happens then). The left column's skeleton is `left.js`'s, in the shape the last load had (`vs.frame` in this browser). |
 | `js/images.js` | A chat's pictures: their bytes asked of the node (`chat.image`) a part at a time, shown as object URLs; the 400 lately used kept, 96 MB at most. |
 | `js/composing.js` | The composer's word at the caret (`/` and `@`, as the app's composer finds it) and an image's parts for `session.attach`. In the box, `/` and `@` complete from the node (`session.complete`); a pasted, dropped or picked image (the + button) goes to the node and the draft names it, and one that is a file on the node gets the line that sends it (`send … --image PATH`); the messages the node holds behind a question show over the box. |
 | `js/settings.js` | The settings' parts with no page in them: grouped by section, a change's `vibeswitcher set` line quoted as the shell needs, what a draft is checked against. |

@@ -4,7 +4,8 @@
 // stops (its session finishes its turn or ends), one of your own sessions finishes its work (never a worker's or a
 // verifier's: the Mac's "when a session finishes"), or the node's engine froze (a freeze its health digest keeps, told once,
 // never one kept before the page looked). Asked once, by a quiet offer the first time something needs you; then a
-// toggle on This node. A notification is the first line only, as text: the browser shows it as text, and controls,
+// toggle on This node. The offer is a note the frame places where nothing moves when it comes or goes (app.js puts it in
+// the left column's gap: the design review's D5); answered, it says what happened, then goes. A notification is the first line only, as text: the browser shows it as text, and controls,
 // bidirectional and other format characters are taken out first. The title bar counts what needs you: open cards and
 // prompts waiting.
 //
@@ -21,7 +22,7 @@
 // its own; `notifications(app)` puts it on the page.
 
 import * as kit from './kit.js';
-import { h } from './dom.js';
+import { h, setText } from './dom.js';
 import { pluginOn, pluginsOn } from './plugincard.js';
 import { t } from './i18n.js';
 
@@ -179,6 +180,7 @@ export function notifications(app, env = {}) {
   const doc = env.document || globalThis.document;
   const supported = typeof Note === 'function';
   const Audio = 'AudioContext' in env ? env.AudioContext : globalThis.AudioContext;
+  const later = env.later || ((fn, ms) => setTimeout(fn, ms));
   let last = null;
   let audio = null;
 
@@ -186,10 +188,17 @@ export function notifications(app, env = {}) {
 
   // The offer, once: shown the first time something needs you while the browser hasn't been asked and you haven't
   // answered; either answer is kept.
-  const offerText = h('span', null, t('ntGetANotificationWhenSomething'));
-  const offer = h('div', { class: 'offline offer', role: 'status', hidden: true }, offerText,
+  const offerText = h('span', { class: 'note-words' }, t('ntGetANotificationWhenSomething'));
+  const offerAnswers = h('span', { class: 'note-actions' },
     kit.button('quiet', { size: 's', class: 'offer-yes', onclick: () => turn(true) }, t('ntTurnOn')),
     kit.button('quiet', { size: 's', class: 'offer-no', onclick: () => turn(false) }, t('ntNotNow')));
+  const offer = h('div', { class: 'note offer', role: 'status', hidden: true }, offerText, offerAnswers);
+  // The offer answered: what happened, in its place, for a few seconds; then it goes.
+  function settled(words) {
+    setText(offerText, words);
+    offerAnswers.hidden = true;
+    later(() => { offer.hidden = true; }, 6000);
+  }
 
   // The toggle on This node.
   const box = kit.checkbox({ class: 'notify-toggle', onchange: () => turn(box.checked) });
@@ -248,13 +257,15 @@ export function notifications(app, env = {}) {
   }
 
   async function turn(on) {
-    offer.hidden = true;
+    const offered = !offer.hidden;
     if (!on || !supported) {
       store(storage, 'off');
+      if (offered) settled(t('frOfferOff'));
       return draw();
     }
     const answer = Note.permission === 'default' ? await Note.requestPermission() : Note.permission;
     store(storage, answer === 'granted' ? 'on' : 'off');
+    if (offered) settled(answer === 'granted' ? t('frOfferOn') : t('frOfferBlocked'));
     draw();
   }
 

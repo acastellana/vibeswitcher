@@ -349,7 +349,47 @@ small { font-size: var(--t-caption); }
   background: var(--raised); box-shadow: var(--e-2); color: var(--ink-2); font-size: var(--t-caption);
   transform: translateX(-50%); animation: enter var(--dur-2) var(--ease-out);
 }
-.offline::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--working); animation: pulse var(--loop) ease-in-out infinite; }
+.offline::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--ink-3); animation: pulse var(--loop) ease-in-out infinite; }
+
+/* The frame's calm (the design review of 2026-11-25, D5, D6, D21, D29). The skip link: the keyboard's first stop,
+   shown only while it has the focus, over the corner of the left column's head. */
+.skip-link { position: fixed; top: 8px; left: 8px; z-index: 20; transform: translateY(-200%); }
+.skip-link:focus { transform: none; }
+/* A note in the left column's gap (the reconnecting line, the notifications' offer): a quiet card where nothing else
+   moves when it comes or goes. */
+.note { display: grid; gap: 6px; margin: 4px 0; padding: 10px 12px; border-radius: var(--r-3); background: var(--raised); box-shadow: var(--e-1); color: var(--ink-2); font-size: var(--t-caption); line-height: var(--lh-caption); }
+.note strong { color: var(--ink); font-weight: var(--w-strong); }
+.note-actions { display: flex; flex-wrap: wrap; gap: 4px; margin-left: -8px; }
+.note.reconnecting { grid-template-columns: auto minmax(0, 1fr); align-items: baseline; column-gap: 8px; }
+.note.reconnecting::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--ink-3); animation: pulse var(--loop) ease-in-out infinite; }
+/* Until the first snapshot: the lead view's shape (its header's two rows, the strip, the lines, the message box) and
+   the right column's, in bars that breathe on the loop (still with reduced motion). */
+.frame-skeleton { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.skeleton-head { flex: none; display: grid; gap: 8px; padding: 8px 24px; border-bottom: 1px solid var(--line); }
+.skeleton-row { display: flex; align-items: center; gap: 14px; min-height: var(--ctl-m); }
+.frame-skeleton .bone.skeleton-title { width: 280px; height: 14px; }
+.frame-skeleton .bone.skeleton-switch { width: 150px; height: var(--ctl-m); border-radius: var(--r-2); }
+.frame-skeleton .bone.skeleton-dial { width: 320px; height: var(--ctl-m); border-radius: var(--r-2); }
+.skeleton-strip { flex: none; display: flex; align-items: center; gap: 14px; min-height: var(--ctl-m); padding: 0 24px; border-bottom: 1px solid var(--line); }
+.skeleton-strip .bone { flex: none; width: 76px; }
+.skeleton-lines { flex: 1; display: grid; align-content: start; gap: 20px; padding: 24px; overflow: hidden; }
+.skeleton-line { display: grid; grid-template-columns: 16px minmax(0, 1fr); align-items: center; gap: 12px; max-width: 720px; }
+.skeleton-mark { width: 16px; height: 16px; border-radius: 50%; background: var(--fill-2); animation: pulse var(--loop) ease-in-out infinite; }
+.skeleton-composer { flex: none; padding: 12px 24px; border-top: 1px solid var(--line); }
+.skeleton-field { display: block; height: var(--ctl-l); border-radius: var(--r-3); box-shadow: var(--e-1-in); }
+/* The right column's skeleton takes its place while loading, and is nowhere otherwise. */
+.app.loading .right:not(.right-skeleton), .app:not(.loading) .right.right-skeleton { display: none; }
+.right.right-skeleton .colbody { display: grid; align-content: start; gap: 16px; padding: 14px 16px; }
+.right-skeleton .colhead .bone { width: 120px; }
+.right-skeleton .bone.skeleton-tabs { width: 100%; height: var(--ctl-m); border-radius: var(--r-2); }
+/* A page of the frame's own (not paired, the node out of reach, a node with nothing yet): what this is, what to do,
+   its one action, what happens then. */
+.frame-page { flex: 1; overflow-y: auto; }
+.frame-page .empty.page { max-width: 460px; margin: 14vh auto 40px; padding: 0 24px; }
+.frame-page .empty.page > p { margin: 0; color: var(--ink-2); }
+.frame-page .empty.page > .frame-then { color: var(--ink-3); font-size: var(--t-caption); line-height: var(--lh-caption); }
+.frame-page .copy-line { justify-self: stretch; margin: 4px 0; text-align: left; }
+.frame-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin: 4px 0; }
 
 /* ---- Shared by the inspector and Your own sessions ---- */
 
@@ -566,7 +606,7 @@ small { font-size: var(--t-caption); }
 .priority { display: inline-flex; align-items: center; gap: 5px; color: var(--ink-2); font-weight: var(--w-strong); }
 .priority.blocking::before, .priority.important::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .priority.blocking { color: var(--needs-you); }
-.priority.important { color: var(--working); }
+.priority.important { color: var(--ink-2); }
 .asked { color: var(--ink-3); }
 .card-question { font-size: var(--t-title); font-weight: var(--w-strong); line-height: var(--lh-title); }
 .card-why { color: var(--ink-2); margin-top: -5px; }
@@ -584,7 +624,7 @@ small { font-size: var(--t-caption); }
 .option-key { flex: none; width: 19px; border-radius: 50%; background: var(--fill-2); color: var(--ink-2); font-size: var(--t-caption); font-weight: var(--w-strong); line-height: 19px; text-align: center; } /* a chip's own line: it sets the chip's height */
 .answer { display: flex; gap: 8px; }
 .answer-input { flex: 1; }
-.card-notice { color: var(--working); font-size: var(--t-caption); }
+.card-notice { color: var(--ink-2); font-size: var(--t-caption); }
 .card-context { font-size: var(--t-caption); margin: 6px 0 0; overflow-wrap: anywhere; }
 .card-context-label { color: var(--ink-2); }
 .card > .card-foot { grid-column: 1; color: var(--ink-3); font-size: var(--t-caption); }
@@ -776,7 +816,7 @@ small { font-size: var(--t-caption); }
 .inspect-port-about { color: var(--ink-3); }
 .inspect-note { padding: 12px 18px 0; color: var(--ink-2); }
 .inspect-notice { display: flex; align-items: flex-start; gap: 8px; padding: 12px 18px 0; color: var(--ink-2); font-size: var(--t-caption); }
-.inspect-notice .icon { margin-top: 2px; color: var(--working); }
+.inspect-notice .icon { margin-top: 2px; color: var(--ink-2); }
 .inspect-skeleton { display: grid; gap: 12px; padding: 18px 18px 0; }
 
 /* The Team tab's tasks. */
@@ -822,7 +862,7 @@ small { font-size: var(--t-caption); }
 .fact dd { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; overflow-wrap: anywhere; }
 .notices { display: grid; gap: 6px; }
 .notices li { display: flex; align-items: flex-start; gap: 9px; padding: 9px 12px; border-radius: var(--r-2); background: var(--fill); }
-.notices .icon { margin-top: 2px; color: var(--working); }
+.notices .icon { margin-top: 2px; color: var(--ink-2); }
 .node-says { margin-bottom: 6px; }
 .lines { display: grid; gap: 4px; color: var(--ink-2); font-size: var(--t-caption); overflow-wrap: anywhere; }
 /* A build: what the node says of it, the hash after it, quiet (D18). Technical details: pids, the node's name, its
@@ -852,7 +892,7 @@ small { font-size: var(--t-caption); }
 .setting-value { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); font-size: var(--t-caption); }
 .setting-about { color: var(--ink-2); font-size: var(--t-caption); }
 .setting-where { color: var(--ink-3); font-size: var(--t-caption); overflow-wrap: anywhere; }
-.setting-note { display: flex; align-items: center; gap: 6px; color: var(--working); font-size: var(--t-caption); }
+.setting-note { display: flex; align-items: center; gap: 6px; color: var(--ink-2); font-size: var(--t-caption); }
 .setting-editor { grid-template-columns: minmax(0, 1fr); margin-top: 6px; }
 .setting-controls { display: flex; align-items: center; gap: 10px; }
 .setting-input { flex: 1; }
@@ -992,18 +1032,15 @@ kbd { padding: 1px 6px; border-radius: var(--r-1); box-shadow: var(--e-1-in); co
 .passkeys { display: grid; gap: 4px; margin-top: 8px; }
 .passkey-row { color: var(--ink-2); font-size: var(--t-caption); }
 .passkey-row code { color: var(--ink); }
-/* The notifications' one offer (js/notify.js): the same quiet pill, with its two answers. */
-.offline.offer { gap: 10px; width: max-content; max-width: calc(100% - 32px); border-radius: var(--r-4); }
-.offer span { flex: 1 1 auto; min-width: 0; }
-.offline.offer::before { background: var(--accent); animation: none; }
+/* The notifications' one offer (js/notify.js): a note in the left column's gap, with its two answers. */
 .offer button { flex: none; min-height: var(--ctl-s); }
 .offer .offer-yes { font-weight: var(--w-strong); }
 .notify-line { display: flex; align-items: center; gap: 8px; color: var(--ink); }
 .notify-said { display: block; margin-top: 4px; color: var(--ink-3); font-size: var(--t-caption); }
 .notify-said:empty { display: none; }
-/* The reconnecting line, the page not paired and the notifications' offer (app.js puts them first in the centre): a row
-   of their own across the top of the centre, pushing what is under it down, never over the header's controls. */
-.centre-wrap > .offline, .centre-wrap > .offline.offer {
+/* The page unpaired while its rows show (app.js puts it first in the centre, after the user's or a terminal's act): a row
+   of its own across the top of the centre, never over the header's controls. */
+.centre-wrap > .offline {
   position: relative; top: auto; left: auto; z-index: auto; flex: none; flex-wrap: wrap; justify-content: center; width: auto; max-width: none;
   padding: 7px 24px; border-radius: 0; border-bottom: 1px solid var(--line); box-shadow: none; transform: none;
 }
@@ -1204,7 +1241,7 @@ kbd { padding: 1px 6px; border-radius: var(--r-1); box-shadow: var(--e-1-in); co
 .place[aria-current] { background: var(--raised); color: var(--ink); box-shadow: var(--e-1); }
 .place-count { margin-left: auto; color: var(--ink-3); font-size: var(--t-caption); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .left-summary { flex: none; display: grid; justify-items: start; gap: 2px; padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); color: var(--ink-2); font-size: var(--t-caption); }
-.summary-words { min-width: 0; }
+.summary-words { display: grid; width: 100%; min-width: 0; }
 .summary-count.asked { color: var(--asked); font-weight: var(--w-strong); }
 .summary-brief { flex: none; color: var(--ink-2); }
 .place.asked { color: var(--asked); }
@@ -1222,6 +1259,28 @@ kbd { padding: 1px 6px; border-radius: var(--r-1); box-shadow: var(--e-1-in); co
 /* Brief me: a quiet button with its mark, not a caption among the status lines. */
 .summary-brief { display: inline-flex; align-items: center; gap: 6px; margin: 4px 0 2px; min-height: var(--ctl-s); padding: 0 10px 0 8px; border-radius: var(--r-2); background: var(--raised); box-shadow: var(--e-1); color: var(--ink); font-weight: var(--w-medium); }
 .summary-brief .icon { color: var(--ink-2); }
+/* The frame's calm in the left column (D5, D6, D24): the notes in its gap; the projects' skeleton rows, each a
+   project's height; Your own sessions' count under its name, as a project's line; the foot's three rows, each of its
+   own height whatever it says (the words' two lines, Brief me, the acting row), so nothing above it moves. */
+.left-notes { display: grid; }
+.projects-skeleton { display: flex; flex-direction: column; gap: 2px; }
+.skeleton-row.project { cursor: default; }
+.skeleton-ring { width: 28px; height: 28px; border-radius: 50%; box-shadow: var(--e-1-in); background: var(--fill); }
+.skeleton-row .project-text { gap: 0; }
+.skeleton-row .project-text > .bone { width: 70%; margin: 4px 0; }
+.skeleton-row .project-text > .bone.short { width: 40%; margin: 3px 0; }
+.place.two-line { display: grid; grid-template-columns: 16px minmax(0, 1fr); column-gap: 9px; }
+.place.two-line > :is(.place-waiting, .place-count, .place-bone) { grid-column: 2; margin-left: 0; }
+.place.two-line > .place-bone { margin: 3px 0; }
+.summary-line { min-height: calc(var(--t-caption) * var(--lh-caption)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.summary-line > .bone { display: inline-block; vertical-align: middle; }
+.left-summary .bone.brief-bone { width: 96px; height: var(--ctl-s); margin: 4px 0 2px; border-radius: var(--r-2); }
+.left-summary .bone.acts-bone { height: var(--ctl-s); margin-top: 4px; border-radius: var(--r-2); }
+.acts-slot { justify-self: stretch; }
+.acts-row { display: flex; align-items: center; gap: 6px; width: 100%; min-height: var(--ctl-s); margin-top: 4px; color: var(--ink-2); }
+.acts-row > .icon { flex: none; color: var(--ink-3); }
+.acts-row > .acts-words { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.acts-row > .act { margin-left: auto; flex-wrap: nowrap; }
 
 /* The centre's header, the switches and the strip */
 .centre-head { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; min-height: var(--head); padding: 8px 24px; border-bottom: 1px solid var(--line); }
@@ -1518,6 +1577,11 @@ kbd { padding: 1px 6px; border-radius: var(--r-1); box-shadow: var(--e-1-in); co
   /* A banner over the header takes the screen's top inset; the header under it doesn't take it twice. */
   .centre-wrap > .offline { padding-top: calc(7px + env(safe-area-inset-top)); }
   .centre-wrap:has(> .offline:not([hidden])) :is(.centre-head, .head, .tc-head, .tc-dhead) { padding-top: 8px; }
+  /* A note waits in the left column (the connection dropped): a dot on the button that opens it, laid over its corner. */
+  :is(.centre-head, .tc-head, .head) > :is(.phone-only, .back):first-child { position: relative; }
+  .app.has-note :is(.centre-head, .tc-head, .head) > :is(.phone-only, .back):first-child::after {
+    content: ""; position: absolute; top: 8px; right: 8px; width: 7px; height: 7px; border-radius: 50%; background: var(--ink-3);
+  }
 }
 
 /* ---- A phone: the lead view (views/project.js). The header one row (the menu, the project's name, what needs you as a
@@ -1572,13 +1636,17 @@ kbd { padding: 1px 6px; border-radius: var(--r-1); box-shadow: var(--e-1-in); co
   .project-view .composer-lead { flex-wrap: nowrap; gap: 8px; padding: 8px 12px calc(8px + env(safe-area-inset-bottom)); }
   .project-view .composer-lead:has(> .to.no-lead) { flex-wrap: wrap; }
   .project-view .composer-lead > .to:not(.no-lead) { display: none; }
-  /* The notifications' offer: one row, its question in two short lines at most beside its two answers. */
-  .centre-wrap > .offline.offer { flex-wrap: nowrap; justify-content: flex-start; gap: 4px; min-height: 44px; padding: 0 4px 0 14px; }
-  .centre-wrap > .offline.offer > span { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: var(--lh-caption); }
-  .centre-wrap > .offline.offer button { padding: 0 8px; }
   /* The keyboard up: the header, what scrolls and the box; the rows that choose what shows wait for it to go down. */
   .app.keyboard { height: var(--vv-height, 100dvh); transform: translateY(var(--vv-top, 0px)); }
-  .app.keyboard .project-view :is(.team-strip, .dial-fold, .centre-head > .segmented), .app.keyboard .centre-wrap > .offer { display: none; }
+  .app.keyboard .project-view :is(.team-strip, .dial-fold, .centre-head > .segmented) { display: none; }
+  /* The load's skeleton in the phone's shape: the header's two rows within the width, the gutters a phone's. */
+  :is(.skeleton-head, .skeleton-strip, .skeleton-composer) { padding-left: 14px; padding-right: 14px; }
+  .skeleton-head { padding-top: calc(8px + env(safe-area-inset-top)); }
+  .skeleton-lines { padding: 16px 14px; }
+  .frame-skeleton .bone.skeleton-title { width: 50%; }
+  .frame-skeleton .bone.skeleton-switch { width: 30%; }
+  .frame-skeleton .bone.skeleton-dial { width: 100%; }
+  .skeleton-strip .bone { width: 64px; }
 }
 
 /* Acting from the page: a request's button, what the node said under it, and whether this page acts */
@@ -1589,7 +1657,7 @@ kbd { padding: 1px 6px; border-radius: var(--r-1); box-shadow: var(--e-1-in); co
 .card-acts { display: flex; flex-wrap: wrap; gap: 8px; }
 .mine.refused { color: var(--ink-2); }
 .acts-line { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; color: var(--ink-2); }
-.acts-line.compact { margin-top: 4px; color: var(--working); font-size: var(--t-caption); font-weight: var(--w-medium); }
+.acts-line.compact { margin-top: 4px; color: var(--ink-2); font-size: var(--t-caption); font-weight: var(--w-medium); }
 /* What a button did, in words, beside it (docs/process/v2-no-terminal.md's table B and A5): the done colour, calm. */
 .act-said.receipt { color: var(--done); }
 .node-act { display: grid; justify-items: start; gap: 8px; margin-top: 12px; }
@@ -1727,6 +1795,8 @@ main.centre-wrap[tabindex="-1"]:focus { outline: none; }
   .send-menu { gap: 4px; }
   .left-summary { gap: 0; }
   .tc-links { gap: 0 14px; }
+  .left-summary .bone:is(.brief-bone, .acts-bone) { height: var(--ctl-touch); }
+  .acts-row { min-height: var(--ctl-touch); }
 }
 
 /* ---- States: every kind of control answers the hand the same way (D1) ----
