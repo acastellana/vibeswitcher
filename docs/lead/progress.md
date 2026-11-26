@@ -4795,3 +4795,4 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-26 16:29 Automatically (auto_advance): Started a worker on a-vault-that-didn (A vault that didn't open keeps its old sealed file until the user has answered (no overwrite under the current key before the alert)), its after tasks done (keychain-keys-the-stated).
 - 2026-11-26 16:29 Started a worker on the-command-guard-fails
 - 2026-11-26 16:29 Automatically (auto_advance): Started a worker on the-command-guard-fails (The command guard fails closed on a program name the shell makes (patterns, variables pieced together, script/setsid wrappers), for git and for `security`), its after tasks done (keychain-keys-the-stated).
+- 2026-11-26 18:12 Automatically (auto_advance): Resumed after sleep: sent the-command-guard-fails's worker one go-on message.
