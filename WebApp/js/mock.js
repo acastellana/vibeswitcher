@@ -12,7 +12,7 @@
 //                 with Space: the node refuses it from a page, as it does there
 //   ?large        the site's lead asks a question too long for a snapshot's part: the cards hold its stub
 //                 (`tooLarge`), and `questions` gives it in parts, as the node does; ?large=changing: it changes between
-//                 its parts every time, so the page says it keeps changing
+//                 its parts every time, so the page says it keeps changing; with ?slow each part takes a moment
 //   ?multi        the asking session's question is a multi-select (several ticks, a free-text row, Submit): a page
 //                 that acts answers it with choices, as the node does
 //   ?rich         "Add dark mode…" holds what an agent writes: a heading, emphasis, a quote, links, nested lists, a
@@ -986,7 +986,9 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
         const parts = Math.max(1, Math.ceil(bytes.length / PART_BYTES));
         if (args.part >= parts) return badArgs(`the card has ${parts} parts, from 0: not ${args.part}`);
         const data = base64(bytes.subarray(args.part * PART_BYTES, (args.part + 1) * PART_BYTES));
-        return { ok: true, result: { part: { card: full.id, version, part: args.part, parts, bytes: bytes.length, data } } };
+        const answer = { ok: true, result: { part: { card: full.id, version, part: args.part, parts, bytes: bytes.length, data } } };
+        // `?slow`: each part a moment, so the card's loading line can be seen.
+        return options.slow ? new Promise((resolve) => later(1500, () => resolve(answer))) : answer;
       });
     }
     // A session's own question answered (`session.reply`, as `Requests.replySession`): the question on its screen read

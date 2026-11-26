@@ -296,8 +296,8 @@ export function promptCard(app) {
           submit.disabled = !ready();
         } });
         box.checked = ticks.has(index);
-        label.append(box, h('span', { class: 'option-key', 'aria-hidden': 'true' }, String(index + 1)), h('span', { class: 'option-text' }, option),
-          prompt.descriptions?.[index] ? h('span', { class: 'option-note' }, prompt.descriptions[index]) : null);
+        label.append(...[box, h('span', { class: 'option-key', 'aria-hidden': 'true' }, String(index + 1)), h('span', { class: 'option-text' }, option),
+          prompt.descriptions?.[index] ? h('span', { class: 'option-note' }, prompt.descriptions[index]) : null].filter(Boolean));
         return h('li', null, label);
       });
       field.value = words;

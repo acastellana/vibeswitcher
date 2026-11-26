@@ -992,6 +992,7 @@ textarea.answer-input { max-height: 200px; line-height: var(--lh-body); resize: 
 .node-says { margin-bottom: var(--s-3); }
 .logs-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--s-3); margin-bottom: var(--s-4); }
 .logs-actions { display: flex; align-items: center; gap: var(--s-3); }
+.logs-actions .block-copy { opacity: 1; } /* the log's Copy stands beside Refresh, not over a block until pointed at */
 .log-lines { max-height: 60vh; overflow: auto; padding: var(--s-4) var(--s-5); border-radius: var(--r-2); background: var(--fill); font-family: var(--mono); font-size: var(--t-code); line-height: var(--lh-code); white-space: pre-wrap; overflow-wrap: anywhere; } /* the log as text, newest last, its own scroll */
 .lines { display: grid; gap: var(--s-2); color: var(--ink-2); font-size: var(--t-caption); overflow-wrap: anywhere; }
 /* A build: what the node says of it, the hash after it, quiet (D18). Technical details: pids, the node's name, its

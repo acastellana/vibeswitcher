@@ -211,6 +211,7 @@ test('C5: an acting page ticks a multi-select’s options and submits them: the 
   const view = card(r);
   assert.match(view.el.shownText, /Tick any that apply, then Submit\./);
   assert.equal(boxes(view.el).length, 4, 'a box for each option');
+  assert.doesNotMatch(view.el.shownText, /null/, 'an option without a description shows none');
   assert.equal(find(view.el, byClass('copy-button')), null, 'no line to paste where the page answers');
   const submit = submitButton(view.el);
   assert.equal(submit.disabled, true, 'nothing ticked: nothing to submit');
