@@ -552,6 +552,9 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
 
   const refused = (message) => ({ ok: false, error: { code: 'refused', message } });
 
+  // What a value set from the page made of a setting (`set`): read back in place of the invented one.
+  const setValues = new Map();
+
   // The node's settings (`settings`' result, as `NodeSettings` makes it), the project's for the site's folder.
   const POLICY = '- One agent owns each change through completion. Separate reviewers only for security, irreversible operations, or complex changes.\n'
     + '- Run affected tests while editing, then the full suite once before merging. Repeat only when new changes justify it.\n'
@@ -561,10 +564,13 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
   function settingsResult(folder) {
     const at = (file) => `${HOME}/.vibeswitcher/${file}`;
     const workflow = `${SITE}/.vibeswitcher/workflow.md`;
-    const row = (key, title, about, section, scope, form, home, value, fallback, where, extra = {}) => ({
+    const row = (key, title, about, section, scope, form, home, invented, fallback, where, extra = {}) => {
+      const value = setValues.has(key) ? (setValues.get(key) === 'default' ? fallback : setValues.get(key)) : invented;
+      return {
       key, title, about, section, scope, form, home, choices: extra.choices || [], limits: extra.limits ?? null, value, default: fallback,
       isDefault: value === fallback, where, guardRail: !!extra.rail, note: extra.note ?? null,
-    });
+      };
+    };
     const limits = (key, title, about, form, value, fallback, extra) => row(key, title, about, extra?.section || 'Machine-wide limits', 'node', form, 'limits', value, fallback, at('mac-limits.json'), extra);
     const boost = (key, title, about, form, value, fallback, extra) => row(key, title, about, 'Boost', 'node', form, 'preferences', value, fallback, at('settings.plist'), extra);
     const models = (key, title, about, form, value, fallback, extra) => row(key, title, about, extra?.section || 'Models', 'project', form, 'workflow', value, fallback, workflow, extra);
@@ -841,16 +847,53 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
       if (target?.status === 'done') emit(setSession(args.session, { status: 'idle' }));
       return { ok: true, result: {} };
     }
+    // What an acting page may do here as on a node (KindSpec's `.acts`): the lead's push settled, a setting set, the
+    // node stopped (the mock starts again a moment later, as a restarted node would).
+    if (message.kind === 'push' || message.kind === 'push.decline') {
+      const lead = leads.get(SITE_PROJECT);
+      if (!lead?.push || lead.push.id !== args.request) return refused('That push request is settled already.');
+      const target = lead.push.target;
+      lead.push = null;
+      emit(put('leads', leads, SITE_PROJECT));
+      const pushed = message.kind === 'push';
+      later(700, () => stream(LEAD, pushed ? `Pushed: ${target} is at the merged work.` : 'Understood: nothing is pushed. It stays on this node.'));
+      return { ok: true, result: { request: args.request, settled: pushed ? 'pushed' : 'declined', ok: true, said: pushed ? `pushed to ${target}` : 'declined', target: pushed ? target : null } };
+    }
+    if (message.kind === 'set') {
+      if (args.key === 'web_acts') {
+        node.web.acts = { ...node.web.acts, on: args.value !== 'off', level: args.value };
+        emit({ in: 'node', id: 'local', value: node });
+        return { ok: true, result: { key: 'web_acts', value: args.value, was: 'trust', scope: 'node', project: null, told: null } };
+      }
+      const was = settingsResult(args.folder || null);
+      const found = [...was.node.settings, ...(was.project?.settings || [])].find((one) => one.key === args.key);
+      if (!found) return refused(`There is no setting ${args.key}.`);
+      setValues.set(args.key, String(args.value));
+      return { ok: true, result: { key: args.key, value: String(args.value), was: found.value, scope: found.scope, project: found.scope === 'project' ? SITE_PROJECT : null, told: null } };
+    }
+    if (message.kind === 'stop') {
+      later(400, () => feed.restart());
+      return { ok: true, result: { sessionsEnded: sessions.size, host: 'stopped' } };
+    }
     return { ok: false, error: { code: 'unknown-kind', message: `This node doesn’t take ${message.kind}.` } };
   }
+
+  // What this mock answers, as a node's `hello.kinds` lists them: a page offers a button only for a kind listed, so
+  // nothing it shows here is refused as unknown. `chat.page` is the feed's own (`pageChat`).
+  const KINDS = ['chat.page',
+    'answer', 'answer.replace', 'tell', 'tell.retract', 'hold', 'ask.answer', 'send', 'session.draft', 'session.draft.clear', 'session.complete',
+    'session.attach', 'session.usage', 'stats', 'session.ports', 'board.task', 'board.image', 'chat.image', 'session.presets', 'brief', 'recent',
+    'mail', 'settings', 'seen', 'push', 'push.decline', 'set', 'stop'];
 
   // ---- The feed's interface (what the WebSocket feed will offer too) ----
 
   let down = false;
 
-  return {
+  const feed = {
+    kinds: KINDS,
     start() {
       later(options.still ? 0 : 320, () => {
+        store.setKinds?.(KINDS);
         store.apply(snapshot());
         if (!options.still && !options.empty) story();
       });
@@ -897,4 +940,5 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
     },
     stop() { for (const timer of timers) clearTimeout(timer); timers.clear(); },
   };
+  return feed;
 }

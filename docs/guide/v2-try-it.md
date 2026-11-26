@@ -169,8 +169,10 @@ the node holds the plugin until you `vs plugin remove wallet` and add it again.
 - **Approvals on a Mac with Touch ID** aren't on: the Mac node isn't built yet.
 - **A page can't act for you.** Typing into a terminal, one-click answers and replies from the phone wait on the web
   listener moving into the host (H1). They also wait on two of your decisions: which sessions a page may type into,
-  and what right a page needs (`docs/process/v2-h1-plan.md`).
-- **Phone push** waits on your decision (`docs/process/v2-push-decision.md`). **Wallet requests** are the external
+  and what right a page needs (`docs/process/v2-h1-plan.md`). H1 is built, and you answered both on 2026-11-25
+  (every session, with a key each device makes at pairing, checked on each message); that isn't built yet.
+- **Phone push** waits on your decision (`docs/process/v2-push-decision.md`). You answered it on 2026-11-25 (push
+  over HTTPS through `tailscale serve`); it isn't built yet. **Wallet requests** are the external
   wallet plugin (section 8): signed in your browser wallet only; the Mac's Wallet Manager path isn't on Linux.
 - **Codex** needs its link (above). Codex *workers* stay off until Codex's sandbox is measured.
 - **Briefings** are in English and spoken by the browser's own voice (no ElevenLabs on the node).

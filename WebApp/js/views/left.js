@@ -48,8 +48,10 @@ export function leftColumn(app, { brief }) {
   const place = (route, iconName, key) => h('a', { class: 'place', href: route, data: { place: key } }, icon(iconName, 16), h('span', null, t(key)));
   const newProject = place('#/new', 'plus', 'newProject');
   const own = place('#/sessions', 'chat', 'ownSessions');
+  // How many sessions are yours (plain), and how many of them need you (apart, in the asking colour).
+  const ownWaiting = h('span', { class: 'place-waiting' });
   const ownCount = h('span', { class: 'place-count' });
-  own.append(ownCount);
+  own.append(ownWaiting, ownCount);
   const nodeLink = place('#/node', 'node', 'thisNode');
   // A notice on the node (its count beside This node), and Boost while it's on (a bolt that opens Settings).
   const notices = h('span', { class: 'place-count tone-text-working' });
@@ -123,19 +125,27 @@ export function leftColumn(app, { brief }) {
     const needs = waits.reduce((sum, place) => sum + place.count, 0);
     const moving = projects.reduce((sum, project) => sum + project.motion, 0);
     const upNext = nextPlace(waits, route);
-    setText(summaryCount, needs ? t('needYou', { n: needs }) : t('nothingNeedsYou'));
+    setText(summaryCount, needs ? t('needYouInAll', { n: needs }) : t('nothingNeedsYou'));
     if (upNext) {
       summaryCount.setAttribute('href', upNext.kind === 'project' ? projectHref(upNext.id) : upNext.kind === 'session' ? sessionHref(upNext.id) : '#/node');
       summaryCount.title = t('nextWaiting');
     } else { summaryCount.removeAttribute('href'); summaryCount.title = ''; }
     setClass(summaryCount, 'asked', needs > 0);
     setText(summaryRest, moving ? ` · ${t('inMotion', { n: moving })}` : '');
-    briefButton.hidden = !store.can?.('brief');
+    // A page the node doesn't know (not paired, or its access taken back) knows nothing to count or brief.
+    const off = state.connection === 'unpaired' || state.connection === 'revoked';
+    summaryCount.hidden = off;
+    summaryRest.hidden = off;
+    briefButton.hidden = off || !store.can?.('brief');
     // Whether this page acts for the user, and since when, with the switch that turns it off.
     const actsKey = JSON.stringify([state.node?.web?.acts, store.acts(), state.phrase, lang()]);
     if (actsKey !== actsDrawn) { actsDrawn = actsKey; actsSlot.replaceChildren(...[actsLine(app, { compact: true })].filter(Boolean)); }
     // The places that hold what waits carry the asking colour, so the user sees where it is.
-    setClass(own, 'asked', waits.some((place) => place.kind === 'session'));
+    const ownWaits = waits.filter((place) => place.kind === 'session').reduce((sum, place) => sum + place.count, 0);
+    setClass(own, 'asked', ownWaits > 0);
+    setText(ownWaiting, ownWaits ? String(ownWaits) : '');
+    ownWaiting.title = ownWaits ? t('ownWaiting', { n: ownWaits }) : '';
+    ownWaiting.hidden = !ownWaits;
     setClass(nodeLink, 'asked', waits.some((place) => place.kind === 'node'));
     const count = state.node?.notices?.length || 0;
     setText(notices, count ? String(count) : '');

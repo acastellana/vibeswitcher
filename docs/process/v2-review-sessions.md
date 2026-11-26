@@ -15,7 +15,7 @@ relies on, as well or better), **improve** (works, but worse than V1 in a way a 
 | Launch presets | good | `presets`, `new --preset`, `preset add\|edit\|remove`, bound by digest, held by the seal until `config accept` | |
 | End a session, Close Finished Shells | **improve** | `end` and `close-shells` work, but V1's `ShellTidier` also ends a Run card's shell by itself once its command went well, 10 minutes back at its prompt, untouched and leaving nothing running (`ShellTidy.due`). On the node every Run card leaves a shell for good, the pile-up V1 fixed on 2026-11-10 | the node's own tidier: the engine looks every 30 s and ends what `ShellTidy.due` names, a shell sent to since its command ended (`send`, `reply`) kept as the user's, recorded across restarts |
 | Pause, rename, reset a name | good | `rename`, `pause` (the Mac's four pauses), kept by the session's keys | |
-| Live terminal: type, select, find, scrollback, text size | blocked | watching works; typing from a page waits on H1's decisions (`docs/process/v2-h1-plan.md`), out of scope here | |
+| Live terminal: type, select, find, scrollback, text size | blocked | watching works; typing from a page waits on H1's decisions (`docs/process/v2-h1-plan.md`), out of scope here | 2026-11-25: answered (every session, a device key checked per message); not built |
 | Terminal look | good | the page's own per-viewer preferences, every V1 option | |
 | Sessions in other terminals | good | `NodeSessions`, `hosted: false`, never typed into | |
 | Terminal.app control | not needed | no Terminal.app on Linux | |

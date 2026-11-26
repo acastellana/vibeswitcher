@@ -24,6 +24,11 @@ const EN = {
   noLead: 'quiet: no lead running',
   thingsNeedYou: { one: '1 thing needs you', other: '{n} things need you' },
   nothingNeedsYou: 'Nothing needs you',
+  // The project's header counts its own; the left column's summary (and the tab's title) counts every place.
+  thingsHereNeedYou: { one: '1 thing in this project needs you', other: '{n} things in this project need you' },
+  nothingHereNeedsYou: 'Nothing in this project needs you',
+  needYouInAll: { one: '{n} needs you in all', other: '{n} need you in all' },
+  ownWaiting: { one: '{n} needs you', other: '{n} need you' },
   briefMe: 'Brief me',
   nextWaiting: 'Go to the next thing that waits on you',
   briefTitle: 'What happened, and what’s asked of you',
@@ -225,6 +230,8 @@ const EN = {
   cWithdrawn: "Withdrawn: ",
   cWentAhead: "Went ahead with ",
   cYouAnswered: "You answered ",
+  cSending: "Sending “{x}”…",
+  cUndo: "Undo",
   cLeadSays: "The lead says",
   cGoingWith: "Going with ",
   cHoldTitle: "Stop the timer: the lead waits for your answer",
@@ -241,6 +248,7 @@ const EN = {
   cPush: "Push",
   cTo: "To",
   cCommits: "Commits",
+  cAndMore: "and {n} more",
   cSettle: "Settle it in a terminal",
   cPushNote: "Either shows the request and asks for its code. Push pushes that commit itself, as a fast-forward only; nothing is pushed before you type the code.",
   cExactly: "Exactly what it asks",
@@ -406,6 +414,8 @@ const EN = {
   noStateFolder: "State folder",
   noWebPage: "Web page",
   noOff: "Off",
+  noPluginsInATerminal: "vibeswitcher plugin list shows every plugin; plugin on NAME and plugin off NAME, in your terminal, change them.",
+  noAutomatic: "Automatic",
   noPagesPaired: "Pages paired",
   noOpenNow: "Open now",
   noBuild: "Build",
@@ -497,6 +507,8 @@ const EN = {
   slOnOff: "on or off",
   slOneOf: "one of {list}",
   slWhole: "a whole number",
+  slWholeRange: "a whole number, {low} to {high}",
+  slNumberAtMost: "a number above 0, at most {high}",
   slNumber: "a number",
   slOneLine: "one line",
   slMoreLines: { one: " (and {n} more line)", other: " (and {n} more lines)" },
@@ -609,6 +621,7 @@ const EN = {
   rcWithdrawnByTheLead: "Withdrawn by the lead.",
   rcItWasRewordedAfterYou: "It was reworded after you answered.",
   rcScorecard: "Scorecard",
+  scorecard: "Scorecard",
   rcDecisions: "Decisions",
   rcAnsweredAndWithdrawn: "Answered and withdrawn",
   rcResults: "Results",
@@ -826,11 +839,13 @@ const EN = {
   drALeadThatRunsWorkers: "A lead that runs workers, has their work verified, and merges. Run the line in a terminal on this node: it asks for a code (and, the first time, says to accept the project’s config and base), then starts the lead. A folder that isn’t a git repository yet, or has no commit: add --init, which makes its first commit of the folder’s files.",
   drGiveAFolderTheLine: "Give a folder: the line that starts its lead shows here.",
   drProjectName: "Project name",
-  drWhereOptionalTheNodeS: "Where (optional: the node’s projects folder)",
+  drWhereOptionalTheNodeS: "Where (optional)",
+  drWhereHint: "Where: left empty, it goes in the node’s projects folder.",
   drWhere: "Where",
   drTheGoalOptional: "The goal (optional)",
   drNewProject: "New project",
   drMakesTheProjectSFolder: "Makes the project’s folder with a git repository and a first commit (README.md, .gitignore), then starts its lead. Run the line in a terminal on this node: it asks for the lead’s code.",
+  drItsFolder: "Its folder: {folder}",
   drGiveItANameThe: "Give it a name: the line that makes it shows here.",
   drFolder: "Folder",
   drModelOptional: "Model (optional)",
@@ -1092,10 +1107,13 @@ const EN = {
   acStopTitle: "Stop the node",
   acStopWords: "Every session ends with it, and the host with its server; start it again from a terminal.",
   acStopNode: "Stop the node",
-  acStopSure: "Stop every session? Click again",
+  acStopSure: "Click again to stop the node",
+  acCancel: "Cancel",
   acApproveTitle: "What one accept settles",
   acOwnDecision: "Your own decision, each in its place:",
   acApproveAll: { one: "Accept it", other: "Accept all {n}" },
+  acUnknownKind: "This node doesn’t take “{what}” from a page: use its line in a terminal. Nothing was done.",
+  acUnknownKindBare: "This node doesn’t take that from a page: do it in a terminal. Nothing was done.",
   acRefused: "The node refused it.",
   acChanged: "This changed since the page drew it: look again. Nothing was done.",
   acNotYet: "The node isn’t answering yet: try again in a moment.",
@@ -1185,6 +1203,17 @@ export const lang = () => language;
 // For the tests.
 export function setLanguage(code) { language = TABLES[code] ? code : 'en'; }
 
+// `t` for a value that is a node (a <time> that keeps counting): the word's parts in order, each blank its value as
+// given, for `h` to append. A node given to `t` would be written as its name ("[object HTMLTimeElement]").
+export function tParts(key, values = {}) {
+  let word = TABLES[language][key] ?? EN[key] ?? key;
+  if (typeof word === 'object') word = values.n === 1 ? word.one : word.other;
+  return word.split(/(\{\w+\})/).filter((part) => part !== '').map((part) => {
+    const name = part.match(/^\{(\w+)\}$/)?.[1];
+    return name && name in values ? values[name] : part;
+  });
+}
+
 export function t(key, values = {}) {
   let word = TABLES[language][key] ?? EN[key] ?? key;
   if (typeof word === 'object') word = values.n === 1 ? word.one : word.other;
@@ -1200,6 +1229,10 @@ const NODE_WORDS = {
     Reverted: 'Revertida', Reconsider: 'Replantear', Stalled: 'Atascada', 'Waiting for the audit': 'Esperando la auditoría',
     'Checking the work': 'Revisando el trabajo', 'Waits on lead': 'Espera al líder', 'It failed; the lead decides what next.': 'Falló; el líder decide qué sigue.',
     'The worker asked the lead something.': 'El trabajador le preguntó algo al líder.',
+    // Usage limits' names and Boost's reasons, as the node words them (NodeUsage, SettingsWatch.boostDecision).
+    'the weekly limit': 'el límite semanal', 'the 5-hour limit': 'el límite de 5 horas', 'the weekly Opus limit': 'el límite semanal de Opus',
+    'the weekly Sonnet limit': 'el límite semanal de Sonnet', 'the spend limit': 'el límite de gasto', 'on in Settings': 'activado en Ajustes', 'off in Settings': 'desactivado en Ajustes',
+    "automatic acts as off on a node: it can't tell whether you're away": 'automático equivale a desactivado en un nodo: no puede saber si estás ausente',
   },
 };
 export function nodeWords(text) {

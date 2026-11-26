@@ -2102,7 +2102,9 @@ Added by this revision, and in the document's S12 as items 14 to 16 (decision 20
 14. The keeper's sealed copy (Task 11b, with the sandbox).
 15. GitGuard's accepted hooks recorded in the vault and checked before each run (S10's check; S2-D12 says why it
     isn't before).
-16. The design's deferred requirements that neither list carried: reply rights type only into confined sessions;
+16. The design's deferred requirements that neither list carried: ~~reply rights type only into confined sessions~~
+    (amended 2026-11-25, the user's answer: page input reaches every session with a device key checked per message;
+    [the H1 plan's decision 1](../../process/v2-h1-plan.md#what-h1-alone-doesnt-decide-the-users-decisions));
     view rights get masked screens; the wallet's signing page on an origin of its own (the design's Security,
     "Also required"; stages 3 and 4, where rights and the wallet's page exist).
 - **A switch replaces the server child when no request is in flight**, by a count of unanswered requests in

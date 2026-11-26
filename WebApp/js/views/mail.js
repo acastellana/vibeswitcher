@@ -3,7 +3,7 @@
 
 import { h, framed } from '../dom.js';
 import { icon } from '../marks.js';
-import { since, plural, tilde, lastPart } from '../words.js';
+import { since, plural, tilde, lastPart, dateTime } from '../words.js';
 import { mailLine, mailCommand } from '../mail.js';
 import { copyLine } from './cards.js';
 import { t } from '../i18n.js';
@@ -48,7 +48,7 @@ export function mailView(app) {
         const line = mailLine(message);
         return h('li', { class: line.sent ? 'mail-message' : 'mail-message refused' },
           h('div', { class: 'mail-head' }, h('span', { class: 'mail-way' }, line.way), ' · ', line.kind, ' · ', line.outcome, ' · ',
-            h('time', { data: { since: message.at }, title: new Date(message.at).toLocaleString() }, since(message.at))),
+            h('time', { data: { since: message.at }, title: dateTime(message.at) }, since(message.at))),
           h('p', { class: 'mail-text' }, line.text),
           line.why ? h('p', { class: 'setting-note' }, icon('warning', 12), line.why) : null);
       })) : h('p', { class: 'node-says' }, t('mvNoMessageSentOrReceived')),

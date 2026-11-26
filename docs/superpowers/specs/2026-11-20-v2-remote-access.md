@@ -30,6 +30,8 @@ remote one is a Unix socket that `tailscale serve` forwards to … a bind to any
 user's decision (below). B is what stage 4's signed approvals need anyway (WebAuthn and WebCrypto want a secure
 context), so A is a step, not the end: B replaces it before any page holds a key.
 
+**2026-11-25:** the user chose B (decision 1 below): A stays as built until B replaces it.
+
 ### The name: the MagicDNS name, never the IP
 
 The page's one origin on the tailnet is `http://<machine>.<tailnet>.ts.net:47830`, the name `tailscale status` gives
@@ -131,15 +133,55 @@ session** (the supervisor's decision of 2026-11-20) and before signed approvals,
 1. **A or B** for this step: accept the direct bind to the tailnet address (a deviation from requirement 4, built
    here, off by default), or wait for `tailscale serve` (HTTPS, which turns on HTTPS certificates for the tailnet and
    puts the machine's name in public certificate logs).
+
+   **Decided, 2026-11-25 (the user's answer):** B. The phone's page moves to HTTPS through `tailscale serve`; the user
+   accepted that the machine's and the tailnet's names go into public certificate logs. The same answer is
+   [the H1 plan's decision 4](../../process/v2-h1-plan.md#what-h1-alone-doesnt-decide-the-users-decisions) and
+   [the push note's decision 1](../../process/v2-push-decision.md#decisions-for-the-user); what it lets be built, in
+   order, is in [the H1 plan](../../process/v2-h1-plan.md#what-can-now-be-built-in-order). The same day the user
+   answered that page input, a phone's included, reaches every session with a device key checked per message, and that
+   push is wanted (those notes). Decisions 2 to 7 were answered the same day, each beside its question below (the
+   lead's calls at the user's word).
 2. **The remote token's life**: 8 hours (built), or another.
+
+   **Decided, 2026-11-25 (the lead's call at the user's word: think carefully about the UX and the security, this needs
+   to feel like a good Apple app):** a device is paired once with its own key (a passkey; Touch ID on the Mac) and stays
+   paired until the user removes it from a Devices list on the page; opening the page after a while asks for Face ID or
+   Touch ID, and that unlock lasts 12 hours, on the phone as on the Mac. This replaces the 8-hour token renewed by a new
+   pairing from a terminal. Where it meets what v2 built (the 12-hour pairing, the tokens' lives, Linux's vault in
+   memory): [V2 without a terminal](../../process/v2-no-terminal.md#where-the-target-meets-what-v2-built).
+
 3. **Masking credentials on remote pages**: the Mac's phone masks tokens, keys and passwords in what it sends; the
    node's chats scrub only URL credentials. Port the Mac's masking for remote pages before the user leaves a phone
    paired, or accept that a stolen phone reads what the transcripts hold for up to 8 h.
+
+   **Decided, 2026-11-25 (the lead's call at the user's word, as 2):** credentials are masked on every remote page, as
+   the Mac's phone does, before any phone is left paired.
+
 4. **A second lock on who is asking**: `tailscale whois` on each peer (its login must be the machine's own), or B's
    login header, or the user's tailnet ACL alone.
+
+   **Decided, 2026-11-25 (the lead's call at the user's word, as 2):** a remote peer's Tailscale login must be the
+   machine's own.
+
 5. **Getting the address to the phone**: a QR code drawn in the terminal (a small encoder, no dependency), or typing
    it. The code lasts 120 s either way.
+
+   **Decided, 2026-11-25 (the lead's call at the user's word, as 2):** a phone is added by scanning a QR code shown on
+   the already-unlocked page (This node › Devices › Add a phone), not drawn in a terminal. It meets `web.open`'s rule (a
+   page never pairs: `KindSpec`'s `terminalOnly`), noted in [V2 without a
+   terminal](../../process/v2-no-terminal.md#where-the-target-meets-what-v2-built).
+
 6. **A watched terminal on the remote page**: none in this slice. The loopback page may watch (LW-D12's amendment);
    whether a phone may too.
+
+   **Decided, 2026-11-25 (the lead's call at the user's word, as 2):** the phone may watch and type into a session's
+   terminal once device keys and HTTPS are built, not before.
+
 7. **The port.** The tailnet's page uses 47830 too (the loopback page's), on the other address. Another port is one
    constant.
+
+   **Decided, 2026-11-25 (the lead's call at the user's word, as 2):** the port stays 47830. And: the page on the same
+   machine keeps acting as today until device keys are built, then requires the device's key (on the Mac, the single
+   Touch ID).
+

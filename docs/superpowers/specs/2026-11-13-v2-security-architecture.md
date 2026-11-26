@@ -2155,7 +2155,8 @@ against it. Each line says what reduces it now, if anything.
     A host that finds the port taken refuses the web, and the server says so in `status`.
 33. **The web tokens' hashes are in a file the user's processes can write** (`<root>/v2/web-tokens.json`, 0600): a
     worker can add a hash of its own and gain a token. That is why a token reads and drafts and never changes anything
-    (the live plan's LW-D6).
+    (the live plan's LW-D6). *2026-11-25, the user's answer:* page input needs a device key made at pairing, each
+    message checked against it, not a token with a third right ([the H1 plan's decision 2](../../process/v2-h1-plan.md#what-h1-alone-doesnt-decide-the-users-decisions)).
 34. **Under WSL's mirrored networking the web's port is reachable from every Windows process of every Windows user**
     (S1, item 22's reach). The token is the only lock against them; the page's files are public and hold no secret.
     The listener is off until `vibeswitcher web`, and closes with the last token (`vibeswitcher web --revoke`).
@@ -2286,9 +2287,12 @@ the unreadable images and the static build, which the plan had here, are before 
     `vibeswitcher-mcp` reads its own. Closes the keeper half of 7.
 15. **GitGuard's accepted hooks recorded in the vault** and checked before each run (decision 19). Narrows the hooks
     half of 7 to the race between check and run.
-16. **The design's requirements no list carried** (decision 20): reply rights type only into confined sessions; view
+16. **The design's requirements no list carried** (decision 20): ~~reply rights type only into confined sessions~~; view
     rights get masked screens; the wallet's signing page on an origin of its own (stages 3 and 4, where rights and
-    the wallet's page exist).
+    the wallet's page exist). **Amended 2026-11-25 (the user's answer):** the first is superseded. Page input reaches
+    every session, the user's own unconfined Claude and shell sessions included, as V1 does, on condition that each
+    device holds its own key made at pairing (Touch ID / passkey, WebAuthn) and every input message is checked
+    against it ([the H1 plan's decision 1](../../process/v2-h1-plan.md#what-h1-alone-doesnt-decide-the-users-decisions)).
 17. **What a spawn other than the app's may add to a session's environment becomes an allow-list**, with the sandbox:
     today it is a list of refused names (`Platform.Tools.spawnEnvironmentRefused`, stage 2 Task 10a), which lets
     through any name it doesn't list (S10).

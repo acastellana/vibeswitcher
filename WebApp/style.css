@@ -978,7 +978,11 @@ kbd { padding: 1px 6px; border-radius: 5px; box-shadow: inset 0 0 0 1px var(--li
 .summary-count.asked { color: var(--asked); font-weight: 600; }
 .summary-brief { flex: none; color: var(--ink-2); }
 .summary-brief:hover { color: var(--ink); text-decoration: underline; }
-.place.asked, .place.asked .place-count { color: var(--asked); font-weight: 600; }
+.place.asked { color: var(--asked); }
+/* Your own sessions: what waits among them in the asking colour, beside their plain count. */
+.place-waiting { margin-left: auto; padding: 0 5px; border-radius: 8px; background: color-mix(in srgb, var(--asked) 12%, transparent); color: var(--asked); font-size: var(--small); font-weight: 600; font-variant-numeric: tabular-nums; }
+.place-waiting:not([hidden]) + .place-count { margin-left: 6px; font-weight: 400; }
+.place > span:not(.place-count):not(.place-waiting) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* The centre's header, the switches and the strip */
 .centre-head { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; min-height: var(--head); padding: 8px 24px; border-bottom: 1px solid var(--line); }
@@ -1276,7 +1280,8 @@ kbd { padding: 1px 6px; border-radius: 5px; box-shadow: inset 0 0 0 1px var(--li
 .act-said { color: var(--ink-2); font-size: var(--small); }
 .act-said:empty { display: none; }
 .act-said.refused, .confirm-note.refused { color: var(--needs-you); }
-.button.confirming { background: var(--needs-you); color: var(--on-status); }
+.button.danger { color: var(--needs-you); }
+.button.confirming { background: var(--needs-you); color: var(--on-status); box-shadow: none; }
 .button.small { padding: 2px 8px; font-size: var(--small); }
 .card-acts { display: flex; flex-wrap: wrap; gap: 8px; }
 .mine.refused { opacity: 0.6; }

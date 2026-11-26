@@ -11,7 +11,7 @@
 
 import { h, setText, setClass } from '../dom.js';
 import { icon } from '../marks.js';
-import { since, until, clock, plural } from '../words.js';
+import { since, until, clock } from '../words.js';
 import { pushLines } from '../push.js';
 import { talkButton } from '../dictate.js';
 import { pluginFacts } from '../plugincard.js';
@@ -161,6 +161,9 @@ export function tooLargeCard(card) {
     copyLine(command, 'the command that shows it whole'));
 }
 
+// How long a Blocking card's answer waits to be taken back before it goes.
+export const UNDO_MS = 5000;
+
 // A lead's question or approval. Returns { el, update(card) }; `el` keeps its text field and its focus across updates.
 export function questionCard(app, first, { expand = null } = {}) {
   const el = h('article', { class: 'card', tabindex: -1 });
@@ -172,7 +175,22 @@ export function questionCard(app, first, { expand = null } = {}) {
   let keys = { buttons: [], hold: null };
 
   // With the `act` right the click is the answer: the card, the `seen` it was drawn with, the words and the version.
-  const choose = (answer) => { if (answer.trim()) app.store.act(card.id, 'answer', { text: answer.trim(), ...(card.question?.version != null ? { version: card.question.version } : {}), seen: card.seen ?? null }); };
+  // What was clicked on: the version and `seen` the card had then, so a question reworded since is refused as changed.
+  const drawnAs = () => ({ ...(card.question?.version != null ? { version: card.question.version } : {}), seen: card.seen ?? null });
+  const send = (text, drawn = drawnAs()) => app.store.act(card.id, 'answer', { text, ...drawn });
+  // A Blocking card's answer waits a few seconds first, "Sending … · Undo" on the card, so a slip of one click can be
+  // taken back; then it goes as it would have. `app.later(fn, ms)` (the tests' clock) returns what cancels it.
+  let sending = null;
+  const later = app.later || ((fn, ms) => { const timer = setTimeout(fn, ms); return () => clearTimeout(timer); });
+  const choose = (answer) => {
+    const text = answer.trim();
+    if (!text || sending) return;
+    if (card.question?.priority !== 'blocking') { send(text); return; }
+    sending = { text, drawn: drawnAs(), cancel: later(() => { const going = sending; sending = null; shape = ''; send(going.text, going.drawn); build(); }, UNDO_MS) };
+    shape = '';
+    build();
+  };
+  const undo = () => { sending?.cancel(); sending = null; shape = ''; build(); el.focus?.(); };
   const hold = () => app.store.act(card.id, 'hold', { seen: card.seen ?? null });
 
   function closedLine(mark, ...text) {
@@ -193,6 +211,16 @@ export function questionCard(app, first, { expand = null } = {}) {
     el.replaceChildren();
     el.className = 'card';
 
+    // Answered elsewhere, or the question changed, while one waited to go: it doesn't go, and the card shows again.
+    if (sending && (!card.open || JSON.stringify(drawnAs()) !== JSON.stringify(sending.drawn))) { sending.cancel(); sending = null; }
+    if (sending) {
+      el.classList.add('closed', 'sending');
+      el.append(h('div', { class: 'card-closed', role: 'status' }, icon('send', 13), h('div', null,
+        h('p', null, t('cSending', { x: sending.text }), ' · ', h('button', { class: 'link card-undo', type: 'button', onclick: undo }, t('cUndo'))),
+        h('p', { class: 'card-about' }, shortHashes(questionHead(question.text))))));
+      keys = { buttons: [], hold: null };
+      return;
+    }
     // Answered (here, a moment ago, or by the node's word), decided by its timer, or withdrawn: one quiet line.
     if (pendingAnswer || !card.open) {
       el.classList.add('closed');
@@ -376,7 +404,7 @@ export function cardSheet(card) {
 // The stack under a lead's chat: "2 questions for you", then the cards, open ones first.
 // The push the lead asks for, while it's open: what goes where, from git and the vault, and the two lines that settle
 // it in a terminal. Nothing on the page pushes.
-function pushCard(lead, app = null) {
+export function pushCard(lead, app = null) {
   const said = pushLines(lead.push, lead.root);
   const fact = (name, ...value) => [h('dt', null, name), h('dd', null, value)];
   return h('article', { class: 'card push-card', 'aria-label': t('cPushAsk') },
@@ -389,7 +417,7 @@ function pushCard(lead, app = null) {
         fact(t('cPush'), said.what),
         fact(t('cTo'), h('code', null, said.url)),
         fact(t('cCommits'), h('ul', { class: 'files' }, said.subjects.map((subject) => h('li', null, h('code', null, subject))),
-          said.more ? h('li', null, `and ${plural(said.more, 'more')}`) : null)))),
+          said.more ? h('li', null, t('cAndMore', { n: said.more })) : null)))),
     app && actsFor(app, 'push') ? h('div', { class: 'card-acts' },
       doButton(app, { label: t('acPush'), kind: 'push', args: () => ({ folder: lead.root, request: lead.push.id }) }).el,
       actsFor(app, 'push.decline') ? doButton(app, { label: t('acDecline'), kind: 'push.decline', quiet: true, args: () => ({ folder: lead.root, request: lead.push.id }) }).el : null)

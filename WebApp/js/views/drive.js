@@ -360,13 +360,14 @@ export function newProjectForm(app) {
   const el = h('section', { class: 'new-session new-project', 'aria-label': t('drNewProject') },
     h('div', { class: 'new-head' }, h('h2', { class: 'new-title' }, t('drNewProject'))),
     h('div', { class: 'new-fields' }, name, location, goal),
+    h('p', { class: 'confirm-note where-hint' }, t('drWhereHint')),
     folderNote,
     lineSlot,
     h('p', { class: 'confirm-note' }, t('drMakesTheProjectSFolder')));
   function draw() {
     const folder = projectFolderName(name.value);
     folderNote.hidden = !folder;
-    folderNote.textContent = folder ? `Its folder: ${folder}` : '';
+    folderNote.textContent = folder ? t('drItsFolder', { folder }) : '';
     lineSlot.replaceChildren(folder ? copyLine(newProjectLine(name.value, location.value, goal.value), t('drTheCommandThatMakesThe'))
       : h('p', { class: 'confirm-note' }, t('drGiveItANameThe')));
   }

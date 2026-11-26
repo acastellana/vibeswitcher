@@ -418,13 +418,18 @@ the security architecture document (`docs/superpowers/specs/2026-11-13-v2-securi
    checks it. A node never updates from a branch. (Building from source stays possible, and says what it is.)
 
 Also required: per-message credentials on the host's socket (`SCM_CREDENTIALS`), since `SO_PEERCRED` is fixed at
-connect; the host a subreaper; host and server non-dumpable; reply rights type only into confined sessions; view
+connect; the host a subreaper; host and server non-dumpable; ~~reply rights type only into confined sessions~~
+(**amended 2026-11-25, the user's answer:** page input reaches every session, the user's own unconfined Claude and
+shell sessions included, as V1 does, on condition that each device holds its own key made at pairing and every input
+message is checked against it;
+[the H1 plan's decision 1](../../process/v2-h1-plan.md#what-h1-alone-doesnt-decide-the-users-decisions)); view
 rights get masked screens; the handover's state out of a worker's reach; logs without tokens, codes or terminal
 text; the wallet's signing page on an origin of its own. Before the bootstrap: per-message credentials; the host,
 its parsers and the server non-dumpable from their exec; the handover's state and secrets in sealed memory, so there is
 no state file at all on Linux. After it: the subreaper **(call)**, inside the sandbox's own process namespace, because
 a host that reaps adopted orphans takes exit statuses from its own code that waits for its children by pid, and
-adoption alone doesn't give an orphan back its session; reply rights only into confined sessions; masked screens; the
+adoption alone doesn't give an orphan back its session; ~~reply rights only into confined sessions~~ (amended
+2026-11-25, above: device keys for page input); masked screens; the
 wallet page's own origin; the logs' lint. The stage 2 plan says what each deferral leaves open, and the security
 document lists it (S11, S12).
 
@@ -787,6 +792,14 @@ of the branch on a real Mac; what that finds is fixed before anything new is bui
 - **The bootstrap's decisions** ([the list](../plans/2026-11-13-v2-bootstrap-path.md#decisions-awaiting-the-user)):
   every recommendation accepted, as written there, trade-offs 1 to 11 and so D1 to D20 (the user, 2026-11-13: "go for
   it"). The machine actions M1 to M10 are the user's, each asked for at the step that needs it.
+- **The user's answers of 2026-11-25** on page input, the phone's HTTPS and push: page input reaches every session,
+  the user's own unconfined ones included, with each device's own key made at pairing checked on every input message
+  (this amends [Security](#security)'s "reply rights type only into confined sessions" and D20); the phone's page moves
+  to HTTPS through `tailscale serve`, the names in public certificate logs accepted; push with the page closed is
+  wanted, the lock screen showing the first line. Each answer is written beside its question:
+  [the H1 plan](../../process/v2-h1-plan.md#what-h1-alone-doesnt-decide-the-users-decisions),
+  [the push note](../../process/v2-push-decision.md#decisions-for-the-user) and
+  [the remote access note](2026-11-20-v2-remote-access.md#decisions-for-the-user).
 
 ## Open decisions
 

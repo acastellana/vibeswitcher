@@ -46,7 +46,7 @@ user notices), **missing**, **blocked** (waits on a user decision or a real Mac)
 | Banners when a session needs input or finishes | good | V1's two kinds, each its own toggle; a click opens the session; not for the session you look at. | |
 | A sound when a session needs input | good | A chime on the page, its own toggle, off until turned on (a page can't play before a click). | |
 | Reminders about waiting or stuck sessions | improve | The node works out V1's reminders (waiting on you 10 min, no progress 15) but only as `status` notices: the page neither notifies nor has V1's "Remind me about waiting or stuck sessions" toggle, so a session left waiting goes unnoticed unless you read This node. | The node carries them structured (`reminders`: session, kind, words, since); the page notifies once per reminder (as V1: once), with its own toggle beside the others, on by default as V1's. |
-| Phone push notifications | blocked | The user's decisions ([the push decision note](v2-push-decision.md)). | |
+| Phone push notifications | blocked | The user's decisions ([the push decision note](v2-push-decision.md)). | 2026-11-25: answered (push wanted, way B, the first line); not built |
 
 ## Remote and web
 

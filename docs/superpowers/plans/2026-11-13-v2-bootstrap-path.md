@@ -102,8 +102,12 @@ asked for at the step that needs each.
        watches that folder. *Otherwise:* the accepted hashes move into the vault and stage 2's Task 10c checks them
        before each run.
     8. [D20, new] The security document's S12 gains items 14 to 16: the two above, and three of the design's
-       requirements no list carried (reply rights type only into confined sessions, view rights get masked screens,
+       requirements no list carried (~~reply rights type only into confined sessions~~, view rights get masked screens,
        the wallet's signing page on an origin of its own). *Costs:* none before stages 3 and 4, where they exist.
+       **Amended 2026-11-25 (the user's answer):** the first of the three is superseded. Page input reaches every
+       session, the user's own unconfined Claude and shell sessions included, as V1 does, on condition that each
+       device holds its own key made at pairing and every input message is checked against it
+       ([the H1 plan's decision 1](../../process/v2-h1-plan.md#what-h1-alone-doesnt-decide-the-users-decisions)).
     9. [D15] Codex workers off (`VIBESWITCHER_CODEX_WORKERS=0` in the lead's session) until Codex's sandbox is
        measured on this kernel. *Costs:* Claude workers only.
     10. [D16] Real-agent tests run only with `VIBESWITCHER_REAL_CLAUDE_CONFIG_DIR` on each gated run's command line

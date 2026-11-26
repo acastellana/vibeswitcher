@@ -132,6 +132,9 @@ merge). Recommended instead, and the planned next step: a passkey touch per acti
   and stop, settings, plugin on and off and add and remove, push and decline, hooks install, switch, stop. Each is
   recorded in the vault as the user's action as today, marked as made from a page (which token, which origin).
 - A page reached over the **tailnet** keeps today's rule (reads and drafts) until the user decides otherwise.
+  *2026-11-25, the user's answers:* the phone's page moves to HTTPS through `tailscale serve`, and page input reaches
+  every session with each device's own key checked per message ([the H1 plan](../../process/v2-h1-plan.md#what-h1-alone-doesnt-decide-the-users-decisions));
+  the rule above stands until that is built.
 - One setting, `web_acts`: `off` (today's rule), `on` (this decision). The user turns it on from a terminal once; the
   node says what it means when they do. Off by default on a new node.
 - The confirmation step is one seam (`PageVoice`): today "none"; a passkey check slots in there without touching the
