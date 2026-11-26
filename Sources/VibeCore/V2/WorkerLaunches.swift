@@ -221,6 +221,22 @@ public enum WorkerLaunch {
         "HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy", "NODE_EXTRA_CA_CERTS", "ANTHROPIC_CUSTOM_HEADERS",
     ]
 
+    /// The top-level settings keys that change which model a worker runs, or where its model list comes from, beside
+    /// what its `--model` says (Claude Code 2.1.332's settings schema, read from its binary): `modelOverrides` maps an
+    /// id to another string and applies to `--model`; `fallbackModel` is tried when the model is overloaded;
+    /// `advisorModel` the advisor's; `agent` runs the main thread as an agent whose `model` may differ; `fastMode` may
+    /// switch the session to another model; `switchModelsOnFlag` switches when safeguards flag a message;
+    /// `availableModels`, `deniedModels`, `enforceAvailableModels` and `availableModelsMatch` change what a pick
+    /// resolves to; `modelCatalogUrl` and its key where the list comes from. A worker whose project settings hold one is
+    /// refused at its bind under the floor. Left: `model` (below `--model`, and counted in `projectModels`), the
+    /// effort and thinking keys (the same model), the credential helpers (`apiKeyHelper`, the AWS and GCP ones,
+    /// `proxyAuthHelper`: which account, not which model; the security architecture's open list), `forceLogin…`
+    /// (login only), `modelPicker` (the picker's rows), `otelHeadersHelper` (telemetry).
+    public static let modelKeys: Set<String> = [
+        "modelOverrides", "fallbackModel", "advisorModel", "agent", "fastMode", "switchModelsOnFlag", "availableModels", "deniedModels",
+        "enforceAvailableModels", "availableModelsMatch", "modelCatalogUrl", "modelCatalogPublicKey",
+    ]
+
     /// The model names a session's project settings in `cwd` give Claude Code (their "model", and their `env`'s
     /// ANTHROPIC_MODEL and ANTHROPIC_DEFAULT_*_MODEL), and the routing names they hold (`routingKeys`, with the file):
     /// in their parsed `env`, and, as a second net, anywhere in a file's text (a key a duplicate hid from the parse);
@@ -234,8 +250,12 @@ public enum WorkerLaunch {
             if let raw = read.raw {
                 let text = String(decoding: raw, as: UTF8.self)
                 routing += routingKeys.filter { text.contains($0) }.sorted().map { "\($0) in .claude/\(file)" }
+                // The model keys by their quoted name (`agent` alone is too common a word: the parse and the
+                // key-twice rule find it).
+                routing += modelKeys.subtracting(["agent"]).filter { text.contains("\"\($0)\"") }.sorted().map { "\($0) in .claude/\(file)" }
             }
             guard let object = read.object else { continue }
+            routing += object.keys.filter(modelKeys.contains).sorted().map { "\($0) in .claude/\(file)" }
             if let model = object["model"] as? String { found.append(model) }
             let env = object["env"] as? [String: Any] ?? [:]
             for (key, value) in env where key == "ANTHROPIC_MODEL" || (key.hasPrefix("ANTHROPIC_DEFAULT_") && key.hasSuffix("_MODEL")) {
@@ -262,9 +282,10 @@ public enum WorkerLaunch {
         public var joined: Bool
     }
 
-    /// How many words a flag takes: none, one whatever it is (`<value>`: Claude Code's commander and Codex's clap take
-    /// the next word even when it is `--` or starts with `-`), one only when the next word doesn't start with `-`
-    /// (`[value]`), or one and every next word that doesn't (`<values...>`).
+    /// How many words a flag takes: none, one (`<value>`: Claude Code's commander takes the next word even when it is
+    /// `--` or starts with `-`; Codex's clap refuses such a word, "a value is required", Codex 0.167.1 for `-m
+    /// --version`: read here as taken, and refused under the floor either way), one only when the next word doesn't
+    /// start with `-` (`[value]`), or one and every next word that doesn't (`<values...>`).
     public enum Arity: Sendable { case none, required, optional, variadic }
 
     /// Claude Code's flags that take a value, from its own option definitions (2.1.332's `.option(…)` and `new Option(…)`
@@ -278,7 +299,7 @@ public enum WorkerLaunch {
         "--session-id": .required, "--output-format": .required, "--input-format": .required, "--max-turns": .required,
         "--resume": .optional, "-r": .optional, "--debug": .optional, "-d": .optional, "--worktree": .optional, "-w": .optional, "--from-pr": .optional,
     ]
-    /// Codex's, from its `--help` (0.x, run in a scratch home): every one of these takes one value; `--no-daemon`,
+    /// Codex's, from its `--help` (0.167.1, run in a scratch home): every one of these takes one value; `--no-daemon`,
     /// `--oss`, `--search` and the rest none.
     static let codexArity: [String: Arity] = [
         "--config": .required, "-c": .required, "--model": .required, "-m": .required, "--profile": .required, "-p": .required,

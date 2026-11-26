@@ -1101,4 +1101,49 @@ extension LeadAdvanceTests {
         }
         #expect(why.contains("settings.local.json") && why.contains("fix or remove the file"), "\(why)")
     }
+
+    // MARK: The model keys in a branch's settings; the refusals' ways out
+
+    /// A worker's branch settings that change its model beside `--model` (`modelOverrides`, `fallbackModel`, `agent`, …)
+    /// refuse it under the floor; `model` alone, below `--model` and counted, doesn't.
+    @Test func aBranchsModelKeysRefuseAWorker() throws {
+        func refusal(_ text: String) throws -> String? {
+            let worktree = temp.url("keys-\(UUID().uuidString.prefix(8))")
+            try FileManager.default.createDirectory(at: worktree.appendingPathComponent(".claude"), withIntermediateDirectories: true)
+            try Data(text.utf8).write(to: worktree.appendingPathComponent(".claude/settings.local.json"))
+            return RoleLaunchCheck.branchRefusal(WorkerLaunch.bindFacts(seen: .init(command: "claude --model sonnet -- go", cwd: worktree.path),
+                                                                         home: temp.url("home-none").path, limit: 60))
+        }
+        let overrides = try refusal("{\"modelOverrides\":{\"claude-sonnet-5-5\":\"claude-fable-5-2\"}}")
+        #expect(overrides?.contains("modelOverrides in .claude/settings.local.json") == true, "\(overrides ?? "")")
+        for text in ["{\"fallbackModel\":[\"fable\"]}", "{\"agent\":\"writer\"}", "{\"fastMode\":true}", "{\"availableModels\":[\"fable\"]}",
+                     "{\"advisorModel\":\"fable\"}", "{\"switchModelsOnFlag\":true}"] {
+            #expect(try refusal(text) != nil, "\(text)")
+        }
+        #expect(try refusal("{\"model\":\"sonnet\",\"effortLevel\":\"high\",\"apiKeyHelper\":\"/bin/true\"}") == nil)
+        // At the bind, the user's words: what it found and the way out.
+        let worktree = temp.url("overrides-worktree")
+        try FileManager.default.createDirectory(at: worktree.appendingPathComponent(".claude"), withIntermediateDirectories: true)
+        try Data("{\"modelOverrides\":{\"claude-sonnet-5-5\":\"claude-fable-5-2\"}}".utf8).write(to: worktree.appendingPathComponent(".claude/settings.local.json"))
+        let (book, root, _) = floorBook()
+        guard case .grant(let worker) = book.answer(.issue(role: .worker, root: root, task: "x", auditing: nil), from: .session("lead")) else { return }
+        guard case .refused(let why) = book.answer(.bind(grant: worker, root: root, session: "o"), from: .session("lead"),
+                                                   bound: .init(command: "claude --model sonnet -- go", cwd: worktree.path)) else {
+            Issue.record("a worker whose branch overrides its model was bound under the floor")
+            return
+        }
+        #expect(why.contains("modelOverrides") && why.contains("remove it from the branch's settings"), "\(why)")
+        // A program it can't tell apart: the way out names the bare name.
+        guard case .grant(let wrapped) = book.answer(.issue(role: .worker, root: root, task: "y", auditing: nil), from: .session("lead")) else { return }
+        guard case .refused(let shell) = book.answer(.bind(grant: wrapped, root: root, session: "sh"), from: .session("lead"),
+                                                     bound: .init(command: "sh -c 'claude --model sonnet'")) else {
+            Issue.record("a wrapped program was bound under the floor")
+            return
+        }
+        #expect(shell.contains("Name claude bare in the launch preset, or lower `floor_verifier_different`"), "\(shell)")
+        // A grant with no digest where settings are a file (an older tool server): its own words.
+        let older = RoleLaunchCheck.refusal(command: "claude --model opus --settings /v/run/k/w/settings.json -- go", agent: .claude, role: .worker,
+                                            environment: nil, settings: .text("{}"), file: .init(digest: nil, folder: "/v/run/k/"), inline: false)
+        #expect(older?.contains("the lead's tool server is from an older build") == true && older?.contains("restart the lead") == true, "\(older ?? "")")
+    }
 }

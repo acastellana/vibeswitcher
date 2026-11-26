@@ -2485,7 +2485,14 @@ environment's names, its `--settings` keys and env names, a worker's branch sett
   agent's check above);
 - whether a pinned key in a role's `--settings` env (the models) wins over the same key in the user's or the branch's
   settings, key by key, is unverified; a worker's branch naming a routing key is refused at its bind;
-- pin ANTHROPIC_BASE_URL once a real subscription session is seen to start and answer with it set.
+- pin ANTHROPIC_BASE_URL once a real subscription session is seen to start and answer with it set;
+- the start-to-bind window (M2): a `--settings` file or a branch's settings rewritten before the role starts and restored
+  before its bind passes the digest and the routing check (Linux's inline settings have no file to rewrite); whether
+  Claude Code re-reads changed settings later is unverified;
+- ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN or `apiKeyHelper` (and the AWS, GCP and proxy helpers) in a branch's settings
+  change which account the session runs as, not its model: not refused;
+- a branch's `.claude/agents/` with a `model` in an agent's front matter: a worker's subagents may run on another model
+  than its `--model` (the main thread's `agent` key is refused, `WorkerLaunch.modelKeys`).
 The post-merge Claude re-audit's obligation and its security mark live on the board (`task.claudeReaudit`: `pending`,
 `sensitive`, and the task's `riskRaised`, in board.json, which anyone of the uid can write): moving them into the vault is open.
 Also not seen, with (a): a race on the worktree's settings, written before the worker starts (it reads them), then

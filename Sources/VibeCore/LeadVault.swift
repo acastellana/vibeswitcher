@@ -1055,9 +1055,9 @@ extension LeadVault {
                     if launch.agent == nil, team(root)?.floor?.verifierDifferent == true {
                         if case .path(let path)? = launch.command.flatMap(WorkerLaunch.program(of:)),
                            member.agent == .codex || (path as NSString).lastPathComponent.hasPrefix("codex") {
-                            return .refused("That session's program \(WorkerLaunch.codexRootsSaid(path)): under the review floor it holds no role.")
+                            return .refused("That session's program \(WorkerLaunch.codexRootsSaid(path)): under the review floor it holds no role. Name codex bare in the launch preset, or lower `floor_verifier_different`.")
                         }
-                        return .refused("That session's command isn't one Claude Code or Codex command the vault can tell apart (a shell, a wrapper or another program): under the review floor it holds no role.")
+                        return .refused("That session's command isn't one Claude Code or Codex command the vault can tell apart (a shell, a wrapper or another program): under the review floor it holds no role. Name claude bare in the launch preset, or lower `floor_verifier_different`.")
                     }
                     let declared = member.agent ?? .claude
                     if let observed = launch.agent, observed != declared {

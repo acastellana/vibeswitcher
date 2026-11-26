@@ -111,7 +111,11 @@ public enum RoleLaunchCheck {
                 guard let file, value.hasPrefix(file.folder), !value.contains("/../"), (value as NSString).lastPathComponent == "settings.json" else {
                     return said("a `--settings` file outside its launch's own folder")
                 }
-                guard case .text(let text)? = settings, let digest = file.digest, WalletStamp.digest(Data(text.utf8)) == digest else {
+                // A grant from a tool server that gives no digest (an older build's): its own words, not the preset's.
+                guard let digest = file.digest else {
+                    return "This session's `--settings` file came with no digest: the lead's tool server is from an older build, so the node can't vouch for it under your review rules: restart the lead."
+                }
+                guard case .text(let text)? = settings, WalletStamp.digest(Data(text.utf8)) == digest else {
                     return said(settings.map { if case .unread = $0 { return "a `--settings` file the node couldn't read" } else { return "a `--settings` file that isn't the one VibeSwitcher wrote for it" } }
                                 ?? "a `--settings` file the node couldn't read")
                 }
