@@ -401,6 +401,10 @@ struct MacSealVaultTests: LeadTeamFixture {
         let runtime = FakeRuntime()
         _ = try lead(root, runtime)
         _ = try vault.checkConfig(root: root)
+        // A book that watches the Mac list holds its first look at those rows (the review's R9): the user's accept of
+        // the card that showed them takes them.
+        let first = ConfigSeal.heldHashes(in: try vault.guardedRecord(root: root))
+        if !first.isEmpty { _ = try vault.checkConfig(root: root, shown: first) }
         #expect(try vault(for: runtime).checkConfig(root: root) == LeadVault.ConfigCheck())
         return (root, vault(for: runtime))
     }

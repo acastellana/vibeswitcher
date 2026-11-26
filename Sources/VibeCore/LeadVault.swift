@@ -808,12 +808,19 @@ extension LeadVault {
             if case .acceptMove(let root, let branch) = request { return acceptMove(root: root, branch: branch, from: caller) }
             // The agents' config, hashed here (never taken from the caller) and outside the lock: it reads files.
             var config: [String: String]?
+            // The Mac list's rows, when this book watches them (`watchesMacList`): held at their first read, never taken
+            // as they are (the review's R9).
+            var macRows: Set<String> = []
             if case .setGuarded(let root, let hashes) = request {
+                let macList = watchesMacList
                 // A branch run's end is a look as well (`sealConfig`).
                 if hashes[ConfigSeal.checkKey] != nil || hashes[ConfigSeal.runEndKey] != nil {
-                    config = ConfigSeal.hashes(home: configHome, root: root, macList: watchesMacList)
+                    config = ConfigSeal.hashes(home: configHome, root: root, macList: macList)
                 } else if hashes[ConfigSeal.wroteKey] != nil {
-                    config = ConfigSeal.hashes(of: ConfigSeal.homeWatched(home: configHome, macList: watchesMacList))
+                    config = ConfigSeal.hashes(of: ConfigSeal.homeWatched(home: configHome, macList: macList))
+                }
+                if macList, config != nil {
+                    macRows = Set(MacSealList.watched(home: configHome, uid: getuid()).map { ConfigSeal.keyPrefix + $0.name })
                 }
             }
             var held: [String] = []
@@ -822,7 +829,7 @@ extension LeadVault {
                 defer { lock.unlock() }
                 var changed = false
                 let reply = answer(request, from: caller, userOpened: userOpened, agentSession: agentSession, liveSessions: liveSessions,
-                                   config: config, changed: &changed)
+                                   config: config, macRows: macRows, changed: &changed)
                 if changed, let onChange, let data = try? JSONEncoder().encode(state) { onChange(data) }
                 swap(&held, &heldNotes)
                 let key = ConfigSeal.keyPrefix + ConfigSeal.copiedFolder
@@ -909,7 +916,7 @@ extension LeadVault {
         // MARK: Rules
 
         private func answer(_ request: Request, from caller: Caller, userOpened: Bool, agentSession: String?, liveSessions: Set<String>?,
-                            config: [String: String]? = nil, changed: inout Bool) -> Reply {
+                            config: [String: String]? = nil, macRows: Set<String> = [], changed: inout Bool) -> Reply {
             switch request {
             case .issue(let role, let root, let task, let auditing, let finder):
                 if role == .lead {
@@ -1133,7 +1140,8 @@ extension LeadVault {
                 // Its commands run as the lead in merge, and its limits hold the team: a worker's or verifier's
                 // session (or anything outside the sessions) that wrote workflow.md doesn't get them taken as the lead's.
                 guard caller == .app || isLead(caller, root) else { return .refused("Only VibeSwitcher or the lead records workflow.md's guard rails.") }
-                if let refusal = sealConfig(root: root, asked: hashes, now: config, caller: caller, live: liveSessions, changed: &changed) {
+                if let refusal = sealConfig(root: root, asked: hashes, now: config, caller: caller, live: liveSessions, macRows: macRows,
+                                            changed: &changed) {
                     return .refused(refusal)
                 }
                 var rails = hashes.filter { !ConfigSeal.isVaultKey($0.key) }
@@ -1428,7 +1436,7 @@ extension LeadVault {
         /// (`ConfigSeal.comesAndGoesSince`). Otherwise it's refused and held, named under `heldKey`, until you accept it in the app. nil when
         /// it's taken.
         private func sealConfig(root: String, asked: [String: String], now hashes: [String: String]?, caller: Caller, live: Set<String>?,
-                                changed: inout Bool) -> String? {
+                                macRows: Set<String> = [], changed: inout Bool) -> String? {
             let marks = asked.keys.filter(ConfigSeal.isVaultKey)
             guard !marks.isEmpty else { return nil }
             if let wrote = asked[ConfigSeal.wroteKey] {
@@ -1483,7 +1491,7 @@ extension LeadVault {
             let firstLook = state.holdsFirstLook == true
             let home = Self.judge(watchedNow.filter { ConfigSeal.isHome(key: $0.key) }, hashes: hashes, recorded: &mac.hashes, held: &mac.held,
                                   quiet: quiet(since: mac.sealedAt), caller: caller, home: true, shown: shown,
-                                  sessions: sessions, sessionsKnown: ids != nil, firstLook: firstLook, at: now)
+                                  sessions: sessions, sessionsKnown: ids != nil, firstLook: firstLook, firstLookKeys: macRows, at: now)
             var projectHeld = guarded[ConfigSeal.heldKey]
             let project = Self.judge(watchedNow.filter { !ConfigSeal.isHome(key: $0.key) }, hashes: hashes, recorded: &guarded, held: &projectHeld,
                                      quiet: quiet(since: team.configSealedAt), caller: caller, home: false, shown: shown,
@@ -1521,7 +1529,11 @@ extension LeadVault {
         private static func judge(_ now: [String: String], hashes: [String: String], recorded: inout [String: String], held: inout String?,
                                   quiet: Bool, caller: Caller, home: Bool, shown: [String: String]? = nil,
                                   sessions: [ConfigSeal.TeamSession] = [], sessionsKnown: Bool = false, firstLook: Bool = false,
-                                  at time: Double = Date().timeIntervalSince1970) -> Bool {
+                                  firstLookKeys: Set<String> = [], at time: Double = Date().timeIntervalSince1970) -> Bool {
+            // What has nothing recorded is held at its first read, not recorded as it is: everything in a vault that holds
+            // its first look, and the Mac list's rows (`firstLookKeys`) in a book that watches them, whose files the
+            // Mac app's workers wrote with no seal on them before (the review's R9; Linux's first look, for these rows).
+            let holdsFirst = { (key: String) in firstLook || firstLookKeys.contains(key) }
             // A seal made while the sync bookkeeping still counted, of a folder as it is now: the same folder, carried
             // over to the hash that leaves it out, so that alone holds nothing. Whatever else moved doesn't match, and
             // is judged as ever.
@@ -1560,7 +1572,7 @@ extension LeadVault {
             })
             // A held first look: everything else with nothing recorded is held too, for the user's accept (also one
             // first read after it).
-            let firstLooked = firstLook ? Set(now.keys.filter { recorded[$0] == nil && !ConfigSeal.comesAndGoes(key: $0) }) : []
+            let firstLooked = Set(now.keys.filter { recorded[$0] == nil && !ConfigSeal.comesAndGoes(key: $0) && holdsFirst($0) })
             var differ = now.filter { firstSeen.contains($0.key) || firstLooked.contains($0.key) || (recorded[$0.key] != nil && recorded[$0.key] != $0.value) }
             // A round Claude Code's skill sync finished (`ConfigSeal.finishedSyncRound`), judged on the whole change since
             // the seal: the sync's, accepted as it is at anyone's look, quiet or not. Noted (`syncRoundKey`), never shown
@@ -1589,7 +1601,7 @@ extension LeadVault {
             // of that (an older app) what's held.
             // A held first look's: only a click that showed it (`shown`).
             let unseen = caller == .app ? differ.filter { key, value in
-                (shown != nil || (firstLook && recorded[key] == nil) ? shown?[key] : before[key]?.hash) != value
+                (shown != nil || (holdsFirst(key) && recorded[key] == nil) ? shown?[key] : before[key]?.hash) != value
             }
                 : differ.filter { key, _ in
                     !quiet || !ConfigSeal.sealsWhenQuiet(key: key) || before[key] != nil || returned.contains(key) || updates.contains(key)
