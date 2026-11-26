@@ -32,7 +32,9 @@ extension WireKinds {
             public var reopen: NodeWire.Value?
             /// The restart's offer to reopen the user's sessions (`LeadEngine.reopenOffer`), null while none; and each
             /// project due a prompt audit (`PromptAuditWatch.value`). Both absent from a node before them (2026-11-26).
-            public var reopenOffer: NodeWire.Value?
+            /// `@WireNull`, as `restart` is: the server writes null while there is none, and a client that reads a
+            /// status and writes it again keeps the key (the captured reply, byte for byte).
+            @WireNull public var reopenOffer: NodeWire.Value?
             public var promptAudits: NodeWire.Value?
             public var ended: NodeWire.Value?
             public var ending: NodeWire.Value?
