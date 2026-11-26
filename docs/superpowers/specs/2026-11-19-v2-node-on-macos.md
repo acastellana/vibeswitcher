@@ -692,12 +692,14 @@ the label, are now bound as follows; each is a refusal that boots out only what 
   typed code, or the Mac's dialog once `approvalMeasured` is on), its answer read: taken, the host shuts down in order,
   then the job is unloaded; refused, or an answer that can't be read (within `Requests.stopWait + 30` s, as on Linux),
   stop fails, says why and unloads nothing. A server that answers `status` with an error, or unreadably, is a refusal
-  too (nothing stopped). No server (nothing listens, no hello, a listener that fails the server check): stop says what
-  ends and how ("the host ends by launchd's bootout; its sessions lose their terminal"), asks the typed code, and boots
-  out.
+  too (nothing stopped), and so (the re-check's note 6) is a listener that fails the server check or a hello that is
+  garbage or late: only nothing listening at all (`connect` refused or no socket) is no server. Then stop says what
+  ends and how ("nothing listens …: the host ends by launchd's bootout; its sessions lose their terminal"), asks the
+  typed code, and boots out. A refusal names the manual `launchctl bootout gui/<uid>/<label>` for a wedged node.
 - *N2, everything the host started that can be found.* Before the prompt, and again after it (what started while it
   waited), the host's descendants by parent links (every level) and every process in a POSIX session one of them leads;
-  and the session ids in their environments (`VIBESWITCHER_SESSION`, where the kernel gives a process's environment to
+  and, read at each look (a process that leaves its session between two looks still carries one), the session ids in
+  their environments (`VIBESWITCHER_SESSION`, where the kernel gives a process's environment to
   its user: not for Apple's platform binaries), with which every process still carrying one is found at the wait.
   `stop` waits for all of them within its limit, names what is left, and fails rather than saying they ended; done, it
   says "every process of it stop could find has ended". *Can't be found on a Mac:* a process that left its session and
@@ -705,8 +707,9 @@ the label, are now bound as follows; each is a refusal that boots out only what 
   started with an emptied environment).
 - *N3.* After a crash, `stop` unloads the dead job and removes the socket's file under the same rule as a live stop
   (a socket, the lock free).
-- *N4.* The plist folder must be a real folder (no link), the user's, writable by neither group nor others, before
-  anything is written or loaded; the plist itself the user's, a regular file, writable by neither (launchd refuses a
+- *N4.* The plist folder must be a real folder (no link), the user's, writable by neither group nor others, with no
+  access control list (the re-check's note 4), before
+  anything is written or loaded; the plist itself the user's, a regular file, writable by neither, no ACL (launchd refuses a
   group- or world-writable plist; `start` says so itself first).
 - *N5.* `status --json` checks the host as the plain `status` does, its line on stderr.
 - A plist from the earlier installer (with `HOME` and `PATH`) is refused as any other; the refusal says to remove it and
@@ -793,6 +796,19 @@ runs at load), `MachServices` (`endpoints`), `Sockets` (`sockets`, and it runs),
 | Two different plists that print identically | a difference only in the keys of the first row |
 | An orphan in a session whose leader ended before stop's first look, its parent gone (stop's words stay "every process of it stop could find") | nothing: any session's program can leave such a child; found once a host-side record of its sessions' ids exists (owed) |
 | A process that left its session and lost its parent before a look, with no readable session id | as the row above |
+
+**What the re-check's round proved on this Mac** (red on `a290cb47`, green from `5fe57dda`): the re-check's tests,
+taken over (`MacAgentRecheckTests`): a variable's value printing a `path` line, a job from another plist then made a
+symbolic or a hard link to the agent's, a `KeepAlive` dictionary job (`semaphores`) swapped in after start's bootstrap,
+each refused by start, status and stop; ACLs on the folder and the plist refused; a link to the user's lock (not yet
+made) refused as the user's lock; a child leaving its session between stop's two looks, carrying the session's id, is
+waited for; and `limitAnAncestorSwappedAndBackWithAnUnshownKey` (with `Debug`, a key `print` shows nothing of) and
+`limitAnOrphanInADeadLeadersSessionCarryingTheId` hold as the table above states. The round's own
+(`MacAgentGrammarTests`): the fixtures cut from this Mac's captures placed in each state and refused for every line the
+grammar can't place; a job with a control character or a non-ASCII byte not written; this Mac's real launchd printing
+the scratch host's job as the grammar says when running, killed and loaded (the canary for a newer release); one real
+job per key `print` shows refused, the six it shows nothing of placed; only no listener is no server; a failed bootout
+said as failed; and `HostLockLinkTests` (a lock that is a link refuses the host's start, nothing made where it points).
 
 **What the round proved on this Mac** (red on `5dfbde9b`, green from `abab3abd`): `MacAgentRoundTests`, the reviewer's
 tests taken over (a swap to `KeepAlive` true or an extra variable at the bootstrap; the pinned host's exact command
