@@ -32,6 +32,35 @@ extension WireKinds {
         }
     }
 
+    /// `logs` (the no-terminal inventory's C8): the node's log's last lines as `vibeswitcher logs` shows them, masked
+    /// (`NodeLogs.read`). `log`: "node" (the server's and the host's) or "sessions" (the host's session log); `cut`: the
+    /// oldest lines left out to keep the reply bounded; `why`: why the log couldn't be read (no lines then).
+    public enum Logs: WireKind {
+        public static let kind = "logs"
+
+        public struct Args: Codable, Sendable, Equatable {
+            public var lines: Int?
+            public var sessions: Bool?
+            public init(lines: Int? = nil, sessions: Bool? = nil) {
+                self.lines = lines
+                self.sessions = sessions
+            }
+        }
+
+        public struct Result: Codable, Sendable, Equatable {
+            public var log: String?
+            public var lines: [String]?
+            public var cut: Int?
+            @WireNull public var why: String?
+            public init(log: String, lines: [String], cut: Int, why: String?) {
+                self.log = log
+                self.lines = lines
+                self.cut = cut
+                self.why = why
+            }
+        }
+    }
+
     /// `status --check-updates`: the update watch's look (`UpdateWatch.checkedResult`): its record's answer for the build
     /// that runs, that build, and the notice a newer one gives.
     public enum UpdateCheck: WireKind {

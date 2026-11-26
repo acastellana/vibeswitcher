@@ -301,6 +301,10 @@ public struct KindSpec: Sendable {
         // Brief me: a read of the user's own, which may ask the summaries' model: never a session's.
         KindSpec("brief", sender: .webRead, effect: .read, servedBy: .requests, page: .bySender, wire: .typed(WireKinds.Brief.self),
                  voiced: .notRecorded(phrase: nil)),
+        // The node's logs, masked as `vibeswitcher logs` masks them (the no-terminal inventory's C8): a read of the
+        // user's, which names every project's sessions and who asked for them: never a session's.
+        KindSpec("logs", sender: .webRead, effect: .read, servedBy: .requests, page: .bySender, wire: .typed(WireKinds.Logs.self),
+                 voiced: .notRecorded(phrase: nil)),
         // Check for Updates now: it asks GitHub and keeps only its answer; the user's, never a session's or a page's.
         KindSpec("update.check", sender: .user, effect: .read, servedBy: .requests, page: .acts, wire: .typed(WireKinds.UpdateCheck.self),
                  voiced: .notRecorded(phrase: nil)),

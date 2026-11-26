@@ -21,7 +21,7 @@ struct NodeLogsTests {
     }
 
     private func read(_ args: WireKinds.Logs.Args, root: URL, place: NodeLogs.Place,
-                      run: @escaping (String, [String], [String]?) -> (status: Int32, output: String)? = { _, _, _ in nil }) -> Result<WireKinds.Logs.Result, NodeWire.Failure> {
+                      run: @escaping (String, [String], [String]?) -> (status: Int32, output: String)? = { _, _, _ in nil }) -> Result<WireKinds.Logs.Result, Requests.ReadRefusal> {
         NodeLogs.read(args, root: root, place: place, scratch: true, run: run)
     }
 

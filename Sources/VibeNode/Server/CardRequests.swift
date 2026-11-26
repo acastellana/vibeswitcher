@@ -141,29 +141,29 @@ extension Requests {
     /// card's id and the SHA-256 of all of them (`version`). After the first part, the `version` it gave is required, and
     /// a card whose bytes changed since is `changed`: parts of two versions are never joined. Refused: no such card
     /// (`gone`), a part it hasn't (`bad-args`), a card past `mostCardParts` parts.
-    static func cardPart(_ value: NodeWire.Value?, id: String, part: Int, version: String?) -> Result<WireKinds.Questions.CardPart, CardPartRefusal> {
-        guard let value else { return .failure(CardPartRefusal(.gone, "no card \(ConfigSeal.inert(id, limit: 80))")) }
-        guard part >= 0 else { return .failure(CardPartRefusal(.badArgs, "questions' part is a part's number from 0")) }
+    static func cardPart(_ value: NodeWire.Value?, id: String, part: Int, version: String?) -> Result<WireKinds.Questions.CardPart, ReadRefusal> {
+        guard let value else { return .failure(ReadRefusal(.gone, "no card \(ConfigSeal.inert(id, limit: 80))")) }
+        guard part >= 0 else { return .failure(ReadRefusal(.badArgs, "questions' part is a part's number from 0")) }
         guard part == 0 || version != nil else {
-            return .failure(CardPartRefusal(.badArgs, "questions with a part after the first needs the version the first part gave"))
+            return .failure(ReadRefusal(.badArgs, "questions with a part after the first needs the version the first part gave"))
         }
         let bytes = Data(NodeWire.line(value).dropLast())
         let current = BuildInfo.sha256(of: bytes)
         if let version, version != current {
-            return .failure(CardPartRefusal(.changed, "the card changed while it was being read: read it again from its first part"))
+            return .failure(ReadRefusal(.changed, "the card changed while it was being read: read it again from its first part"))
         }
         let parts = max(1, (bytes.count + cardPartBytes - 1) / cardPartBytes)
         guard parts <= mostCardParts else {
-            return .failure(CardPartRefusal(.refused, "the card is \(bytes.count) bytes: more than \(mostCardParts) parts of \(cardPartBytes / 1024) KiB"))
+            return .failure(ReadRefusal(.refused, "the card is \(bytes.count) bytes: more than \(mostCardParts) parts of \(cardPartBytes / 1024) KiB"))
         }
-        guard part < parts else { return .failure(CardPartRefusal(.badArgs, "the card has \(parts) parts, from 0: not \(part)")) }
+        guard part < parts else { return .failure(ReadRefusal(.badArgs, "the card has \(parts) parts, from 0: not \(part)")) }
         let start = part * cardPartBytes
         let slice = bytes.subdata(in: (bytes.startIndex + start)..<(bytes.startIndex + min(bytes.count, start + cardPartBytes)))
         return .success(.init(card: id, version: current, part: part, parts: parts, bytes: bytes.count, data: slice.base64EncodedString()))
     }
 
-    /// Why a part of a card isn't given: the reply's error.
-    struct CardPartRefusal: Error, Equatable {
+    /// Why a read (a part of a card, the logs) gives nothing: the reply's error.
+    struct ReadRefusal: Error, Equatable {
         let failure: NodeWire.Failure
         init(_ code: NodeWire.Code, _ message: String) { failure = .init(code, message) }
         var code: String { failure.code }

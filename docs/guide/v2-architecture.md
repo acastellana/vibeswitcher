@@ -191,6 +191,7 @@ taken on the Unix socket.
 | `hooks.install` | the user's terminal | yes | yes |  | `Requests.act` | `agents`, `codex` | `WireKinds.HooksInstall` | its result; done again | yes | the terminal's alone |
 | `hooks.remove` | the user's terminal | yes | yes |  | `Requests.act` | `agents` | `WireKinds.HooksRemove` | its result; done again |  | yes |
 | `lead` | the user's terminal | yes | yes |  | `Requests.act` | `folder`, `goal`, `initialized`, `replace`, `resume`, `takeHead` | `WireKinds.Lead` | its result |  | yes |
+| `logs` | the user's terminal, or a page that reads |  |  |  | `Requests.act` |  | `WireKinds.Logs` |  |  |  |
 | `mail` | the user's terminal, or a page that reads |  |  |  | `Requests.act` |  | `WireKinds.Mail` |  |  |  |
 | `plugin.add` | the user's terminal | yes | yes |  | `Requests.act` | `folder`, `manifest`, `program` | not yet | its result |  | the terminal's alone |
 | `plugin.file` | anyone of the uid |  |  |  | `Requests.act` |  | not yet |  |  |  |

@@ -23,7 +23,7 @@ struct CardPartsTests {
         return .object(fields)
     }
 
-    private func part(_ value: NodeWire.Value?, _ index: Int, version: String? = nil, id: String = CardPartsTests.id) -> Result<WireKinds.Questions.CardPart, Requests.CardPartRefusal> {
+    private func part(_ value: NodeWire.Value?, _ index: Int, version: String? = nil, id: String = CardPartsTests.id) -> Result<WireKinds.Questions.CardPart, Requests.ReadRefusal> {
         Requests.cardPart(value, id: id, part: index, version: version)
     }
 

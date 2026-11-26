@@ -440,6 +440,7 @@ public final class Requests: @unchecked Sendable {
         case "settings": settings(request, reply: reply)
         case "recent": recent(request, reply: reply)
         case "brief": brief(request, reply: reply)
+        case "logs": logs(request, reply: reply)
         case "update.check": updateCheck(request, reply: reply)
         case "approve.list": approveList(request, reply: reply)
         case "web.pairing": webPairing(request, reply: reply)
