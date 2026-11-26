@@ -283,6 +283,36 @@ Terminal input and resize become one binary type (6), so they share the sequence
 stream, `seq`, type and payload bytes, checked in `WebRequestScreen.binary` before the relay's mode check. Types 1 and
 3 from a page are refused as today (`TerminalRelay.binary`'s watch rule) and close the connection on the user's node.
 
+**The bytes, exactly** (slice 1, `Sources/VibeCore/V2/DeviceProof.swift`; where the lines above left a byte open, the
+strictest choice, each one encoding per value):
+
+| Frame | Bytes | Signed over |
+| --- | --- | --- |
+| text | `{"v":1,"kind":"signed","body":"` BODY `","sig":"` SIG `"}`, nothing before or after | `"vibeswitcher-frame-v1\n"` + origin + `"\n"` + conn + `"\n"` + body |
+| terminal | `[6][stream: 4][seq: 8][sig: 64][type: 1][payload]`, integers big-endian | `"vibeswitcher-term-v1\n"` + origin + `"\n"` + conn + `"\n"` + stream (4) + seq (8) + type (1) + payload |
+
+- **The text envelope is those exact bytes**, not JSON read loosely: the four fields in that order, no space, `v` 1,
+  `kind` `signed`. BODY is the body with each `"` and `\` escaped by one `\` and no other escape (a body holds no byte
+  under 0x20, as compact JSON never does): what `JSON.stringify({v: 1, kind: "signed", body, sig})` makes.
+- **`sig`** is the 64 bytes `r || s` (WebCrypto's form) in unpadded base64url, 86 characters, the last one's 4 spare
+  bits zero. `s` is **not** required low: WebCrypto doesn't make it so, and the other signature of a frame, (r, n − s),
+  signs the same bytes, which the sequence takes once.
+- **`conn`** in the signed bytes is the challenge's text, unpadded base64url of its 32 bytes (43 characters); **origin**
+  the listener's, printable ASCII without a space.
+- **The body** is one JSON object in RFC 8259's grammar **with no whitespace** outside strings, at most 32 deep (the
+  body's object is 1), **no name twice in any object**, names with no escape and two the same when canonically
+  equivalent (as a Swift `String` key compares them: `K` and the Kelvin sign are one name), valid UTF-8, a `\u` escape of a surrogate only as a high one then a low one. It begins
+  `{"v":1,"seq":N,` with N in plain decimal (no sign, no leading zero): the only place `seq` is read.
+- **`seq`** runs from 1 to 2^53 − 1 (JavaScript's largest exact integer), text and terminal frames counting in the one
+  sequence; lower than expected is a repeat, higher a skip.
+- **A terminal frame's type** is 1 (input, at least one byte) or 3 (a resize, exactly 4 bytes); a stream of the
+  connection's, and the resize's columns and rows, stay `TerminalRelay`'s to check.
+- **Size:** a frame of either kind is at most 64 KiB (the contract's client frame).
+- **Order:** size, the layout, the signature, and only then the signed bytes' content (the body's grammar, `seq`).
+  Each refusal has its own name (`DeviceProof.Refusal`) and closes the connection.
+- **Vectors** the page's module (slice 5) must reproduce byte for byte: `DeviceProofTests.textVectors` and
+  `terminalVectors` (hex), with the key they verify under, in `Tests/VibeCoreTests/DeviceProofTests.swift`.
+
 This amends the contract's §8 "When signed approvals exist": `proof {device, nonce, sig}` on a request becomes the
 envelope on every frame, and "checked by the host (rule 7)" becomes **checked by the server** for each frame (the
 server holds the connection and is the app, S2), with the presence proofs (unlocks, guarded changes, device adds)
