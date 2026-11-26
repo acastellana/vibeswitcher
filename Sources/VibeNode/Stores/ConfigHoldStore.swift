@@ -386,7 +386,7 @@ public enum ConfigHoldStore {
     public static func changedAt(_ names: [String], root: String, home: String) -> [String: Date] {
         guard !names.isEmpty else { return [:] }
         var times: [String: Date] = [:]
-        for watched in ConfigSeal.watched(home: home, root: root) where names.contains(watched.name) && (watched.kind == .file || watched.kind == .mcpServers) {
+        for watched in ConfigSeal.watched(home: home, root: root, macList: MacSealList.namedByTheNode) where names.contains(watched.name) && (watched.kind == .file || watched.kind == .mcpServers) {
             var info = stat()
             guard stat(watched.path, &info) == 0 else { continue }
             let changed = Platform.Files.changed(info)
@@ -399,7 +399,7 @@ public enum ConfigHoldStore {
     static func sizes(_ names: [String], root: String, home: String) -> [String: Int] {
         guard !names.isEmpty else { return [:] }
         var sizes: [String: Int] = [:]
-        for watched in ConfigSeal.watched(home: home, root: root) where names.contains(watched.name) && (watched.kind == .file || watched.kind == .mcpServers) {
+        for watched in ConfigSeal.watched(home: home, root: root, macList: MacSealList.namedByTheNode) where names.contains(watched.name) && (watched.kind == .file || watched.kind == .mcpServers) {
             if let size = (try? FileManager.default.attributesOfItem(atPath: watched.path))?[.size] as? NSNumber { sizes[watched.name] = size.intValue }
         }
         return sizes

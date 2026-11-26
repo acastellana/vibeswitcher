@@ -670,7 +670,7 @@ extension LeadEngine {
             let held = ConfigHoldStore.held(root: root, vault: vault, home: home, snapshot: snapshot.projects[root])
                 .map { SessionPresets.withPresetsToAccept($0, vault: vault, home: home, nodeRoot: node) }
             // The home folder's watched things' names (the Mac-wide seal's): what another root's open card may show too.
-            let homeNames = Set(ConfigSeal.homeWatched(home: home).map(\.name))
+            let homeNames = Set(ConfigSeal.homeWatched(home: home, macList: MacSealList.namedByTheNode).map(\.name))
             // With nothing held: whether accepting would record anything (guard rails or a floor workflow.md proposes that
             // the vault doesn't hold), and whether the last accept's snapshot is one this host's vault sealed (none: the
             // vault's first look is owed, a host restart since, or the project never accepted). Nothing owed: the card is
@@ -754,7 +754,7 @@ extension LeadEngine {
         let (vault, home, node) = (cardVault, self.home, self.root)
         work.async { [weak self] in
             let snapshot = AcceptedSnapshot.load(root: node)
-            let homeNames = Set(ConfigSeal.homeWatched(home: home).map(\.name))
+            let homeNames = Set(ConfigSeal.homeWatched(home: home, macList: MacSealList.namedByTheNode).map(\.name))
             let found = roots.sorted().reduce(into: [String: ConfigHoldStore.Shown]()) { found, root in
                 if case .success(var shown) = ConfigHoldStore.held(root: root, vault: vault, home: home, look: false,
                                                                    snapshot: snapshot.projects[root]) {
