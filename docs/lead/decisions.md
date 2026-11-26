@@ -499,3 +499,7 @@ Both were reported as pre-existing or doubtful in reports about other things and
 
 Seven v2 tasks were ready and refused for 0.2 GB of disk while the Mac sat idle; the user asked for full focus on completing v2. The user's own answer of 2026-11-24 (C08E0405) took it from 6 to 2 for the same reason. The cost is known: a worker that finishes under 16 GB free can't run its load check until space is freed.
 
+## 2026-11-27 00:51:02 A third item for the Mac node's switch-on list (with the two of 2026-11-26: the handover's receiving side, and the vault key's Keychain rule): once main's vault fix 5e98c1fc is in v2, a checked Mac node host whose sealed vault stops opening never saves again, because the fix holds a started-over vault's saves until the app's key is taught and a node's host on the Mac takes no app key (found by the main-into-v2 merge's worker, 2026-11-27; it fails closed, the old file is kept, but the vault, v2's action record and the user's seals stay in memory only until a restart drops them). The node host needs its own confirmation path for a started-over vault before isCheckedMacNode is lifted. Dormant until then.
+
+Reported in passing by a merge task that was told not to fix it; without a record it would be lost in a kept task's report, and it would silently lose a Mac node's guarded state after one bad start.
+
