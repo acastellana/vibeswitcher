@@ -123,6 +123,14 @@ export function tilde(path, home) {
   return path;
 }
 
+// A path shortened for a line: its first part and its last two, the middle elided ("~/.vibeswitcher/…/mac-limits.json").
+export function elided(path, keep = 2) {
+  const text = String(path || '');
+  const parts = text.split('/');
+  if (parts.length <= keep + 2) return text;
+  return [parts[0] || '', parts[1], '…', ...parts.slice(-keep)].join('/');
+}
+
 export function lastPart(path) {
   return (path || '').replace(/\/+$/, '').split('/').pop() || '';
 }

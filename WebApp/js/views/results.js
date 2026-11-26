@@ -2,6 +2,7 @@
 // its row opens (`TeamRowDetails`, `board.task`: why it last failed, its checkpoints, the worker's report, the audit and
 // its findings, its merge and its score line). Read-only; asked of the node only when shown.
 
+import * as kit from '../kit.js';
 import { h, setText } from '../dom.js';
 import { icon } from '../marks.js';
 import { clock, moment } from '../words.js';
@@ -48,7 +49,7 @@ export function resultScreenshots(app) {
 // A task row's details, asked of the node as the row opens and again when it is opened again later.
 export function taskDetails(app) {
   const body = h('div', { class: 'task-details', hidden: true });
-  const button = h('button', { class: 'icon-button task-more', type: 'button', 'aria-expanded': 'false', title: t('rsDetails'), 'aria-label': t('rsDetails') }, icon('chevron', 10));
+  const button = kit.iconButton({ class: 'task-more', 'aria-expanded': 'false', title: t('rsDetails'), 'aria-label': t('rsDetails') }, icon('chevron', 10));
   let key = null;
   let asking = 0;
 

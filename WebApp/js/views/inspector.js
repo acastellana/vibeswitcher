@@ -6,9 +6,10 @@
 // one line. Rows are written in place (`setText`), and a fact that comes and goes while you watch keeps its row, so
 // nothing under it moves. Nothing is drawn while the inspector is closed.
 
+import * as kit from '../kit.js';
 import { h, keyed, setText, setClass, framed } from '../dom.js';
 import { statusMark, setMark, icon } from '../marks.js';
-import { STATES, AGENTS, ROLES, stateOf, since, short, moment, tilde, plural } from '../words.js';
+import { STATES, AGENTS, ROLES, stateOf, since, short, moment, tilde, plural, elided } from '../words.js';
 import { sessionHref, inspectorTab, teamOf, projectOf } from '../ui.js';
 import { ledger, fileWords, usageWords, costWords } from '../activity.js';
 import { teamTasks } from './lead.js';
@@ -47,7 +48,7 @@ function fact(name, ...content) {
 
 // A titled group of facts, left out while none of them has anything to say.
 function group(title, ...facts) {
-  const el = h('section', { class: 'inspect-group' }, h('h2', { class: 'group-head' }, title), h('dl', null, facts.map((entry) => entry.el)));
+  const el = h('section', { class: 'inspect-group' }, kit.sectionTitle('h2', { class: 'group-head' }, title), h('dl', null, facts.map((entry) => entry.el)));
   return { el, settle() { el.hidden = facts.every((entry) => entry.el.hidden); } };
 }
 
@@ -74,7 +75,7 @@ function overview(app) {
   const began = fact(t('inSince'));
   const running = fact(t('inRunning'));
   const says = h('p', { class: 'inspect-says' });
-  const status = h('section', { class: 'inspect-group' }, h('h2', { class: 'group-head' }, t('inStatus')), h('dl', null, state.el, began.el, running.el), says);
+  const status = h('section', { class: 'inspect-group' }, kit.sectionTitle('h2', { class: 'group-head' }, t('inStatus')), h('dl', null, state.el, began.el, running.el), says);
 
   const folder = fact(t('inFolder'));
   folder.el.classList.add('wraps');
@@ -93,6 +94,10 @@ function overview(app) {
   const command = fact(t('inCommand'));
   const size = fact(t('inSize'));
   const agents = group(t('inAgent'), agent, agentSession, process, command, size);
+  // The agent's own session id, its process, the command and the terminal's size are for someone fixing it (D18):
+  // folded under Technical details.
+  const technical = h('details', { class: 'inspect-technical' }, h('summary', null, t('noTechnical')), h('dl', null, agentSession.el, process.el, command.el, size.el));
+  agents.el.append(technical);
 
   // Tokens and cost (the Mac's ActivityFeed): asked of the node (`session.usage`) as the tab shows, and again while it
   // shows, at most every `USAGE_EVERY` ms.
@@ -106,7 +111,7 @@ function overview(app) {
   let usageAsking = false;
 
   const role = fact(t('inRole'));
-  const leadLink = h('a', { class: 'inspect-link' });
+  const leadLink = kit.button('quiet', { size: 's', tag: 'a', class: 'inspect-link' });
   const lead = fact(t('inLead'), leadLink);
   const task = fact(t('inTask'));
   const team = group(t('inTeam'), role, lead, task);
@@ -114,7 +119,7 @@ function overview(app) {
   // Dev servers (the app's dev pages): the ports the session's processes listen on (`session.ports`), asked as the tab
   // shows and again at most every `USAGE_EVERY` ms; each opens in a new tab on the node's own machine.
   const portList = h('ul', { class: 'inspect-ports' });
-  const ports = { el: h('section', { class: 'inspect-group', hidden: true }, h('h2', { class: 'group-head' }, t('inDevServers')), portList) };
+  const ports = { el: h('section', { class: 'inspect-group', hidden: true }, kit.sectionTitle('h2', { class: 'group-head' }, t('inDevServers')), portList) };
   let portsFor = null;
   let portsAt = 0;
   let portsAsking = false;
@@ -125,9 +130,9 @@ function overview(app) {
     const rows = (result?.ports || []).map((entry) => portRow(entry, globalThis.location?.hostname)).filter(Boolean);
     ports.el.hidden = !rows.length;
     portList.replaceChildren(...rows.map((row) => h('li', null,
-      row.url ? h('a', { class: 'inspect-link', href: row.url, target: '_blank', rel: 'noopener noreferrer', title: t('inOpensInTab', { url: row.url }) }, row.label)
+      row.url ? kit.button('quiet', { size: 's', tag: 'a', class: 'inspect-link', href: row.url, target: '_blank', rel: 'noopener noreferrer', title: t('inOpensInTab', { url: row.url }) }, row.label)
         : h('span', { title: t('inOnTheNodeSMachine') }, row.label),
-      h('span', { class: 'inspect-port-about' }, ' · ' + row.about))));
+      h('span', { class: 'inspect-port-about', title: row.process }, ' · ' + row.about))));
   }
   function askPorts(session) {
     if (!store.can('session.ports') || session.ended) {
@@ -196,7 +201,8 @@ function overview(app) {
       setText(says, said);
       if (said) says.title = said; else says.removeAttribute('title');
 
-      folder.say(tilde(session.cwd, home), session.cwd);
+      // ~/… with its middle elided where it is long, whole on hover.
+      folder.say(session.cwd ? elided(tilde(session.cwd, home), 3) : null, session.cwd);
       branch.say(session.branch);
       runsIn.say(session.hosted ? t('inTheSessionHost') : t('inAnotherTerminal'));
       place.settle();
@@ -215,6 +221,7 @@ function overview(app) {
       command.say(session.command);
       size.say(session.size ? `${session.size.cols} × ${session.size.rows}` : null);
       agents.settle();
+      technical.hidden = [agentSession, process, command, size].every((entry) => entry.el.hidden);
       askUsage(session);
       askPorts(session);
 
@@ -238,7 +245,7 @@ function teamPane(app) {
   // Under the tasks, as the Mac's Team tab: the scorecard, decisions, answered questions, files.
   const records = boardRecords(app);
   const later = h('p', { class: 'inspect-note' }, t('inTheBoardSTasksCome'));
-  const leadLink = h('a', { class: 'inspect-link' });
+  const leadLink = kit.button('quiet', { size: 's', tag: 'a', class: 'inspect-link' });
   const leader = fact(t('inSession'), leadLink);
   const questions = fact(t('inQuestions'));
   const held = fact(t('inHeld'));
@@ -314,7 +321,7 @@ function ledgerRow(first) {
       running.hidden = !row.running;
       setClass(el, 'failed', row.failed);
       const took = row.took === null ? '' : row.took < 1 ? '<1s' : short(row.took);
-      setText(trail, [row.failed ? 'failed' : '', took].filter(Boolean).join(' · '));
+      setText(trail, [row.failed ? t('inFailed') : '', took].filter(Boolean).join(' · '));
     },
   };
 }
@@ -377,8 +384,8 @@ function activityPane(app, scroller, again) {
 
 export function inspector(app) {
   const { store, ui } = app;
-  const tabs = TABS.map((tab) => h('button', { type: 'button', onclick: () => ui.setInspectorTab(tab.id) }, tab.label));
-  const close = h('button', { class: 'icon-button inspect-close', type: 'button', 'aria-label': t('inCloseTheInspector'), onclick: () => ui.setInspector(false) }, icon('close', 14));
+  const tabs = TABS.map((tab) => kit.segment({ onclick: () => ui.setInspectorTab(tab.id) }, tab.label));
+  const close = kit.iconButton({ class: 'inspect-close', 'aria-label': t('inCloseTheInspector'), onclick: () => ui.setInspector(false) }, icon('close', 14));
   const scroller = h('div', { class: 'inspect-scroll' });
   let current = null;
   const again = framed(() => {
@@ -388,7 +395,7 @@ export function inspector(app) {
   const panes = { team: teamPane(app), overview: overview(app), activity: activityPane(app, scroller, again) };
   scroller.append(panes.team.el, panes.overview.el, panes.activity.el);
   const el = h('aside', { class: 'inspector', id: 'inspector', 'aria-label': t('inInspector') },
-    h('div', { class: 'inspect-top' }, h('div', { class: 'segmented', role: 'group', 'aria-label': t('inInspector') }, tabs), close), scroller);
+    h('div', { class: 'inspect-top' }, kit.segmented({ role: 'group', 'aria-label': t('inInspector') }, tabs), close), scroller);
   // Under a sheet: a touch beside it closes it.
   const scrim = h('div', { class: 'inspect-scrim', onclick: () => ui.setInspector(false) });
   let shownTab = null;

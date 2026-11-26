@@ -35,7 +35,20 @@ function fakeApp({ route = { name: 'node' }, state = {}, kinds = null, acts = tr
   const listeners = [];
   const ui = { state: { route }, subscribe(fn) { listeners.push(fn); }, go() {} };
   const leave = () => { ui.state.route = { name: 'home' }; for (const fn of listeners) fn('route'); };
-  return { store, sent, ui, leave };
+  return { store, sent, ui, leave, listeners };
+}
+
+// This node shows one group at a time beside its list (views/node.js): the text of every group, each chosen in turn.
+function everyGroup(nodeView, app) {
+  const view = nodeView(app);
+  const keys = findAll(view.columns.rows, byClass('tc-row')).map((row) => row.dataset.key);
+  let text = '';
+  for (const group of keys) {
+    app.ui.state.route = { name: 'node', group };
+    for (const fn of app.listeners) fn('route');
+    text += view.columns.detail.textContent;
+  }
+  return text;
 }
 
 test('This node: a request it took as yours says how long ago as the other rows do, never an element’s name', async () => {
@@ -44,10 +57,12 @@ test('This node: a request it took as yours says how long ago as the other rows 
   const node = nodeValue();
   node.accepted = [{ kind: 'lead', action: 'b7e0c2d4-5a61-4f38-9c0b-1e2d3f4a5b6c', at: new Date(Date.now() - 90 * 60000).toISOString(), pid: 51022, cgroup: '/init.scope',
     commandLine: ['vibeswitcher', 'lead', '/home/dev/projects/example-site'] }];
-  const app = fakeApp({ state: { node } });
+  const app = fakeApp({ route: { name: 'node', group: 'accepted' }, state: { node } });
   const text = nodeView(app).el.textContent;
   assert.doesNotMatch(text, /\[object /);
-  assert.match(text, /vibeswitcher lead \/home\/dev\/projects\/example-site · 1h 30m ago · \/init\.scope/);
+  // In words, never the command line or the cgroup (D18): the command on hover.
+  assert.match(text, /Started a project’s lead · 1h 30m ago/);
+  assert.doesNotMatch(text, /init\.scope|vibeswitcher lead/);
 });
 
 // A project whose lead asks two things (a question and its push), and five sessions of the user's own of which one
@@ -73,12 +88,12 @@ test('the counts say what they count: the project’s things against everything 
     const left = leftColumn(app, { brief() {} });
     left.render();
     assert.equal(find(left.el, byClass('summary-count')).textContent, all);
-    // Your own sessions: how many there are, plain; what waits among them, apart and in the asking colour.
+    // Your own sessions: what waits among them, in words and in the asking colour (how many there are, in its title).
     const own = find(left.el, (node) => node.dataset.place === 'ownSessions');
-    assert.equal(find(own, byClass('place-count')).textContent, '5');
+    assert.equal(find(own, byClass('place-count')).hidden, true);
     const waits = find(own, byClass('place-waiting'));
-    assert.equal(waits.textContent, '1');
-    assert.equal(waits.title, code === 'en' ? '1 needs you' : '1 te necesita');
+    assert.equal(waits.textContent, code === 'en' ? '1 needs you' : '1 te necesita');
+    assert.equal(own.title, code === 'en' ? '5 sessions of yours' : '5 sesiones tuyas');
     const { projectView } = await import('../js/views/project.js');
     const view = projectView(app, { sheet: { open() {}, close() {} } });
     view.render();
@@ -103,7 +118,7 @@ test('the mock lists the kinds it answers, as a node’s hello does, and answers
   await shown;
   assert.ok(Array.isArray(kinds), 'no kinds before the snapshot: the page takes the mock to answer anything');
   for (const kind of ['push', 'push.decline', 'set', 'stop', 'answer', 'settings']) assert.ok(kinds.includes(kind), kind);
-  for (const kind of ['lead', 'session.new', 'plugin.on', 'approve', 'term.open', 'draft']) assert.ok(!kinds.includes(kind), `${kind}: the mock doesn’t answer it, so it isn’t listed`);
+  for (const kind of ['plugin.on', 'approve', 'term.open', 'draft']) assert.ok(!kinds.includes(kind), `${kind}: the mock doesn’t answer it, so it isn’t listed`);
   const push = await mock.request({ kind: 'push', args: { folder: '/home/dev/projects/example-site', request: '3c9e1f20' } });
   assert.equal(push.ok, true, JSON.stringify(push));
   assert.equal(push.result.settled, 'pushed');
@@ -163,8 +178,10 @@ test('a setting’s value out of its range, or not a number, says the range besi
   assert.equal(findAll(box, (node) => node.tag === 'button' && /Set|Copy/.test(node.textContent + (node.attrs['aria-label'] || ''))).length, 0, 'nothing to set or copy');
   assert.doesNotMatch(box.textContent, /vibeswitcher set/);
   editing.set(slots.key, '4');
+  // A page that acts for you sets it with Set (the line is the terminal's way, shown where the page doesn't act).
   const fine = editor(slots, null, editing, app);
-  assert.match(fine.textContent, /vibeswitcher set node_heavy_slots 4/);
+  assert.ok(find(fine, button('Set')));
+  assert.match(editor(slots, null, editing, fakeApp({ kinds: ['set'], acts: false })).textContent, /vibeswitcher set node_heavy_slots 4/);
 });
 
 test('in Spanish the page’s own words are Spanish, its dates the page’s language without seconds; the node’s own sentences stay as sent', async () => {
@@ -175,7 +192,7 @@ test('in Spanish the page’s own words are Spanish, its dates the page’s lang
   node.usage.limits.push({ name: 'seven_day', label: 'the weekly limit', model: null, usedPercent: 84, reached: false, resetsAt: '2026-11-27T14:54:08.000Z', holds: true, text: 'the weekly limit (every model): 84% used' },
     { name: 'five_hour', label: 'the 5-hour limit', model: null, usedPercent: 31, reached: false, resetsAt: '2026-11-25T13:54:00.000Z', holds: false, text: 'the 5-hour limit (every model): 31% used' });
   node.web = { state: 'listening', port: 8765, tokens: 1, connections: 1, acts: { on: true, level: 'trust', since: '2026-11-25T13:54:00.000Z', pages: 1, keys: [{ id: 'k1', added: '2026-11-25T13:54:00.000Z', lastUsed: null }] } };
-  const text = nodeView(fakeApp({ state: { node } })).el.textContent;
+  const text = everyGroup(nodeView, fakeApp({ state: { node } }));
   for (const english of ['The weekly limit', 'The 5-hour limit', '(every model)', 'on in Settings', 'ModoOn', 'Modoon', ' AM', ' PM', '11/27/2026', 'Nov ']) {
     assert.ok(!text.includes(english), `${english} in: ${text}`);
   }
@@ -251,11 +268,11 @@ test('Stop the node is a plain button in the danger colour, never the primary bl
   setLanguage('en');
   const { nodeView } = await import('../js/views/node.js');
   const timers = [];
-  const app = fakeApp({ kinds: ['stop'], state: { node: nodeValue() } });
+  const app = fakeApp({ route: { name: 'node', group: 'stop' }, kinds: ['stop'], state: { node: nodeValue() } });
   app.later = (fn) => { timers.push(fn); return () => {}; };
   const el = nodeView(app).el;
   const stop = find(el, (node) => node.tag === 'button' && node.textContent === 'Stop the node');
-  assert.ok(stop.classList.contains('quiet') && stop.classList.contains('danger'), stop.className);
+  assert.ok(stop.classList.contains('plain') && stop.classList.contains('danger'), stop.className);
   stop.click();
   assert.deepEqual(app.sent, []);
   assert.equal(stop.textContent, 'Click again to stop the node');
@@ -291,7 +308,9 @@ test('the smaller ones: New project’s Where fits its box with its hint below, 
   const { settingsView } = await import('../js/views/settings.js');
   const app = fakeApp({ route: { name: 'settings' }, reply: () => ({ ok: true, result: { node: { root: '/home/u/.vibeswitcher', settings: [] }, project: null, leftOut: [], usage: null } }) });
   const view = settingsView(app);
-  const search = find(view.el, byClass('setting-search'));
+  // The node's settings answered (each section of the list is the node's, or this browser's terminal).
+  await new Promise((resolve) => setImmediate(resolve));
+  const search = find(view.el, byClass('tc-search'));
   assert.ok(view.el.shownText.includes('Terminal'), 'the terminal section, before a search');
   search.value = 'no such setting';
   search.dispatch('input');

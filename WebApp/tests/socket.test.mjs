@@ -575,3 +575,16 @@ test('every chat frame the page reads passes its validator', () => {
   }
   assert.equal(validate('reply.chat.page', vector('chat.page')[1]), null);
 });
+
+test('“Try again now” (the design review’s D21): retryNow opens the node’s socket at once while it waits between two tries, never reloads, never doubles an attempt', async () => {
+  const r = rig();
+  await r.feed.start();
+  assert.equal(r.sockets.length, 1);
+  assert.equal(r.feed.retryNow(), false, 'an attempt is open: nothing to hurry');
+  r.socket().close();
+  assert.equal(r.timers.length, 1, 'the next try is waiting');
+  assert.equal(r.feed.retryNow(), true);
+  assert.equal(r.sockets.length, 2, 'a new socket, now');
+  assert.equal(r.page.reloads, 0, 'the page is never reloaded (the node out of reach would take it away)');
+  assert.equal(r.feed.retryNow(), false, 'and not a second one while that is open');
+});

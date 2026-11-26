@@ -1,6 +1,7 @@
 // A lead's team, twice: the strip above its chat (one line of counts, the first line of the Mac's Team strip) and the
 // tasks of the inspector's Team tab (every task with what it's doing, the Mac's Team tab). Both read the lead's board.
 
+import * as kit from '../kit.js';
 import { h, keyed, setText, setClass } from '../dom.js';
 import { icon } from '../marks.js';
 import { taskDetails } from './results.js';
@@ -61,7 +62,7 @@ export function teamTasks(app) {
   const finishedList = h('ul', { class: 'tasks', hidden: true });
   const fold = h('button', { class: 'fold', type: 'button', 'aria-expanded': 'false' }, h('span', { class: 'fold-text' }), icon('chevron', 10));
   const empty = h('p', { class: 'inspect-note', hidden: true }, t('leNothingOnTheBoardYet'));
-  const el = h('section', { class: 'inspect-group' }, h('h2', { class: 'group-head' }, t('leTasks')), empty, list, fold, finishedList);
+  const el = h('section', { class: 'inspect-group' }, kit.sectionTitle('h2', { class: 'group-head' }, t('leTasks')), empty, list, fold, finishedList);
   const rows = new Map();
   const finishedRows = new Map();
   let open = false;

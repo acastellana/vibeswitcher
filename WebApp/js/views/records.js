@@ -8,6 +8,7 @@
 //   whole of it (a decision's why, a question's answer). What is open stays open while the board changes.
 // - Every string is the sessions' writing: drawn as text, never markup.
 
+import * as kit from '../kit.js';
 import { h, setText } from '../dom.js';
 import { clock, moment, decisionLine, plural } from '../words.js';
 import { markdown } from '../text.js';
@@ -80,7 +81,7 @@ export function boardRecords(app, { decisions: showDecisions = true } = {}) {
   let drawn = '';
 
   function section(title, ...content) {
-    const el = h('section', { class: 'inspect-group records-section' }, h('h2', { class: 'group-head' }, title), content);
+    const el = h('section', { class: 'inspect-group records-section' }, kit.sectionTitle('h2', { class: 'group-head' }, title), content);
     return { el };
   }
 
@@ -156,10 +157,8 @@ export function boardRecords(app, { decisions: showDecisions = true } = {}) {
       score.el.hidden = !card || !(board.tasks || []).length;
       if (card) {
         const tiles = card.tiles || [];
-        scoreTiles.replaceChildren(...(tiles.length ? tiles.map((tile, index) => h('div', {
-          class: 'score-tile' + (tile.note ? ' quiet' : '') + (index === 3 && card.reverts > 0 ? ' bad' : ''), title: tile.help || '',
-        }, h('span', { class: 'score-value' }, tile.value), h('span', { class: 'score-label' }, tile.label),
-        tile.note ? h('span', { class: 'score-note' }, tile.note) : null))
+        scoreTiles.replaceChildren(...(tiles.length ? tiles.map((tile, index) => kit.tile({ value: tile.value, label: tile.label, note: tile.note, help: tile.help,
+          tone: index === 3 && card.reverts > 0 ? 'bad' : tile.note ? 'quiet' : '', class: 'score-tile' }))
           : [h('p', { class: 'records-note' }, t('rcNothingMergedYetTheNumbers'))]));
         setText(scoreFoot, card.footnote || '');
         scoreFoot.hidden = !card.footnote;
