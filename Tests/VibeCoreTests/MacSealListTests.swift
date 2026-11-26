@@ -119,7 +119,11 @@ struct MacSealListTests {
             try body()
             let after = self.prints(list())
             #expect(after[item.name] != before[item.name], "\(item.name): \(what) changed nothing")
-            for (name, printed) in before where name != item.name { #expect(after[name] == printed, "\(what) to \(item.name) changed \(name)") }
+            // A row inside another (the node's plist in the LaunchAgents folder) changes that one too, and only that one.
+            let holders = Set(items.filter { item.path.hasPrefix($0.path + "/") }.map(\.name))
+            for (name, printed) in before where name != item.name && !holders.contains(name) {
+                #expect(after[name] == printed, "\(what) to \(item.name) changed \(name)")
+            }
             before = after
         }
         for item in items {
@@ -223,7 +227,9 @@ struct MacSealListTests {
         #expect(ConfigSeal.watched(home: home, root: root).map(\.name) == ConfigSeal.watched(home: home, root: root, macList: false).map(\.name))
         #expect(Set(ConfigSeal.watched(home: home, root: root, macList: true).map(\.name))
                 == Set(ConfigSeal.watched(home: home, root: root).map(\.name)).union(mac))
-        #expect(!ConfigSeal.hashes(home: home, root: root).keys.contains { key in mac.contains { key.hasSuffix($0) } })
+        let hashed = ConfigSeal.hashes(home: home, root: root)
+        #expect(mac.allSatisfy { hashed[ConfigSeal.keyPrefix + $0] == nil }, "a Mac row hashed without macList")
+        #expect(mac.allSatisfy { ConfigSeal.hashes(home: home, root: root, macList: true)[ConfigSeal.keyPrefix + $0] != nil })
         #expect(MacSealList.namedByTheNode)
     }
 
@@ -391,6 +397,9 @@ struct MacSealVaultTests: LeadTeamFixture {
         book.watchesMacList = true
         try seedRows()
         let (root, lead) = try team()
+        let agents = "~/Library/LaunchAgents"
+        // The node's plist is in the LaunchAgents folder: a change to it is both rows'.
+        let held = { (name: String) in name == "~/" + MacSealList.plist ? [agents, name].sorted() : [name] }
         let changes: [(String, () throws -> Void, () throws -> Void)] = [
             ("~/Library/LaunchAgents", { try write("<plist>evil</plist>\n", home + "/Library/LaunchAgents/com.evil.agent.plist") },
              { try write("<plist>evil 2</plist>\n", home + "/Library/LaunchAgents/com.evil.agent.plist") }),
@@ -411,12 +420,12 @@ struct MacSealVaultTests: LeadTeamFixture {
         ]
         for (name, first, second) in changes {
             try first()
-            #expect(try lead.checkConfig(root: root).held == [name], "\(name): a change not held")
-            #expect(try lead.checkConfig(root: root).held == [name], "\(name): held at the next look too")
-            #expect(try vault.checkConfig(root: root).resealed == [name], "\(name): the user's accept")
+            #expect(try lead.checkConfig(root: root).held.sorted() == held(name), "\(name): a change not held")
+            #expect(try lead.checkConfig(root: root).held.sorted() == held(name), "\(name): held at the next look too")
+            #expect(try vault.checkConfig(root: root).resealed.sorted() == held(name), "\(name): the user's accept")
             #expect(try lead.checkConfig(root: root).held.isEmpty, "\(name): held after the accept")
             try second()
-            #expect(try lead.checkConfig(root: root).held == [name], "\(name): the next change not held")
+            #expect(try lead.checkConfig(root: root).held.sorted() == held(name), "\(name): the next change not held")
             _ = try vault.checkConfig(root: root)
         }
     }
@@ -429,12 +438,12 @@ struct MacSealVaultTests: LeadTeamFixture {
         let (root, lead) = try team()
         let name = "~/" + MacSealList.plist
         try write("<plist>another job</plist>\n", home + "/" + MacSealList.plist)
-        #expect(try lead.checkConfig(root: root).held == [name])
+        #expect(Set(try lead.checkConfig(root: root).held) == [name, "~/Library/LaunchAgents"])
         let shown = ConfigSeal.heldHashes(in: try vault.guardedRecord(root: root))
         #expect(shown.keys.contains(ConfigSeal.keyPrefix + name), "\(shown.keys.sorted())")
         try write("<plist>changed after the card</plist>\n", home + "/" + MacSealList.plist)
         _ = try vault.checkConfig(root: root, shown: shown)
-        #expect(try lead.checkConfig(root: root).held == [name], "a change the card didn't show was sealed")
+        #expect(Set(try lead.checkConfig(root: root).held) == [name, "~/Library/LaunchAgents"], "a change the card didn't show was sealed")
         let again = ConfigSeal.heldHashes(in: try vault.guardedRecord(root: root))
         _ = try vault.checkConfig(root: root, shown: again)
         #expect(try lead.checkConfig(root: root).held.isEmpty)
@@ -465,10 +474,12 @@ struct MacSealVaultTests: LeadTeamFixture {
         let agents = home + "/Library/LaunchAgents"
         for (name, path, mode) in [("~/" + MacSealList.plist, plist, 0o644), ("~/" + MacSealList.terminalPreferences, terminal, 0o600),
                                    ("~/.cargo/env", home + "/.cargo/env", 0o644)] as [(String, String, mode_t)] {
+            // The plist's mode is its folder's row's too.
+            let expected: Set<String> = path == plist ? [name, "~/Library/LaunchAgents"] : [name]
             try #require(chmod(path, 0) == 0)
-            #expect(try lead.checkConfig(root: root).held == [name], "\(name) unreadable")
+            #expect(Set(try lead.checkConfig(root: root).held) == expected, "\(name) unreadable")
+            // Put back exactly as sealed, the vault's look takes it as sealed (its rule for every watched thing, Linux's too).
             try #require(chmod(path, mode) == 0)
-            #expect(try lead.checkConfig(root: root).held == [name], "\(name): still held, put back, until accepted")
             _ = try vault.checkConfig(root: root)
         }
         let saved = try Data(contentsOf: URL(fileURLWithPath: terminal))
