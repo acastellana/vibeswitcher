@@ -446,7 +446,7 @@ or decided. Done on Linux, tested on both systems (`ApprovalJudgmentTests`, `App
    the label running another program refused and left alone, one loaded and not running unloaded; `bootstrap` and
    `kickstart` in `gui/<uid>`; the host waited for on its socket and known by the connection's audit token, its pid
    launchd's, its running code the pinned host, hardened, then its welcome and its command line the job's; everything
-   it loaded booted out on any refusal, nothing it didn't load touched), `stop` (the host checked, what ends said with
+   it loaded booted out on any refusal; since the review's round, a running job of the label is the node's only when loaded from the agent's own plist with launchd's word and its executable the job's), `stop` (the host checked, what ends said with
    the server's session count and the typed code asked, the server's stop, the host's children
    taken, `bootout`, then no job, no process of them and no socket within 30 s, else named) and `status` (from the host
    itself, its build the record's row its code is); the command line's Mac arm behind `usersNodeRefusal`

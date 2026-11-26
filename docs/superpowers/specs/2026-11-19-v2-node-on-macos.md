@@ -661,6 +661,56 @@ environment as a fixed value (the server child, the launchers, the parsers and t
 memory into its stderr (the server's is `node.log`). A crash of any of them still goes to the system's crash reporter
 (`~/Library/Logs/DiagnosticReports`), as every process's does.
 
+**The review's round (2026-11-26, "ready with fixes"; designed before the code).** What launchd loaded, and the job of
+the label, are now bound as follows; each is a refusal that boots out only what this `start` loaded.
+
+- *Measured first* (macOS 27.2): `launchctl print`'s job shows `properties = inferred program` for the agent's plist,
+  `runatload | inferred program` with `RunAtLoad`, `keepalive | …` with `KeepAlive` (and a `KeepAlive` job runs at load
+  with no `kickstart`, `immediate reason = speculative`); its `environment = { … }` block is the plist's
+  `EnvironmentVariables` plus launchd's own `OSLogRateLimit => 64` and `XPC_SERVICE_NAME => <label>`; `arguments = { … }`,
+  `stdout path` and `stderr path` are the plist's. A rename of a file away and back, and a hard link to it, change its
+  ctime (`stat`, nanoseconds), so a file put back after a swap is not the file as it was.
+- *I1, the file launchd read.* `start` keeps the descriptor its read-back checked open and takes its device, inode,
+  ctime and size, and the plist folder's device, inode and ctime after its own write. Once the host is seen (token,
+  code, command line, executable), the path must still name that inode, its ctime and size unchanged, its bytes read
+  again from the descriptor still start's, and the folder the same with its ctime unchanged: any change to the file
+  or its folder while launchd read it (a rename over it, one away and back, a write and a write back, a folder swapped
+  and back) refuses. And launchd's own word for what it loaded must be the job's: `path` the agent's plist by device and
+  inode, `arguments` the job's, the `environment` block the job's variables and launchd's two, `stdout path` and
+  `stderr path` the job's, `properties` exactly the measured line for its `RunAtLoad` and no `keepalive`. launchd's text
+  is a refusal only, never what accepts a host: that is the token's.
+- *What can't be bound.* A folder above the plist's folder (`~/Library`, the home) swapped away and back while launchd
+  read the path: compared by inode only (their ctimes move with every file made in them, so a ctime there would refuse
+  most starts), so a swap and a swap back of an ancestor isn't caught by the file check; launchd's `properties`,
+  `arguments` and `environment` lines still are, for every key they show. A key launchd's `print` shows nothing of
+  (`ThrottleInterval`, `Nice`, `ExitTimeOut` within the measured `exit timeout = 5`, `SoftResourceLimits`) is bound only
+  by the file check. launchd's text format is the release's (measured on 27.2): another format refuses.
+- *I2, a job of the label that runs.* `start`'s "runs already", `status`'s "runs" and `stop` take a running job only when
+  launchd loaded it from the agent's own plist (`print`'s `path`, by device and inode), launchd's word for it is the
+  job's (as in I1), its process's executable (the kernel's path of its image) is the job's program by device and inode
+  (a byte copy elsewhere, or the same code at another path, is another file), its command line is the job's, and its
+  token runs a pinned host. The plist on disk must be start's bytes too. *Residual:* a job loaded earlier from other
+  bytes at the agent's path, put back to start's since, whose differing keys `print` doesn't show (above).
+- *N1, stop asks once.* With a server that answers: what ends is said with the server's count, and the server's own stop
+  is asked under the rule the other commands use (`TypedWord.said(approval: client.approvalRule)`: the typed code, or the
+  Mac's dialog once `approvalMeasured` is on), its answer read: taken, the host shuts down in order, then the job is
+  unloaded; refused, or an answer that can't be read (within `Requests.stopWait + 30` s, as on Linux), stop fails, says
+  why and unloads nothing. With no server that answers: stop says what ends and how ("the host ends by launchd's
+  bootout; its sessions lose their terminal"), asks the typed code, and boots out.
+- *N2, everything the host started.* Before the stop, the host's descendants by parent links (every level), and every
+  process in the POSIX session of each of them (a program that forked and lost its parent but kept its session). `stop`
+  waits for all of them within its limit, names what is left, and fails rather than saying it ended. *Can't be found on
+  a Mac:* a process that left its session (`setsid`) and lost its parent before the snapshot: nothing links it to the
+  host any more.
+- *N3.* After a crash, `stop` unloads the dead job and removes the socket's file under the same rule as a live stop
+  (a socket, the lock free).
+- *N4.* The plist folder must be a real folder (no link), the user's, writable by neither group nor others, before
+  anything is written or loaded; the plist itself the user's, a regular file, writable by neither (launchd refuses a
+  group- or world-writable plist; `start` says so itself first).
+- *N5.* `status --json` checks the host as the plain `status` does, its line on stderr.
+- A plist from the earlier installer (with `HOME` and `PATH`) is refused as any other; the refusal says to remove it and
+  run `start` again (`start` writes its own), and the installer (step 7) must write exactly what `start` writes.
+
 **What a real Mac proved (2026-11-26, this Mac, macOS 27.2, SIP on).** Red and green, exactly: `MacAgentTests`' five
 launchd tests (a) to (e) and its three first function tests were red on the seams `01d34331` and are green from
 `4c2f76b5`; in `MacCheckedSessionsTests` (f) the session's `SSH_AUTH_SOCK`, `SWIFT_BACKTRACE` and umask were red there,
@@ -703,7 +753,8 @@ the user's). The plist written at the user's login (`--at-login`, `RunAtLoad`).
 **What it doesn't cover** (for the switch-on review):
 
 - *The plist between its check and `bootstrap`* is read again by launchd by path: a file swapped in that gap is started
-  by launchd, then refused by the check after the load and booted out. It ran, as any program of the user's can.
+  by launchd, then refused by the binding after the load (the review's round, I1) and booted out. It ran, as any
+  program of the user's can; an ancestor folder swapped and back with a key `print` doesn't show is the residual.
 - *A switch rewrites no plist.* After an in-place switch the job's `ProgramArguments` still name the build it was
   started as, while another runs; `status` and `stop` check the host against every build the record pins, so they
   pass, but the next `start` after a `stop` starts the plist's build and refuses the plist once the command line is
