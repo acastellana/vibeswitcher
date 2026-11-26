@@ -610,6 +610,10 @@ small { font-size: var(--t-caption); }
 .prose ul ul { list-style: circle; }
 .prose ul ul ul { list-style: square; }
 .chat-row .prose > :is(p, ul, ol, blockquote, h3, h4, h5, h6) { max-width: 68ch; }
+/* A table's words stay whole: a table wider than the column scrolls sideways in its own box (a phone's), never breaks
+   a value mid-word. */
+.prose .table :is(th, td) { overflow-wrap: normal; }
+.prose .table code { white-space: nowrap; }
 .table th.align-center, .table td.align-center { text-align: center; }
 .table th.align-right, .table td.align-right { text-align: right; font-variant-numeric: tabular-nums; }
 .bubble.prose > * + * { margin-top: 6px; }
