@@ -93,7 +93,9 @@ export function projectView(app, { sheet }) {
   globalThis.document?.addEventListener?.('click', (event) => { if (dialOpen && !dial.contains(event.target) && !dialFold.contains(event.target)) foldDial(false); });
   const menuButton = kit.iconButton({ class: 'phone-only', 'aria-label': t('menu'), onclick: () => app.drawer('left') }, icon('menu', 16));
   const teamButton = kit.iconButton({ class: 'phone-only team-button', 'aria-label': t('showTeam'), onclick: () => app.drawer('right') }, icon('team', 16));
-  const head = h('header', { class: 'centre-head' }, menuButton, h('div', { class: 'head-words' }, big, name), count, switcher, h('span', { class: 'grow' }), dialFold, dial, teamButton);
+  // One row, the left and right columns' header height, in Lead and in Roadmap alike (D11): the switch first, where
+  // nothing that grows or shrinks moves it; then what needs you and the project's name; the dial at the right end.
+  const head = h('header', { class: 'centre-head' }, menuButton, switcher, count, h('div', { class: 'head-words' }, big, name), h('span', { class: 'grow' }), dialFold, dial, teamButton);
   const strip = h('div', { class: 'team-strip' });
   // On a phone the team strip is one line, whole counts only, that opens to all of them at a touch.
   const stripFold = h('button', { class: 'strip-fold', type: 'button', 'aria-expanded': 'false', 'aria-label': t('stripAll') }, icon('chevron', 12));
@@ -135,7 +137,29 @@ export function projectView(app, { sheet }) {
   // The conversation and what waits on the user: two panes wide (the waiting block under the conversation, scrolling
   // in itself), one scroll on a phone (what waits first, the conversation under it): style.css's `.centre-scroll`.
   const scroller = h('div', { class: 'centre-scroll' }, talk, waitBox);
-  const scrollBox = () => (phone() ? scroller : talk);
+  const scrollBox = () => scroller;
+  // The reading position across a redraw (D10): the line, or the waiting block, nearest the top of what shows, and
+  // how far from that top it was; put back there after, so a card arriving or answered moves nothing being read.
+  waitBox.dataset.anchor = 'wait';
+  function readingAt(box) {
+    if (typeof box.getBoundingClientRect !== 'function') return null;
+    const view = box.getBoundingClientRect();
+    let best = null;
+    for (const node of box.querySelectorAll('[data-anchor]')) {
+      const rect = node.getBoundingClientRect();
+      if (rect.bottom <= view.top || rect.top >= view.bottom || (!rect.height && !rect.width)) continue;
+      const offset = rect.top - view.top;
+      if (!best || Math.abs(offset) < Math.abs(best.offset)) best = { key: node.dataset.anchor, offset };
+    }
+    return best;
+  }
+  function keepReading(box, at) {
+    if (!at) return;
+    const node = [...box.querySelectorAll('[data-anchor]')].find((one) => one.dataset.anchor === at.key);
+    if (!node) return;
+    const moved = node.getBoundingClientRect().top - box.getBoundingClientRect().top - at.offset;
+    if (Math.abs(moved) >= 1) box.scrollTop += moved;
+  }
   const el = h('section', { class: 'centre project-view', 'aria-label': t('lead') }, head, strip, quiet, scroller, composer, gone);
   // The project's name beside "N things need you" shrinks to an ellipsis; squeezed to a mark, it goes (the right
   // column's head names the project).
@@ -143,7 +167,23 @@ export function projectView(app, { sheet }) {
     name.classList.remove('squeezed');
     if (name.textContent && name.clientWidth < 56 && name.scrollWidth > name.clientWidth) name.classList.add('squeezed');
   };
-  if (typeof ResizeObserver === 'function') new ResizeObserver(fitName).observe(head);
+  // Wider than a phone the row never wraps: where it doesn't fit, the dial folds behind its one button (the level and
+  // its count, opening the three as a menu, as on a phone), then the sentence gives way to its count. A phone's
+  // header is its own (style.css's 760 px block), the dial always folded.
+  function fitHead() {
+    const narrow = phone();
+    setClass(head, 'dial-folded', narrow);
+    setClass(head, 'words-short', false);
+    name.classList.remove('squeezed');
+    if (!narrow && head.clientWidth) {
+      const over = () => head.scrollWidth > head.clientWidth + 1 || (!!name.textContent && name.scrollWidth > name.clientWidth + 1);
+      if (!dial.hidden && over()) setClass(head, 'dial-folded', true);
+      if (over()) setClass(head, 'words-short', true);
+    }
+    if (!head.classList.contains('dial-folded') && dialOpen) foldDial(false);
+    fitName();
+  }
+  if (typeof ResizeObserver === 'function') new ResizeObserver(fitHead).observe(head);
   // The strip's fold only where a count is past its first line (or it is open): measured while the strip has a
   // layout (not while the keyboard hides it, nor before the view is placed), and again as its width changes.
   function fitStrip() {
@@ -180,6 +220,8 @@ export function projectView(app, { sheet }) {
   let sheetShown = null;
   let waitShown = false;
   let lastWaiting = 0;
+  // The roadmap shown last (its project): drawn again in place, it keeps where it was scrolled.
+  let roadShown = null;
 
   // The ways past the next step reach the lead's own session (`send`): that kind and a live lead session.
   const sendsTo = (lead) => actsFor(app, 'send') && !!lead?.session && store.state.sessions.has(lead.session);
@@ -286,9 +328,9 @@ export function projectView(app, { sheet }) {
 
   function lineEl(line, route) {
     // A push settled from this page: what came of it, one quiet line (the lead hears it from the node).
-    if (line.kind === 'push') return [h('p', { class: `line kind-push ${line.outcome}` }, icon(line.outcome === 'declined' ? 'close' : 'check', 13), h('span', { class: 'line-text' }, line.head), h('time', null, clock(line.at)))];
+    if (line.kind === 'push') return [h('p', { class: `line kind-push ${line.outcome}`, data: { anchor: `push:${line.key}` } }, icon(line.outcome === 'declined' ? 'close' : 'check', 13), h('span', { class: 'line-text' }, line.head), h('time', null, clock(line.at)))];
     const answered = line.kind === 'ask';
-    const button = h('a', { class: `line kind-${line.kind}${answered ? ' answered' : ''}`, href: routeHref(route, { sheet: line.key }) },
+    const button = h('a', { class: `line kind-${line.kind}${answered ? ' answered' : ''}`, href: routeHref(route, { sheet: line.key }), data: { anchor: line.key } },
       lineMark(line.kind), h('span', { class: 'line-text' }, cut(shortHashes(line.head), 140)), h('time', null, clock(line.at)));
     // A question the lead withdrew: nobody answers it now, and the line under it says so, with the lead's reason.
     if (answered && line.state === 'withdrawn') return [button, h('p', { class: 'withdrawn-note' }, t('withdrawn') + (line.why ? `: ${cut(shortHashes(line.why), 160)}` : ''))];
@@ -393,6 +435,7 @@ export function projectView(app, { sheet }) {
     setText(foldWords, t({ asks: 'dialAsks', decisions: 'dialDecisionsShort', all: 'dialAll' }[route.show] || 'dialDecisionsShort'));
     setText(foldCount, String(counts[route.show] ?? ''));
     dialFold.setAttribute('aria-label', `${t('dialLabel')}: ${t({ asks: 'dialAsks', decisions: 'dialDecisions', all: 'dialAll' }[route.show] || 'dialDecisions')}`);
+    fitHead();
     const stack = stackOf(route.id);
     stack.update();
     const extra = cards.filter((card) => !['question', 'approval'].includes(card.kind));
@@ -403,6 +446,7 @@ export function projectView(app, { sheet }) {
     if (key === drawn) return;
     const box = scrollBox();
     const atEnd = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+    const reading = atEnd ? null : readingAt(box);
     drawn = key;
     const asks = route.show === 'asks';
     setClass(el, 'show-asks', asks);
@@ -450,6 +494,7 @@ export function projectView(app, { sheet }) {
     const settled = !changedView && phone() && !asks && lastWaiting > 0 && !waiting;
     lastWaiting = waiting;
     if (changedView || atEnd || settled) requestAnimationFrame(() => { box.scrollTop = top ? 0 : box.scrollHeight; });
+    else keepReading(box, reading);
   }
 
   // The date column: the landing as the node says it, its range under it, and where it comes from on hover and focus
@@ -524,6 +569,29 @@ export function projectView(app, { sheet }) {
   // The address with `id` opened or closed among the roadmap's open rows.
   const toggled = (route, id) => projectHref(route.id, { view: 'roadmap', open: route.open.includes(id) ? route.open.filter((one) => one !== id) : [...route.open, id] });
 
+  // A roadmap opened (or another project's): from its top; drawn again in place (a goal opened, a minute on), where it was.
+  function roadTop(route) {
+    roadOpen = { id: route.id, open: [...route.open] };
+    if (roadShown === route.id) return;
+    roadShown = route.id;
+    scroller.scrollTop = 0;
+  }
+
+  // What the roadmap showed open last, and what folds away: a goal, the done goals and the queue open and close in
+  // place over the short motion (D22), once, as the address changes them; drawn again for any other reason (a minute
+  // on, a task moved), they are just there.
+  let roadOpen = null;
+  const roadClosing = new Set();
+  function roadChanged(route) {
+    if (roadOpen?.id !== route.id) roadClosing.clear();
+    else for (const id of roadOpen.open) if (!route.open.includes(id)) roadClosing.add(id);
+    for (const id of route.open) roadClosing.delete(id);
+  }
+  function roadUnfold(route, id, body) {
+    if (!route.open.includes(id)) return kit.unfold({ motion: 'closing', onclosed: () => { roadClosing.delete(id); drawn = ''; render(); } }, body);
+    return kit.unfold({ motion: roadOpen?.id === route.id && !roadOpen.open.includes(id) ? 'opening' : null }, body);
+  }
+
   // With goals: one row per goal (its tasks' marks and counts; with estimates its bar to its landing, the likely–worst
   // band, a mark per task landing, and its date), opening in place to its tasks joined to it by branch lines; Unsorted
   // last of the open ones; the done goals folded at the end.
@@ -535,8 +603,9 @@ export function projectView(app, { sheet }) {
     const goalRow = (row) => {
       const id = row.goal ? row.goal.id : 'unsorted';
       const open = route.open.includes(id);
-      const counts = [['motion', 'roadCountMotion'], ['blocked', 'roadCountBlocked'], ['queued', 'roadCountQueued'], ['merged', 'roadCountMerged']]
-        .filter(([where]) => row.counts[where]).map(([where, key]) => t(key, { n: row.counts[where] }));
+      // Its progress at a glance (D28): each count as the rows' badge, in its tone (working only for what moves).
+      const counts = [['motion', 'roadCountMotion', 'working'], ['blocked', 'roadCountBlocked', 'neutral'], ['queued', 'roadCountQueued', 'neutral'], ['merged', 'roadCountMerged', 'done']]
+        .filter(([where]) => row.counts[where]).map(([where, key, tone]) => kit.badge(tone, t(key, { n: row.counts[where] })));
       const marks = axis
         ? trackEl(axis, {
           start: Math.min(...row.tasks.map((task) => Date.parse(task.startedAt || '') || Infinity)), landing: row.goal?.forecast, tone: 'goal',
@@ -546,14 +615,19 @@ export function projectView(app, { sheet }) {
         : h('span', { class: 'goal-marks', 'aria-hidden': 'true' }, row.tasks.map((task) => h('i', { class: `goal-mark tone-${taskTone(task)}${whereOf(task) === 'blocked' ? ' blocked' : ''}`, title: task.title })));
       // A group, not a button: the title side opens and closes the goal; the track and the date (which takes focus for
       // where it comes from) do nothing.
-      const head = h('div', { class: 'goal-row' + (row.goal ? '' : ' unsorted') + (row.goal?.state === 'done' ? ' done' : ''), role: 'group', 'aria-label': row.goal ? row.goal.title : t('roadUnsorted') },
-        h('button', { class: 'goal-title', type: 'button', 'aria-expanded': String(open), onclick: () => ui.go(toggled(route, id)) },
-          h('b', null, row.goal ? row.goal.title : t('roadUnsorted'), h('span', { class: 'goal-toggle' }, icon('chevron', 10))),
-          h('small', null, [counts.join(', ') || t('roadNoTasks'), row.goal?.done ? `${t('roadDoneMeans')} ${row.goal.done}` : null].filter(Boolean).join(' · '))),
+      // The whole row is the button's target (its title's ::after covers it); the date over it still takes focus and a
+      // tap for where it comes from. A long name keeps to two lines, whole on hover and for a screen reader.
+      const title = row.goal ? row.goal.title : t('roadUnsorted');
+      const head = h('div', { class: 'goal-row' + (row.goal ? '' : ' unsorted') + (row.goal?.state === 'done' ? ' done' : ''), role: 'group', 'aria-label': title },
+        h('button', { class: 'goal-title', type: 'button', title, 'aria-expanded': String(open), onclick: () => ui.go(toggled(route, id)) },
+          h('span', { class: 'goal-name' }, h('b', null, title), h('span', { class: 'goal-toggle' }, icon('chevron', 10))),
+          h('span', { class: 'goal-counts' }, counts.length ? counts : h('small', null, t('roadNoTasks')))),
         marks, axis ? whenEl(row.goal?.forecast, basisWords(row.goal?.forecast, { score, goal: true }), { board }) : h('span', { class: 'road-when' }));
-      if (!open) return [head];
+      const closing = !open && roadClosing.has(id);
+      if (!open && !closing) return [head];
       const tasks = row.tasks.map((task, index) => taskLine2(task, roadNote(task, board, cards, whereOf(task)), { axis, score, board, cls: 'goal-task' + (index === row.tasks.length - 1 ? ' last' : '') }));
-      return [head, h('div', { class: 'goal-tasks' }, tasks.length ? tasks : [h('p', { class: 'road-note goal-empty' }, t('roadNoTasks'))])];
+      const means = row.goal?.done ? h('p', { class: 'road-note goal-means' }, `${t('roadDoneMeans')} ${row.goal.done}`) : null;
+      return [head, roadUnfold(route, id, h('div', { class: 'goal-tasks' }, means, tasks.length ? tasks : [h('p', { class: 'road-note goal-empty' }, t('roadNoTasks'))]))];
     };
     const children = [h('p', { class: 'road-intro' }, axis ? [t('roadGoalsDated'), score?.line ? ' ' + score.line : ''].join('') : t('roadGoalsIntro'))];
     if (axis) children.push(axisHead(axis));
@@ -563,12 +637,11 @@ export function projectView(app, { sheet }) {
       const open = route.open.includes('done');
       children.push(h('button', { class: 'road-band', type: 'button', 'aria-expanded': String(open), onclick: () => ui.go(toggled(route, 'done')) },
         h('span', null, t('roadDoneGoals', { n: rows.done.length })), h('span', { class: 'road-band-toggle' }, open ? t('roadQueueClose') : t('roadQueueOpen'), icon('chevron', 10))));
-      if (open) for (const row of rows.done) children.push(...goalRow(row));
+      if (open || roadClosing.has('done')) children.push(roadUnfold(route, 'done', h('div', { class: 'road-done' }, rows.done.flatMap(goalRow))));
     }
     col.replaceChildren(...children);
     setClass(col, 'dated', !!axis);
-    talk.scrollTop = 0;
-    scroller.scrollTop = 0;
+    roadTop(route);
   }
 
   function drawRoadmap(route, board) {
@@ -577,6 +650,7 @@ export function projectView(app, { sheet }) {
     const key = JSON.stringify([route, board?.tasks, board?.goals, board?.score, cards.map((card) => [card.id, card.open]), lang(), Math.floor(Date.now() / 60000)]);
     if (key === drawn) return;
     drawn = key;
+    roadChanged(route);
     // With estimates, the time axis; without, what the roadmap drew before them.
     const axis = hasDates(board) ? timeAxis(axisPoints(board)) : null;
     if (board?.goals?.length) { drawGoals(route, board, cards, axis); return; }
@@ -594,13 +668,12 @@ export function projectView(app, { sheet }) {
         axis ? whenEl(lastLanding(team.queued), '') : null,
         h('span', { class: 'road-band-toggle' }, open ? t('roadQueueClose') : t('roadQueueOpen'), icon('chevron', 10)));
       children.push(h('h2', { class: 'road-head' }, t('roadQueued')), band);
-      if (open) children.push(h('div', { class: 'road-queue' }, team.queued.map((task) => taskRow(task, task.after?.length ? [t('after', { list: listed(titles(task.after)) })] : [], dates))));
+      if (open || roadClosing.has('queue')) children.push(roadUnfold(route, 'queue', h('div', { class: 'road-queue' }, team.queued.map((task) => taskRow(task, task.after?.length ? [t('after', { list: listed(titles(task.after)) })] : [], dates)))));
     }
     if (!team.motion.length && !team.blocked.length && !team.queued.length) children.push(kit.empty({ tag: 'p', size: 'page', class: 'empty-line' }, t('roadNothing')));
     col.replaceChildren(...children);
     setClass(col, 'dated', !!axis);
-    talk.scrollTop = 0;
-    scroller.scrollTop = 0;
+    roadTop(route);
   }
 
   // The queue's band says when its last dated task lands ("all by …").
@@ -660,7 +733,6 @@ export function projectView(app, { sheet }) {
     setText(count, String(waiting));
     count.hidden = !waiting;
     setText(name, lastPart(root));
-    fitName();
     name.title = tilde(root, state.node?.home);
     leadLink.setAttribute('href', projectHref(route.id));
     roadLink.setAttribute('href', projectHref(route.id, { view: 'roadmap' }));
@@ -668,6 +740,7 @@ export function projectView(app, { sheet }) {
     dial.hidden = route.view !== 'lead';
     dialFold.hidden = dial.hidden;
     if (dial.hidden && dialOpen) foldDial(false);
+    fitHead();
     composer.hidden = route.view !== 'lead';
     waitBox.hidden = route.view !== 'lead' || !waitShown;
     strip.replaceChildren(h('b', null, t('team')), ...stripCounts(board), stripFold);
@@ -701,7 +774,7 @@ export function projectView(app, { sheet }) {
           copyLine(leadLine(root), 'the command that starts a new lead there')]));
       quietForm.onclick = (event) => { event.preventDefault(); app.startLead?.(root); };
     }
-    if (route.view === 'roadmap') { lastProject = null; setClass(el, 'show-asks', false); drawRoadmap(route, board); } else drawLead(route, board, lead);
+    if (route.view === 'roadmap') { lastProject = null; setClass(el, 'show-asks', false); drawRoadmap(route, board); } else { roadShown = null; roadOpen = null; drawLead(route, board, lead); }
     drawSheet(route, board);
   }
 

@@ -28,6 +28,10 @@ export function rightColumn(app) {
   const el = h('aside', { class: 'right', 'aria-label': t('team') },
     h('div', { class: 'colhead' }, name), h('div', { class: 'right-tabs' }, kit.segmented({ tag: 'nav', class: 'tabs', role: 'tablist' }, ...tabs)), body);
   let drawn = '';
+  // The task shown open last (its project and slug), and one folding away: a task opens and closes in place over the
+  // short motion (D22), once, when the address changes it; drawn again for any other reason, it is just there.
+  let shownTask = null;
+  let closing = null;
 
   function taskDetails(task, board, route) {
     const parts = [];
@@ -65,7 +69,11 @@ export function rightColumn(app) {
     const open = route.task === task.slug;
     const row = h('a', { class: 'task-row2' + (open ? ' open' : ''), href: routeHref(route, { task: open ? null : task.slug, sheet: null }), 'aria-expanded': String(open) },
       stepBar(task), h('span', { class: 'task-words' }, h('span', { class: 'task-name' }, task.title), h('span', { class: `task-state tone-text-${task.status === 'blocked' || task.group === 'attention' ? 'blocked' : ''}` }, nodeWords(task.state))));
-    return open ? [row, taskDetails(task, board, route)] : [row];
+    if (open) return [row, kit.unfold({ motion: shownTask && shownTask.id === route.id && shownTask.slug === task.slug ? null : 'opening' }, taskDetails(task, board, route))];
+    if (closing && closing.id === route.id && closing.slug === task.slug) {
+      return [row, kit.unfold({ motion: 'closing', onclosed: () => { closing = null; drawn = ''; render(); } }, taskDetails(task, board, route))];
+    }
+    return [row];
   }
 
   function team(route, board, lead) {
@@ -136,7 +144,11 @@ export function rightColumn(app) {
       tab.setAttribute('href', routeHref(route, { tab: tab.dataset.tab, task: null, sheet: null }));
       tab.setAttribute('aria-selected', String(tab.dataset.tab === route.tab));
     }
+    // A task closed since the last draw (by its row, Esc or the address) folds away; one opened unfolds.
+    const before = shownTask;
+    if (before && (before.id !== route.id || before.slug !== route.task)) closing = before.id === route.id && route.tab === 'team' ? before : null;
     body.replaceChildren(...(route.tab === 'stats' ? stats(board) : route.tab === 'files' ? files(board, lead) : team(route, board, lead)).filter(Boolean));
+    shownTask = route.task && route.tab === 'team' ? { id: route.id, slug: route.task } : null;
   }
 
   for (const topic of ['boards', 'leads', 'cards', 'sessions', 'node']) store.subscribe(topic, () => { if (ui.state.route.name === 'project') render(); });

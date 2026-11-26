@@ -103,10 +103,10 @@ test('U2 phone: the lead view’s header is one row: the menu, the project’s n
   // Row 1 holds the menu, the name, the count and the team; row 2 Lead | Roadmap and the dial's fold.
   assert.equal(under(PHONE, '.project-view .centre-head > :first-child')['grid-row'], '1');
   assert.equal(under(PHONE, '.project-view .centre-head .pname')['grid-row'], '1');
-  assert.equal(under(PHONE, '.project-view .head-count:not([hidden])')['grid-row'], '1');
+  assert.equal(under(PHONE, '.project-view .centre-head > .head-count:not([hidden])')['grid-row'], '1');
   assert.equal(under(PHONE, '.project-view .centre-head .team-button')['grid-row'], '1');
   assert.equal(under(PHONE, '.project-view .centre-head > .segmented:not(.dial)')['grid-row'], '2');
-  assert.equal(under(PHONE, '.project-view .dial-fold:not([hidden])')['grid-row'], '2');
+  assert.equal(under(PHONE, '.project-view .centre-head.dial-folded > .dial-fold:not([hidden])')['grid-row'], '2');
   // Wider, the phone's parts never show.
   assert.equal(under('', '.head-count').display, 'none');
   assert.equal(under('', '.dial-fold').display, 'none');
@@ -142,10 +142,11 @@ test('U2 phone: the dial folds behind one button saying the level shown and its 
     fold.click();
     dial.dispatch('keydown', { key: 'Escape' });
     assert.ok(!dial.classList.contains('open'));
-    // The menu on a phone: over the page under its button, shown only while open.
-    assert.equal(under(PHONE, '.project-view .centre-head > .dial').position, 'absolute');
-    assert.equal(under(PHONE, '.project-view .centre-head > .dial').display, 'none');
-    assert.equal(under(PHONE, '.project-view .centre-head > .dial.open:not([hidden])').display, 'flex');
+    // The menu (folded: always on a phone, and wider where the header's row can't hold the dial, D11): over the page
+    // under its button, shown only while open.
+    assert.equal(under('', '.project-view .centre-head.dial-folded > .dial').position, 'absolute');
+    assert.equal(under('', '.project-view .centre-head.dial-folded > .dial').display, 'none');
+    assert.equal(under('', '.project-view .centre-head.dial-folded > .dial.open:not([hidden])').display, 'flex');
   }
   setLanguage('en');
 });
@@ -172,15 +173,14 @@ test('U2 phone: one scroll, what waits first and the conversation under it; no b
   assert.ok(scroll, 'the conversation and the waiting block share one box');
   assert.deepEqual(scroll.children.map((node) => node.attrs.class), ['talk', 'wait-box'], 'in the order the wide page draws them');
   assert.ok(!find(scroll, byClass('wait-box')).hidden, 'the card waits in it');
-  // Wide, the shared box is no box: each pane as before.
-  assert.equal(under('', '.centre-scroll').display, 'contents');
-  // A phone: the shared box scrolls; the panes in it don't; what waits comes first.
-  assert.equal(under(PHONE, '.project-view .centre-scroll')['overflow-y'], 'auto');
-  assert.equal(under(PHONE, '.project-view .centre-scroll > .talk').overflow, 'visible');
-  const waits = under(PHONE, '.project-view .centre-scroll > .wait-box');
-  assert.equal(waits.order, '-1');
+  // At every width the shared box scrolls and the panes in it don't (D10 made the desktop's as the phone's).
+  assert.equal(under('', '.project-view .centre-scroll')['overflow-y'], 'auto');
+  assert.equal(under('', '.project-view .centre-scroll > .talk').overflow, 'visible');
+  const waits = under('', '.project-view .centre-scroll > .wait-box');
   assert.equal(waits['max-height'], 'none');
   assert.equal(waits.overflow, 'visible');
+  // A phone: what waits comes first.
+  assert.equal(under(PHONE, '.project-view .centre-scroll > .wait-box').order, '-1');
 });
 
 test('U2 phone: opened with something waiting, the scroll starts there; the last of it answered, it goes to the conversation’s end', async () => {

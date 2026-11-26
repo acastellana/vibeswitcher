@@ -137,7 +137,9 @@ test('U4: at “What waits on me” the conversation pane is hidden and the wait
   // The rules: the pane gone, the block the one thing that scrolls (no cap of its own), at every width.
   const css = readFileSync(join(here, '..', 'style.css'), 'utf8');
   assert.match(css, /\.project-view\.show-asks \.talk \{ display: none; \}/);
-  assert.match(css, /\.project-view\.show-asks \.wait-box \{ flex: 1; min-height: 0; max-height: none;/);
+  // The centre's one scroll (D10): the waiting block has no height of its own and fills the centre.
+  assert.match(css, /\.project-view \.centre-scroll > \.wait-box \{ flex: none; max-height: none; overflow: visible; \}/);
+  assert.match(css, /\.project-view\.show-asks \.centre-scroll > \.wait-box \{ flex: 1 0 auto; \}/);
 });
 
 // U5 ---------------------------------------------------------------------------------------------------------------

@@ -107,3 +107,23 @@ export function empty({ tag = 'div', size = 'list', class: extra = '', ...props 
   if (size !== 'page' && size !== 'list') throw new Error(`no empty size ${size}`);
   return h(tag, { ...props, class: join('empty', size === 'page' ? 'page' : '', extra) }, ...children);
 }
+
+// What opens in place under its row (a task's details, a goal's tasks, the queue): `motion: 'opening'` unfolds it over
+// the short motion (--dur-2, eased), the rows under it moving down with it instead of jumping; `'closing'` folds it
+// away the same way, then `onclosed()` (the caller draws again without it). Drawn again open, it is simply there.
+// Reduced motion: no motion, so a closing one is gone at once.
+const stillMotion = () => !!globalThis.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
+export function unfold({ motion = null, onclosed = null, class: extra = '', ...props } = {}, ...children) {
+  const moving = motion && !stillMotion() ? motion : null;
+  const el = h('div', { ...props, class: join('unfold', moving, extra), ...(moving === 'closing' ? { 'aria-hidden': 'true', inert: true } : {}) },
+    h('div', { class: 'unfold-inner' }, ...children));
+  if (moving) {
+    el.addEventListener('animationend', (event) => {
+      if (event.target !== el) return;
+      el.classList.remove(moving);
+      if (moving === 'closing') onclosed?.();
+    });
+  }
+  if (motion === 'closing' && !moving) queueMicrotask(() => onclosed?.());
+  return el;
+}
