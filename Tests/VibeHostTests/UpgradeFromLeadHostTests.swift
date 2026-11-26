@@ -33,15 +33,16 @@ import Testing
 
     /// What scripts/lib/swift-jobs.sh's `swiftpm_options` gives every SwiftPM command: the native build system (the
     /// Command Line Tools of 2026-11-05 made swiftbuild the default, which compiles SwiftTerm's .metal file and wants
-    /// Xcode's Metal Toolchain), and inside Codex's sandbox `--disable-sandbox` (macOS refuses a sandbox in a sandbox).
+    /// Xcode's Metal Toolchain), Package.resolved's versions only (`--only-use-versions-from-resolved-file`: a stale
+    /// lock file fails the build), and inside Codex's sandbox `--disable-sandbox` (macOS refuses a sandbox in a sandbox).
     static func swiftpmOptions(_ environment: [String: String] = ProcessInfo.processInfo.environment) -> [String] {
-        ["--build-system", "native"] + ((environment["CODEX_SANDBOX"] ?? "").isEmpty ? [] : ["--disable-sandbox"])
+        ["--build-system", "native", "--only-use-versions-from-resolved-file"] + ((environment["CODEX_SANDBOX"] ?? "").isEmpty ? [] : ["--disable-sandbox"])
     }
 
     @Test func theOldHostBuildsAsTheScriptsBuild() {
-        #expect(Self.swiftpmOptions([:]) == ["--build-system", "native"])
-        #expect(Self.swiftpmOptions(["CODEX_SANDBOX": "seatbelt"]) == ["--build-system", "native", "--disable-sandbox"])
-        #expect(Self.swiftpmOptions(["CODEX_SANDBOX": ""]) == ["--build-system", "native"])
+        #expect(Self.swiftpmOptions([:]) == ["--build-system", "native", "--only-use-versions-from-resolved-file"])
+        #expect(Self.swiftpmOptions(["CODEX_SANDBOX": "seatbelt"]) == ["--build-system", "native", "--only-use-versions-from-resolved-file", "--disable-sandbox"])
+        #expect(Self.swiftpmOptions(["CODEX_SANDBOX": ""]) == ["--build-system", "native", "--only-use-versions-from-resolved-file"])
     }
 
     @Test func theOldHostsBuildTakesTheSlotsShareOfTheCores() {
@@ -134,9 +135,9 @@ import Testing
         }
         // SwiftPM leaves folders in its TMPDIR: the build's own, removed with it.
         try run(xcrun, ["swift", "build"] + swiftpmOptions() + ["--package-path", source.path, "--scratch-path", scratch.path,
-                                   "--disable-automatic-resolution", "--product", "vibeswitcher-host"] + heavyJobs(), temporary: temporary, limit: buildLimit)
+                                   "--product", "vibeswitcher-host"] + heavyJobs(), temporary: temporary, limit: buildLimit)
         let product = try run(xcrun, ["swift", "build"] + swiftpmOptions() + ["--package-path", source.path, "--scratch-path", scratch.path,
-                                                 "--disable-automatic-resolution", "--show-bin-path"], temporary: temporary, limit: buildLimit)
+                                                 "--show-bin-path"], temporary: temporary, limit: buildLimit)
         // Its last line: the native build system says first, in the same output, that it's deprecated.
         let binPath = product.split(whereSeparator: \.isNewline).last.map(String.init) ?? ""
         let binary = binPath.trimmingCharacters(in: .whitespaces) + "/vibeswitcher-host"

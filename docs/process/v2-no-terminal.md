@@ -291,7 +291,10 @@ Each item is one task; the page-only ones are under 30 minutes each. Files are o
 6. C7: a card too large for a frame, in parts: the card read, `cards.js` (`tooLarge`).
 7. C8: a `logs` read kind, masked as `Logs.swift` masks: `KindSpec.swift`, a request file, a Logs group on This node (M).
 
-**3. The device-key track** (decided 2026-11-25; [the H1 plan's order](v2-h1-plan.md#what-can-now-be-built-in-order)):
+**3. The device-key track** (decided 2026-11-25; [the H1 plan's order](v2-h1-plan.md#what-can-now-be-built-in-order);
+designed 2026-11-26 in [device keys](../superpowers/specs/2026-11-26-v2-device-keys-design.md), whose
+[build order](../superpowers/specs/2026-11-26-v2-device-keys-design.md#build-order) splits the five items below into
+slices, for review before any is built):
 
 1. HTTPS through `tailscale serve` (the H1 plan's item 1; E6, with N5).
 2. Device keys at pairing, every message checked (item 2): A1, A2, A0; the Devices list (A5 per device); A3's trust

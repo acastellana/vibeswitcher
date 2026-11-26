@@ -21,10 +21,17 @@ public enum WorkerLaunch {
         public var cwd: String?
         /// A test's stand-in programs a role's path may name, in place of a scratch node's (`nodeLinks`); nil: those.
         public var links: [Agent: [String]]?
-        public init(command: String?, cwd: String? = nil, links: [Agent: [String]]? = nil) {
+        /// The names (never the values) of the environment its spawn request gave it; nil: not told.
+        public var environmentNames: [String]?
+        /// Whether `command` is the request's in full (false: the host's recorded one, long values as `'…'`, after a
+        /// restart or a handover between the spawn and the bind).
+        public var full: Bool
+        public init(command: String?, cwd: String? = nil, links: [Agent: [String]]? = nil, environmentNames: [String]? = nil, full: Bool = true) {
             self.command = command
             self.cwd = cwd
             self.links = links
+            self.environmentNames = environmentNames
+            self.full = full
         }
     }
 
@@ -63,8 +70,10 @@ public enum WorkerLaunch {
     /// The `env` each team session's `--settings` carries under the floor (`LeadLaunch.prepare`'s `pinModels`): each
     /// family's alias pinned to its id
     /// (ANTHROPIC_DEFAULT_<FAMILY>_MODEL), and ANTHROPIC_MODEL to the model the session is launched with (`model`, as
-    /// its id; none without one). Whether a project's or a worktree's settings `env` can still win key by key is
-    /// unverified (the security architecture's open list).
+    /// its id; none without one). Not ANTHROPIC_BASE_URL: no subscription (claude.ai login) session has been seen to
+    /// start and answer with it set (the security architecture's open list). Whether a project's or a worktree's
+    /// settings `env` can still win key by key is unverified (the same list); a worker's project settings naming a
+    /// routing key are refused at its bind (`routingKeys`).
     public static func pins(model: String?) -> [String: String] {
         var pins = Dictionary(uniqueKeysWithValues: currentIDs.map { ("ANTHROPIC_DEFAULT_\($0.key.uppercased())_MODEL", $0.value) })
         if let model { pins["ANTHROPIC_MODEL"] = fullID(model) }
@@ -91,21 +100,67 @@ public enum WorkerLaunch {
     /// A settings file under `root` (`components`), read the careful way (`Platform.Files.readRegular`: no link below
     /// `root`, a regular file only, opened without waiting, at most `settingsLimit` bytes) and parsed only when its JSON
     /// nests no deeper than `depthLimit`; with why not, when it isn't read (none: no such file).
-    public static func settings(in root: String, _ components: [String]) -> (object: [String: Any]?, note: String?) {
+    /// A file there that isn't one JSON object, or that names a key twice in one object (`duplicateKey`: another
+    /// parser may keep the other), isn't read either, and says so. `raw`: its bytes, when read.
+    public static func settings(in root: String, _ components: [String]) -> (object: [String: Any]?, note: String?, raw: Data?) {
         let name = components.joined(separator: "/")
         var read = Platform.Files.readRegular(in: root, path: components, limit: settingsLimit)
         // A link at the end (a settings file kept elsewhere): followed, with the same checks on what it names.
         if case .refused(let why) = read, why.hasSuffix(" is a link") { read = followingLastLink(in: root, components) }
         switch read {
-        case .absent: return (nil, nil)
-        case .refused(let why): return (nil, "\(name) in \(root) not read: \(why)")
+        case .absent: return (nil, nil, nil)
+        case .refused(let why): return (nil, "\(name) in \(root) not read: \(why)", nil)
         case .data(let data):
             guard nests(data, within: depthLimit) else {
-                return (nil, "\(name) in \(root) not read: not UTF-8 JSON (no byte-order mark, no NUL) nesting at most \(depthLimit) deep")
+                return (nil, "\(name) in \(root) not read: not UTF-8 JSON (no byte-order mark, no NUL) nesting at most \(depthLimit) deep", data)
             }
-            guard let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return (nil, nil) }
-            return (object, nil)
+            guard let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+                return (nil, "\(name) in \(root) not read: not one JSON object", data)
+            }
+            if let key = duplicateKey(data) { return (nil, "\(name) in \(root) not read: it names \"\(key)\" twice in one object", data) }
+            return (object, nil, data)
         }
+    }
+
+    /// The first key `data` (JSON) names twice in one object, at any level, its escapes decoded; nil when none. A token
+    /// scan beside the parse (`nests` has bounded its depth), not a second parser: JSONSerialization keeps one of two
+    /// same-named keys, and Claude Code's parser may keep the other.
+    static func duplicateKey(_ data: Data) -> String? {
+        let bytes = [UInt8](data)
+        // Each open container: an object's keys so far and whether a key comes next; nil for an array.
+        var stack: [(keys: Set<String>, expectingKey: Bool)?] = []
+        var index = 0
+        while index < bytes.count {
+            let byte = bytes[index]
+            switch byte {
+            case 0x7B:
+                stack.append((keys: [], expectingKey: true))
+            case 0x5B:
+                stack.append(nil)
+            case 0x7D, 0x5D:
+                if !stack.isEmpty { stack.removeLast() }
+            case 0x2C:
+                if let top = stack.last, var object = top {
+                    object.expectingKey = true
+                    stack[stack.count - 1] = object
+                }
+            case 0x22:
+                let start = index
+                index += 1
+                while index < bytes.count, bytes[index] != 0x22 { index += bytes[index] == 0x5C ? 2 : 1 }
+                guard let top = stack.last, var object = top, object.expectingKey else { break }
+                let literal = Data(bytes[start...min(index, bytes.count - 1)])
+                let key = (try? JSONSerialization.jsonObject(with: Data("[".utf8) + literal + Data("]".utf8)) as? [String])?.first
+                    ?? String(decoding: literal, as: UTF8.self)
+                guard object.keys.insert(key).inserted else { return key }
+                object.expectingKey = false
+                stack[stack.count - 1] = object
+            default:
+                break
+            }
+            index += 1
+        }
+        return nil
     }
 
     /// The file at `components` under `root`, its last link followed (the folders on the way were checked for links by
@@ -157,46 +212,165 @@ public enum WorkerLaunch {
         return true
     }
 
+    /// The `env` names that send Claude Code to another endpoint or provider than the one its `--model` names there:
+    /// a base URL, Bedrock, Vertex or Foundry and theirs, a proxy and the certificates that let one read it. A worker
+    /// whose project settings name one is refused at its bind under the floor (its record would say its `--model`).
+    public static let routingKeys: Set<String> = [
+        "ANTHROPIC_BASE_URL", "ANTHROPIC_BEDROCK_BASE_URL", "ANTHROPIC_VERTEX_BASE_URL", "ANTHROPIC_FOUNDRY_BASE_URL", "ANTHROPIC_FOUNDRY_RESOURCE",
+        "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY", "CLAUDE_CODE_SKIP_BEDROCK_AUTH", "CLAUDE_CODE_SKIP_VERTEX_AUTH",
+        "HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy", "NODE_EXTRA_CA_CERTS", "ANTHROPIC_CUSTOM_HEADERS",
+    ]
+
+    /// The top-level settings keys that change which model a worker runs, or where its model list comes from, beside
+    /// what its `--model` says (Claude Code 2.1.332's settings schema, read from its binary): `modelOverrides` maps an
+    /// id to another string and applies to `--model`; `fallbackModel` is tried when the model is overloaded;
+    /// `advisorModel` the advisor's; `agent` runs the main thread as an agent whose `model` may differ; `fastMode` may
+    /// switch the session to another model; `switchModelsOnFlag` switches when safeguards flag a message;
+    /// `availableModels`, `deniedModels`, `enforceAvailableModels` and `availableModelsMatch` change what a pick
+    /// resolves to; `modelCatalogUrl` and its key where the list comes from. A worker whose project settings hold one is
+    /// refused at its bind under the floor. Left: `model` (below `--model`, and counted in `projectModels`), the
+    /// effort and thinking keys (the same model), the credential helpers (`apiKeyHelper`, the AWS and GCP ones,
+    /// `proxyAuthHelper`: which account, not which model; the security architecture's open list), `forceLogin…`
+    /// (login only), `modelPicker` (the picker's rows), `otelHeadersHelper` (telemetry).
+    public static let modelKeys: Set<String> = [
+        "modelOverrides", "fallbackModel", "advisorModel", "agent", "fastMode", "switchModelsOnFlag", "availableModels", "deniedModels",
+        "enforceAvailableModels", "availableModelsMatch", "modelCatalogUrl", "modelCatalogPublicKey",
+    ]
+
     /// The model names a session's project settings in `cwd` give Claude Code (their "model", and their `env`'s
-    /// ANTHROPIC_MODEL and ANTHROPIC_DEFAULT_*_MODEL): branch content, read the careful way (`settings`) only to add;
-    /// with why a file wasn't read.
-    static func projectModels(cwd: String?) -> (models: [String], notes: [String]) {
-        guard let cwd else { return ([], []) }
-        var found: [String] = [], notes: [String] = []
+    /// ANTHROPIC_MODEL and ANTHROPIC_DEFAULT_*_MODEL), and the routing names they hold (`routingKeys`, with the file):
+    /// in their parsed `env`, and, as a second net, anywhere in a file's text (a key a duplicate hid from the parse);
+    /// branch content, read the careful way (`settings`) only to add; with why a file wasn't read.
+    static func projectModels(cwd: String?) -> (models: [String], notes: [String], routing: [String]) {
+        guard let cwd else { return ([], [], []) }
+        var found: [String] = [], notes: [String] = [], routing: [String] = []
         for file in ["settings.json", "settings.local.json"] {
             let read = settings(in: cwd, [".claude", file])
             if let note = read.note { notes.append(note) }
+            if let raw = read.raw {
+                let text = String(decoding: raw, as: UTF8.self)
+                routing += routingKeys.filter { text.contains($0) }.sorted().map { "\($0) in .claude/\(file)" }
+                // The model keys by their quoted name (`agent` alone is too common a word: the parse and the
+                // key-twice rule find it).
+                routing += modelKeys.subtracting(["agent"]).filter { text.contains("\"\($0)\"") }.sorted().map { "\($0) in .claude/\(file)" }
+            }
             guard let object = read.object else { continue }
+            routing += object.keys.filter(modelKeys.contains).sorted().map { "\($0) in .claude/\(file)" }
             if let model = object["model"] as? String { found.append(model) }
-            for (key, value) in object["env"] as? [String: Any] ?? [:]
-            where key == "ANTHROPIC_MODEL" || (key.hasPrefix("ANTHROPIC_DEFAULT_") && key.hasSuffix("_MODEL")) {
+            let env = object["env"] as? [String: Any] ?? [:]
+            for (key, value) in env where key == "ANTHROPIC_MODEL" || (key.hasPrefix("ANTHROPIC_DEFAULT_") && key.hasSuffix("_MODEL")) {
                 if let value = value as? String { found.append(value) }
             }
+            routing += env.keys.filter(routingKeys.contains).sorted().map { "\($0) in .claude/\(file)" }
         }
-        return (found, notes)
+        return (found, notes, Array(NSOrderedSet(array: routing)).compactMap { $0 as? String })
     }
 
-    /// The `--model` (or `--model=`) a launch command passes before its `--` (what follows is the start message: the
-    /// brief's words, never options): the last one, as Claude Code's own option parsing takes it; nil when none. The
-    /// command split as a shell splits it (`words`).
+    /// The `--model` (or `--model=`) a launch command passes (`options(of:)`): the last one, as Claude Code's own option
+    /// parsing takes it; nil when none.
     public static func launchModel(command: String) -> String? {
-        let options = words(command).prefix { $0 != "--" }
-        var found: String?
-        for (index, word) in options.enumerated() {
-            if word == "--model", index + 1 < options.count { found = options[options.startIndex + index + 1] }
-            if word.hasPrefix("--model=") { found = String(word.dropFirst("--model=".count)) }
+        options(of: command).last { $0.flag == "--model" }?.value.flatMap { $0.isEmpty ? nil : $0 }
+    }
+
+    // MARK: A launch's options, as its agent reads them
+
+    /// One option of a launch command: its flag (the long or short name, without `=value`), the value it took (nil: none),
+    /// and whether that value was joined to it (`--model=x`, `-mx`).
+    public struct Option: Equatable, Sendable {
+        public var flag: String
+        public var value: String?
+        public var joined: Bool
+    }
+
+    /// How many words a flag takes: none, one (`<value>`: Claude Code's commander takes the next word even when it is
+    /// `--` or starts with `-`; Codex's clap refuses such a word, "a value is required", Codex 0.167.1 for `-m
+    /// --version`: read here as taken, and refused under the floor either way), one only when the next word doesn't
+    /// start with `-` (`[value]`), or one and every next word that doesn't (`<values...>`).
+    public enum Arity: Sendable { case none, required, optional, variadic }
+
+    /// Claude Code's flags that take a value, from its own option definitions (2.1.332's `.option(…)` and `new Option(…)`
+    /// texts, read from its binary; no session started): `[value]` ones optional. Every other flag takes none.
+    static let claudeArity: [String: Arity] = [
+        "--model": .required, "--fallback-model": .required, "--advisor": .required, "--effort": .required, "--name": .required, "-n": .required,
+        "--settings": .required, "--setting-sources": .required, "--permission-mode": .required, "--agents": .required, "--agent": .required,
+        "--append-system-prompt": .required, "--append-system-prompt-file": .required, "--system-prompt": .required, "--system-prompt-file": .required,
+        "--mcp-config": .variadic, "--add-dir": .variadic, "--allowedTools": .variadic, "--allowed-tools": .variadic,
+        "--disallowedTools": .variadic, "--disallowed-tools": .variadic, "--tools": .variadic, "--plugin-dir": .required,
+        "--session-id": .required, "--output-format": .required, "--input-format": .required, "--max-turns": .required,
+        "--resume": .optional, "-r": .optional, "--debug": .optional, "-d": .optional, "--worktree": .optional, "-w": .optional, "--from-pr": .optional,
+    ]
+    /// Codex's, from its `--help` (0.167.1, run in a scratch home): every one of these takes one value; `--no-daemon`,
+    /// `--oss`, `--search` and the rest none.
+    static let codexArity: [String: Arity] = [
+        "--config": .required, "-c": .required, "--model": .required, "-m": .required, "--profile": .required, "-p": .required,
+        "--sandbox": .required, "-s": .required, "--cd": .required, "-C": .required, "--add-dir": .required,
+        "--ask-for-approval": .required, "-a": .required, "--enable": .required, "--disable": .required,
+        "--image": .variadic, "-i": .variadic, "--local-provider": .required,
+    ]
+
+    /// `command`'s options as its agent's parser reads them, the one reading every check here uses (`launchModel`,
+    /// `RoleLaunchCheck`): after its program (leading assignments and `env` with its options passed over, as
+    /// `program(of:)` reads them), each flag takes the words its arity says (`claudeArity`, `codexArity`; `agent` nil:
+    /// Codex's when the program's name starts with `codex`), and only a `--` where a flag could start ends them (what
+    /// follows is the start message). A word that is neither is a positional, passed over.
+    public static func options(of command: String, agent: Agent? = nil) -> [Option] {
+        var words = tokens(command)[...]
+        while words.first?.assignment == true { words = words.dropFirst() }
+        if let first = words.first?.text, first == "env" || first == "/usr/bin/env" || first == "/bin/env" {
+            words = words.dropFirst()
+            while let option = words.first?.text, option.hasPrefix("-") {
+                words = words.dropFirst()
+                if option == "-u" || option == "--unset" { words = words.dropFirst() }
+            }
+            while words.first?.assignment == true { words = words.dropFirst() }
         }
-        return found.flatMap { $0.isEmpty ? nil : $0 }
+        guard let program = words.first?.text else { return [] }
+        let rest = Array(words.dropFirst().map(\.text))
+        let codex = agent.map { $0 == .codex } ?? (program as NSString).lastPathComponent.hasPrefix("codex")
+        let arity = codex ? codexArity : claudeArity
+        var options: [Option] = []
+        var index = 0
+        while index < rest.count {
+            let word = rest[index]
+            index += 1
+            if word == "--" { break }
+            guard word.hasPrefix("-"), word != "-" else { continue }
+            var flag = word, joined: String?
+            if word.hasPrefix("--") {
+                if let equals = word.firstIndex(of: "=") { flag = String(word[..<equals]); joined = String(word[word.index(after: equals)...]) }
+            } else if word.count > 2 {
+                flag = String(word.prefix(2))
+                let tail = word.dropFirst(2)
+                joined = String(tail.hasPrefix("=") ? tail.dropFirst() : tail)
+            }
+            var option = Option(flag: flag, value: joined, joined: joined != nil)
+            switch arity[flag] ?? .none {
+            case .none:
+                break
+            case .required, .variadic:
+                if joined == nil, index < rest.count {
+                    option.value = rest[index]
+                    index += 1
+                }
+                if arity[flag] == .variadic { while index < rest.count, !rest[index].hasPrefix("-") { index += 1 } }
+            case .optional:
+                if joined == nil, index < rest.count, !rest[index].hasPrefix("-") {
+                    option.value = rest[index]
+                    index += 1
+                }
+            }
+            options.append(option)
+        }
+        return options
     }
 
     /// The agent a launch command starts, judged by what runs, never by a scan of its words: the command must be one
-    /// simple command (no `;`, `&`, `|`, redirection, substitution or newline outside quotes: `controlled`), its program
-    /// the first word after assignments and `env` with its options (the one transparent wrapper; `sh -c`, `exec -a` or
-    /// any other wrapper isn't), and that program Claude Code's or Codex's: the bare name `claude` or `codex` (what the
-    /// session's shell finds), or a path that resolves to Claude Code's installed binary (`VersionedClaude.isBinary`, or
-    /// its npm package's) or Codex's (`codex`, `codex.js`, or its npm package's), or to what the node's own links name
-    /// (`nodeLinks`: the program the node's engine starts its roles with, `RoleProgram`). Anything else is nil (a shell,
-    /// a wrapper, another program), which a bind under the floor refuses.
+    /// simple command of literal words (no `;`, `&`, `|`, redirection, substitution, expansion or newline outside
+    /// quotes: `controlled`), no assignment, its program the first word or the first after `env` with its options (the
+    /// one transparent wrapper; `sh -c`, `exec -a` or any other wrapper isn't), and that program Claude Code's or
+    /// Codex's: the bare name `claude` or `codex` (what the session's shell finds), or a path that resolves into Claude
+    /// Code's versioned binaries or Codex's install root (`agent(atPath:links:)`), or to a scratch node's stand-ins
+    /// (`nodeLinks`). Anything else is nil (a shell, a wrapper, another program), which a bind under the floor refuses.
     public static func commandAgent(_ command: String, links: [Agent: [String]] = nodeLinks) -> Agent? {
         switch program(of: command) {
         case .bare(let agent): return agent
@@ -234,15 +408,15 @@ public enum WorkerLaunch {
 
 
     /// The agent the program at `path` is, by what it resolves to, never by which link it was reached through: Claude
-    /// Code's versioned binary in the account's `~/.local/share/claude/versions/`, or Codex under its install root on this
-    /// machine (`codexRoot`); on a scratch node, a test's stand-in its links name (`links`, `nodeLinks`). A link the
-    /// user's `~/.local/bin/claude` points at `/bin/bash` resolves to bash: nil. Anything else is nil (a name alone, a
-    /// package path anyone of the uid could make).
-    static func agent(atPath path: String, links: [Agent: [String]]) -> Agent? {
+    /// Code's versioned binary in the account's `~/.local/share/claude/versions/`, or Codex under one of its install
+    /// roots (`codexRoots`, `CodexRoot.holds`); on a scratch node, a test's stand-in its links name (`links`,
+    /// `nodeLinks`). A link the user's `~/.local/bin/claude` points at `/bin/bash` resolves to bash: nil. Anything else
+    /// is nil (a name alone, a package path anyone of the uid could make).
+    static func agent(atPath path: String, links: [Agent: [String]], codexRoots: [CodexRoot] = codexRoots) -> Agent? {
         guard let real = realPathOf(path) else { return nil }
         let versions = (VibePaths.accountHome as NSString).appendingPathComponent(".local/share/claude/versions") + "/"
         if real.hasPrefix(versions), VersionedClaude.isBinary(real) { return .claude }
-        if real.hasPrefix(codexRoot) { return .codex }
+        if codexRoots.contains(where: { $0.holds(real) }) { return .codex }
         for (agent, paths) in links where paths.contains(where: { realPathOf($0) == real }) { return agent }
         return nil
     }
@@ -257,9 +431,56 @@ public enum WorkerLaunch {
         return [.claude: [test + "/claude"], .codex: [test + "/codex"]]
     }
 
-    /// Where Codex is installed on this machine: the account's bun global package (`~/.bun/bin/codex` resolves into it),
-    /// read where it's used.
-    static var codexRoot: String { (VibePaths.accountHome as NSString).appendingPathComponent(".bun/install/global/node_modules/@openai/codex") + "/" }
+    /// A folder Codex's package is installed in, and whether it counts only when root's.
+    public struct CodexRoot: Equatable, Sendable {
+        /// The package's folder, ending in `/`.
+        public var folder: String
+        /// npm's global roots: counted only when every folder from `/` down to the program, and the program, is root's
+        /// and writable by no group or other (`rootsAlone`). Those a same-uid writer can't make or change, so they hold
+        /// more than the home one, which anyone of the uid could fill.
+        public var rootOwned: Bool
+
+        public init(folder: String, rootOwned: Bool) {
+            self.folder = folder.hasSuffix("/") ? folder : folder + "/"
+            self.rootOwned = rootOwned
+        }
+
+        /// Whether the resolved program `real` is this root's.
+        public func holds(_ real: String) -> Bool {
+            real.hasPrefix(folder) && (!rootOwned || WorkerLaunch.rootsAlone(real))
+        }
+    }
+
+    /// Codex's install roots: bun's global package in the account's home (`~/.bun/bin/codex` resolves into it), and npm's
+    /// global roots (`/usr/lib/node_modules`, `/usr/local/lib/node_modules`, Homebrew's `/opt/homebrew/lib/node_modules`)
+    /// when root's (`CodexRoot.rootOwned`). Read where it's used (HomePathLint).
+    public static var codexRoots: [CodexRoot] {
+        [CodexRoot(folder: (VibePaths.accountHome as NSString).appendingPathComponent(".bun/install/global/node_modules/@openai/codex"), rootOwned: false)]
+            + ["/usr/lib/node_modules", "/usr/local/lib/node_modules", "/opt/homebrew/lib/node_modules"].map {
+                CodexRoot(folder: $0 + "/@openai/codex", rootOwned: true)
+            }
+    }
+
+    /// Whether `real` (a resolved path) and every folder from `/` down to it is root's, owned by uid 0 and writable by no
+    /// group or other, each looked at without following a link.
+    static func rootsAlone(_ real: String) -> Bool {
+        guard real.hasPrefix("/") else { return false }
+        var paths = ["/"]
+        for component in real.split(separator: "/") { paths.append((paths.count == 1 ? "" : paths[paths.count - 1]) + "/" + component) }
+        for path in paths {
+            var info = stat()
+            guard lstat(path, &info) == 0, info.st_uid == 0, info.st_mode & (S_IWGRP | S_IWOTH) == 0,
+                  info.st_mode & S_IFMT != S_IFLNK else { return false }
+        }
+        return true
+    }
+
+    /// Why a role's program at `path`, meant as Codex, isn't counted as Codex: named with the roots it would have had to
+    /// resolve into.
+    public static func codexRootsSaid(_ path: String, roots: [CodexRoot] = codexRoots) -> String {
+        let listed = roots.map { $0.folder + ($0.rootOwned ? " (root's)" : "") }.joined(separator: ", ")
+        return "\(path) doesn't resolve into one of Codex's install roots here (\(listed))"
+    }
 
     static func realPathOf(_ path: String) -> String? {
         guard let resolved = realpath(path, nil) else { return nil }
@@ -381,6 +602,18 @@ public enum WorkerLaunch {
         public var families: [String] = []
         /// A settings file there wasn't read (refused, or the reads ran out of time).
         public var unread = false
+        /// The command the host started it with, its spawn environment's names, and the `--settings` file it names, as
+        /// read (`RoleLaunchCheck`, judged under the floor at the bind).
+        public var command: String?
+        public var environmentNames: [String]?
+        public var settings: RoleLaunchCheck.SettingsRead?
+        public var full = true
+        /// The routing names a worker's project settings hold (`routingKeys`), each with its file.
+        public var projectRouting: [String] = []
+        /// Why a project settings file there wasn't read whole (refused, too big, not one JSON object, a key twice), and
+        /// whether the bounded reads finished at all (false: they took longer than the bind waits).
+        public var projectUnread: [String] = []
+        public var projectRead = true
         public var notes: [String] = []
     }
 
@@ -390,6 +623,10 @@ public enum WorkerLaunch {
         guard let seen else { return BindFacts() }
         let links = seen.links ?? nodeLinks
         var facts = BindFacts(known: true)
+        facts.command = seen.command
+        facts.environmentNames = seen.environmentNames
+        facts.full = seen.full
+        let settingsPath = seen.command.flatMap(RoleLaunchCheck.settingsPath(in:))
         facts.model = seen.command.flatMap(launchModel(command:)).flatMap { $0.lowercased() == "default" ? nil : $0 }
         // The agent: a bare name told now; a path resolved in the bounded block below (a hung mount never holds the
         // vault), nil past its time.
@@ -402,20 +639,33 @@ public enum WorkerLaunch {
             let project = projectModels(cwd: seen.cwd)
             var agent: Agent?
             if case .path(let path) = told { agent = Self.agent(atPath: path, links: links) }
-            result.set((home.object?["model"] as? String, project.models, home.note.map { [$0] } ?? [], project.notes, home.note == nil, agent))
+            // The `--settings` file a command names, read the careful way (its content judged at the bind).
+            var settingsText: String?
+            if let settingsPath, case .data(let data)? = Optional(Platform.Files.readRegular(in: (settingsPath as NSString).deletingLastPathComponent,
+                                                                                            path: [(settingsPath as NSString).lastPathComponent],
+                                                                                            limit: settingsLimit)) {
+                settingsText = String(data: data, encoding: .utf8)
+            }
+            result.set((home.object?["model"] as? String, project.models, home.note.map { [$0] } ?? [], project.notes, home.note == nil, agent, settingsText,
+                        project.routing))
             done.signal()
         }
         if done.wait(timeout: .now() + limit) == .success, let read = result.get() {
             facts.defaultModel = read.defaultModel
             facts.defaultKnown = read.homeRead
             if case .path = told { facts.agent = read.agent }
+            if let settingsPath { facts.settings = read.settingsText.map { .text($0) } ?? .unread(settingsPath) }
             facts.notes = read.homeNotes + read.projectNotes
+            facts.projectRouting = read.projectRouting
+            facts.projectUnread = read.projectNotes
             facts.unread = !read.projectNotes.isEmpty
             facts.families = Array(Set(ran(facts) + read.projectModels.flatMap(runsOn))).sorted()
         } else {
             facts.unread = true
+            facts.projectRead = false
             facts.notes = ["a launch's settings weren't read: reading them took more than \(Int(limit)) s; only its command's model is recorded"]
             facts.families = ran(facts).sorted()
+            if let settingsPath { facts.settings = .unread(settingsPath) }
         }
         return facts
     }
@@ -445,7 +695,8 @@ public enum WorkerLaunch {
 
     /// The bounded reads' result, handed between two queues.
     private final class Found: @unchecked Sendable {
-        typealias Read = (defaultModel: String?, projectModels: [String], homeNotes: [String], projectNotes: [String], homeRead: Bool, agent: Agent?)
+        typealias Read = (defaultModel: String?, projectModels: [String], homeNotes: [String], projectNotes: [String], homeRead: Bool, agent: Agent?,
+                          settingsText: String?, projectRouting: [String])
         private let lock = NSLock()
         private var value: Read?
         func set(_ found: Read) { lock.withLock { value = found } }

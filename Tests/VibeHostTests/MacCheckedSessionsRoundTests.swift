@@ -27,15 +27,18 @@ struct MacCheckedSessionsRoundTests {
         }
         // No DYLD_INSERT_LIBRARIES: dyld aborts this unhardened scratch host on a missing one before main (its crash
         // report, 2026-11-26 02:10); a checked node is hardened, and start refuses one in launchd's environment.
+        // A shell other than the account's own: the session's SHELL is the user database's, so planting that one
+        // would prove nothing (GitHub's Mac runner's account has bash, a user's Mac zsh).
+        let plantedShell = MacCheckedSessionsTests.accountShell == "/bin/bash" ? "/bin/zsh" : "/bin/bash"
         let planted = ["VIBESWITCHER_ANYTHING": "planted", "VIBESWITCHER_HOME": plantedRoot, "HOME": plantedHome, "CFFIXED_USER_HOME": plantedHome,
                        "DYLD_LIBRARY_PATH": "/planted-lib", "PATH": "/planted/bin:/usr/bin:/bin", "SSH_AUTH_SOCK": plantedSocket,
                        "BASH_ENV": hook, "ENV": hook, "ZDOTDIR": zdot,
-                       "SHELL": "/bin/bash", "LANG": "xx_PLANTED.UTF-8", "LC_ALL": "xx_PLANTED.UTF-8", "VIBESWITCHER_LEAD_ROLE": "planted",
+                       "SHELL": plantedShell, "LANG": "xx_PLANTED.UTF-8", "LC_ALL": "xx_PLANTED.UTF-8", "VIBESWITCHER_LEAD_ROLE": "planted",
                        "SWIFT_BACKTRACE": "enable=yes"]
         let second = try await ScratchHostProcess(environment: planted, prepare: { dir in
             home = dir + "/shaped"
             try FileManager.default.createDirectory(atPath: home, withIntermediateDirectories: true)
-            try "export PATH=\"$PATH:/vs-login-marker\"\n".write(toFile: home + "/.zprofile", atomically: true, encoding: .utf8)
+            try MacCheckedSessionsTests.writeLoginMarker(home: home)
         }, late: { [CheckedSessions.testShapeFlag, home] })
         defer { second.stop() }
         let (client, _, _, _, _, _, _) = try await TestClient.welcomed(second.socket, appKey: second.appKey)

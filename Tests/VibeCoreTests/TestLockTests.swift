@@ -196,7 +196,7 @@ struct TestLockTests {
         #expect(stopped == nil, "\(outputs)")
         let share = TestLock.coreBudget(slots: 3), cores = loaded ? share : ncpu
         let said = try String(contentsOfFile: asked, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
-        #expect(said == "build --build-system native -j 2 -Xswiftc -j\((cores + 1) / 2) | \(cores)", "\(said)")
+        #expect(said == "build --build-system native --only-use-versions-from-resolved-file -j 2 -Xswiftc -j\((cores + 1) / 2) | \(cores)", "\(said)")
         let header = "\(TestLock.coresVariable): \(share), the slot's share of \(ncpu) cores (3 slots)"
         let output = outputs.first?.output ?? ""
         #expect(output.contains("\n" + header), "\(outputs)")
@@ -912,7 +912,7 @@ struct TestLockTests {
         #expect(run.process.terminationStatus == 0, "\(lines(run.output))")
         // In a worktree the lead made, scripts/lib/module-cache.sh puts its cache's path first.
         let said = lines(log + ".args").map { $0.replacingOccurrences(of: #" -Xswiftc -module-cache-path -Xswiftc \S+"#, with: "", options: .regularExpression) }
-        #expect(said == ["A build --build-system native -j 2 -Xswiftc -j2", "A test --build-system native -j 2 -Xswiftc -j2 --filter X"], "\(lines(log + ".args"))")
+        #expect(said == ["A build --build-system native --only-use-versions-from-resolved-file -j 2 -Xswiftc -j2", "A test --build-system native --only-use-versions-from-resolved-file -j 2 -Xswiftc -j2 --filter X"], "\(lines(log + ".args"))")
     }
 
     /// Inside Codex's sandbox (CODEX_SANDBOX set in its commands) swift build and swift test leave SwiftPM's own sandbox
@@ -926,7 +926,7 @@ struct TestLockTests {
         #expect(await exited(run.process), "pid \(run.process.processIdentifier) still running")
         #expect(run.process.terminationStatus == 0, "\(lines(run.output))")
         let said = lines(log + ".args").map { $0.replacingOccurrences(of: #" -Xswiftc -module-cache-path -Xswiftc \S+"#, with: "", options: .regularExpression) }
-        #expect(said == ["A build --build-system native --disable-sandbox -j 2 -Xswiftc -j2", "A test --build-system native --disable-sandbox -j 2 -Xswiftc -j2 --filter X"],
+        #expect(said == ["A build --build-system native --only-use-versions-from-resolved-file --disable-sandbox -j 2 -Xswiftc -j2", "A test --build-system native --only-use-versions-from-resolved-file --disable-sandbox -j 2 -Xswiftc -j2 --filter X"],
                 "\(lines(log + ".args"))")
         // The security tests' scratch host can't listen there (Unix sockets refused): skipped, saying so, not failed.
         #expect(lines(run.output).contains("security socket/signing tests: skipped inside Codex's sandbox, which refuses their scratch host's socket"),
@@ -956,17 +956,17 @@ struct TestLockTests {
             #expect(process.terminationStatus == 0)
             return lines(log + ".args").last ?? ""
         }
-        #expect(try run(nil) == "unset build --build-system native -c release")
-        #expect(try run("") == " build --build-system native -c release")
-        #expect(try run("x") == "x build --build-system native -c release")
-        #expect(try run("0") == "0 build --build-system native -c release")
-        #expect(try run("4") == "4 build --build-system native -j 2 -Xswiftc -j2 -c release")
-        #expect(try run("5") == "5 build --build-system native -j 2 -Xswiftc -j3 -c release")
-        #expect(try run("1") == "1 build --build-system native -j 2 -Xswiftc -j1 -c release")
+        #expect(try run(nil) == "unset build --build-system native --only-use-versions-from-resolved-file -c release")
+        #expect(try run("") == " build --build-system native --only-use-versions-from-resolved-file -c release")
+        #expect(try run("x") == "x build --build-system native --only-use-versions-from-resolved-file -c release")
+        #expect(try run("0") == "0 build --build-system native --only-use-versions-from-resolved-file -c release")
+        #expect(try run("4") == "4 build --build-system native --only-use-versions-from-resolved-file -j 2 -Xswiftc -j2 -c release")
+        #expect(try run("5") == "5 build --build-system native --only-use-versions-from-resolved-file -j 2 -Xswiftc -j3 -c release")
+        #expect(try run("1") == "1 build --build-system native --only-use-versions-from-resolved-file -j 2 -Xswiftc -j1 -c release")
         // Inside Codex's sandbox, SwiftPM's own goes (a sandbox inside it is refused); an empty CODEX_SANDBOX is none.
-        #expect(try run("4", codex: "seatbelt") == "4 build --build-system native --disable-sandbox -j 2 -Xswiftc -j2 -c release")
-        #expect(try run(nil, codex: "seatbelt") == "unset build --build-system native --disable-sandbox -c release")
-        #expect(try run("4", codex: "") == "4 build --build-system native -j 2 -Xswiftc -j2 -c release")
+        #expect(try run("4", codex: "seatbelt") == "4 build --build-system native --only-use-versions-from-resolved-file --disable-sandbox -j 2 -Xswiftc -j2 -c release")
+        #expect(try run(nil, codex: "seatbelt") == "unset build --build-system native --only-use-versions-from-resolved-file --disable-sandbox -c release")
+        #expect(try run("4", codex: "") == "4 build --build-system native --only-use-versions-from-resolved-file -j 2 -Xswiftc -j2 -c release")
         let buildApp = try String(contentsOf: Self.repo.appendingPathComponent("scripts/build-app.sh"), encoding: .utf8)
         #expect(buildApp.contains("source scripts/lib/swift-jobs.sh"))
         #expect(buildApp.contains("Resources/bin/vs-heavy --as scripts/build-app.sh bash -c 'heavy_swift build -c release'"))
@@ -1007,8 +1007,8 @@ struct TestLockTests {
         }
         // A value from outside is never taken: the decision is this run's. A cache that is a folder, not the box's
         // mount, takes nothing, in a box (where boxOwners is set) or not.
-        #expect(try options(home: bare) == "--build-system native")
-        #expect(try options(home: home) == "--build-system native", "in a box: \(Platform.Tools.boxOwners != nil)")
+        #expect(try options(home: bare) == "--build-system native --only-use-versions-from-resolved-file")
+        #expect(try options(home: home) == "--build-system native --only-use-versions-from-resolved-file", "in a box: \(Platform.Tools.boxOwners != nil)")
         // Both scripts decide before their scratch HOME replaces the caller's; test.sh exports it (only when set) for
         // vs-heavy's bash, the retry's too, and no longer once the swift run is over; heavy_swift keeps it from SwiftPM's
         // environment and the tests'.

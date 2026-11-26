@@ -29,6 +29,12 @@ public final class HostedSession {
     public var onEnd: ((Int32) -> Void)?
     /// While a view is attached it answers terminal queries; the headless terminal's answers are dropped.
     public var clientsAttached = false
+    /// Its spawn request's command in full (`info.command` is the recorded one, long values shown as `'…'`:
+    /// `LinuxLaunch.recorded`) and the names, never the values, of the environment it gave: for the vault's judgement of
+    /// a role's launch at its bind (`RoleLaunchCheck`), kept by this host only (never sent, never handed over: a session
+    /// from before a handover has neither, and its bind, made at its start, is long done).
+    public var requestCommand: String?
+    public var requestEnvironmentNames: [String]?
     /// The session's parser stalled or ended, and what was done about it: a line for the host's log.
     public var onParserTrouble: ((String) -> Void)?
     /// Its PTY changed size: a line for the host's log (see `resize`).

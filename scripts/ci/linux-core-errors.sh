@@ -35,7 +35,7 @@ mkdir "$stand_ins" || exit 1
 made=()
 while :; do
     # A build on every core for as long as it compiles: in a slot, on the slot's share (Resources/bin/vs-heavy).
-    Resources/bin/vs-heavy --as scripts/ci/linux-core-errors.sh bash -c 'heavy_swift build --force-resolved-versions --target "$target" -Xswiftc -continue-building-after-errors -Xswiftc -I -Xswiftc "$stand_ins" > "$log" 2>&1'
+    Resources/bin/vs-heavy --as scripts/ci/linux-core-errors.sh bash -c 'heavy_swift build --target "$target" -Xswiftc -continue-building-after-errors -Xswiftc -I -Xswiftc "$stand_ins" > "$log" 2>&1'
     status=$?
     again=""
     for module in $(sed -nE "s/.*error: no such module '([A-Za-z0-9_]+)'.*/\1/p" "$log" | sort -u); do
