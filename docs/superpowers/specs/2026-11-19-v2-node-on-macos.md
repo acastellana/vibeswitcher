@@ -919,9 +919,12 @@ below), while the host at the socket runs B's code at the same pid. The rule, wr
   inode. When launchd's job is another build's than the plist's, the host must have switched in place: the keeper's two
   flags follow its command line (`Switched.must`). A host whose build isn't the plist's is refused by `status` and
   `start`, naming both builds and the remedy (`vibeswitcher switch <the host's build>`); `stop` and the command line's
-  server check take it only when it switched in place (the keeper's flags), whatever builds launchd's job and the plist
-  are of: a switch, a second one or a rollback whose follow-up hasn't run (the window between the handover and the
-  rewrite, which the switch's own server checks cross; `aSecondSwitchBeforeItsFollowUpIsStillTheNodeToTheServerCheckAndStop`).
+  server check take it when it switched in place (the keeper's flags), whatever builds launchd's job and the plist are
+  of: a switch, a second one or a rollback whose follow-up hasn't run (the window between the handover and the rewrite,
+  which the switch's own server checks cross; `aSecondSwitchBeforeItsFollowUpIsStillTheNodeToTheServerCheckAndStop`);
+  and when it runs launchd's own job exactly while another process replaced the plist with another pinned build's (the
+  review's N2: so the remedy `status` names, `vibeswitcher switch <the host's build>`, reaches its server and rewrites
+  the plist; `aPlistReplacedUnderTheRunningJobIsPutRightByTheRemedyStatusNames`).
 - *The rewrite* (`MacAgent.switched(to:folder:)`, the switch's Mac follow-up in `SwitchCommand.followUp`, after the
   handover, or when the host runs the target already): the record pins the target and its files; launchd's word judged
   as above; the job's process the target's host by token and code with the target's job's command line (the keeper's
@@ -932,10 +935,21 @@ below), while the host at the socket runs B's code at the same pid. The rule, wr
   word judged again against the file held (still the job it loaded, the same pid), the host looked at again and the held
   file unchanged (`HeldPlist.changed`). It loads and unloads nothing. A refusal before the rename leaves the plist the old
   build's; one after puts the old bytes back the same way, said whether it could; launchd's job runs on untouched
-  either way. Run again with nothing to do, it says so.
+  either way. Where the put-back fails (a link, or anything not a regular file, at the plist's path), no command of
+  this program can tell the job is the node's any more (each judges the plist), so the refusal names the one way out:
+  remove what is there, `launchctl bootout` by hand (it ends the host and its sessions), then `vibeswitcher start`
+  (`aPutBackThatFailsNamesTheOnlyWayOutAndItWorks` follows it to a started node). Run again with nothing to do, it says
+  so.
 - *The command line's server check* (`ServerCheck`): the listener's expected parent is the host `MacAgent.runningHost`
   finds (`afterASwitch: true`), by token and code, never `launchctl print`'s text: before, the pid came from the lenient
-  print and the host's code was checked only by the server, at its own start (F7).
+  print and the host's code was checked only by the server, at its own start (F7). When the host isn't found every
+  command says why and what to do (`MacAgent.serverCheckHost`: the plist's remedy, `vibeswitcher start` for no job), not
+  only that the listener's code "can't be told" (the review's N1, `theServerCheckSaysWhyTheHostIsntKnownAndWhatToDo`).
+- *A change in behaviour* (the review's N3): a job of the label loaded and not running from another pinned build than
+  the plist's (launchd's A, the plist B) was refused by `start` and left loaded before this branch; `start` now unloads
+  it, since it is placed as a pinned build's job at the agent's own plist and nothing of it runs, and goes on as from
+  nothing: A's command line is then refused by the plist, B's starts B
+  (`aStartOverAJobNotRunningOfAnotherBuildUnloadsItFirst`).
 - *Where `launchctl print`'s `program` is still read, and what it decides:* `NodeAgent.placed` (the grammar: the line is
   a literal made from the job, a mismatch refuses); `NodeAgent.printed` (lenient), whose one reader is
   `MacAgent.printed()` in `start`'s wait, where a pid read decides only when to refuse sooner; `NodeCheck.macServerCode`
@@ -978,7 +992,8 @@ no decision takes `launchctl print`'s `program` text; nothing of a switch's foll
   bootout` by hand ends the job): a process of the user's can make the node refuse, never pass. A plist naming another
   pinned build's job is refused by `status` while that build's host doesn't run.
 - *One failed look at the host during a switch's wait for its server* (`settle`, through the server check) is now a
-  refusal (77) of the switch's last steps, after the handover happened: `vibeswitcher switch <build>` again finishes it.
+  refusal (77) of the switch's last steps, after the handover happened; the refusal says so, and that `vibeswitcher
+  switch <build>` again finishes the switch once what it names is put right.
 - *A follow-up that never runs* (the command line ended after the handover): the plist stays the old build's; `status`
   refuses saying so, and `vibeswitcher switch <build>` finishes it.
 - *An older build's `start`* while the node runs a newer one says the node runs already, naming the newer build: it

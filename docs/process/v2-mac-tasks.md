@@ -376,8 +376,16 @@ or decided. Done on Linux, tested on both systems (`ApprovalJudgmentTests`, `App
    host went to (`MacAgent.switched`: the host the target's by token and code first, the plist replaced by a new file
    renamed over it, `start`'s own checks with its descriptor held, launchd's word and the host again, the old bytes put
    back on a refusal after the rename, nothing loaded or unloaded); launchd's job may be another pinned build's than the
-   plist's only while the host is the plist's build and switched in place; `status` and `start` refuse a host whose
-   build isn't the plist's, naming the remedy. `program` is still read only by the grammar (a mismatch refuses) and the
+   plist's: for `status` and `start` only while the host is the plist's build and switched in place, and `status` and
+   `start` refuse a host whose build isn't the plist's, naming the remedy; `stop` and the command line's server check
+   also take a host that switched in place (the keeper's flags) whatever builds launchd's job and the plist are of, or
+   that runs launchd's own job exactly under a plist another process replaced, so that `stop` and the remedy can run
+   (the design's "Rows 7 and 10" has the rule). *The review's notes (2026-11-26, "ready with fixes"):* N1, the server
+   check says why the host isn't known and what to do; N2, every remedy named runs from its state (a replaced plist:
+   `vibeswitcher switch <build>`; a put-back that failed: remove what is there, `launchctl bootout` by hand, `start`);
+   N3, a change in behaviour: `start` unloads a loaded, not-running job of another pinned build than the plist's, which
+   before it refused and left loaded (`aStartOverAJobNotRunningOfAnotherBuildUnloadsItFirst`); N4, this line, and
+   settle's refusal says the switch again finishes it. `program` is still read only by the grammar (a mismatch refuses) and the
    lenient reader in `start`'s wait (only to refuse sooner). *A real Mac proved:* an in-place switch of a scratch
    launchd job through a keeper (`MacAgentSwitchTests`, red with the change reverted): launchd's word stays the first
    build's job across it; the plist rewritten; `status` passes for the new build; after `stop`, the old build's `start`
