@@ -4,7 +4,7 @@
 import * as kit from '../kit.js';
 import { h, framed } from '../dom.js';
 import { icon } from '../marks.js';
-import { since, plural, tilde, dateTime } from '../words.js';
+import { since, plural, tilde, dateTime, elided } from '../words.js';
 import { usageFacts } from '../settings.js';
 import { dictationGroup } from '../dictate.js';
 import { healthFacts } from '../health.js';
@@ -70,6 +70,57 @@ function showRows(el, words, all = false) {
 const row = (name, ...value) => h('div', { class: 'fact' }, h('dt', null, name), h('dd', null, value));
 const ago = (iso) => (iso ? h('time', { data: { since: iso }, title: dateTime(iso) }, since(iso)) : 'unknown');
 const group = (title, ...children) => h('section', { class: 'node-group' }, kit.sectionTitle('h2', {}, title), children);
+
+// What a person reads first and what only someone fixing the node needs (D18): process ids, the node's own name, its
+// state folder. Folded under "Technical details", the rows still found by a search (which opens it).
+const technical = (...rows) => h('details', { class: 'node-technical' }, h('summary', null, t('noTechnical')), h('dl', { class: 'facts-list' }, rows));
+
+// A day as a person says it: "Nov 23", "23 nov".
+const dayOf = (iso) => new Date(iso).toLocaleDateString(lang(), { month: 'short', day: 'numeric' });
+
+// The Technical details folds inside `el`.
+function foldsOf(el, found = []) {
+  for (const child of [...(el.children || [])]) {
+    if (child.tagName === 'DETAILS') found.push(child); else foldsOf(child, found);
+  }
+  return found;
+}
+
+// A build's commit: its first 7 characters, quiet, the whole on hover (and selected whole by a click, to copy).
+export const shortHash = (commit) => String(commit || '').slice(0, 7);
+const hash = (commit) => h('code', { class: 'node-hash', title: commit }, shortHash(commit));
+
+// A build as a person names it (D18): what the node says of it (a commit's subject, the date it has run since), the
+// hash after it. The node sends a date only for the running build (its server's start) and a name only for the one a
+// rollback goes to (its line): the others are their hash alone until it sends theirs.
+export function buildWords({ commit, name = null, since: from = null }) {
+  const parts = [];
+  if (name) parts.push(h('span', { class: 'node-build-name' }, name));
+  if (from) parts.push(h('span', { class: 'node-build-date', title: dateTime(from) }, t('noBuildSince', { date: dateTime(from, { date: 'medium' }) })));
+  return h('span', { class: 'node-build' }, parts.flatMap((part, index) => (index ? [' · ', part] : [part])), parts.length ? ' ' : null, hash(commit));
+}
+
+// The rollback's line ("200e2c32 v2 journal: …"): its commit and the subject after it.
+export function rollbackParts(rollback) {
+  const line = String(rollback?.line || '');
+  const commit = rollback?.commit || line.split(' ')[0] || '';
+  const subject = line.startsWith(commit) ? line.slice(commit.length).trim() : line;
+  return { commit, name: subject || null };
+}
+
+// Who may act as you, in words (the node's rule's mode): a terminal on this computer, the same with a looser check, no
+// one, or with your approval.
+export const ruleWords = (mode) => ({ systemd: t('noRuleSystemd'), weaker: t('noRuleWeaker'), closed: t('noRuleClosed'), approval: t('noRuleApproval') }[mode] || mode || '');
+
+// A request the node took as yours, in words: what it did, and where (a folder shortened, whole on hover).
+const ACCEPTED = { lead: 'noAccLead', answer: 'noAccAnswer', approve: 'noAccApprove', set: 'noAccSet', 'session.new': 'noAccNew', new: 'noAccNew', send: 'noAccSend',
+  'session.reply': 'noAccAnswer', resume: 'noAccResume', 'session.resume': 'noAccResume', stop: 'noAccStop', push: 'noAccPush' };
+export function acceptedWords(entry, home) {
+  const what = ACCEPTED[entry.kind] ? t(ACCEPTED[entry.kind]) : t('noAccOther');
+  const subject = typeof entry.subject === 'string' && entry.subject.startsWith('/') ? entry.subject : null;
+  return [h('span', { title: (entry.commandLine || []).join(' ') || entry.kind }, what),
+    subject ? [' · ', h('span', { class: 'node-path', title: subject }, elided(tilde(subject, home)))] : null];
+}
 
 // The account's usage (the node's `usage`): each limit known, the ones holding work back marked; null before the
 // node's first read. Also on Settings.
@@ -171,7 +222,7 @@ function passkeysPart(acts) {
   return h('div', { class: 'passkeys' },
     acts.notice ? h('p', { class: 'node-says passkey-notice' }, acts.notice) : null,
     keys.length ? kit.sectionTitle('p', { class: 'col-title' }, t('pkKeys', { n: keys.length })) : null,
-    keys.map((key) => h('p', { class: 'passkey-row' }, h('code', null, key.id), ' ', t('pkKeyWhen', { added: when(key.added), used: when(key.lastUsed) }))));
+    keys.map((key, index) => h('p', { class: 'passkey-row' }, h('span', { title: key.id }, t('pkKeyN', { n: index + 1 })), ' · ', t('pkKeyWhen', { added: when(key.added), used: when(key.lastUsed) }))));
 }
 
 export function nodeView(app) {
@@ -255,10 +306,10 @@ export function nodeView(app) {
           row(t('noState'), h('span', { class: connected ? 'dot tone-done' : 'dot tone-needs-you', 'aria-hidden': 'true' }), connected ? t('noConnected') : host.state),
           row(t('noRunningFor'), ago(host.startedAt)),
           row(t('noLiveSessions'), String(host.liveSessions)),
-          row(t('noProcess'), `pid ${host.pid ?? '?'}`),
           notes ? row(t('noServerRestarts'), String(notes.serverRestarts)) : null,
-          notes?.refusedAppConnections ? row(t('noRefusedConnections'), String(notes.refusedAppConnections)) : null,
-          (notes?.replacedPaths || []).map((path) => row(t('noTookBackItsPath'), tilde(path, home))))) },
+          notes?.refusedAppConnections ? row(t('noRefusedConnections'), String(notes.refusedAppConnections)) : null),
+        technical(row(t('noProcess'), `pid ${host.pid ?? '?'}`),
+          (notes?.replacedPaths || []).map((path) => row(t('noTookBackItsPath'), h('span', { class: 'node-path', title: path }, elided(tilde(path, home))))))) },
       usage ? { key: 'usage', title: t('noAccountUsage'), meta: top === null ? '' : `${top}%`, metaTone: usage.limits.some((limit) => limit.holds) ? 'asked' : '', el: usageGroup(node.usage) } : null,
       // Boost (the node's `boost`): on or off, why, and the limits it raises to.
       node.boost ? { key: 'boost', title: t('noBoost'), meta: node.boost.on ? t('noOn') : t('noOff'), metaTone: node.boost.on ? 'working' : '', el: group(t('noBoost'),
@@ -276,10 +327,10 @@ export function nodeView(app) {
           : h('p', { class: 'node-says' }, t('noPluginsInATerminal'))) } : null,
       { key: 'server', title: t('noServer'), meta: '', el: group(t('noServer'),
         h('dl', { class: 'facts-list' },
-          row(t('noRunningFor'), ago(server.startedAt)),
-          row(t('noProcess'), `pid ${server.pid}`),
+          row(t('noRunningFor'), ago(server.startedAt))),
+        technical(row(t('noProcess'), `pid ${server.pid}`),
           row(t('noNode'), node.node),
-          row(t('noStateFolder'), tilde(node.root, home)))) },
+          row(t('noStateFolder'), h('span', { class: 'node-path', title: node.root }, elided(tilde(node.root, home)))))) },
       // The web listener this page came in by (the node's `web`; the mock has none).
       node.web ? { key: 'web', title: t('noWebPage'), meta: node.web.state === 'listening' ? t('noOn') : node.web.state === 'off' ? t('noOff') : node.web.state, el: group(t('noWebPage'),
         h('dl', { class: 'facts-list' },
@@ -288,17 +339,20 @@ export function nodeView(app) {
           row(t('noOpenNow'), String(node.web.connections))),
         controlsNow().revoke) } : null,
       update ? { key: 'updates', title: t('noUpdates'), meta: update.tone === 'needs-you' ? t('noNewer') : update.tone === 'done' ? t('noCurrent') : '', metaTone: update.tone === 'needs-you' ? 'asked' : '', el: updatesGroup(node.update, controlsNow().check) } : null,
-      { key: 'build', title: t('noBuild'), meta: String(notes?.build || server.commit || '').slice(0, 8), metaTone: 'mono', el: group(t('noBuild'),
-        h('dl', { class: 'facts-list' },
-          row(t('noRunning'), h('code', null, notes?.build || server.commit)),
-          server.commit !== (notes?.build || server.commit) ? row(t('noServer'), h('code', null, server.commit)) : null,
-          others.length ? row(t('noAlsoInstalled'), others.map((commit) => h('code', null, commit))) : null,
-          builds?.rollback ? row(t('noRollbackGoesTo'), builds.rollback.line) : null)) },
-      { key: 'rule', title: t('noWhoMayAct'), meta: node.rule?.mode || '', el: group(t('noWhoMayAct'),
+      { key: 'build', title: t('noBuild'), meta: server.startedAt ? dayOf(server.startedAt) : shortHash(notes?.build || server.commit),
+        el: group(t('noBuild'),
+          h('dl', { class: 'facts-list' },
+            row(t('noRunning'), buildWords({ commit: notes?.build || server.commit, since: server.commit === (notes?.build || server.commit) ? server.startedAt : null })),
+            server.commit !== (notes?.build || server.commit) ? row(t('noServer'), buildWords({ commit: server.commit, since: server.startedAt })) : null,
+            builds?.rollback ? row(t('noRollbackGoesTo'), buildWords(rollbackParts(builds.rollback))) : null,
+            others.filter((commit) => commit !== builds?.rollback?.commit).length
+              ? row(t('noAlsoInstalled'), others.filter((commit) => commit !== builds?.rollback?.commit).flatMap((commit, index) => [index ? ', ' : null, hash(commit)])) : null)) },
+      { key: 'rule', title: t('noWhoMayAct'), meta: ruleWords(node.rule?.mode), el: group(t('noWhoMayAct'),
+        h('dl', { class: 'facts-list' }, row(t('noWhoMayActNow'), ruleWords(node.rule?.mode))),
         h('p', { class: 'node-says' }, node.rule?.says || ''),
         h('ul', { class: 'lines' }, (node.facts || []).map((line) => h('li', null, line)))) },
       node.accepted?.length ? { key: 'accepted', title: t('noRequestsItTookAsYours'), meta: String(node.accepted.length), el: group(t('noRequestsItTookAsYours'),
-        h('ul', { class: 'lines' }, node.accepted.map((entry) => h('li', null, h('code', null, entry.commandLine.join(' ')), ' · ', tParts('noAgo', { d: ago(entry.at) }), ' · ', entry.cgroup)))) } : null,
+        h('ul', { class: 'lines' }, node.accepted.map((entry) => h('li', null, acceptedWords(entry, home), ' · ', tParts('noAgo', { d: ago(entry.at) }))))) } : null,
       node.journal?.length ? { key: 'journal', title: t('noJournal'), meta: String(node.journal.length), el: group(t('noJournal'), h('ul', { class: 'lines' }, node.journal.map((line) => h('li', null, line.replace(/^journal: /, ''))))) } : null,
       // With the `act` right: stop the node (every session ends), asked twice.
       actsFor(app, 'stop') ? { key: 'stop', title: t('acStopTitle'), meta: '', el: group(t('acStopTitle'), h('p', { class: 'node-says' }, t('acStopWords')),
@@ -361,6 +415,8 @@ export function nodeView(app) {
       showRows(chosen.el, words, chosen.titleFound);
       // The words found, marked (the groups are drawn again for each search, so nothing marked stays).
       for (const row of rowsOf(chosen.el)) if (!row.hidden) markWords(row, words);
+      // A row found under Technical details: open, so what was found shows.
+      for (const fold of foldsOf(chosen.el)) if (rowsOf(fold).some((row) => !row.hidden)) fold.open = true;
     }
     if (columns.detailBody.firstChild !== chosen.el || columns.detailBody.childNodes.length !== 1) columns.show({ title: chosen.title, sub: chosen.group, top, body: [chosen.el] });
     else columns.show({ title: chosen.title, sub: chosen.group, top });

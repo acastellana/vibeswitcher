@@ -16,7 +16,8 @@ test('up to date says so, with the line that checks now', () => {
 test('a newer build names it, with its install and switch lines first', () => {
   const facts = updateFacts({ checkedAt: '2026-11-22T08:00:00.000Z', commit, aheadBy: 3, install: `scripts/install-node.sh ${commit}`, problem: null });
   assert.equal(facts.tone, 'needs-you');
-  assert.match(facts.state, /aaaaaaaaaaaa \(3 commits ahead\)/);
+  // The short hash a person reads (D18): 7 characters.
+  assert.match(facts.state, /: aaaaaaa \(3 commits ahead\)/);
   assert.deepEqual(facts.lines.map((line) => line.text), [`scripts/install-node.sh ${commit}`, `vibeswitcher switch ${commit}`, checkNowLine]);
 });
 

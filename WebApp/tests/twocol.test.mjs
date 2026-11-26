@@ -164,7 +164,8 @@ test('This node: the list is the page’s groups with a count or a one-word stat
   assert.equal(names[1], 'Notices 1');
   assert.match(names[0], / 1$/);
   assert.ok(names.includes('Session host Connected'), names.join(' | '));
-  assert.ok(names.some((one) => /^Build [0-9a-f]{8}$/.test(one)), names.join(' | '));
+  // The build by the day it has run since, never its hash (D18).
+  assert.ok(names.some((one) => /^Build [A-Z][a-z]{2} \d{1,2}$/.test(one)), names.join(' | '));
   const first = rowsOf(view)[0];
   assert.ok(first.classList.contains('asked'), 'what needs you, in the asking colour');
   assert.equal(chosenRow(view), first, '#/node opens what needs you');

@@ -104,7 +104,7 @@ test('B4: Check now asks the node to look, says Checking…, then what it found;
     answer({ ok: true, result: found });
     await flush();
     assert.equal(check.disabled, false);
-    assert.match(detail.textContent, new RegExp(t('upCheckedNewer', { commit: '5b8e1d2a9c4f' }).replace(/[()]/g, '.')));
+    assert.match(detail.textContent, new RegExp(t('upCheckedNewer', { commit: '5b8e1d2' }).replace(/[()]/g, '.')));
     // Refused: in the node's words, the button back.
     check.click();
     answer({ ok: false, error: { code: 'refused', message: 'this server doesn’t check for updates (a scratch node asks GitHub nothing)' } });

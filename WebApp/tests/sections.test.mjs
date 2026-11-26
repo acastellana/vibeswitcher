@@ -196,3 +196,89 @@ test('D16: a setting the node keeps to a terminal shows no control but Change an
   assert.equal(elided('~/projects/site/.vibeswitcher/workflow.md'), '~/projects/…/.vibeswitcher/workflow.md');
   assert.equal(elided('~/.vibeswitcher/policy.md'), '~/.vibeswitcher/policy.md');
 });
+
+// ---- D18: This node and the inspector in a person's words ----
+
+const vectors = JSON.parse(readFileSync(new URL('../wire/vectors.json', import.meta.url), 'utf8'));
+const nodeValue = () => ({ ...structuredClone(vectors['snapshot.node'].entries[0].value), home: '/home/dev',
+  server: { pid: 48213, startedAt: '2026-11-23T09:00:00.000Z', commit: 'f62aef61c0ffee11' },
+  builds: { installRoot: '/home/dev/.local/share/vibeswitcher', installed: ['f62aef61c0ffee11', '200e2c32', '5e563cf5'], rollback: { commit: '200e2c32', line: '200e2c32 v2 journal: an entry with no cgroup softens no mark' } },
+  rule: { mode: 'systemd', says: 'a request is the user’s when its process is in a terminal’s scope of this login', scopes: [] },
+  accepted: [{ kind: 'lead', action: 'b7e0', subject: '/home/dev/projects/example-site', at: '2026-11-23T10:00:00.000Z', pid: 51022, cgroup: '/init.scope', commandLine: ['vibeswitcher', 'lead', '/home/dev/projects/example-site'] }] });
+
+async function nodeGroup(code, group) {
+  setLanguage(code);
+  const { nodeView } = await import('../js/views/node.js');
+  const node = nodeValue();
+  node.host.notes = { ...(node.host.notes || {}), build: node.server.commit };
+  const app = fakeApp({ route: { name: 'node', group }, state: { node } });
+  const view = nodeView(app);
+  return { view, detail: view.columns.detail, list: view.columns.el };
+}
+
+test('D18: a build is a date and a name a person can say, its hash short and after them, whole on hover; who may act and what it took as yours in words', async () => {
+  for (const code of ['en', 'es']) {
+    const { detail, list } = await nodeGroup(code, 'build');
+    const words = detail.textContent;
+    assert.match(words, new RegExp(t('noBuildSince', { date: '' }).trim().slice(0, 10)), `${code}: since when it runs`);
+    assert.match(words, /v2 journal: an entry with no cgroup softens no mark/, 'the rollback’s build by its name');
+    const hashes = findAll(detail, byClass('node-hash'));
+    assert.deepEqual(hashes.map((one) => one.textContent), ['f62aef6', '200e2c3', '5e563cf'], 'each 7 characters');
+    assert.equal(hashes[0].attrs.title, 'f62aef61c0ffee11', 'whole on hover');
+    assert.doesNotMatch(words, /f62aef61c0ffee11/);
+    // The list's row says the day, not the hash.
+    const row = find(list, (node) => node.dataset?.key === 'build');
+    assert.doesNotMatch(row.textContent, /f62aef/);
+    // Who may act: the mode in words.
+    const rule = (await nodeGroup(code, 'rule'));
+    assert.match(rule.detail.textContent, new RegExp(t('noRuleSystemd')));
+    assert.doesNotMatch(find(rule.list, (node) => node.dataset?.key === 'rule').textContent, /systemd/);
+    // What it took as yours: in words, the folder ~/…, no command line or cgroup.
+    const accepted = (await nodeGroup(code, 'accepted')).detail.textContent;
+    assert.match(accepted, new RegExp(t('noAccLead')));
+    assert.match(accepted, /~\/projects\/example-site/);
+    assert.doesNotMatch(accepted, /init\.scope|vibeswitcher lead/);
+  }
+  setLanguage('en');
+});
+
+test('D18: process ids, the node’s name and its state folder fold under Technical details, found by a search', async () => {
+  const { detail } = await nodeGroup('en', 'server');
+  const fold = find(detail, (node) => node.tag === 'details');
+  assert.ok(fold && fold.classList.contains('node-technical'));
+  assert.equal(find(fold, (node) => node.tag === 'summary').textContent, 'Technical details');
+  assert.match(fold.textContent, /pid 48213/);
+  const open = findAll(detail, (node) => node.classList.contains('fact') && !findAll(fold, (one) => one === node).length);
+  assert.ok(open.every((one) => !/pid|State folder/.test(one.textContent)), 'nothing technical outside the fold');
+  const host = (await nodeGroup('en', 'host')).detail;
+  assert.match(find(host, (node) => node.tag === 'details').textContent, /pid/);
+});
+
+test('D18: the inspector folds the agent’s ids, process, command and size under Technical details; its folder is ~/… elided; its links are the shared quiet button', async () => {
+  setLanguage('es');
+  const { inspector } = await import('../js/views/inspector.js');
+  const P = 'local:project:site';
+  const lead = { id: 'local:lead', role: 'lead', lead: P, hosted: true, cwd: '/home/dev/projects/example-site', status: 'working', title: 'example-site' };
+  const worker = { id: 'local:w1', hosted: true, cwd: '/home/dev/projects/example-site/.vibeswitcher/worktrees/fix-footer/packages/web', agent: 'claude', status: 'working',
+    since: '2026-11-23T09:00:00.000Z', startedAt: '2026-11-23T08:00:00.000Z', agentSession: '01a9c3d7-aaaa', pid: 51022, terminal: 'pts/3', command: 'claude', size: { cols: 132, rows: 38 },
+    role: 'worker', lead: P };
+  const app = fakeApp({ state: { node: { home: '/home/dev' }, sessions: new Map([[lead.id, lead], [worker.id, worker]]) } });
+  app.ui.state.inspector.tab = 'overview';
+  const pane = inspector(app);
+  pane.update(worker);
+  const fold = find(pane.el, byClass('inspect-technical'));
+  assert.ok(fold && fold.tag === 'details' && !fold.hidden);
+  assert.equal(find(fold, (node) => node.tag === 'summary').textContent, 'Detalles técnicos');
+  for (const words of ['01a9c3d7', '51022 en pts/3', 'claude', '132 × 38']) assert.match(fold.textContent, new RegExp(words));
+  const folder = findAll(pane.el, byClass('inspect-row')).find((row) => row.children[0].textContent === t('inFolder'));
+  assert.equal(folder.children[1].textContent, '~/projects/…/fix-footer/packages/web');
+  assert.equal(folder.children[1].attrs.title, worker.cwd, 'whole on hover');
+  // The worker's lead, in its Team rows.
+  const link = find(pane.el, (node) => node.classList.contains('inspect-link') && node.textContent === 'example-site');
+  assert.ok(link, 'the lead’s link');
+  assert.deepEqual(link.attrs.class.split(' ').sort(), ['button', 'inspect-link', 'quiet', 'small']);
+  // No look of its own: the quiet button's, which a touch screen makes a fingertip.
+  assert.doesNotMatch(bareCss, /\.inspect-link \{[^}]*color/);
+  assert.match(bareCss, /\.button, \.button\.small, \.button\.quiet,/);
+  setLanguage('en');
+});

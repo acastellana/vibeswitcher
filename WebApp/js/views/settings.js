@@ -8,7 +8,8 @@
 import * as kit from '../kit.js';
 import { h, setText, framed } from '../dom.js';
 import { icon } from '../marks.js';
-import { tilde, lastPart } from '../words.js';
+import { tilde, lastPart, elided } from '../words.js';
+export { elided };
 import { copyLine } from './cards.js';
 import { usageGroup } from './node.js';
 import { terminalLookSection } from './termlook.js';
@@ -63,14 +64,6 @@ function settingRow(setting, { folder, home, editing, toggle, app = null, words 
       place ? h('span', { class: 'setting-file', title: place, tabindex: 0 }, t('svWhereKept'), ' ', h('span', { class: 'setting-file-path' }, elided(place))) : null),
     setting.note ? h('p', { class: 'setting-note' }, icon('warning', 12), setting.note) : null,
     drafted != null ? editor(setting, folder, editing, app) : null);
-}
-
-// A path shortened for a line: its first part and its last two, the middle elided ("~/.vibeswitcher/…/mac-limits.json").
-export function elided(path, keep = 2) {
-  const text = String(path || '');
-  const parts = text.split('/');
-  if (parts.length <= keep + 2) return text;
-  return [parts[0] || '', parts[1], '…', ...parts.slice(-keep)].join('/');
 }
 
 // The values a setting takes, in the page's words where the node words them as numbers ("1 to 12", "above 0, at most

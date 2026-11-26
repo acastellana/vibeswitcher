@@ -16,7 +16,7 @@ export function updateFacts(update) {
   if (update.commit) {
     tone = 'needs-you';
     const ahead = update.aheadBy != null ? t('upAhead', { n: update.aheadBy }) : '';
-    state = t('upNewer', { commit: update.commit.slice(0, 12) }) + ahead;
+    state = t('upNewer', { commit: update.commit.slice(0, 7) }) + ahead;
     if (update.install) lines.push({ label: t('upTheCommandThatInstallsIt'), text: update.install });
     lines.push({ label: t('upThenTheCommandThatSwitches'), text: `vibeswitcher switch ${update.commit}` });
   } else if (update.checkedAt) {
@@ -32,7 +32,7 @@ export function updateFacts(update) {
 // What a look now found (`update.check`'s reply, the watch's record), in words: a newer build, up to date, or why it
 // couldn't look.
 export function checkedWords(result = {}) {
-  if (result.commit) return t('upCheckedNewer', { commit: String(result.commit).slice(0, 12) }) + (result.aheadBy != null ? t('upAhead', { n: result.aheadBy }) : '');
+  if (result.commit) return t('upCheckedNewer', { commit: String(result.commit).slice(0, 7) }) + (result.aheadBy != null ? t('upAhead', { n: result.aheadBy }) : '');
   if (result.problem) return t('upCheckedProblem', { why: result.problem });
   if (result.checkedAt) return t('upCheckedCurrent');
   return t('upCheckedNothing');

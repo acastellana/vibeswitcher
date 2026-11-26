@@ -745,7 +745,6 @@ small { font-size: var(--t-caption); }
 .inspect-state time::before { content: "· "; }
 /* As tall empty as said: a whole line (its line and its 1px), so what follows never moves by a fraction. */
 .inspect-says { height: calc(var(--lh-body) * 1em + 1px); padding: 1px 18px 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); font-size: var(--t-caption); }
-.inspect-link { color: var(--accent); }
 .inspect-ports { margin: 0; padding: 3px 18px 0; list-style: none; display: grid; gap: 4px; font-size: var(--t-caption); }
 .inspect-port-about { color: var(--ink-3); }
 .inspect-note { padding: 12px 18px 0; color: var(--ink-2); }
@@ -780,6 +779,12 @@ small { font-size: var(--t-caption); }
 .ledger-title.mono, .ledger-dim.mono { font-family: var(--mono); font-size: var(--t-caption); }
 .ledger-trail { flex: none; color: var(--ink-3); font-size: var(--t-caption); font-variant-numeric: tabular-nums; }
 .ledger-dim { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); font-size: var(--t-caption); }
+/* The inspector's links are the quiet button (D18): its words where the link's were, a fingertip on a touch screen. */
+.inspect-link { max-width: 100%; margin-left: -6px; overflow: hidden; text-overflow: ellipsis; }
+.inspect-ports .inspect-link { margin-left: -6px; }
+/* Technical details: the agent's own ids, its process, command and size, folded (D18). */
+.inspect-technical > summary { padding: 3px 18px; color: var(--ink-2); font-size: var(--t-caption); cursor: pointer; }
+.inspect-technical[open] > summary { margin-bottom: 2px; }
 
 /* ---- This node ---- */
 
@@ -793,6 +798,17 @@ small { font-size: var(--t-caption); }
 .notices .icon { margin-top: 2px; color: var(--working); }
 .node-says { margin-bottom: 6px; }
 .lines { display: grid; gap: 4px; color: var(--ink-2); font-size: var(--t-caption); overflow-wrap: anywhere; }
+/* A build: what the node says of it, the hash after it, quiet (D18). Technical details: pids, the node's name, its
+   state folder, folded. A path: shortened, whole on hover. */
+.node-build { display: inline; }
+.node-build-date { color: var(--ink-2); }
+.node-hash { color: var(--ink-3); font-family: var(--mono); font-size: var(--t-code); }
+.node-technical { margin-top: 10px; }
+.node-technical > summary { padding: 4px 0; color: var(--ink-2); font-size: var(--t-caption); cursor: pointer; }
+.node-path { cursor: help; }
+@media (hover: none) and (pointer: coarse) {
+  .node-technical > summary, .inspect-technical > summary { display: flex; align-items: center; min-height: var(--ctl-touch); }
+}
 
 /* ---- Settings ---- */
 
@@ -1695,7 +1711,7 @@ main.centre-wrap[tabindex="-1"]:focus { outline: none; }
 :is(.button, .send, .icon-button, .segment, .option, .copy-button, .code-run, .fold, .confirm-clear, .link, .inspect-link,
   .strip-board, .summary-count, .summary-brief, .offer button, .attach-choice, .send-way, .suggestion, .palette-row, .project, .place, .tc-row, .own-row,
   .task-link, .task-row2, .line, .now, .latest-said, .latest, .goal-title, .road-band, .card-unfold, .records-row > summary, .records-earlier > summary,
-  .facts-files summary, .card-terminal > summary, .all-done-tasks > summary, .chat-image-button, .dial-fold, .strip-fold, .look-colour, .brand,
+  .facts-files summary, .node-technical > summary, .inspect-technical > summary, .card-terminal > summary, .all-done-tasks > summary, .chat-image-button, .dial-fold, .strip-fold, .look-colour, .brand,
   .strip-team, .attached-remove, .field, .check) {
   transition: var(--state-transition);
 }
@@ -1716,7 +1732,7 @@ main.centre-wrap[tabindex="-1"]:focus { outline: none; }
   :is(.place, .summary-brief):not(:where([aria-current], .confirming, .copied, .listening, .done, .failed, .asked)):hover { color: var(--ink); }
   /* Words that darken. */
   :is(.segment, .fold, .confirm-clear, .latest-said, .code-run, .strip-fold, .tab-banner-close, .strip-team, .brand,
-    .facts-files summary, .card-terminal > summary, .all-done-tasks > summary):not(:where([aria-current], [aria-selected="true"], [aria-pressed="true"], :disabled, .confirming, .copied, .listening, .done, .failed, .asked)):hover { color: var(--ink); }
+    .facts-files summary, .node-technical > summary, .inspect-technical > summary, .card-terminal > summary, .all-done-tasks > summary):not(:where([aria-current], [aria-selected="true"], [aria-pressed="true"], :disabled, .confirming, .copied, .listening, .done, .failed, .asked)):hover { color: var(--ink); }
   .code-run:hover { border-color: var(--ink-3); }
   /* Links: underlined. */
   :is(.link, .inspect-link, .strip-board, .summary-count[href]):hover { text-decoration: underline; }
@@ -1740,7 +1756,7 @@ main.centre-wrap[tabindex="-1"]:focus { outline: none; }
 :is(.icon-button, .segment, .option, .copy-button, .code-run, .fold, .confirm-clear, .link, .inspect-link, .strip-board,
   .summary-count, .summary-brief, .offer button, .attach-choice, .send-way, .suggestion, .palette-row, .project, .place, .tc-row, .own-row, .task-link,
   .task-row2, .line, .now, .latest-said, .goal-title, .road-band, .card-unfold, .records-row > summary, .records-earlier > summary,
-  .facts-files summary, .card-terminal > summary, .all-done-tasks > summary, .chat-image-button, .dial-fold, .strip-fold, .button.quiet, .button.plain, .brand, .look-colour,
+  .facts-files summary, .node-technical > summary, .inspect-technical > summary, .card-terminal > summary, .all-done-tasks > summary, .chat-image-button, .dial-fold, .strip-fold, .button.quiet, .button.plain, .brand, .look-colour,
   .strip-team):not(:where(:disabled, .read-only > *)):active { background-color: var(--fill-3); }
 .attached-remove:active { transform: scale(0.9); }
 .latest:active { background-color: var(--raised-press); transform: scale(0.97); }

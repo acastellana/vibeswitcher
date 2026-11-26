@@ -60,7 +60,9 @@ test('This node: a request it took as yours says how long ago as the other rows 
   const app = fakeApp({ route: { name: 'node', group: 'accepted' }, state: { node } });
   const text = nodeView(app).el.textContent;
   assert.doesNotMatch(text, /\[object /);
-  assert.match(text, /vibeswitcher lead \/home\/dev\/projects\/example-site · 1h 30m ago · \/init\.scope/);
+  // In words, never the command line or the cgroup (D18): the command on hover.
+  assert.match(text, /Started a project’s lead · 1h 30m ago/);
+  assert.doesNotMatch(text, /init\.scope|vibeswitcher lead/);
 });
 
 // A project whose lead asks two things (a question and its push), and five sessions of the user's own of which one
