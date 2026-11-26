@@ -1024,24 +1024,24 @@ textarea.answer-input { max-height: 200px; line-height: var(--lh-body); resize: 
 .setting-file[open] > summary::after { content: ": "; }
 .setting-file-path { color: var(--ink-2); cursor: help; }
 
-kbd { padding: 1px 6px; border-radius: var(--r-1); box-shadow: var(--e-1-in); color: var(--ink-2); font-size: var(--t-caption); white-space: nowrap; }
+kbd { padding: 1px var(--s-3); border-radius: var(--r-1); box-shadow: var(--e-1-in); color: var(--ink-2); font-size: var(--t-caption); white-space: nowrap; }
 
 /* ---- ⌘K ---- */
 
-.palette { position: fixed; inset: 0; z-index: 10; display: flex; align-items: flex-start; justify-content: center; padding: 12vh 12px 0; background: var(--scrim); animation: fade var(--dur-2) var(--ease-out); }
+.palette { position: fixed; inset: 0; z-index: 10; display: flex; align-items: flex-start; justify-content: center; padding: 12vh var(--s-5) 0; background: var(--scrim); animation: fade var(--dur-2) var(--ease-out); }
 @keyframes fade { from { opacity: 0; } }
 .palette-panel { width: min(620px, 100%); border-radius: var(--r-3); background: var(--raised); box-shadow: var(--e-3); overflow: hidden; animation: enter var(--dur-2) var(--ease-out); }
-.palette-field { display: flex; align-items: center; gap: 10px; padding: 0 16px; border-bottom: 1px solid var(--line); color: var(--ink-3); }
-.palette-input { flex: 1; min-width: 0; padding: 14px 0; border: 0; background: none; color: var(--ink); font-size: var(--t-title); outline: none; }
+.palette-field { display: flex; align-items: center; gap: var(--s-4); padding: 0 var(--s-6); border-bottom: 1px solid var(--line); color: var(--ink-3); }
+.palette-input { flex: 1; min-width: 0; padding: var(--s-5) 0; border: 0; background: none; color: var(--ink); font-size: var(--t-title); outline: none; }
 .palette-input::placeholder { color: var(--ink-3); }
-.palette-list { max-height: min(360px, 50vh); padding: 6px; overflow-y: auto; }
-.palette-row { display: flex; align-items: center; gap: 11px; padding: 6px 10px; border-radius: var(--r-2); cursor: default; --ring: var(--raised); }
+.palette-list { max-height: min(360px, 50vh); padding: var(--s-3); overflow-y: auto; }
+.palette-row { display: flex; align-items: center; gap: var(--s-4); padding: var(--s-3) var(--s-4); border-radius: var(--r-2); cursor: default; --ring: var(--raised); }
 .palette-row[aria-selected="true"] { background: var(--fill-2); }
 .palette-icon { display: inline-flex; justify-content: center; width: 20px; color: var(--ink-2); }
-.palette-text { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 10px; }
+.palette-text { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: var(--s-4); }
 .palette-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: var(--w-medium); }
 .palette-about { flex: none; color: var(--ink-2); font-size: var(--t-caption); }
-.palette-none { padding: 22px; color: var(--ink-2); text-align: center; }
+.palette-none { padding: var(--s-7); color: var(--ink-2); text-align: center; }
 
 /* ---- Phone: the session view's own (the columns' are at the end) ---- */
 
@@ -1681,24 +1681,24 @@ kbd { padding: 1px 6px; border-radius: var(--r-1); box-shadow: var(--e-1-in); co
 .own-state.tone-text-needs-you { color: var(--needs-you); font-weight: var(--w-strong); }
 
 /* The side sheet */
-.sheet { position: fixed; top: 0; right: 0; bottom: 0; z-index: 8; width: min(560px, 92%); padding: 26px 30px 40px; overflow-y: auto; background: var(--raised); box-shadow: var(--e-3); outline: none; animation: sheet-in var(--dur-2) var(--ease-out); }
+.sheet { position: fixed; top: 0; right: 0; bottom: 0; z-index: 8; width: min(560px, 92%); padding: var(--s-7) var(--s-8) var(--s-8); overflow-y: auto; background: var(--raised); box-shadow: var(--e-3); outline: none; animation: sheet-in var(--dur-2) var(--ease-out); }
 @keyframes sheet-in { from { transform: translateX(24px); opacity: 0; } }
 .sheet-scrim { position: fixed; inset: 0; z-index: 7; background: var(--scrim); }
-.sheet-close { position: absolute; top: 14px; right: 14px; }
-.sheet-kicker { margin-bottom: 4px; color: var(--ink-3); font-size: var(--t-caption); font-weight: var(--w-strong); }
-.sheet-title { padding-right: 30px; font-size: var(--t-large); line-height: var(--lh-large); }
-.sheet-when { margin: 4px 0 16px; color: var(--ink-3); font-size: var(--t-caption); }
+.sheet-close { position: absolute; top: var(--s-5); right: var(--s-5); }
+.sheet-kicker { margin-bottom: var(--s-2); color: var(--ink-3); font-size: var(--t-caption); font-weight: var(--w-strong); }
+.sheet-title { padding-right: var(--s-8); font-size: var(--t-large); line-height: var(--lh-large); }
+.sheet-when { margin: var(--s-2) 0 var(--s-6); color: var(--ink-3); font-size: var(--t-caption); }
 .sheet-body { font-size: var(--t-read); line-height: var(--lh-read); overflow-wrap: anywhere; }
-.sheet-body p, .sheet-body ul, .sheet-body ol, .sheet-body .table, .sheet-body figure { margin: 0 0 10px; }
-.sheet-body ul { padding-left: 20px; list-style: disc; }
-.sheet-body ol { padding-left: 22px; list-style: decimal; }
-.sheet-body code { padding: 1px 5px; border-radius: var(--r-1); background: var(--fill-2); font-size: var(--t-code); }
-.sheet-body h3, .sheet-body h4, .sheet-body h5 { margin: 14px 0 6px; font-size: var(--t-title); font-weight: var(--w-strong); }
-.sheet-sub { margin: 16px 0 6px; color: var(--ink-3); font-size: var(--t-caption); font-weight: var(--w-strong); }
+.sheet-body p, .sheet-body ul, .sheet-body ol, .sheet-body .table, .sheet-body figure { margin: 0 0 var(--s-4); }
+.sheet-body ul { padding-left: var(--s-7); list-style: disc; }
+.sheet-body ol { padding-left: var(--s-7); list-style: decimal; }
+.sheet-body code { padding: 1px var(--s-2); border-radius: var(--r-1); background: var(--fill-2); font-size: var(--t-code); }
+.sheet-body h3, .sheet-body h4, .sheet-body h5 { margin: var(--s-5) 0 var(--s-3); font-size: var(--t-title); font-weight: var(--w-strong); }
+.sheet-sub { margin: var(--s-6) 0 var(--s-3); color: var(--ink-3); font-size: var(--t-caption); font-weight: var(--w-strong); }
 .sheet-body .mine { display: inline-block; max-width: 100%; }
 .table { overflow-x: auto; }
 .table table { border-collapse: collapse; font-size: var(--t-body); }
-.table th, .table td { padding: 5px 12px 5px 0; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+.table th, .table td { padding: var(--s-2) var(--s-5) var(--s-2) 0; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
 
 /* Thin scrollbars, without buttons */
 ::-webkit-scrollbar { width: 8px; height: 8px; }
