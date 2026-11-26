@@ -19,9 +19,12 @@ public enum WorkerLaunch {
     public struct Seen: Equatable, Sendable {
         public var command: String?
         public var cwd: String?
-        public init(command: String?, cwd: String? = nil) {
+        /// A test's stand-in programs a role's path may name, in place of a scratch node's (`nodeLinks`); nil: those.
+        public var links: [Agent: [String]]?
+        public init(command: String?, cwd: String? = nil, links: [Agent: [String]]? = nil) {
             self.command = command
             self.cwd = cwd
+            self.links = links
         }
     }
 
@@ -37,9 +40,12 @@ public enum WorkerLaunch {
         return families.first { name.contains($0) }
     }
 
-    /// Each family's current model id, as this build knows it (kept in step with `LeadPrices.table`'s newest): what a
-    /// worker under the floor is launched with in place of the family's alias, and what every team session's
-    /// `--settings` pins the aliases to (`pins`), so a worktree's settings `env` can't remap one.
+    /// Each family's current model id, as this build knows it (kept in step with `LeadPrices.table`'s newest, which a
+    /// test holds it to): what a worker under the floor is launched with in place of the family's alias, and what each
+    /// team session's `--settings` pins the aliases to under that floor (`pins`), so a worktree's settings `env` can't
+    /// remap one. Whoever adds a model's price updates it in the same change (VibeSwitcher's maintainers, by hand, at a
+    /// model's release). Stale, a session under the floor runs the older id its family had here, not the newest: an
+    /// alias would have moved on with Claude Code; this keeps to what the record names. Without the floor nothing is pinned.
     public static let currentIDs: [String: String] = [
         "fable": "claude-fable-5-2", "mythos": "claude-mythos-5-2", "opus": "claude-opus-5-5", "sonnet": "claude-sonnet-5-5",
         "haiku": "claude-haiku-5-5",
@@ -54,7 +60,8 @@ public enum WorkerLaunch {
         return id + (bare == lowered ? "" : "[1m]")
     }
 
-    /// The `env` every team session's `--settings` carries: each family's alias pinned to its id
+    /// The `env` each team session's `--settings` carries under the floor (`LeadLaunch.prepare`'s `pinModels`): each
+    /// family's alias pinned to its id
     /// (ANTHROPIC_DEFAULT_<FAMILY>_MODEL), and ANTHROPIC_MODEL to the model the session is launched with (`model`, as
     /// its id; none without one). Whether a project's or a worktree's settings `env` can still win key by key is
     /// unverified (the security architecture's open list).
@@ -200,19 +207,15 @@ public enum WorkerLaunch {
 
     /// What `commandAgent` reads of a command without touching the disk: the agent a bare name starts, or the path
     /// whose resolution decides (`agent(atPath:links:)`); nil when it can't be told (not one simple command, a wrapper,
-    /// an assignment that changes what a name or a script runs: `riskyAssignment`).
+    /// any assignment, an expansion or a glob).
     enum Program: Equatable { case bare(Agent), path(String) }
 
     static func program(of command: String) -> Program? {
         guard !controlled(command) else { return nil }
         var rest = tokens(command)[...]
-        func skipAssignments() -> Bool {
-            while let first = rest.first, first.assignment {
-                if riskyAssignment(String(first.text.prefix { $0 != "=" })) { return false }
-                rest = rest.dropFirst()
-            }
-            return true
-        }
+        // No assignment at all: neither the node's launches nor the Mac's presets put one in a role's command (a
+        // preset's env goes in the session's environment), and any one may change the model, the config or what runs.
+        func skipAssignments() -> Bool { !(rest.first?.assignment ?? false) }
         guard skipAssignments() else { return nil }
         if let first = rest.first?.text, first == "env" || first == "/usr/bin/env" || first == "/bin/env" {
             rest = rest.dropFirst()
@@ -229,36 +232,34 @@ public enum WorkerLaunch {
         return program.hasPrefix("/") ? .path(program) : nil
     }
 
-    /// An assignment that changes what a bare name or a node script runs: PATH, NODE_OPTIONS, BASH_ENV, ENV, and the
-    /// loaders' LD_* and DYLD_*.
-    static func riskyAssignment(_ name: String) -> Bool {
-        ["PATH", "NODE_OPTIONS", "BASH_ENV", "ENV"].contains(name) || name.hasPrefix("LD_") || name.hasPrefix("DYLD_")
-    }
 
-    /// The agent the program at `path` is, once resolved: what the node's own links resolve to (`nodeLinks`, the
-    /// program its engine starts roles with), Claude Code's versioned binary in the account's
-    /// `~/.local/share/claude/versions/`, or Claude Code's or Codex's npm package under a `lib/node_modules` (or bun's
-    /// `install/global/node_modules`) folder; nil for anything else, a name alone included (`/x/codex`).
+    /// The agent the program at `path` is, by what it resolves to, never by which link it was reached through: Claude
+    /// Code's versioned binary in the account's `~/.local/share/claude/versions/`, or Codex under its install root on this
+    /// machine (`codexRoot`); on a scratch node, a test's stand-in its links name (`links`, `nodeLinks`). A link the
+    /// user's `~/.local/bin/claude` points at `/bin/bash` resolves to bash: nil. Anything else is nil (a name alone, a
+    /// package path anyone of the uid could make).
     static func agent(atPath path: String, links: [Agent: [String]]) -> Agent? {
         guard let real = realPathOf(path) else { return nil }
-        for (agent, paths) in links where paths.contains(where: { realPathOf($0) == real }) { return agent }
         let versions = (VibePaths.accountHome as NSString).appendingPathComponent(".local/share/claude/versions") + "/"
         if real.hasPrefix(versions), VersionedClaude.isBinary(real) { return .claude }
-        func package(_ name: String) -> Bool {
-            ["/lib/node_modules/", "/install/global/node_modules/"].contains { real.contains($0 + name + "/") }
-        }
-        if package("@anthropic-ai/claude-code") { return .claude }
-        if package("@openai/codex") { return .codex }
+        if real.hasPrefix(codexRoot) { return .codex }
+        for (agent, paths) in links where paths.contains(where: { realPathOf($0) == real }) { return agent }
         return nil
     }
 
-    /// The links the node reads its programs by (`NodePreflight.claudeLink`/`codexLink`): `~/.local/bin/claude` and
-    /// `codex` in the account's home, and a scratch node's `<root>/v2/test/claude` and `codex`.
+    /// The programs a scratch node's roles start by (`<root>/v2/test/claude` and `codex`, a test's stand-ins), counted by
+    /// what they are only on a scratch node: a root other than the account's own `~/.vibeswitcher`
+    /// (`VibePaths.isAccountRoot`, the test `NodeFolders.isUsersRoot` makes too). On the user's node none: anyone of the
+    /// uid could make that folder.
     public static var nodeLinks: [Agent: [String]] {
-        let home = (VibePaths.accountHome as NSString).appendingPathComponent(".local/bin")
+        guard !VibePaths.isAccountRoot(VibePaths.root, accountHome: VibePaths.accountHome) else { return [:] }
         let test = VibePaths.root.appendingPathComponent("v2/test").path
-        return [.claude: [home + "/claude", test + "/claude"], .codex: [home + "/codex", test + "/codex"]]
+        return [.claude: [test + "/claude"], .codex: [test + "/codex"]]
     }
+
+    /// Where Codex is installed on this machine: the account's bun global package (`~/.bun/bin/codex` resolves into it),
+    /// read where it's used.
+    static var codexRoot: String { (VibePaths.accountHome as NSString).appendingPathComponent(".bun/install/global/node_modules/@openai/codex") + "/" }
 
     static func realPathOf(_ path: String) -> String? {
         guard let resolved = realpath(path, nil) else { return nil }
@@ -267,26 +268,29 @@ public enum WorkerLaunch {
     }
 
 
-    /// Whether `command` holds more than one simple command's syntax outside quotes: a list (`;`, `&`, `|`), a
-    /// redirection, a substitution (`$(`, backquote), a subshell or a newline.
+    /// Whether `command` is more than one simple command of literal words, as the shell would run it: a list (`;`,
+    /// `&`, `|`), a redirection, a substitution or expansion (`$` anywhere but in single quotes, backquote), a glob or
+    /// brace (`*`, `?`, `[`, `{` outside quotes), a word starting with an unquoted `~`, a subshell or a newline. What's in
+    /// single quotes is literal (the start message, the tool server's settings).
     static func controlled(_ command: String) -> Bool {
         var single = false, double = false, escaped = false
-        var previous: Character = " "
+        var atWordStart = true
         for character in command {
-            defer { previous = character }
-            if escaped { escaped = false; continue }
+            if escaped { escaped = false; atWordStart = false; continue }
             if single { if character == "'" { single = false }; continue }
-            if character == "\\" { escaped = true; continue }
+            if character == "\\" { escaped = true; atWordStart = false; continue }
             if double {
-                if character == "\"" { double = false } else if character == "`" || (previous == "$" && character == "(") { return true }
+                if character == "\"" { double = false } else if character == "`" || character == "$" { return true }
                 continue
             }
             switch character {
             case "'": single = true
             case "\"": double = true
-            case ";", "&", "|", "<", ">", "`", "(", ")", "\n": return true
+            case ";", "&", "|", "<", ">", "`", "(", ")", "\n", "$", "*", "?", "[", "{": return true
+            case "~" where atWordStart: return true
             default: break
             }
+            atWordStart = character.isWhitespace
         }
         return false
     }
@@ -384,6 +388,7 @@ public enum WorkerLaunch {
     /// only the command's family is recorded, and that's said).
     public static func bindFacts(seen: Seen?, home: String, limit: TimeInterval) -> BindFacts {
         guard let seen else { return BindFacts() }
+        let links = seen.links ?? nodeLinks
         var facts = BindFacts(known: true)
         facts.model = seen.command.flatMap(launchModel(command:)).flatMap { $0.lowercased() == "default" ? nil : $0 }
         // The agent: a bare name told now; a path resolved in the bounded block below (a hung mount never holds the
@@ -396,7 +401,7 @@ public enum WorkerLaunch {
             let home = settings(in: home, [".claude", "settings.json"])
             let project = projectModels(cwd: seen.cwd)
             var agent: Agent?
-            if case .path(let path) = told { agent = Self.agent(atPath: path, links: nodeLinks) }
+            if case .path(let path) = told { agent = Self.agent(atPath: path, links: links) }
             result.set((home.object?["model"] as? String, project.models, home.note.map { [$0] } ?? [], project.notes, home.note == nil, agent))
             done.signal()
         }
@@ -425,7 +430,7 @@ public enum WorkerLaunch {
 
     /// The families a launch adds and why a file wasn't read (`bindFacts`, unbounded): for a caller that waits itself.
     public static func families(seen: Seen?, home: String) -> (families: [String], notes: [String]) {
-        let facts = bindFacts(seen: seen, home: home, limit: .greatestFiniteMagnitude / 4)
+        let facts = bindFacts(seen: seen, home: home, limit: 3_600)
         return (facts.families, facts.notes)
     }
 

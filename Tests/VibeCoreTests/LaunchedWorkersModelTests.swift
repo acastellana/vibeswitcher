@@ -99,7 +99,7 @@ extension LeadAdvanceTests {
         let alias = try #require(task("alias", root))
         #expect(lead.auditModel(lead.workflow, task: alias, security: true) == "fable")
         // The last --model is what Claude Code runs; one inside a quoted word or after `--` isn't an option.
-        bindWorker("alias", root: root, session: "twice", command: "claude --model opus --name 'a --model haiku' --model=claude-fable-5-2[1m] -- 'x --model sonnet'")
+        bindWorker("alias", root: root, session: "twice", command: "claude --model opus --name 'a --model haiku' '--model=claude-fable-5-2[1m]' -- 'x --model sonnet'")
         #expect(vault.launchedFamilies(root: root, task: "alias") == ["fable"])
         #expect(lead.auditModel(lead.workflow, task: alias, security: true) == "sonnet")
     }
@@ -429,6 +429,20 @@ extension LeadAdvanceTests {
         #expect(WorkerLaunch.fullID("claude-sonnet-4-6") == "claude-sonnet-4-6" && WorkerLaunch.fullID("my-model") == "my-model")
     }
 
+    /// Without the floor that keeps audits off the workers' model, nothing is pinned: a session's settings `env` is as
+    /// it ever was, and a worker starts by its alias.
+    @Test func withoutTheFloorNothingIsPinned() throws {
+        let (root, runtime, lead) = try floorTeam(defaultModel: Self.fableDefault, leadModel: "fable")
+        try vault.setReviewFloor(LeadReviewFloor(verifierDifferent: false), root: root)
+        _ = lead.call("add_task", ["title": "Opus", "goal": "g", "acceptance": ["a"], "review": "audit", "model": "opus"])
+        #expect(!lead.call("start_worker", ["task": "opus"]).isError)
+        let launched = try #require(command("opus", runtime))
+        #expect(launchedOn(launched).first == "opus", "\(launched)")
+        let settings = try #require(try LaunchArguments.json("--settings", in: launched) as [String: Any]?)
+        let env = settings["env"] as? [String: String] ?? [:]
+        #expect(env == LeadLaunch.environment(.worker), "\(env)")
+    }
+
     /// An offer a process in the lead's session filed with no audit out of models (a question of its own, in the
     /// audit's very words): the app side finds a model free by the vault's record, and records nothing.
     @Test func anOfferWithNoModelLeftOutRecordsNothing() throws {
@@ -614,35 +628,52 @@ extension LeadAdvanceTests {
         try installScript("#!/bin/sh\n", at: real)
         let link = temp.url("bin-claude")
         try FileManager.default.createSymbolicLink(at: link, withDestinationURL: real)
-        // The node's own link names Claude Code's binary here (its engine starts roles by that path).
-        let nodeLinks: [Agent: [String]] = [.claude: [link.path]]
-        let codex = temp.url("prefix").appendingPathComponent("lib/node_modules/@openai/codex/bin/codex.js")
+        // The node's own links name Claude Code's and Codex's programs here (its engine starts roles by those paths).
+        let codex = temp.url("codex-bin").appendingPathComponent("codex.js")
         try FileManager.default.createDirectory(at: codex.deletingLastPathComponent(), withIntermediateDirectories: true)
         try installScript("#!/usr/bin/env node\n", at: codex)
+        let nodeLinks: [Agent: [String]] = [.claude: [link.path], .codex: [codex.path]]
         let lookAlike = temp.url("wrappers").appendingPathComponent("claude")
         let codexLookAlike = temp.url("wrappers").appendingPathComponent("codex")
-        let stray = temp.url("stray").appendingPathComponent("@openai/codex/evil")
-        for file in [lookAlike, codexLookAlike, stray] {
+        let package = temp.url("prefix").appendingPathComponent("lib/node_modules/@openai/codex/bin/codex.js")
+        for file in [lookAlike, codexLookAlike, package] {
             try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
             try installScript("#!/bin/sh\nexec codex-evil\n", at: file)
         }
-        #expect(WorkerLaunch.commandAgent("env -i FOO=1 '\(real.path)' --model opus -- go", links: nodeLinks) == .claude)
+        #expect(WorkerLaunch.commandAgent("env -i '\(real.path)' --model opus -- go", links: nodeLinks) == .claude)
         #expect(WorkerLaunch.commandAgent("'\(link.path)' --model opus", links: nodeLinks) == .claude)
-        #expect(WorkerLaunch.commandAgent("claude --model opus -- 'a; b | c'") == .claude)
-        #expect(WorkerLaunch.commandAgent("'\(codex.path)' -m gpt-6") == .codex)
-        // Assignments the shell takes, and that leave the program's search alone, are passed over.
-        #expect(WorkerLaunch.commandAgent("FOO=1 claude") == .claude && WorkerLaunch.commandAgent("env -i claude") == .claude)
+        #expect(WorkerLaunch.commandAgent("'\(codex.path)' -m gpt-6", links: nodeLinks) == .codex)
+        // A quoted start message is literal, whatever it holds.
+        #expect(WorkerLaunch.commandAgent("claude --model opus -- 'a; b | c $HOME/*.txt ~ {a,b} [x]?'") == .claude)
+        #expect(WorkerLaunch.commandAgent("env -i claude") == .claude)
         for command in ["sh -c 'exec codex-evil' claude", "env X=claude real-program", "'\(lookAlike.path)' --model opus", "bash codex", "bash -l",
                         "claude --model opus; claude --model fable", "exec -a claude fable", "env -S 'claude' x", "claude --model opus > out.txt",
-                        // What a bare name or a script runs, moved by an assignment.
-                        "PATH=/x claude", "env PATH=/x codex", "NODE_OPTIONS=--require=/x/evil.js codex", "LD_PRELOAD=/x.so claude",
-                        "DYLD_INSERT_LIBRARIES=/x.dylib claude", "BASH_ENV=/x claude", "ENV=/x claude", "env -i PATH=/x claude",
+                        // Any assignment: none is put in a role's command, and each may change the model, the config or what runs.
+                        "FOO=1 claude", "PATH=/x claude", "env PATH=/x codex", "NODE_OPTIONS=--require=/x/evil.js codex", "LD_PRELOAD=/x.so claude",
+                        "ANTHROPIC_MODEL=claude-fable-5-2 claude", "CLAUDE_CONFIG_DIR=/x claude", "env -i CODEX_HOME=/x codex",
                         // Not assignments to the shell: a program by that name.
                         "'FOO=1' claude", "\"PATH\"=/x claude", "é=1 claude",
-                        // A name alone, or a package path outside an install root.
-                        "'\(codexLookAlike.path)' -m gpt-6", "'\(stray.path)'"] {
+                        // A name alone, or a package path anyone of the uid could make.
+                        "'\(codexLookAlike.path)' -m gpt-6", "'\(package.path)'",
+                        // What the shell would expand: never taken literally.
+                        "/a/b/cl*", "$HOME/x", "~/.local/bin/claude", "{claude,x}", "\"$HOME\"/claude", "claude[0]"] {
             #expect(WorkerLaunch.commandAgent(command, links: nodeLinks) == nil, "\(command)")
         }
+        // What a scratch node's stand-in link names counts as that agent (a test's program).
+        #expect(WorkerLaunch.commandAgent("'\(lookAlike.path)' --model opus", links: [.claude: [lookAlike.path]]) == .claude)
+        // A link is judged by what it resolves to, never by being the account's link: one to bash is bash.
+        let toBash = temp.url("account-bin").appendingPathComponent("claude")
+        try FileManager.default.createDirectory(at: toBash.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(atPath: toBash.path, withDestinationPath: "/bin/bash")
+        #expect(WorkerLaunch.commandAgent("'\(toBash.path)' -c 'exec fable' x --model claude-sonnet-5-5", links: [:]) == nil)
+        // A package path in a Claude Code-looking place under the home, but not its versions folder: nil.
+        let cli = temp.url("w").appendingPathComponent("lib/node_modules/@anthropic-ai/claude-code/cli")
+        try FileManager.default.createDirectory(at: cli.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try installScript("#!/bin/sh\n", at: cli)
+        #expect(WorkerLaunch.commandAgent("'\(cli.path)' --model opus", links: [:]) == nil)
+        // The stand-ins' links count only on a scratch node (these tests' root isn't the account's own).
+        #expect(WorkerLaunch.nodeLinks.isEmpty == VibePaths.isAccountRoot(VibePaths.root, accountHome: VibePaths.accountHome))
+        #expect(!WorkerLaunch.nodeLinks.isEmpty)
         // Under the floor, such a session holds no role.
         let (book, root, commit) = floorBook()
         guard case .refused(let why) = bindVerifier(book, root: root, commit: commit, session: "sh", command: "sh -c 'exec claude --model fable' claude") else {
