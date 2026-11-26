@@ -272,9 +272,11 @@ if VaultFirstLook.holds(arguments: arguments, ownsLaunchers: ownsLaunchers, rest
 // A scratch host's test sets how long a `.user` seal verifies (V2/LeadVaultV2.swift); the user's host refuses the flag.
 if HostHardening.takesTestFlags(ownsLaunchers: ownsLaunchers), let life = value(after: "--test-user-seal-life").flatMap(Double.init) { LeadVaultV2.sealLife = life }
 // The app that started this host gives it its key on stdin (see `AppProof`), and says so: taken while the vault
-// holds none.
+// holds none, but not by a vault that started over (its file no longer opens under the Keychain key): that one waits
+// for your confirmation through the app (`LeadVault.Book.awaitsAppKey`).
 if arguments.contains(HostStart.appKeyFlag), let key = HostStart.appKeyFromStdin(), let vault = config.vault, !vault.adoptAppKey(key) {
-    log("the app key on stdin isn't the one the vault holds: kept the vault's")
+    log(vault.awaitsAppKey ? "the vault started over: the app key on stdin waits for your confirmation"
+        : "the app key on stdin isn't the one the vault holds: kept the vault's")
 }
 
 // A scratch host's tests of its file watches (VibePlatform/Watches.swift); the user's host refuses the flags.

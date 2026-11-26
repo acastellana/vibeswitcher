@@ -251,17 +251,46 @@ final class HostClient: ObservableObject {
     private var offeredKeyReset = false
 
     /// Asks whether to teach the host this app's key, given why it refused and how many sessions the app knew to be
-    /// live: true to replace the host's key. An alert; a test's answer instead.
+    /// live: true to replace the host's key. An alert (`keyResetAlert`); a test's answer instead.
     var confirmKeyReset: (_ reason: String, _ live: Int) -> Bool = { reason, live in
-        let alert = NSAlert()
-        alert.messageText = "The session host doesn't recognise this VibeSwitcher."
-        alert.informativeText = reason + " The project lead's tools, updating the host in place and ending sessions from the app are off until it does. "
-            + (live > 0 ? "If VibeSwitcher's Keychain item was deleted, end every session (\(live) running) and reopen VibeSwitcher to teach the host this app's new key."
-                : "If VibeSwitcher's Keychain item was deleted, teach the host this app's new key (it's logged in ~/.vibeswitcher/debug/host.log).")
-        if live == 0 { alert.addButton(withTitle: "Teach It This App's Key") }
-        alert.addButton(withTitle: live == 0 ? "Not Now" : "OK")
+        let alert = HostClient.keyResetAlert(reason: reason, live: live)
         NSApp.activate()
         return alert.runModal() == .alertFirstButtonReturn && live == 0
+    }
+
+    /// The alert `confirmKeyReset` shows: why the host refused (`reason`), that a replaced key is one cause, what to
+    /// check first, and with no session live (`live`), the button that teaches the host this app's key. Another
+    /// program of your account can replace VibeSwitcher's Keychain keys (it can't read them; 2026-11-26), so the alert
+    /// says so before it offers the button. A vault that started over (`AppProof.vaultStartedOver`) says that in its
+    /// own words: its key is the one replaced, or the Keychain was reset.
+    static func keyResetAlert(reason: String, live: Int) -> NSAlert {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        let off = "The project lead's tools, updating the host in place and ending sessions from the app are off until it does."
+        let next = live > 0 ? "To teach the host this app's key, end every session (\(live) running) and reopen VibeSwitcher."
+            : "The change is logged in ~/.vibeswitcher/debug/host.log."
+        if reason == AppProof.vaultStartedOver {
+            alert.messageText = "The team's vault could not be opened and was started again."
+            alert.informativeText = "The session host keeps the team's vault sealed with a key from your Keychain, and the "
+                + "sealed file no longer opens with it: what the vault held can't be read, and it holds no key for this VibeSwitcher "
+                + "yet. " + off + "\n\nThis happens after a Keychain reset, and it can also mean another program on this Mac "
+                + "replaced the vault's key. Check first: if you didn't reset your Keychain, open Keychain Access and look at "
+                + "the item \u{201C}VibeSwitcher lead vault\u{201D} (when it was modified), and don't teach the host until "
+                + "you're sure what changed it. The file that didn't open is kept as it was, at "
+                + "~/.vibeswitcher/lead/vault.sealed, and nothing is saved over it until you answer. Teaching the host "
+                + "this app's key starts the vault anew, sealed with whatever key your Keychain gives the session host now, "
+                + "and sets the old file aside beside it as vault.sealed.didnt-open-<date> (if your Keychain gives none, "
+                + "the vault lives in memory only and the old file stays where it is). " + next
+        } else {
+            alert.messageText = "The session host doesn't recognise this VibeSwitcher."
+            alert.informativeText = reason + " " + off + "\n\nThis happens after VibeSwitcher is reinstalled or your "
+                + "Keychain is reset, and it can also mean another program on this Mac replaced VibeSwitcher's key. Check "
+                + "first: if you did neither, open Keychain Access and look at the item \u{201C}VibeSwitcher app key\u{201D} "
+                + "(when it was modified), and don't teach the host until you're sure what changed it. " + next
+        }
+        if live == 0 { alert.addButton(withTitle: "Teach It This App's Key") }
+        alert.addButton(withTitle: live == 0 ? "Not Now" : "OK")
+        return alert
     }
 
     private func proofRefused(_ reason: String) {

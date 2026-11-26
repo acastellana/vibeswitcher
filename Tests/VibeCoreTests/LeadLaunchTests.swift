@@ -316,14 +316,15 @@ struct LeadLaunchTests {
     /// The Mac's rules are main's, for each role (each list's SHA-256, its rules one a line): Linux's are added only
     /// where `Platform.Tools.roleDenyRules` has them, at the end. The rules both systems give are checked on both.
     /// Recorded at 47636aaf, the commit stage 2's plan starts from, and again at each merge of main that changes a list:
-    /// last at the merge of 2026-11-19 (main at cd6c4ae9: `RefusedGit`'s spellings of the refused git options and the
-    /// rest; before it, 2026-11-17's at d2277773), where `LeadLaunch.swift` differs from main's only by v2's hook lines.
+    /// last at the merge of 2026-11-27 (main at e02ece00: `LeadLaunch.keychainTool`, the `security` tool refused to every
+    /// role; before it, 2026-11-19's at cd6c4ae9, `RefusedGit`'s spellings of the refused git options and the rest, and
+    /// 2026-11-17's at d2277773), where `LeadLaunch.swift` differs from main's only by v2's hook lines.
     @Test func theMacsDenyRulesAreTodays() throws {
         let recorded: [String: String] = [
-            "lead": "b1fa0d51cdb0e0465897cb73117c382059b58d9ae2ab16bea7390800f35060ad",
-            "worker-project-lead-docs/lead": "3e2107006ca8ece321d2ec885d6f538257ee0918055577c79238d4b37818c2c6",
-            "worker": "24e7c87cde397fd322ee6bb588607d53c1910a083e98d0a20b9618eb4e467ee4",
-            "verifier-project-lead-docs/lead": "b58d389b65b4b6f522e7049a7bb8c83e54b9c48156c9b5bbf0cb73f4662cb8b2",
+            "lead": "edd9f3a5f8b40a1dccea1682cf5323a6b4b712104d15f6da0160255ff5092bb2",
+            "worker-project-lead-docs/lead": "d60a4db31cce0f7a6e489d6367928e29934f773a7f5ba5ba9050dbdede2acc1c",
+            "worker": "35fad92bbca69ceeaf8f9cfae6f3bc958d208164188e3e66e944710107cd49ea",
+            "verifier-project-lead-docs/lead": "2e8751c9019069faa2c496cdf3fd1fdb5cf21e65832cbd539901ce0d0ef101c1",
         ]
         let shapes: [(LeadLaunch.Role, String?, String?)] = [(.lead, nil, nil), (.worker, "project-lead", "docs/lead"), (.worker, nil, nil),
                                                               (.verifier, "project-lead", "docs/lead")]

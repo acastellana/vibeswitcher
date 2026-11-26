@@ -88,6 +88,8 @@ public enum RefusedGit {
         case option(String)
         case command(String)
         case variable(String)
+        /// The `security` command-line tool, which reaches your Keychains (`keychainTool`).
+        case keychain
         case unreadable(Unread)
 
         /// Why a line's git can't be read. Refused, not guessed at (decision 2026-10-25 16:33: hardening fails closed):
@@ -116,21 +118,25 @@ public enum RefusedGit {
             case .variable(let name):
                 "VibeSwitcher refuses setting \(name)\(configHomes.contains(name) ? " for git" : "") to every role: it points git at another repository, work tree, config "
                     + "or programs, as git's -C, -c and --git-dir do. Run git in your own worktree without it."
+            case .keychain:
+                "VibeSwitcher refuses the `security` command to every session it starts: it reaches your Keychains, where "
+                    + "VibeSwitcher keeps its keys, and on 2026-11-26 probing them crashed the Mac's keychain daemon and locked "
+                    + "your login keychain. Keychain checks are done only in a keyboard session with the user: ask your lead."
             case .unreadable(.tangled):
                 "VibeSwitcher refuses a command nested more than \(ShellWords.depthLimit) levels deep (subshells, substitutions) "
                     + "or too tangled to read: it can't check what git it runs. Write it flatter."
             case .unreadable(.handed(let interpreter)):
-                "VibeSwitcher refuses a line that hands text naming git to \(interpreter), which runs it as commands of its own "
-                    + "(as `sh -c '…'`, `eval`, `env -S`, `trap`, `watch` and a shell or `source` reading its input do): it can't "
-                    + "check what git that runs. Run the git command plainly, on a line of its own, without the wrapper."
+                "VibeSwitcher refuses a line that hands text naming git or security to \(interpreter), which runs it as commands of "
+                    + "its own (as `sh -c '…'`, `eval`, `env -S`, `trap`, `watch` and a shell or `source` reading its input do): it "
+                    + "can't check what that runs. Run the git command plainly, on a line of its own, without the wrapper."
             case .unreadable(.expanded(let word)):
                 "VibeSwitcher refuses git with `\(Self.short(word))` where its options or its command go: the shell makes that "
                     + "word from an expansion (a variable, a substitution, braces or a pattern), so it can't check what git "
                     + "runs. Run the git command plainly, its options and command written out, without the variable."
             case .unreadable(.program(let word)):
                 "VibeSwitcher refuses a command whose name the shell makes from an expansion (`\(Self.short(word))`) on a line "
-                    + "that names git: it can't check whether that runs git. Write the program's name out, and run the git "
-                    + "command plainly, without the variable."
+                    + "that names git or security: it can't check whether that runs one. Write the program's name out, and run "
+                    + "the git command plainly, without the variable."
             }
         }
 
@@ -157,9 +163,21 @@ public enum RefusedGit {
         return nil
     }
 
-    /// Whether `text` names git: `git` without its case, between characters that aren't ASCII letters or digits
-    /// (`/usr/bin/git`, `GIT_DIR`, `.git`; not `github`, `digit`, `RefusedGit`), read as a shell would read it again:
-    /// quotes, backslashes and a backslash's line break taken out (`g""it`, `g\it`).
+    /// The programs a line is read closely for: git, and `security` (`keychainTool`), whose text handed to another
+    /// interpreter, or whose name made by the shell, is refused as git's is.
+    static let named = ["git", keychainTool]
+
+    /// The `security` command-line tool (/usr/bin/security), refused to every role whatever its arguments, by its
+    /// name in any folder and behind every wrapper `refusal(command:)` reads (`env`, `command`, `xcrun`, `sudo`, …):
+    /// it reaches your Keychains, where the app's and the vault's keys are, and another program of your account can
+    /// replace them with it (2026-11-26, a measurement on scratch keychains, which also crashed securityd and locked
+    /// the login keychain). Not seen, as for git: a script file a shell runs (scripts/build-app.sh runs it, in your own
+    /// shell), another language's interpreter, or a program that calls the Security framework itself.
+    public static let keychainTool = "security"
+
+    /// Whether `text` names git or `security` (`named`): the word without its case, between characters that aren't
+    /// ASCII letters or digits (`/usr/bin/git`, `GIT_DIR`, `.git`; not `github`, `digit`, `RefusedGit`, `SecurityAudit`),
+    /// read as a shell would read it again: quotes, backslashes and a backslash's line break taken out (`g""it`, `g\it`).
     static func names(_ text: String) -> Bool {
         var bytes: [UInt8] = []
         var skipBreak = false
@@ -172,14 +190,16 @@ public enum RefusedGit {
         func wordByte(_ byte: UInt8) -> Bool {
             (byte >= UInt8(ascii: "a") && byte <= UInt8(ascii: "z")) || (byte >= UInt8(ascii: "0") && byte <= UInt8(ascii: "9"))
         }
-        let git = Array("git".utf8)
-        var at = 0
-        while at + git.count <= bytes.count {
-            if bytes[at] == git[0], bytes[at + 1] == git[1], bytes[at + 2] == git[2],
-               at == 0 || !wordByte(bytes[at - 1]), at + git.count == bytes.count || !wordByte(bytes[at + git.count]) {
-                return true
+        for name in named {
+            let word = Array(name.utf8)
+            var at = 0
+            while at + word.count <= bytes.count {
+                if bytes[at..<(at + word.count)].elementsEqual(word),
+                   at == 0 || !wordByte(bytes[at - 1]), at + word.count == bytes.count || !wordByte(bytes[at + word.count]) {
+                    return true
+                }
+                at += 1
             }
-            at += 1
         }
         return false
     }
@@ -382,6 +402,8 @@ public enum RefusedGit {
         }
         guard index < words.count else { return appends && wrapped && named ? .unreadable(.expanded("xargs")) : nil }
         let program = folded((words[index] as NSString).lastPathComponent)
+        // `security`, by its name in any folder, behind any wrapper above: whatever it's asked.
+        if program == keychainTool { return .keychain }
         if exporters.contains(program) {
             // `export GIT_DIR=x`, `declare -x GIT_DIR`: refused whatever runs after it on the line.
             for word in words.dropFirst(index + 1) {

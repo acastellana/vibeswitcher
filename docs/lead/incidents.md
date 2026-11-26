@@ -165,3 +165,17 @@ Evidence: docs/lead/progress.md line 2603, committed in 5d597f5d at 10:57 from a
 Task: merges-never-sit-blocked
 Check: task turn-this-incident-into-19 turns it into a check that runs before merge.
 
+## 2026-11-26 08:54:18 A worker's scratch-keychain probe put a macOS "unlock scratch.keychain-db" password dialog on the user's screen twice; the user cancelled both.
+
+Evidence: Task the-app-s-keychain, 2026-11-26 about 09:1x: its worker measured Keychain behaviour with `security` on scratch keychain files; the scratch keychain auto-locked (default 300 s timeout) and a `security add-generic-password` call, which lets UI through, waited on an unlock dialog for about 2 minutes until the worker killed it. The worker reported one dialog; the user reported seeing two. The contract forbade anything that puts a dialog on the user's screen, but nothing enforced it: AGENTS.md's rule names debuggers, not the `security` tool or keychains, and no lint or guard covers `security` calls in tests, scripts or worker probes. A check should make a locked or interactive keychain call impossible from the team's tests and scripts (for example a lint that every `security` invocation in scripts/ and Tests/ goes through one helper that creates the keychain unlocked with no timeout, passes no-UI, and wraps a hard timeout), plus a line in AGENTS.md's hard rules.
+
+Task: the-app-s-keychain
+Check: task turn-this-incident-into-20 turns it into a check that runs before merge.
+
+## 2026-11-26 09:18:28 A worker's Keychain probes left the user's real login keychain locked with a lock timer set, which stopped every new Claude session on the Mac ("Not logged in") and put a stream of real password prompts on the user's screen until the user unlocked it by hand.
+
+Evidence: Task the-app-s-keychain, 2026-11-26 about 08:45–09:20. New worker sessions failed from 08:59 (turn-this-incident-into-20 twice on "Not logged in · Please run /login"; v2-device-keys-slice-2 twice with its tools never connecting). The user's screenshots show "security wants to use the login keychain" repeatedly and "Unapproved caller. SecurityAgent may only be invoked by Apple software". The user found the login keychain's "lock after N minutes" setting in force and set it to 10000 minutes; a login keychain normally has no timer, and a keychain made by `security create-keychain` gets a 300 s timer, the same the worker reported on its scratch keychains. The worker had reported touching only scratch keychains with HOME redirected; which call reached the default keychain is not yet established (the task's written account is to find it; candidates are `security` subcommands that act on the default keychain when no path is given, such as set-keychain-settings and lock-keychain). After the user unlocked the keychain, a new worker started normally. Same root event as the dialog incident recorded earlier today; its check task (turn-this-incident-into-20) was widened to cover default-keychain subcommands and ACL calls.
+
+Task: the-app-s-keychain
+Check: task turn-this-incident-into-21 turns it into a check that runs before merge.
+

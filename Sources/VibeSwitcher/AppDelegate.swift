@@ -6,13 +6,17 @@ import VibeCore
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NSPopoverDelegate {
     private let store = SessionStore()
+    /// The app's key in the login Keychain, read once: what it proves itself to the host with, and what Phone Access's
+    /// paired phones are sealed with (a key of their own made from it).
+    private static let appKey = HostClient.appKey(from: AppProof.KeychainStore())
     /// The session host that runs the window's sessions; the app proves itself to it with its key in the login Keychain.
-    let hostClient = HostClient(appKey: HostClient.appKey(from: AppProof.KeychainStore()))
+    let hostClient = HostClient(appKey: AppDelegate.appKey)
     private let popoverState = PopoverState()
     private let preferences = Preferences()
     /// Notifications need an app bundle; `swift run` (no bundle) runs without them instead of crashing.
     private lazy var notifier: Notifier? = Bundle.main.bundleIdentifier == nil ? nil : Notifier(preferences: preferences)
-    private lazy var phoneAccess = PhoneAccess(store: store)
+    private lazy var phoneAccess = PhoneAccess(
+        store: store, devicesKey: AppDelegate.appKey().map { SealedData.purposeKey(PhoneAccess.devicesPurpose, from: $0) })
     private var settingsWindow: SettingsWindowController?
     /// The Statistics window (`showStatistics`), and the collector it keeps (its parsed files cached between openings).
     private var statisticsWindow: StatisticsWindowController?

@@ -742,7 +742,7 @@ struct PhoneRepliesTests {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { respond(.json(["ok": true])) }
         }
         server.receiveLimit = 0.3
-        let port = UInt16.random(in: 47_000...48_999)
+        let port = try freeLoopbackPort()
         let ready = Box<Bool?>(nil)
         server.start(port: port, onReady: { ready.value = true }, onFailure: { _ in ready.value = false })
         defer { server.stop() }
