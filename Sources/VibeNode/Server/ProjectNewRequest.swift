@@ -89,6 +89,10 @@ public enum ProjectMaker {
         case .failure(let refused): return .failure(refused)
         case .success(let parts): below = parts
         }
+        guard identityKnown(home: home, scratch: scratch) else {
+            return .failure(Refusal(.identity, "The first commit needs your name and email in your global git config (git config --global user.name and user.email)."))
+        }
+
         // The projects folder, made when it isn't there yet (only it, and only where it is the parent): as the app makes
         // it for a first project.
         var madeLevels: [String] = []
@@ -148,6 +152,15 @@ public enum ProjectMaker {
         }
         defer { close(parent) }
 
+        // A project gets a repository of its own: none around the parent (git asked as `lead --init` asks it).
+        let around = LeadInit.git(["rev-parse", "--show-toplevel"], in: parentPath, home: home, scratch: scratch)
+        if around.ok || !around.error.hasPrefix("fatal: not a git repository (or any") {
+            undoLevels()
+            return .failure(Refusal(.repository, around.ok
+                ? "\(shown(parentPath, home)) is inside the git repository \(ConfigSeal.inert(shown(around.trimmed, home), limit: 200)): a new project gets a repository of its own; make it somewhere else."
+                : "git couldn't say \(shown(parentPath, home)) is in no repository (\(ConfigSeal.inert(around.error.trimmingCharacters(in: .whitespacesAndNewlines), limit: 200))): nothing was made."))
+        }
+
         // The project's folder: made new, or nothing (anything by its name there refuses, a link too).
         let folder = parentPath + "/" + folderName
         guard mkdirat(parent, folderName, 0o755) == 0 else {
@@ -187,7 +200,21 @@ public enum ProjectMaker {
         }
         madeReadme = true
 
-        return .success(Made(name: title, folder: folder, commit: "", files: ["README.md"]))
+        // Its repository and first commit, as `lead --init` makes them: the folder planned (its README, and the
+        // .gitignore made), then made through its descriptor.
+        let plan: LeadInit.Plan
+        switch LeadInit.plan(folder, home: home, scratch: scratch) {
+        case .failure(let why): return .failure(undo(Refusal(.failed, why.message)))
+        case .success(let planned): plan = planned
+        }
+        guard plan.device == UInt64(madeInfo.st_dev), plan.inode == UInt64(madeInfo.st_ino), plan.files == [".gitignore", "README.md"], plan.addsGitignore,
+              plan.leftOut.isEmpty else {
+            return .failure(undo(Refusal(.failed, "The project's folder changed before its first commit (something was added to it): nothing was committed.")))
+        }
+        switch LeadInit.make(plan, home: home, scratch: scratch) {
+        case .failure(let why): return .failure(undo(Refusal(.failed, why.message)))
+        case .success(let made): return .success(Made(name: title, folder: plan.folder, commit: made.commit, files: made.files))
+        }
     }
 
     /// Why `title` isn't a name taken here (before the app's own rules): a control or format character (a direction
@@ -221,6 +248,14 @@ public enum ProjectMaker {
             return .success(Array(parts.dropFirst(prefix.count)))
         }
         return .failure(Refusal(.outside, "A project from here is made in your projects folder, \(shown(root, home)), or a folder inside it; \(ConfigSeal.inert(shown(full, home), limit: 200)) isn't."))
+    }
+
+    /// Whether the user's global git config names them (the first commit's author), asked as `LeadInit` asks it.
+    static func identityKnown(home: String, scratch: URL) -> Bool {
+        guard (try? VibePaths.ensurePrivate(scratch)) != nil else { return false }
+        let name = LeadInit.git(["config", "--global", "--get", "user.name"], in: "/", home: home, scratch: scratch).trimmed
+        let email = LeadInit.git(["config", "--global", "--get", "user.email"], in: "/", home: home, scratch: scratch).trimmed
+        return !name.isEmpty && !email.isEmpty
     }
 
     /// The path of the folder `descriptor` is open on, as the system resolves it.
@@ -257,25 +292,36 @@ extension Requests {
         let (queue, note, nodeRoot, home) = (self.queue, self.note, root, engine.home)
         let preflight = engine.preflight
         DispatchQueue.global(qos: .userInitiated).async {
-            func answer(_ result: WireKinds.ProjectNew.Result) { queue.async { reply(.init(re: request.id, typed: result)) } }
-            // Nothing is made for a lead the engine would refuse to start.
-            if case .failure(let missing) = preflight.check() {
-                return answer(Self.projectRefused(.init(.noClaude, "No claude for the project's lead (\(missing.missing.joined(separator: "; "))): nothing was made.")))
-            }
-            let folder = NodeSettings.projectsFolder(files: NodeSettings.Files(root: nodeRoot))
-            let made: ProjectMaker.Made
-            switch ProjectMaker.make(name: name, location: args.location, projectsFolder: folder, home: home,
-                                     scratch: nodeRoot.appendingPathComponent("scratch", isDirectory: true)) {
-            case .failure(let refusal):
-                note("project.new: nothing made: \(refusal.reason.rawValue)")
-                return answer(Self.projectRefused(refusal))
-            case .success(let done): made = done
-            }
-            note("project.new: made \(ConfigSeal.inert(made.folder, limit: 200)) with its first commit \(made.commit.prefix(8)); starting its lead")
-            engine.startLead(folder: made.folder, goal: goal, takeHead: false, replace: false, initialized: false) { outcome in
-                answer(Self.projectMade(made, home: home, outcome))
-            }
+            let missing: String? = { if case .failure(let refusal) = preflight.check() { return refusal.missing.joined(separator: "; ") } else { return nil } }()
+            Self.makeProject(name: name, location: args.location, goal: goal, claudeMissing: missing,
+                             projectsFolder: NodeSettings.projectsFolder(files: NodeSettings.Files(root: nodeRoot)), home: home,
+                             scratch: nodeRoot.appendingPathComponent("scratch", isDirectory: true), note: note,
+                             startLead: { folder, goal, initialized, done in
+                                 engine.startLead(folder: folder, goal: goal, takeHead: false, replace: false, initialized: initialized, completion: done)
+                             }) { result in queue.async { reply(.init(re: request.id, typed: result)) } }
         }
+    }
+
+    /// `project.new`'s work, off the queue: nothing made when the lead's claude is missing (`claudeMissing`, what is),
+    /// else the project made (`ProjectMaker.make`) and its lead started (`startLead`, with `initialized`: the repository
+    /// is new); `answer` hears the result once (from any thread).
+    static func makeProject(name: String, location: String?, goal: String?, claudeMissing: String?, projectsFolder: String, home: String,
+                            scratch: URL, note: @escaping (String) -> Void,
+                            startLead: (_ folder: String, _ goal: String?, _ initialized: Bool, _ done: @escaping (LeadEngine.StartOutcome) -> Void) -> Void,
+                            answer: @escaping (WireKinds.ProjectNew.Result) -> Void) {
+        // Nothing is made for a lead the engine would refuse to start.
+        if let claudeMissing {
+            return answer(projectRefused(.init(.noClaude, "No claude for the project's lead (\(claudeMissing)): nothing was made.")))
+        }
+        let made: ProjectMaker.Made
+        switch ProjectMaker.make(name: name, location: location, projectsFolder: projectsFolder, home: home, scratch: scratch) {
+        case .failure(let refusal):
+            note("project.new: nothing made: \(refusal.reason.rawValue)")
+            return answer(projectRefused(refusal))
+        case .success(let done): made = done
+        }
+        note("project.new: made \(ConfigSeal.inert(made.folder, limit: 200)) with its first commit \(made.commit.prefix(8)); starting its lead")
+        startLead(made.folder, goal, true) { outcome in answer(projectMade(made, home: home, outcome)) }
     }
 
     /// A project not made: its reason, and why in the node's words.

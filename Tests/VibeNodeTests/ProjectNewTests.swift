@@ -172,6 +172,42 @@ struct ProjectNewTests {
         #expect(listing(world.projects) == before)
     }
 
+    // MARK: The server's work
+
+    /// What `project.new` does with its arguments: with no claude for the lead nothing is made (and no lead asked for);
+    /// made, its lead is started in the new folder with the goal, as a new repository (`initialized`), and the result
+    /// says both; a refusal starts nothing.
+    @Test func theServerMakesItThenStartsItsLeadAndNothingWithoutClaude() async throws {
+        let world = try world()
+        let asked = Locked<[String]>([])
+        func run(_ name: String, goal: String? = nil, claudeMissing: String? = nil,
+                 outcome: LeadEngine.StartOutcome = .started(session: UUID(), program: "/bin/claude", notes: [])) async -> WireKinds.ProjectNew.Result? {
+            let answered = Locked<WireKinds.ProjectNew.Result?>(nil)
+            Requests.makeProject(name: name, location: nil, goal: goal, claudeMissing: claudeMissing, projectsFolder: world.projects, home: world.home,
+                                 scratch: world.nodeScratch, note: { _ in },
+                                 startLead: { folder, goal, initialized, done in
+                                     asked.mutate { $0.append("\(folder)|\(goal ?? "-")|\(initialized)") }
+                                     done(outcome)
+                                 }) { answered.value = $0 }
+            _ = await eventually(timeout: 60) { answered.value != nil }
+            return answered.value
+        }
+        let missing = try #require(await run("Shop", claudeMissing: "claude: no link"))
+        #expect(missing.made == false && missing.refused == "noClaude" && missing.said?.contains("claude: no link") == true, "\(missing)")
+        #expect(listing(world.projects).isEmpty && asked.value.isEmpty)
+
+        let made = try #require(await run("Shop", goal: "sell things"))
+        let folder = LeadInit.resolved(world.projects + "/shop")
+        #expect(made.made == true && made.folder == folder && made.lead == "started" && made.commit?.count == 40, "\(made)")
+        #expect(asked.value == ["\(folder)|sell things|true"], "\(asked.value)")
+
+        let again = try #require(await run("Shop"))
+        #expect(again.made == false && again.refused == "exists" && asked.value.count == 1, "\(again)")
+
+        let noLead = try #require(await run("Till", outcome: .refused("the session host is gone")))
+        #expect(noLead.made == true && noLead.lead == "refused" && noLead.notes == ["the session host is gone"], "\(noLead)")
+    }
+
     // MARK: The kind
 
     /// `project.new` is a user's-voice state change of the same class as `lead` and `session.new` (the kinds that start
