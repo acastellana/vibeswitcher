@@ -1332,6 +1332,7 @@ const EN = {
   noRuleShortApproval: "With approval",
   tlLines: "lines",
   dpAProgram: "a program",
+  drNameLabel: "Name",
 };
 
 

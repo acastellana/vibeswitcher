@@ -1320,4 +1320,5 @@ export const ES = {
   noRuleShortApproval: "Con aprobación",
   tlLines: "líneas",
   dpAProgram: "un programa",
+  drNameLabel: "Nombre",
 };

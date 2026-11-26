@@ -685,7 +685,7 @@ export function newProjectForm(app) {
   const folderNote = h('p', { class: 'confirm-note', hidden: true });
   const lineSlot = h('div', { class: 'prompt-line start-actions' });
   const el = h('section', { class: 'start-form new-project', 'aria-label': t('drNewProject') },
-    startRow(t('drProjectName'), name, folderNote),
+    startRow(t('drNameLabel'), name, folderNote),
     startRow(t('drWhere'), location, h('p', { class: 'confirm-note where-hint' }, t('drWhereHint'))),
     startRow(t('drGoalOptional'), goal),
     lineSlot);
