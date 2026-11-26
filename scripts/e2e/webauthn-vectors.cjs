@@ -8,6 +8,13 @@
 //   node scripts/e2e/webauthn-vectors.cjs --out <a scratch folder> [--fixture Tests/VibeCoreTests/WebAuthnVectors.swift]
 //
 // It writes the fixture (a Swift file holding one JSON document, every byte string in hex) and prints what it measured.
+//
+//   node scripts/e2e/webauthn-vectors.cjs --by-hand --out <a scratch folder> [--port 47999]
+//
+// serves the same page with buttons instead, for a look on a real device (Safari, an iPhone): no Chrome is started.
+// Each button's ceremony (its rpId the page's own host name) is shown on the page and printed here as one JSON line
+// in the fixture's form (hex), and appended to <out>/by-hand.jsonl; the page's storage marker reads back what it
+// stored and when, for Safari's 7-day storage rule. Stop it with Ctrl-C.
 // `$CHROME` names the browser when it isn't at Google Chrome's usual place. What the document holds:
 // - `registrations`: each `navigator.credentials.create` answer (clientDataJSON, attestationObject, rawId and Chrome's
 //   own `getPublicKey()` SPKI, an independent reading of the key) with what the server expected (challenge, origin,
@@ -30,6 +37,7 @@ const option = (name, fallback) => { const at = args.indexOf(name); return at >=
 const out = option('--out');
 const fixture = option('--fixture', path.join('Tests', 'VibeCoreTests', 'WebAuthnVectors.swift'));
 const rounds = Number(option('--rounds', '60'));
+const byHand = args.includes('--by-hand');
 if (!out) { console.error('usage: webauthn-vectors.cjs --out <scratch folder> [--fixture <file>] [--rounds N]'); process.exit(2); }
 fs.mkdirSync(out, { recursive: true });
 
@@ -97,6 +105,83 @@ function serve() {
     });
     server.listen(0, 'localhost', () => resolve(server));
   });
+}
+
+// The page with buttons (`--by-hand`): each ceremony with a fresh random challenge, rpId the page's host name, its
+// outcome posted back to /record and shown.
+const handPage = String.raw`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<title>webauthn by hand</title>
+<style>body{font:16px system-ui;margin:16px}button{display:block;margin:8px 0;font-size:18px;padding:10px}pre{white-space:pre-wrap;word-break:break-all;font-size:12px}</style>
+<button id="create">Register a passkey (UV required, discoverable, ES256)</button>
+<button id="get">Assert with this passkey (allowCredentials)</button>
+<button id="discover">Assert, picking the passkey (no allowCredentials)</button>
+<button id="store">Store a marker in localStorage and IndexedDB</button>
+<button id="read">Read the marker back</button>
+<pre id="log"></pre>
+<script>
+const b64u = (bytes) => btoa(String.fromCharCode(...new Uint8Array(bytes))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const random = (n) => crypto.getRandomValues(new Uint8Array(n));
+const log = (line) => { document.getElementById('log').textContent = line + '\n\n' + document.getElementById('log').textContent; };
+const record = (entry) => fetch('/record', { method: 'POST', body: JSON.stringify({ ...entry, origin: location.origin, rpId: location.hostname, userAgent: navigator.userAgent, at: new Date().toISOString() }) });
+const run = (kind, work) => async () => {
+  try { const entry = { kind, ...(await work()) }; log(JSON.stringify(entry)); await record(entry); }
+  catch (e) { log(kind + ': ' + e); await record({ kind, error: String(e) }); }
+};
+document.getElementById('create').onclick = run('registration', async () => {
+  const challenge = random(32);
+  const made = await navigator.credentials.create({ publicKey: { challenge, rp: { id: location.hostname, name: 'vectors' },
+    user: { id: random(16), name: 'vectors', displayName: 'vectors' }, pubKeyCredParams: [{ type: 'public-key', alg: -7 }],
+    authenticatorSelection: { userVerification: 'required', residentKey: 'required' }, attestation: 'none' } });
+  localStorage.setItem('credential', b64u(made.rawId));
+  return { challenge: b64u(challenge), rawId: b64u(made.rawId), clientDataJSON: b64u(made.response.clientDataJSON),
+    attestationObject: b64u(made.response.attestationObject), spki: made.response.getPublicKey ? b64u(made.response.getPublicKey()) : null };
+});
+const assert = (allow) => async () => {
+  const challenge = random(32), id = localStorage.getItem('credential');
+  const allowCredentials = allow && id ? [{ type: 'public-key', id: Uint8Array.from(atob(id.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - id.length % 4) % 4)), (c) => c.charCodeAt(0)) }] : [];
+  const got = await navigator.credentials.get({ publicKey: { challenge, rpId: location.hostname, userVerification: 'required', allowCredentials } });
+  return { challenge: b64u(challenge), rawId: b64u(got.rawId), clientDataJSON: b64u(got.response.clientDataJSON),
+    authenticatorData: b64u(got.response.authenticatorData), signature: b64u(got.response.signature),
+    userHandle: got.response.userHandle ? b64u(got.response.userHandle) : null, allowCredentials: allowCredentials.length };
+};
+document.getElementById('get').onclick = run('assertion', assert(true));
+document.getElementById('discover').onclick = run('assertion', assert(false));
+const idb = () => new Promise((resolve, reject) => { const open = indexedDB.open('marker', 1); open.onupgradeneeded = () => open.result.createObjectStore('m'); open.onsuccess = () => resolve(open.result); open.onerror = () => reject(open.error); });
+document.getElementById('store').onclick = run('marker-stored', async () => {
+  const at = new Date().toISOString(); localStorage.setItem('marker', at);
+  const db = await idb(); await new Promise((resolve) => { const t = db.transaction('m', 'readwrite'); t.objectStore('m').put(at, 'marker'); t.oncomplete = resolve; });
+  return { stored: at };
+});
+document.getElementById('read').onclick = run('marker-read', async () => {
+  const db = await idb(); const fromIdb = await new Promise((resolve) => { const r = db.transaction('m').objectStore('m').get('marker'); r.onsuccess = () => resolve(r.result ?? null); });
+  return { localStorage: localStorage.getItem('marker'), indexedDB: fromIdb, credential: localStorage.getItem('credential') };
+});
+</script>`;
+
+// `--by-hand`: the page on `--port` of localhost, each ceremony printed in the fixture's form and kept in by-hand.jsonl.
+function serveByHand(port) {
+  const kept = path.join(out, 'by-hand.jsonl');
+  const server = http.createServer((request, response) => {
+    if (request.method === 'POST' && request.url === '/record') {
+      let body = '';
+      request.on('data', (chunk) => { body += chunk; if (body.length > 1 << 20) request.destroy(); });
+      request.on('end', () => {
+        let entry;
+        try { entry = JSON.parse(body); } catch { response.writeHead(400); response.end(); return; }
+        for (const field of ['challenge', 'rawId', 'clientDataJSON', 'attestationObject', 'spki', 'authenticatorData', 'signature', 'userHandle']) {
+          if (typeof entry[field] === 'string') entry[field] = hex(entry[field]);
+        }
+        const line = JSON.stringify(entry);
+        fs.appendFileSync(kept, line + '\n');
+        console.log(line);
+        response.writeHead(204); response.end();
+      });
+      return;
+    }
+    response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+    response.end(handPage);
+  });
+  server.listen(port, 'localhost', () => console.error(`by hand: http://localhost:${port}/ (kept in ${kept}); Ctrl-C ends it`));
 }
 
 function chromePath() {
@@ -317,7 +402,8 @@ async function main() {
 }
 
 // Chrome and the servers stopped on a failure too: nothing of this run outlives it.
-main().then(() => process.exit(0), (error) => {
+if (byHand) serveByHand(Number(option('--port', '47999')));
+else main().then(() => process.exit(0), (error) => {
   console.error(error);
   for (const server of servers) server.close();
   if (browser) killGroup(browser.chrome);
