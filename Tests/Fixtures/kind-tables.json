@@ -84,6 +84,11 @@
       "rename",
       "unset"
     ],
+    "project.new" : [
+      "goal",
+      "location",
+      "name"
+    ],
     "prompt-audit" : [
       "do",
       "folder"
@@ -205,6 +210,7 @@
     "plugin.on" : "turn a plugin on for this node",
     "plugin.remove" : "remove a plugin from this node",
     "presets.edit" : "edit your launch presets",
+    "project.new" : "make a new project and start its lead for you",
     "prompt-audit" : "change a project's prompt-audit reminder",
     "push" : "push a lead's branch for you",
     "push.decline" : "decline a lead's push",
@@ -334,6 +340,11 @@
       "op",
       "rename",
       "unset"
+    ],
+    "project.new" : [
+      "goal",
+      "location",
+      "name"
     ],
     "prompt-audit" : [
       "do",
@@ -472,6 +483,7 @@
     "plugin.on" : true,
     "plugin.remove" : true,
     "presets.edit" : true,
+    "project.new" : true,
     "prompt-audit" : true,
     "push" : true,
     "push.decline" : true,
@@ -541,6 +553,7 @@
     "plugin.on",
     "plugin.remove",
     "presets.edit",
+    "project.new",
     "prompt-audit",
     "push",
     "push.decline",
@@ -631,6 +644,10 @@
       "keepsResult" : true,
       "rerun" : false
     },
+    "project.new" : {
+      "keepsResult" : true,
+      "rerun" : false
+    },
     "prompt-audit" : {
       "keepsResult" : true,
       "rerun" : true
@@ -717,6 +734,7 @@
     "start",
     "stop",
     "lead",
+    "project.new",
     "questions",
     "draft",
     "draft.clear",
@@ -824,6 +842,7 @@
     "plugin.on" : "user",
     "plugin.remove" : "user",
     "presets.edit" : "user",
+    "project.new" : "user",
     "prompt-audit" : "user",
     "push" : "user",
     "push.decline" : "user",

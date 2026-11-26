@@ -173,6 +173,10 @@ public struct KindSpec: Sendable {
                  voiced: .recorded(.init(arguments: .ofType, keepsResult: true, rerun: false, carded: false, batch: false, phrase: "stop your VibeSwitcher node", dialog: .asArguments))),
         KindSpec("lead", sender: .user, effect: .change, servedBy: .requests, page: .acts, wire: .typed(WireKinds.Lead.self),
                  voiced: .recorded(.init(arguments: .ofType, keepsResult: true, rerun: false, carded: false, batch: false, phrase: "start a project's lead for you", dialog: .asArguments))),
+        // A new project (the no-terminal inventory's C1): its folder, repository and first commit, then its lead; `lead`'s
+        // rule, the kind that starts a project's lead for the user (a page's that acts, recorded, never done again).
+        KindSpec("project.new", sender: .user, effect: .change, servedBy: .requests, page: .acts, wire: .typed(WireKinds.ProjectNew.self),
+                 voiced: .recorded(.init(arguments: .ofType, keepsResult: true, rerun: false, carded: false, batch: false, phrase: "make a new project and start its lead for you", dialog: .asArguments))),
         KindSpec("questions", sender: .anyone, effect: .read, servedBy: .requests, page: .bySender, wire: .typed(WireKinds.Questions.self),
                  voiced: .notRecorded(phrase: nil)),
         KindSpec("draft", sender: .webDraft, effect: .change, servedBy: .requests, page: .bySender, wire: page,

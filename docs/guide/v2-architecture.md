@@ -38,9 +38,7 @@ Mac's rule Touch ID or the login password stands for the typed code; under the c
 On the command line, `TypedWord.said` shows what the request will do and asks for its code. Only that prompt makes
 the `Typed` token. `NodeClient.change`, the one way the command line sends a state change, takes the token, sends the
 request with a new action id, and writes the journal entry once the server has accepted it. `NodeClient.request`
-refuses a state-changing kind (CLIChangeLint).
-
-On the server:
+refuses a state-changing kind (CLIChangeLint). On the server:
 
 1. **Envelope** (`NodeWire.unwrap`, the same on both transports). The message must be a JSON object, a request
    (`v`, `id`, `kind`), at no newer a version. Otherwise the connection gets a `bye` with its code. A kind the server
@@ -202,6 +200,7 @@ taken on the Unix socket.
 | `plugin.on` | the user's terminal | yes | yes |  | `Requests.act` | `plugin` | `WireKinds.PluginOn` | its result; done again |  | yes |
 | `plugin.remove` | the user's terminal | yes | yes |  | `Requests.act` | `plugin` | not yet | its result; done again |  | yes |
 | `presets.edit` | the user's terminal | yes | yes |  | `Requests.act` | `args`, `default`, `digest`, `env`, `folder`, `keepShell`, `kind`, `name`, `op`, `rename`, `unset` | `WireKinds.PresetsEdit` | its result |  | yes |
+| `project.new` | the user's terminal | yes | yes |  | `Requests.act` | `goal`, `location`, `name` | `WireKinds.ProjectNew` | its result |  | yes |
 | `prompt-audit` | the user's terminal | yes | yes |  | `Requests.act` | `do`, `folder` | `WireKinds.PromptAudit` | its result; done again |  | yes |
 | `push` | the user's terminal | yes | yes |  | `Requests.act` | `folder`, `request` | `WireKinds.Push` | its result |  | yes |
 | `push.decline` | the user's terminal | yes | yes |  | `Requests.act` | `folder`, `request` | `WireKinds.PushDecline` | its result; done again |  | yes |

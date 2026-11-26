@@ -258,7 +258,9 @@ struct RequestsTests {
                                     // `vibeswitcher update`'s seal of the unit's ExecStart move after its switch (2026-11-24).
                                     "build.seal",
                                     // An answer replaced, a tell taken back, before the lead has it (2026-11-24).
-                                    "answer.replace", "tell.retract"]
+                                    "answer.replace", "tell.retract",
+                                    // A new project from the page (the no-terminal inventory's C1, 2026-11-26).
+                                    "project.new"]
         #expect(Set(NodeWire.kinds.keys) == reads.union(changes), "a kind added to NodeWire.kinds is classified here")
         for kind in reads { #expect(!NodeWire.changesState(kind), "\(kind)") }
         for kind in changes { #expect(NodeWire.changesState(kind), "\(kind)") }

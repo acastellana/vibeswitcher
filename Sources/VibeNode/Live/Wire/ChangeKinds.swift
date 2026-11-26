@@ -76,6 +76,50 @@ extension WireKinds {
         }
     }
 
+    /// `project.new`: a new project (`name`; `location`, the projects folder or a folder in it, else the projects folder;
+    /// `goal`, its lead's) made with its git repository and first commit, then its lead started (`Requests.newProject`).
+    /// Not made: `made` false, `refused` the reason (`ProjectMaker.Refusal.Reason`), `said` why.
+    public enum ProjectNew: WireChangeKind {
+        public static let kind = "project.new"
+        public struct Args: WireArgs, Equatable {
+            public var name: String?
+            public var location: String?
+            public var goal: String?
+            public enum CodingKeys: String, CodingKey, CaseIterable { case name, location, goal }
+            public init(name: String?, location: String? = nil, goal: String? = nil) {
+                self.name = name
+                self.location = location
+                self.goal = goal
+            }
+        }
+        public struct Result: Codable, Sendable, Equatable {
+            public var made: Bool?
+            @WireNull public var name: String?
+            @WireNull public var folder: String?
+            @WireNull public var commit: String?
+            /// What the lead's start did: started, shown, waiting or refused; null when nothing was made.
+            @WireNull public var lead: String?
+            @WireNull public var session: String?
+            /// Why nothing was made (`ProjectMaker.Refusal.Reason`); null when it was.
+            @WireNull public var refused: String?
+            /// What happened, in a sentence.
+            public var said: String?
+            public var notes: [String]?
+            public init(made: Bool, name: String?, folder: String?, commit: String?, lead: String?, session: String?, refused: String?,
+                        said: String, notes: [String]) {
+                self.made = made
+                self.name = name
+                self.folder = folder
+                self.commit = commit
+                self.lead = lead
+                self.session = session
+                self.refused = refused
+                self.said = said
+                self.notes = notes
+            }
+        }
+    }
+
     // MARK: Cards
 
     /// A card's code and id: what `hold`, `base accept` and `base keep` take.

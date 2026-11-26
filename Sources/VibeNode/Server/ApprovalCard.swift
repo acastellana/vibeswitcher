@@ -115,6 +115,11 @@ extension Requests {
             let how = args["resume"]?.bool == true ? "reopen the lead of" : args["replace"]?.bool == true ? "replace the lead of" : "start a lead in"
             // The goal is told to the lead as the user's: decisive, whole.
             return .success(("\(how) \(Self.place(folder))" + (text("goal").map { " with the goal \(whole($0))" } ?? ""), nil))
+        case "project.new":
+            guard let name = text("name") else { return .failure(.init(why: "project.new needs a name: nothing was asked")) }
+            // The name, where and the goal (told to the lead as the user's): decisive, whole.
+            let place = text("location").flatMap { $0.isEmpty ? nil : $0 }.map { "in \(Self.place($0))" } ?? "in your projects folder"
+            return .success(("make the project \(whole(name)) \(place) and start its lead" + (text("goal").map { " with the goal \(whole($0))" } ?? ""), nil))
         case "stop":
             let live = link.sessions.filter(\.isLive).count
             return .success(("stop the node, ending \(live) live session\(live == 1 ? "" : "s")", nil))
