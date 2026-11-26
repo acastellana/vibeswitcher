@@ -919,9 +919,9 @@ below), while the host at the socket runs B's code at the same pid. The rule, wr
   inode. When launchd's job is another build's than the plist's, the host must have switched in place: the keeper's two
   flags follow its command line (`Switched.must`). A host whose build isn't the plist's is refused by `status` and
   `start`, naming both builds and the remedy (`vibeswitcher switch <the host's build>`); `stop` and the command line's
-  server check take it only when launchd's job and the plist are the same build's and the host switched in place from it
-  (a switch whose follow-up hasn't run: the window between the handover and the rewrite, which the switch's own server
-  checks cross).
+  server check take it only when it switched in place (the keeper's flags), whatever builds launchd's job and the plist
+  are of: a switch, a second one or a rollback whose follow-up hasn't run (the window between the handover and the
+  rewrite, which the switch's own server checks cross; `aSecondSwitchBeforeItsFollowUpIsStillTheNodeToTheServerCheckAndStop`).
 - *The rewrite* (`MacAgent.switched(to:folder:)`, the switch's Mac follow-up in `SwitchCommand.followUp`, after the
   handover, or when the host runs the target already): the record pins the target and its files; launchd's word judged
   as above; the job's process the target's host by token and code with the target's job's command line (the keeper's
@@ -936,10 +936,11 @@ below), while the host at the socket runs B's code at the same pid. The rule, wr
 - *The command line's server check* (`ServerCheck`): the listener's expected parent is the host `MacAgent.runningHost`
   finds (`afterASwitch: true`), by token and code, never `launchctl print`'s text: before, the pid came from the lenient
   print and the host's code was checked only by the server, at its own start (F7).
-- *Where `launchctl print`'s `program` is still read, and that it can only refuse:* `NodeAgent.placed` (the grammar: the
-  line is a literal made from the job, a mismatch refuses); `NodeAgent.printed` (lenient), whose one reader is
+- *Where `launchctl print`'s `program` is still read, and what it decides:* `NodeAgent.placed` (the grammar: the line is
+  a literal made from the job, a mismatch refuses); `NodeAgent.printed` (lenient), whose one reader is
   `MacAgent.printed()` in `start`'s wait, where a pid read decides only when to refuse sooner; `NodeCheck.macServerCode`
-  takes a `job` that chooses nothing. No decision accepts on it.
+  takes a `job` that chooses nothing. launchd's word, once placed, picks which rule `node` applies (whether the host may
+  or must carry the keeper's flags); it never picks which code passes: that is the token's, against the record.
 
 **What a real Mac proved** (this Mac, macOS 27.2; `MacAgentSwitchTests`, red with the change reverted, `git diff 95d9f0b1
 09d73c96 | git apply -R`, green from `09d73c96`): a scratch job of build A started; its host handed over in place to B
@@ -972,8 +973,12 @@ no decision takes `launchctl print`'s `program` text; nothing of a switch's foll
   node's doesn't (its grammar takes none); the real-launchd test drops that pair from the kernel's arguments and nothing
   else. A checked node's switched command line is still tested as data (no `--node` job runs here).
 - *The plist after the rewrite* is a file in a folder of the user's, as before the switch: any process of the user's can
-  rename another over it; `start` and `status` refuse what isn't a pinned build's job, so this can only make them refuse
-  (or name another pinned build's job, which `status` refuses while that build's host doesn't run).
+  remove it or rename another over it. What isn't a pinned build's job is refused, and since the command line's server
+  check now judges the plist too, every command that reaches the server refuses then, `stop` with them (`launchctl
+  bootout` by hand ends the job): a process of the user's can make the node refuse, never pass. A plist naming another
+  pinned build's job is refused by `status` while that build's host doesn't run.
+- *One failed look at the host during a switch's wait for its server* (`settle`, through the server check) is now a
+  refusal (77) of the switch's last steps, after the handover happened: `vibeswitcher switch <build>` again finishes it.
 - *A follow-up that never runs* (the command line ended after the handover): the plist stays the old build's; `status`
   refuses saying so, and `vibeswitcher switch <build>` finishes it.
 - *An older build's `start`* while the node runs a newer one says the node runs already, naming the newer build: it

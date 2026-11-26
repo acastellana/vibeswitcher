@@ -523,8 +523,8 @@ or decided. Done on Linux, tested on both systems (`ApprovalJudgmentTests`, `App
    didn't run is refused by `status` (and the next `start` of the new build refuses the old plist, as before) with
    `vibeswitcher switch <build>` to finish it, while `stop` and the server check still take the node. *What can't be
    bound,* added to the design's table: the loaded job's keys `print` shows nothing of after a rewrite; the scratch
-   test's `--handover` pair; a plist a process of the user's renames over afterwards (it can only make `start` and
-   `status` refuse). *For the installer (step 7):* an upgrade that switches the running node needn't write the plist: `vibeswitcher switch`
+   test's `--handover` pair; a plist a process of the user's removes or renames over afterwards (it can make every
+   command refuse the node, `stop` included, never pass). *For the installer (step 7):* an upgrade that switches the running node needn't write the plist: `vibeswitcher switch`
    rewrites it. *Owed:* a real `--node` job's switch, the command line's Mac arm end to end, the plist's row in the seal's
    Mac list (step 8).
 

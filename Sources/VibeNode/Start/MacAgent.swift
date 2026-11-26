@@ -548,8 +548,8 @@ public struct MacAgent {
     /// launchd's job is another build's than the plist's (a switch's rewrite, `switched`), the process must have
     /// switched in place: the keeper's two flags follow its command line. `stale` (a stop's look, and the command line's
     /// server check between a switch's handover and its follow-up) also takes a host whose build isn't the plist's when
-    /// launchd's job and the plist are the same build's and the host switched in place from it (keeper's flags): a
-    /// switch whose rewrite didn't happen yet. Anything else is refused, the builds named.
+    /// it switched in place (keeper's flags), whatever build launchd's job and the plist are of: a switch, a second one
+    /// or a rollback whose rewrite didn't happen yet. Anything else is refused, the builds named.
     func node(_ pid: pid_t, builds: [NodePins.Build], loaded: Candidate, onDisk: Candidate, stale: Bool = false) -> Result<Host, StartRefusal> {
         switch steps.see(place.socket, pid, builds) {
         case .nothing(let why), .other(let why): return .failure(StartRefusal(why))
@@ -559,7 +559,7 @@ public struct MacAgent {
             let switched: Switched
             if build == onDisk.build {
                 (job, switched) = (onDisk.job, loaded == onDisk ? .may : .must)
-            } else if stale, loaded == onDisk, var other = steps.job(build) {
+            } else if stale, var other = steps.job(build) {
                 other.atLogin = onDisk.job.atLogin
                 (job, switched) = (other, .must)
             } else {
