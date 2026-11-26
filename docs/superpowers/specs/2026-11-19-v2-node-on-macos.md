@@ -756,9 +756,16 @@ launchd's word:
   must hold exactly the job's variables and launchd's two, each once, any order (launchd's own order is by hash);
   `inherited environment` (the user domain's `launchctl setenv`, the job's to ignore: the reset drops it) only lines
   `NAME => VALUE` with a name, each name once; `default environment` exactly `PATH => /usr/bin:/bin:/usr/sbin:/sbin`.
-- **Why a value can't cause an accept.** launchd prints every one of its own lines after an injected value too, so a
-  value that adds lines adds them to a whole the template already fixes: the real lines then don't fit, or come after
-  the closing `}`. No key is looked up, so an added line can't be "the" path.
+- **What a value can and can't do.** launchd prints its own lines after an injected value too, so a value that adds
+  lines adds them to a whole the template already fixes: the real lines then don't fit, or come after the closing `}`,
+  and no key is looked up, so an added line can't be "the" path (always printed, at line 3, before any value), a second
+  variable, or another key. *Except* a line launchd prints only for a key that is set: `stdout path` and `stderr path`
+  (measured: neither prints without its key). A plist with no `StandardErrorPath` and `StandardOutPath` set to
+  `/dev/null` followed by a newline and `\tstderr path = <the agent's log>` prints exactly the two lines the template
+  wants: the job runs with no stderr (and stdout to a path no one has), and is placed. Its gain is the host's log; every
+  other key it could change still prints a line the template refuses, and the host's command line, program and code are
+  the kernel's. (A plist's `OSLogRateLimit` prints a second line, which refuses; its `XPC_SERVICE_NAME` is launchd's own:
+  measured, so no variable can stand in for launchd's two.)
 - **The path** printed must be the agent's plist as launchd resolves it (`realpath` of the folder, then the file's name),
   and that path, by `lstat` (no link followed), the file `start` holds open (in `start`) or the agent's plist (`status`,
   `stop`) by device and inode: a link, a hard link elsewhere, another file refuses.
@@ -773,7 +780,7 @@ launchd's word:
 
 *Measured (macOS 27.2, scratch jobs of the node's key set, under `/tmp`):* the states `not running` (loaded, never run:
 `last exit code = (never exited)`), `xpcproxy` and `running` (with the running group), and after an exit `last exit code
-= 0`, a kill `last terminating signal = Killed: 9`, a code-signing refusal `last exit reason = OS_REASON_CODESIGNING`;
+= 0` (`= 1` bare, `= 78: EX_CONFIG` with its name, `last terminating signal = Terminated: 15` for a SIGTERM), a kill `last terminating signal = Killed: 9`, a code-signing refusal `last exit reason = OS_REASON_CODESIGNING`;
 the coalition blocks from the first run on; `path` resolved (`/private/tmp/…`), `program`, `arguments` and `stderr path`
 as the plist gives them; `immediate reason = non-ipc demand` after a `kickstart`, `speculative` with `RunAtLoad`. One job
 per `launchd.plist` key, diffed against that baseline: `Nice` (`nice`), `ThrottleInterval` (`minimum runtime`),
@@ -793,7 +800,9 @@ runs at load), `MachServices` (`endpoints`), `Sockets` (`sockets`, and it runs),
 | --- | --- |
 | A key `print` shows nothing of (`AssociatedBundleIdentifiers`, `Debug`, `Disabled`, `InitGroups`, `LimitLoadToSessionType`, `POSIXSpawnType`) in a plist launchd read through an ancestor of the plist's folder swapped away and back | a process of the user's renaming `~/Library` (or the home) away and back in the instant launchd reads the plist, with every app's files there gone meanwhile; and what it gets is at most those keys, none of which restarts or reconfigures the host |
 | A disk image mounted over the plist's folder for launchd's read (the covered folder keeps its inode and ctime); not run here (attaching may show UI) | a process of the user's attaching an image at that instant (`hdiutil attach -mountpoint`); its gain as in the row above, since every key `print` shows is still compared |
-| Two different plists that print identically | a difference only in the keys of the first row |
+| Two different plists that print identically | a difference only in the keys of the first row, or the output paths of the next row |
+| The job's output paths stood in by a value (no `StandardErrorPath`, `StandardOutPath`'s value carrying the `stderr path` line): its stderr, and so the host's log, go nowhere | for `status` and `stop`, a process of the user's that bootstraps a job of the label from other bytes at the agent's path and puts start's bytes back; for `start`, the ancestor swap of the first row. The gain is the log alone; binding fds 1 and 2 by the kernel is an idea for the reviewer |
+| A server whose listen backlog is full looks like none (`connect` refused, as on the Mac it is) and gets the typed code and the bootout | a wedged server: the user's code is still asked first |
 | An orphan in a session whose leader ended before stop's first look, its parent gone (stop's words stay "every process of it stop could find") | nothing: any session's program can leave such a child; found once a host-side record of its sessions' ids exists (owed) |
 | A process that left its session and lost its parent before a look, with no readable session id | as the row above |
 
