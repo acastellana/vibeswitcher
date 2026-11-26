@@ -60,6 +60,10 @@ public enum ConfigSeal {
             /// top-level key but the ones the app rewrites as it runs, by its parsed value (`MacSealList.preferencesHash`;
             /// the lead's approval of 2026-11-26). The Mac's list only (Terminal's).
             case preferences
+            /// zsh's saved Terminal sessions (`~/.zsh_sessions`): only its `*.session` files, which Terminal's zsh
+            /// sources when it restores a window (`/etc/zshrc_Apple_Terminal`), each by its bytes, but the ones that
+            /// hold only the restore line that file writes (`MacSealList.sessionsHash`; the review's R5). The Mac's list only.
+            case sessions
         }
 
         public var name: String
@@ -591,6 +595,13 @@ public enum ConfigSeal {
                 if item.name == copiedFolder { all[bookkeepingKey(of: keyPrefix + item.name)] = encode(folder.bookkeeping) }
                 continue
             }
+            // A listing: walked once, for its hash and its entries' (the card names which changed).
+            if item.kind == .listing {
+                let parts = LinuxSealList.listingParts(item.path, targets: MacSealList.readsLinkTargets(item.name))
+                all[keyPrefix + item.name] = parts.map { LinuxSealList.listingHash(lines: $0.map(\.line)) } ?? LinuxSealList.listingHash(item.path)
+                all[keysPrefix + item.name] = encode(parts.map(LinuxSealList.listingKeys) ?? [:])
+                continue
+            }
             guard let hash = fingerprint(item) else { continue }
             all[keyPrefix + item.name] = hash
             if let keys = keyHashes(item) { all[keysPrefix + item.name] = encode(keys) }
@@ -604,6 +615,10 @@ public enum ConfigSeal {
     static func keyHashes(_ watched: Watched) -> [String: String]? {
         if let parts = parts(watched) { return Dictionary(parts, uniquingKeysWith: { first, _ in first }) }
         if watched.kind == .preferences { return MacSealList.preferenceKeys(watched.path) }
+        if watched.kind == .sessions { return MacSealList.sessionKeys(watched.path) }
+        if watched.kind == .listing {
+            return LinuxSealList.listingParts(watched.path, targets: MacSealList.readsLinkTargets(watched.name)).map(LinuxSealList.listingKeys) ?? [:]
+        }
         guard watched.kind == .mcpServers || (watched.kind == .file && watched.path.hasSuffix(".json")) else { return nil }
         var info = stat()
         guard stat(watched.path, &info) == 0 else { return [:] }
@@ -738,6 +753,8 @@ public enum ConfigSeal {
         case .plugin, .scripts: return parts(watched).map(partsHash)
         // Its ByHost files are read whether the domain's own file is there or not (`preferencesHash` says it absent).
         case .preferences: return MacSealList.preferencesHash(watched.path)
+        // Its folder's own state is in its hash, absent included (`sessionsHash`).
+        case .sessions: return MacSealList.sessionsHash(watched.path)
         default: break
         }
         var hasher = SHA256()
@@ -760,9 +777,11 @@ public enum ConfigSeal {
         case .folder, .entries:
             return readFolder(watched).hash
         case .listing:
-            return LinuxSealList.listingHash(watched.path)
+            return LinuxSealList.listingHash(watched.path, targets: MacSealList.readsLinkTargets(watched.name))
         case .preferences:
             return MacSealList.preferencesHash(watched.path)  // Taken above, before the absent guard.
+        case .sessions:
+            return MacSealList.sessionsHash(watched.path)  // Taken above, before the absent guard.
         case .mcpServers:
             var servers = mcpServers(watched.path)
             for _ in 1..<3 where servers == nil {

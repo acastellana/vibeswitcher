@@ -73,13 +73,7 @@ public enum LinuxSealList {
         var items = homeEntries.map { entry in item(home: home, relative: entry.0, kind: entry.1) }
         var names = Set(items.map(\.name))
         names.formUnion(ConfigSeal.homeFiles.map { "~/" + $0.0 })
-        for file in startupFiles {
-            guard let data = ConfigSeal.regularContents((home as NSString).appendingPathComponent(file), limit: 1 << 20) else { continue }
-            for path in sourced(startupFile: String(decoding: data, as: UTF8.self), home: home) {
-                let watched = ConfigSeal.Watched(name: ConfigSeal.shown(path, home: home), path: path, kind: .file)
-                if names.insert(watched.name).inserted { items.append(watched) }
-            }
-        }
+        addSourced(from: startupFiles, home: home, names: &names, to: &items)
         if let root = outside ?? (isAccountHome(home, uid: uid) ? "/" : nil) {
             items += outsideEntries(uid: uid, mounts: mounts, root: root)
         }
@@ -95,6 +89,31 @@ public enum LinuxSealList {
         guard let own = getpwuid(uid).map({ String(cString: $0.pointee.pw_dir) }) else { return false }
         let resolved = { (path: String) in URL(fileURLWithPath: path).standardizedFileURL.resolvingSymlinksInPath().path }
         return resolved(home) == resolved(own)
+    }
+
+    /// A startup file read whole at most for what it sources (`addSourced`): past it, it names nothing (owed).
+    static let startupLimit = 16 << 20
+
+    /// The most files `addSourced` reads for what they source, the startup files among them.
+    static let sourcedReads = 256
+
+    /// What the startup files (`startupFiles`, under `home`) source (`sourced`), and what those source in turn, every
+    /// level (the review's R6: a line added to a sourced file is held as that file's change, and its target is then a
+    /// row too): each target a `.file` row named as shown, added to `items` once (`names`, which holds the names
+    /// already watched); each file read once, whole up to `startupLimit` (the review's R6c: past 1 MB, a startup file
+    /// named nothing), at most `sourcedReads` of them.
+    static func addSourced(from startupFiles: [String], home: String, names: inout Set<String>, to items: inout [ConfigSeal.Watched]) {
+        var queue = startupFiles.map { (home as NSString).appendingPathComponent($0) }
+        var read: Set<String> = []
+        while !queue.isEmpty, read.count < sourcedReads {
+            let file = queue.removeFirst()
+            guard read.insert(file).inserted, let data = ConfigSeal.regularContents(file, limit: startupLimit) else { continue }
+            for path in sourced(startupFile: String(decoding: data, as: UTF8.self), home: home) {
+                queue.append(path)
+                let watched = ConfigSeal.Watched(name: ConfigSeal.shown(path, home: home), path: path, kind: .file)
+                if names.insert(watched.name).inserted { items.append(watched) }
+            }
+        }
     }
 
     /// Each `.` or `source` target in a startup file's `text` written `~/…`, `$HOME/…`, `${HOME}/…` or by `home`'s own
@@ -161,9 +180,10 @@ public enum LinuxSealList {
     /// by its relative name, type, mode, size, inode, mtime and ctime with nanoseconds, and a link's target; never a
     /// file's contents. A write changes ctime, which no one can set back. Absent: hashes as absent. A Windows user's
     /// Startup folder the user's known-startup list names shortcuts of: each known shortcut by its line, and the
-    /// folder's own line without its times (`StartupShortcuts`).
-    static func listingHash(_ path: String) -> String {
-        guard let lines = listingLines(path) else {
+    /// folder's own line without its times (`StartupShortcuts`). `targets`: each link's line is followed by its
+    /// target's (`targetLine`; the Mac's Homebrew rows, `MacSealList.readsLinkTargets`).
+    static func listingHash(_ path: String, targets: Bool = false) -> String {
+        guard let lines = listingLines(path, targets: targets) else {
             var hasher = SHA256()
             hasher.update(data: Data("absent".utf8))
             return ConfigSeal.hex(hasher.finalize())
@@ -179,21 +199,46 @@ public enum LinuxSealList {
     }
 
     /// The lines `listingHash` hashes, in order; nil when nothing is at `path`.
-    static func listingLines(_ path: String) -> [String]? {
-        var lines: [String] = []
-        let add = { (text: String) in lines.append(text) }
+    static func listingLines(_ path: String, targets: Bool = false) -> [String]? {
+        listingParts(path, targets: targets)?.map(\.line)
+    }
+
+    /// The per-entry hashes of a listing, for the card (`ConfigSeal.keyHashes`; the review's R8): each top-level entry
+    /// by its name, its lines and those of everything under it hashed as one (16 hex digits), and the folder's own line
+    /// as "."; so a card says "git added" or "claude changed, 2.1.333 added", one key per top-level entry whatever the
+    /// tree's size. `parts`: `listingParts`', the lines the hash (`listingHash`) is of.
+    static func listingKeys(_ parts: [(top: String, line: String)]) -> [String: String] {
+        var grouped: [String: SHA256] = [:]
+        var order: [String] = []
+        for part in parts {
+            let key = part.top.isEmpty ? "." : part.top
+            if grouped[key] == nil { order.append(key); grouped[key] = SHA256() }
+            grouped[key]?.update(data: Data((part.line + "\n").utf8))
+        }
+        var keys: [String: String] = [:]
+        for key in order {
+            guard let hasher = grouped[key] else { continue }
+            keys[key] = String(ConfigSeal.hex(hasher.finalize()).prefix(16))
+        }
+        return keys
+    }
+
+    /// `listingLines`' lines, each with the top-level entry it's under ("" for the folder's own line); nil when nothing
+    /// is at `path`.
+    static func listingParts(_ path: String, targets: Bool = false) -> [(top: String, line: String)]? {
+        var parts: [(top: String, line: String)] = []
         var info = stat()
         guard lstat(path, &info) == 0 else { return nil }
         var known: [String: StartupShortcuts.Known] = [:]
         if let startup = StartupShortcuts.startupFolder(path), let list = StartupShortcuts.list(root: startup.root),
            list.contains(where: { $0.user == startup.user }), (info.st_mode & S_IFMT) == S_IFDIR {
             known = StartupShortcuts.knownEntries(in: path, user: startup.user, list: list)
-            add("listing known-startup d \(info.st_mode & 0o7777)")
+            parts.append(("", "listing known-startup d \(info.st_mode & 0o7777)"))
         } else {
-            add("listing " + line(info, path: path, relative: ""))
+            parts.append(("", "listing " + line(info, path: path, relative: "")))
         }
-        walk(path, relative: "", known: known, add)
-        return lines
+        walk(path, relative: "", known: known, targets: targets) { top, text in parts.append((top, text)) }
+        return parts
     }
 
     /// One entry's line: its name (its length first, so no name can pass for two), type, mode, size, inode, times.
@@ -212,24 +257,38 @@ public enum LinuxSealList {
         return text
     }
 
-    /// Each entry under `folder` in name order, depth first: folders entered, links never followed; a top-level entry
-    /// `known` names by its known line.
-    private static func walk(_ folder: String, relative: String, known: [String: StartupShortcuts.Known] = [:], _ add: (String) -> Void) {
+    /// The line of what the link at `path` (`relative` in the listing) leads to, every link on the way followed (one
+    /// `stat`): its type, mode, size, device, inode and times, so a file behind the link rewritten in place, or
+    /// replaced, changes the listing (the review's R7: a Cellar binary behind `/opt/homebrew/bin`); "unresolved" when
+    /// it leads nowhere. Never its contents.
+    static func targetLine(path: String, relative: String) -> String {
+        var info = stat()
+        guard stat(path, &info) == 0 else { return "t \(relative.utf8.count):\(relative) unresolved" }
+        return "t " + String(line(info, path: path, relative: relative).dropFirst(2)) + " dev \(info.st_dev)"
+    }
+
+    /// Each entry under `folder` in name order, depth first: folders entered, links never followed (with `targets`,
+    /// each link's target's line after its own, `targetLine`); a top-level entry `known` names by its known line.
+    /// `add` takes each line with the top-level entry it's under.
+    private static func walk(_ folder: String, relative: String, known: [String: StartupShortcuts.Known] = [:], targets: Bool = false,
+                             top: String = "", _ add: (String, String) -> Void) {
         guard let names = try? FileManager.default.contentsOfDirectory(atPath: folder) else {
-            add("unreadable \(relative.utf8.count):\(relative)")
+            add(top, "unreadable \(relative.utf8.count):\(relative)")
             return
         }
         for name in names.sorted() {
             let path = (folder as NSString).appendingPathComponent(name)
             let shown = relative.isEmpty ? name : relative + "/" + name
+            let under = top.isEmpty ? name : top
             if let line = known[name] {
-                add(line.hashLine)
+                add(under, line.hashLine)
                 continue
             }
             var info = stat()
             guard lstat(path, &info) == 0 else { continue }
-            add(line(info, path: path, relative: shown))
-            if (info.st_mode & S_IFMT) == S_IFDIR { walk(path, relative: shown, add) }
+            add(under, line(info, path: path, relative: shown))
+            if targets, (info.st_mode & S_IFMT) == S_IFLNK { add(under, targetLine(path: path, relative: shown)) }
+            if (info.st_mode & S_IFMT) == S_IFDIR { walk(path, relative: shown, targets: targets, top: under, add) }
         }
     }
 

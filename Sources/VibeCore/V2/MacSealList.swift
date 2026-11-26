@@ -48,6 +48,9 @@ public enum MacSealList {
         (".config/gh", .listing),
         // Each session writes its snapshot here, and sources it before each command (Linux's ST-D19).
         (".claude/shell-snapshots", .entries), (".codex/shell-snapshots", .entries),
+        // Terminal's zsh sources a saved session here when it restores a window (`/etc/zshrc_Apple_Terminal`): only
+        // the `*.session` files, and not one that holds only the restore line zsh writes (`sessionsHash`, R5).
+        (".zsh_sessions", .sessions),
     ]
 
     /// The startup files whose `.` and `source` targets are watched (`LinuxSealList.sourced`): zsh's, the Mac's shell.
@@ -55,7 +58,13 @@ public enum MacSealList {
 
     /// The rows outside the home, by their own path (their names): read only for the account's own home.
     public static let outsideEntries: [(String, ConfigSeal.Watched.Kind)] = [
+        // Each link's target's line too (`readsLinkTargets`): a Cellar file rewritten in place behind a link (R7).
         ("/opt/homebrew/bin", .listing), ("/opt/homebrew/sbin", .listing),
+        // What every login shell runs by `.zprofile`'s `eval "$(brew shellenv)"`: `bin/brew` (the listing's) sources
+        // `brew.sh`, which sources `utils/os.sh` and `cmd/shellenv.sh`, then exits (R7; read 2026-11-26, each
+        // `albert:admin` 0644 on this Mac, so the user's to write). By contents.
+        ("/opt/homebrew/Library/Homebrew/brew.sh", .file), ("/opt/homebrew/Library/Homebrew/utils/os.sh", .file),
+        ("/opt/homebrew/Library/Homebrew/cmd/shellenv.sh", .file),
         // `xcode-select -s` writes this link (root's); `swift`, `git` and `xcrun` in `/usr/bin` follow it.
         ("/var/db/xcode_select_link", .file),
     ]
@@ -76,13 +85,7 @@ public enum MacSealList {
         }
         var names = Set(items.map(\.name))
         names.formUnion(ConfigSeal.homeFiles.map { "~/" + $0.0 })
-        for file in startupFiles {
-            guard let data = ConfigSeal.regularContents((home as NSString).appendingPathComponent(file), limit: 1 << 20) else { continue }
-            for path in LinuxSealList.sourced(startupFile: String(decoding: data, as: UTF8.self), home: home) {
-                let watched = ConfigSeal.Watched(name: ConfigSeal.shown(path, home: home), path: path, kind: .file)
-                if names.insert(watched.name).inserted { items.append(watched) }
-            }
-        }
+        LinuxSealList.addSourced(from: startupFiles, home: home, names: &names, to: &items)
         if let root = outside ?? (LinuxSealList.isAccountHome(home, uid: uid) ? "/" : nil) {
             items += outsideEntries.map { entry in
                 ConfigSeal.Watched(name: entry.0, path: root == "/" ? entry.0 : (root as NSString).appendingPathComponent(entry.0), kind: entry.1)
@@ -94,6 +97,95 @@ public enum MacSealList {
     /// Whether `name` is one of the rows outside the home: the node-wide seal's, as a home's (`ConfigSeal.isHome`).
     static func isOutsideName(_ name: Substring) -> Bool {
         outsideEntries.contains { $0.0 == name }
+    }
+
+    /// The listings whose links' targets are read too (`LinuxSealList.targetLine`): Homebrew's `bin` and `sbin`, about
+    /// 1,200 links on this Mac, one `stat` each.
+    static let linkTargetListings: Set<String> = ["/opt/homebrew/bin", "/opt/homebrew/sbin"]
+
+    /// Whether the listing named `name` reads its links' targets (`linkTargetListings`); never a Linux row.
+    static func readsLinkTargets(_ name: String) -> Bool { linkTargetListings.contains(name) }
+
+    // MARK: Saved Terminal sessions (`ConfigSeal.Watched.Kind.sessions`)
+
+    /// The restore line `/etc/zshrc_Apple_Terminal` writes first in each session file, around the save's time: its
+    /// restore sources a file whose first line is exactly this form, and its save writes nothing else unless the user
+    /// set save hooks (`shell_session_save_user_state`). Read from that file on this Mac (2026-11-26), never run.
+    static let restorePrefix = "echo Restored session: \"$(/bin/date -r "
+    static let restoreSuffix = ")\"\n"
+
+    /// Whether `data` is a session file zsh writes with no save hooks: the restore line alone (its time in 1 to 20
+    /// digits), which runs `echo` and `/bin/date` only.
+    static func isRestoreLineOnly(_ data: Data) -> Bool {
+        let bytes = [UInt8](data), prefix = Array(restorePrefix.utf8), suffix = Array(restoreSuffix.utf8)
+        guard bytes.count > prefix.count + suffix.count, bytes.starts(with: prefix), bytes.suffix(suffix.count).elementsEqual(suffix) else { return false }
+        let digits = bytes[prefix.count..<(bytes.count - suffix.count)]
+        return (1...20).contains(digits.count) && digits.allSatisfy { (0x30...0x39).contains($0) }
+    }
+
+    /// The session files a sessions row reads: the folder's own state ("absent", "unreadable", "not a folder", or
+    /// "folder" with its mode and owner, after "link <target> " when it is a link, read through it), and each entry
+    /// whose name ends `.session` in any case (the volume ignores case, as zsh's open of `<id>.session` does), by name,
+    /// in the order of their bytes, with what it is: a regular file by its bytes ("bytes <digest>"), nil when it holds
+    /// only the restore line (`isRestoreLineOnly`: what a window's close writes, which comes and goes with every
+    /// close and restore and runs nothing); anything else (a link, with its target, read through; a folder; another
+    /// kind; unreadable) by what it is. `.history` files are left out: zsh reads them as history (`fc -R`), never runs them.
+    static func sessionFiles(_ path: String) -> (folder: String, files: [(name: String, said: String?)]) {
+        var info = stat()
+        guard lstat(path, &info) == 0 else { return ("absent", []) }
+        var said = ""
+        if (info.st_mode & S_IFMT) == S_IFLNK {
+            said = "link " + ((try? FileManager.default.destinationOfSymbolicLink(atPath: path)) ?? "") + " "
+            guard stat(path, &info) == 0 else { return (said + "absent", []) }
+        }
+        guard (info.st_mode & S_IFMT) == S_IFDIR else { return (said + "not a folder", []) }
+        let folder = said + "folder \(info.st_mode & 0o7777) \(info.st_uid)"
+        guard let names = try? FileManager.default.contentsOfDirectory(atPath: path) else { return (folder + " unreadable", []) }
+        let sessions = names.filter { ($0 as NSString).range(of: ".session", options: [.anchored, .backwards, .caseInsensitive]).location != NSNotFound }
+        var files: [(name: String, said: String?)] = []
+        for name in sessions.sorted(by: { Array($0.utf8).lexicographicallyPrecedes(Array($1.utf8)) }) {
+            let file = (path as NSString).appendingPathComponent(name)
+            var entry = stat()
+            guard lstat(file, &entry) == 0 else { continue }
+            var what = ""
+            if (entry.st_mode & S_IFMT) == S_IFLNK {
+                what = "link " + ((try? FileManager.default.destinationOfSymbolicLink(atPath: file)) ?? "") + " "
+            } else if (entry.st_mode & S_IFMT) == S_IFREG, let data = ConfigSeal.regularContents(file, limit: 4096, followLink: false),
+                      isRestoreLineOnly(data) {
+                files.append((name, nil))
+                continue
+            }
+            switch ConfigSeal.contentsDigest(file, followLink: true) {
+            case .digest(let digest): what += "bytes " + digest
+            case .other: what += "other"
+            case .unreadable: what += "unreadable"
+            }
+            files.append((name, what))
+        }
+        return (folder, files)
+    }
+
+    /// A sessions row's hash: the folder's state, then each session file that isn't the restore line alone, by name
+    /// and bytes (`sessionFiles`). So a window's close or restore changes nothing, and a line added to a saved session,
+    /// or a session file of another form coming, changing or going, is a change.
+    static func sessionsHash(_ path: String) -> String {
+        var hasher = SHA256()
+        let (folder, files) = sessionFiles(path)
+        hasher.update(data: Data("sessions \(folder)\n".utf8))
+        for file in files {
+            guard let said = file.said else { continue }
+            hasher.update(data: Data("\(file.name.utf8.count):\(file.name) \(said)\n".utf8))
+        }
+        return ConfigSeal.hex(hasher.finalize())
+    }
+
+    /// A sessions row's per-key hashes, for the card: "folder", and each session file that isn't the restore line
+    /// alone, by name.
+    static func sessionKeys(_ path: String) -> [String: String] {
+        let (folder, files) = sessionFiles(path)
+        var keys = ["folder": folder]
+        for file in files { if let said = file.said { keys[file.name] = said } }
+        return keys
     }
 
     // MARK: Preferences (`ConfigSeal.Watched.Kind.preferences`)

