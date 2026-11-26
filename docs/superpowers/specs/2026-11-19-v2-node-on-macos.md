@@ -750,7 +750,9 @@ launchd's word:
   by line in launchd's order, as bytes (split at 0x0A; any byte but a tab, a newline or printable ASCII refuses). Each
   template line is either a literal made from the job (its label, its plist's path as launchd resolves it, its program,
   arguments, output paths, variables, `properties`) or a strict pattern for what launchd counts (`pid`, `runs`, `forks`,
-  `active count`, `asid`, the coalition IDs, `jetsam …`). A line the template can't place, a line after the closing `}`,
+  `active count`, `asid`, the coalition IDs, and five lines this Mac always prints with the same values, `jetsam priority`
+  40, the two `jetsam memory limit`s `(unlimited)`, `jetsam thread limit` 32 and `sanitizer flags` `0x0`, kept as
+  patterns, digits or hex: no key measured moves them, `JetsamProperties` included). A line the template can't place, a line after the closing `}`,
   or a value that differs is a refusal. Optional are only the groups measured coming and going: the running group (`pid`
   to `checked allocations flags`), the two coalition blocks, and one of the four last-exit lines. The `environment` block
   must hold exactly the job's variables and launchd's two, each once, any order (launchd's own order is by hash);
@@ -762,9 +764,11 @@ launchd's word:
   variable, or another key. *Except* a line launchd prints only for a key that is set: `stdout path` and `stderr path`
   (measured: neither prints without its key). A plist with no `StandardErrorPath` and `StandardOutPath` set to
   `/dev/null` followed by a newline and `\tstderr path = <the agent's log>` prints exactly the two lines the template
-  wants: the job runs with no stderr (and stdout to a path no one has), and is placed. Its gain is the host's log; every
-  other key it could change still prints a line the template refuses, and the host's command line, program and code are
-  the kernel's. (A plist's `OSLogRateLimit` prints a second line, which refuses; its `XPC_SERVICE_NAME` is launchd's own:
+  wants, and is placed. But launchd never spawns such a job (measured by the re-check: it can't open that stdout path,
+  which lies under `/dev/null`, under `/dev` that the user can't write; every start ends `last exit code = 78: EX_CONFIG`
+  with no pid): the host never runs under it, `status` says it doesn't run (69), and `start` boots it out and loads its
+  own. Every other key it could change still prints a line the template refuses, and the host's command line, program
+  and code are the kernel's. (A plist's `OSLogRateLimit` prints a second line, which refuses; its `XPC_SERVICE_NAME` is launchd's own:
   measured, so no variable can stand in for launchd's two.)
 - **The path** printed must be the agent's plist as launchd resolves it (`realpath` of the folder, then the file's name),
   and that path, by `lstat` (no link followed), the file `start` holds open (in `start`) or the agent's plist (`status`,
@@ -790,18 +794,25 @@ per `launchd.plist` key, diffed against that baseline: `Nice` (`nice`), `Throttl
 runs at load), `MachServices` (`endpoints`), `Sockets` (`sockets`, and it runs), `ProcessType` (`spawn type`), and in
 `properties` `AbandonProcessGroup`, `EnableTransactions`, `EnablePressuredExit`, `inetdCompatibility`, `LaunchOnlyOnce`,
 `LegacyTimers`, `LowPriorityIO`, `LowPriorityBackgroundIO`, `MaterializeDatalessFiles`, `SessionCreate`, `StartOnMount`,
-`WaitForDebugger` and an unknown key (`partial import`): each a line the template refuses. No line at all:
-`AssociatedBundleIdentifiers`, `Debug`, `Disabled` false, `InitGroups`, `LimitLoadToSessionType` (a list too) and
-`POSIXSpawnType` `Interactive`.
+`WaitForDebugger` and an unknown key (`partial import`): each a line the template refuses. No line at all (seven keys):
+`AssociatedBundleIdentifiers`, `Debug`, `Disabled`, `InitGroups`, `LimitLoadToSessionType`, `POSIXSpawnType` and
+`JetsamProperties`. With their other values (the re-check's measurement, real scratch jobs): `Disabled` true isn't loaded
+at all (bootstrap 5, no override written); `LimitLoadToSessionType` `Background` or `LoginWindow` isn't loaded in `gui/`,
+absent or `[Aqua]` prints the same; `POSIXSpawnType` `Background`, `Adaptive`, `App` or `TALApp` prints the same and runs
+at the baseline's nice 0 and priority 31 (`ProcessType` Interactive wins); `InitGroups` false prints the same, `id` shows
+the same groups; `Debug` true is launchd's own logging; `AssociatedBundleIdentifiers` names the job in System Settings'
+Login Items only; `JetsamProperties` (`JetsamPriority`, `JetsamMemoryLimit` and its variants, `JetsamThreadLimit`) loads
+and runs with every jetsam line at the baseline: launchd ignores it for a gui agent here. None runs other code, changes
+the command line, environment, outputs or restarts, or gives a session anything.
 
 *What start still can't bind, and what an attacker must already be able to do for each:*
 
 | Not bound | What it takes |
 | --- | --- |
-| A key `print` shows nothing of (`AssociatedBundleIdentifiers`, `Debug`, `Disabled`, `InitGroups`, `LimitLoadToSessionType`, `POSIXSpawnType`) in a plist launchd read through an ancestor of the plist's folder swapped away and back | a process of the user's renaming `~/Library` (or the home) away and back in the instant launchd reads the plist, with every app's files there gone meanwhile; and what it gets is at most those keys, none of which restarts or reconfigures the host |
+| A key `print` shows nothing of (the seven above) in the plist launchd read | for a job `start` itself loads: a process of the user's renaming `~/Library` (or the home) away and back in the instant launchd reads the plist, with every app's files there gone meanwhile. For a job found loaded (`start`'s "runs already", `status`, `stop`, which bind the plist's bytes on disk as they are now): a process of the user's that rewrites the agent's plist with one of those keys, bootstraps it and writes start's bytes back, with no race. What it gets either way is at most those keys, with the effects measured above: none restarts, reconfigures or runs the host otherwise |
 | A disk image mounted over the plist's folder for launchd's read (the covered folder keeps its inode and ctime); not run here (attaching may show UI) | a process of the user's attaching an image at that instant (`hdiutil attach -mountpoint`); its gain as in the row above, since every key `print` shows is still compared |
 | Two different plists that print identically | a difference only in the keys of the first row, or the output paths of the next row |
-| The job's output paths stood in by a value (no `StandardErrorPath`, `StandardOutPath`'s value carrying the `stderr path` line): its stderr, and so the host's log, go nowhere | for `status` and `stop`, a process of the user's that bootstraps a job of the label from other bytes at the agent's path and puts start's bytes back; for `start`, the ancestor swap of the first row. The gain is the log alone; binding fds 1 and 2 by the kernel is an idea for the reviewer |
+| The job's output paths stood in by a value (no `StandardErrorPath`, `StandardOutPath`'s value carrying the `stderr path` line): placed, but never run | the same as the row above. launchd refuses to spawn such a job (exit 78 at every start, no pid), so nothing runs under it and no log is lost: `status` says it doesn't run, `start` replaces it |
 | A server whose listen backlog is full looks like none (`connect` refused, as on the Mac it is) and gets the typed code and the bootout | a wedged server: the user's code is still asked first |
 | An orphan in a session whose leader ended before stop's first look, its parent gone (stop's words stay "every process of it stop could find") | nothing: any session's program can leave such a child; found once a host-side record of its sessions' ids exists (owed) |
 | A process that left its session and lost its parent before a look, with no readable session id | as the row above |

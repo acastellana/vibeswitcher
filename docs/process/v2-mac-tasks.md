@@ -493,7 +493,11 @@ or decided. Done on Linux, tested on both systems (`ApprovalJudgmentTests`, `App
    `--lock` with `O_NOFOLLOW` (the app's host too: shared code); only no listener is no server for `stop`; a failed
    bootout said as failed; session ids read at every look. What start still can't bind is the design's table. *Owed for
    a later step:* a host-side record of its sessions' ids, so `stop` can find an orphan whose session leader ended before
-   its first look.
+   its first look. *The final re-check (2026-11-26, "ready to offer for v2"):* the spec corrected to what it measured
+   (the output-path stand-in is never spawned; a job found loaded binds the plist's bytes on disk, not only through a
+   swap; the seven keys `print` shows nothing of, `JetsamProperties` among them, with their other values); and a
+   `launchctl bootstrap` that didn't finish (no answer within its limit, or ended by a signal) is judged and start's own
+   job booted out (`e7cd6467` red, `6f04d1e2` green).
 
 ## What `v2` found on the Mac and doesn't change
 
