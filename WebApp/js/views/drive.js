@@ -154,6 +154,8 @@ export function promptCard(app) {
   let key = '';
   let chosen = null;
   let words = '';
+  // A multi-select's ticked options (indices), kept across draws of the same question.
+  let ticks = new Set();
   let shown = null;
   // This page's answer, for the session it was given on: { phase: 'waiting' (Undo still possible) | 'sending' |
   // 'answered' | 'refused' | 'dropped', session, prompt (the click's identity), choice, option, text, cancel, why }.
@@ -168,6 +170,21 @@ export function promptCard(app) {
     if (!prompt || mine?.phase === 'waiting' || mine?.phase === 'sending') return;
     const waiting = { phase: 'waiting', session: session.id, key: promptKey(prompt), question: prompt.question, options: [...prompt.options], choice: index + 1,
       option: prompt.options[index], text };
+    mine = waiting;
+    waiting.cancel = later(() => go(waiting), UNDO_MS);
+    draw(session);
+  }
+
+  // A multi-select's Submit: the ticked options go as `choices` (from 1, in their order), with the words of its free-text
+  // row when that is ticked; shown as their words, joined.
+  function answerTicks(session, indices, text = null) {
+    const prompt = session.prompt;
+    if (!prompt || !indices.length || mine?.phase === 'waiting' || mine?.phase === 'sending') return;
+    const sorted = [...indices].sort((a, b) => a - b);
+    const takes = new Set(prompt.text || []);
+    const said = sorted.map((index) => (takes.has(index) && text ? text : prompt.options[index])).join(', ');
+    const waiting = { phase: 'waiting', session: session.id, key: promptKey(prompt), question: prompt.question, options: [...prompt.options],
+      choices: sorted.map((index) => index + 1), option: said, text: null, words: sorted.some((index) => takes.has(index)) ? text : null };
     mine = waiting;
     waiting.cancel = later(() => go(waiting), UNDO_MS);
     draw(session);
@@ -192,7 +209,9 @@ export function promptCard(app) {
     }
     mine = { ...waiting, phase: 'sending' };
     draw(now);
-    const args = { session: waiting.session, choice: waiting.choice, question: waiting.question, options: waiting.options, ...(waiting.text ? { text: waiting.text } : {}) };
+    const args = waiting.choices
+      ? { session: waiting.session, choices: waiting.choices, question: waiting.question, options: waiting.options, ...(waiting.words ? { text: waiting.words } : {}) }
+      : { session: waiting.session, choice: waiting.choice, question: waiting.question, options: waiting.options, ...(waiting.text ? { text: waiting.text } : {}) };
     app.store.request('session.reply', args).then((reply) => {
       // It no longer needs you: until the node reads its screen again, the answered question counts no more.
       if (reply?.ok) app.store.sessionReplied?.(waiting.session, waiting.key);
@@ -254,7 +273,40 @@ export function promptCard(app) {
       h('header', { class: 'card-head' }, h('span', { class: 'priority blocking' }, t('drIsAsking', { agent }))),
       h('pre', { class: 'ask-text' }, prompt.question),
     ];
-    if (prompt.multiSelect) {
+    const notes = () => {
+      if (mine?.phase === 'refused' && mine.key === promptKey(prompt)) parts.push(h('p', { class: 'card-notice', role: 'alert' }, t('drReplyRefused', { why: mine.why })));
+      if (mine?.phase === 'dropped') parts.push(h('p', { class: 'card-notice', role: 'status' }, t('drReplyChanged')));
+      if (mine?.phase === 'still' && mine.key === promptKey(prompt)) parts.push(h('p', { class: 'card-notice', role: 'alert' }, t('drReplyStillOpen')));
+    };
+    if (prompt.multiSelect && acts) {
+      // Ticks, then Submit (the node ticks each box in the session and submits only once its screen shows them all).
+      // A tick changes this card in place: nothing is drawn again, so the focus stays where it is.
+      const ready = () => ticks.size > 0 && (![...ticks].some((index) => takes.has(index)) || !!words.trim());
+      const submit = kit.button('primary', { class: 'ticks-submit', title: t('drSubmitTicksTitle'),
+        onclick: () => { if (ready()) answerTicks(session, [...ticks], words.trim() || null); } }, t('drSubmitTicks'));
+      const field = kit.field({ class: 'answer-input ticks-words', type: 'text', value: words, placeholder: t('drYourWords'), 'aria-label': t('drYourWordsForThisOption'),
+        oninput: () => { words = field.value; submit.disabled = !ready(); },
+        onkeydown: (event) => { if (event.key === 'Enter' && !event.isComposing) { event.preventDefault(); submit.click(); } } });
+      const rows = prompt.options.map((option, index) => {
+        const label = h('label', { class: 'option option-tick' + (ticks.has(index) ? ' chosen' : '') });
+        const box = kit.checkbox({ checked: ticks.has(index), onchange: (event) => {
+          if (event.target.checked) ticks.add(index); else ticks.delete(index);
+          label.classList.toggle('chosen', ticks.has(index));
+          field.hidden = ![...ticks].some((one) => takes.has(one));
+          submit.disabled = !ready();
+        } });
+        box.checked = ticks.has(index);
+        label.append(box, h('span', { class: 'option-key', 'aria-hidden': 'true' }, String(index + 1)), h('span', { class: 'option-text' }, option),
+          prompt.descriptions?.[index] ? h('span', { class: 'option-note' }, prompt.descriptions[index]) : null);
+        return h('li', null, label);
+      });
+      field.value = words;
+      field.hidden = ![...ticks].some((one) => takes.has(one));
+      submit.disabled = !ready();
+      parts.push(h('p', { class: 'confirm-note' }, t('drTickAnyThenSubmit')), h('ul', { class: 'options ticks', 'aria-label': t('drTheChoices') }, rows), field,
+        h('div', { class: 'ticks-actions' }, submit));
+      notes();
+    } else if (prompt.multiSelect) {
       parts.push(h('ol', { class: 'options read-only' }, prompt.options.map((option) => h('li', { class: 'option' }, h('span', { class: 'option-text' }, option)))),
         h('p', { class: 'confirm-note' }, t('drItTakesSeveralTicksAnswer')));
     } else if (acts) {
@@ -270,9 +322,7 @@ export function promptCard(app) {
         box.grow();
         parts.push(box.el);
       }
-      if (mine?.phase === 'refused' && mine.key === promptKey(prompt)) parts.push(h('p', { class: 'card-notice', role: 'alert' }, t('drReplyRefused', { why: mine.why })));
-      if (mine?.phase === 'dropped') parts.push(h('p', { class: 'card-notice', role: 'status' }, t('drReplyChanged')));
-      if (mine?.phase === 'still' && mine.key === promptKey(prompt)) parts.push(h('p', { class: 'card-notice', role: 'alert' }, t('drReplyStillOpen')));
+      notes();
     } else {
       parts.push(h('div', { class: 'options' }, buttons));
       if (chosen !== null && takes.has(chosen)) {
@@ -318,7 +368,7 @@ export function promptCard(app) {
       const now = JSON.stringify([session.id, prompt?.question, prompt?.options, prompt?.at, mine?.phase ?? null, acting()]);
       if (now === key) return;
       // Another question (or the same one asked again): nothing picked for it yet.
-      if (!prompt || !key.startsWith(JSON.stringify([session.id, prompt.question]).slice(0, -1))) { chosen = null; words = ''; }
+      if (!prompt || !key.startsWith(JSON.stringify([session.id, prompt.question]).slice(0, -1))) { chosen = null; words = ''; ticks = new Set(); }
       key = now;
       draw(session);
     },

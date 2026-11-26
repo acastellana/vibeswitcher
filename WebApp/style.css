@@ -1139,6 +1139,10 @@ kbd { padding: 1px var(--s-3); border-radius: var(--r-1); box-shadow: var(--e-1-
 
 .options.read-only { list-style: none; }
 .options.read-only .option { padding: var(--s-3) var(--s-5); background: transparent; box-shadow: var(--e-1-in); cursor: default; }
+.options.ticks { list-style: none; } /* a multi-select's rows: each a label, its box first, ticked in place */
+.option-tick { cursor: pointer; }
+.ticks-words { width: 100%; margin-top: var(--s-3); }
+.ticks-actions { display: flex; justify-content: flex-end; margin-top: var(--s-4); }
 .card-command { display: grid; gap: var(--s-2); padding: var(--s-4) var(--s-5); border-radius: var(--r-2); box-shadow: var(--e-1-in); }
 .card-command-label { color: var(--ink-3); font-size: var(--t-caption); }
 .card-command code { overflow-wrap: anywhere; user-select: all; }

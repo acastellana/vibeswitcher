@@ -34,7 +34,7 @@ import { followKeyboard } from './js/viewport.js';
 const params = new URLSearchParams(location.search);
 const store = createStore();
 const ui = createUI();
-const mocked = params.has('mock') || params.has('still') || params.has('empty') || params.has('rows') || params.has('older') || params.has('toggle');
+const mocked = params.has('mock') || params.has('still') || params.has('empty') || params.has('rows') || params.has('older') || params.has('toggle') || params.has('multi');
 // The mock is loaded only for ?mock and its kin: the node's embedded page leaves it out (scripts/webapp-embed.sh), so
 // there it says so; WebApp/serve.sh and a scratch server's folder serve it.
 // Whether this page runs inside a frame (a cross-origin parent can't be read: framed too).
@@ -51,7 +51,7 @@ function ownBuild() {
 }
 const feed = mocked
   ? await import('./js/mock.js').then(
-    ({ createMock }) => createMock(store, { rows: Number(params.get('rows')) || 0, still: params.has('still'), delay: params.get('delay'), empty: params.has('empty'), older: params.has('older'), toggle: params.has('toggle'), held: params.has('held'), norole: params.has('norole'),
+    ({ createMock }) => createMock(store, { rows: Number(params.get('rows')) || 0, still: params.has('still'), delay: params.get('delay'), empty: params.has('empty'), older: params.has('older'), toggle: params.has('toggle'), multi: params.has('multi'), held: params.has('held'), norole: params.has('norole'),
       rich: params.has('rich'), stream: params.has('stream'), restart: params.has('restart'), slow: params.has('slow'),
       refuse: (params.get('refuse') || '').split(',').filter(Boolean) }),
     (error) => {

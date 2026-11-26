@@ -10,6 +10,8 @@
 //                 session.reply, session.new, session.resume and lead (as a node that doesn't take them from a page)
 //   ?toggle       the asking session's question is Claude's auto-mode popup, whose second option is a setting toggled
 //                 with Space: the node refuses it from a page, as it does there
+//   ?multi        the asking session's question is a multi-select (several ticks, a free-text row, Submit): a page
+//                 that acts answers it with choices, as the node does
 //   ?rich         "Add dark mode…" holds what an agent writes: a heading, emphasis, a quote, links, nested lists, a
 //                 table, fenced code, a long output and a failed command (each state of the chat, to see and shoot)
 //   ?stream       "Bank webhooks…" streams a long rich reply on load and again each time one ends
@@ -93,6 +95,9 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
     add(ASKING, { cwd: API, status: 'needs-you', since: ago(20), startedAt: ago(140), title: 'Why does the payout job run twice?', detail: 'Bash: pytest tests/test_payouts.py',
       prompt: options.toggle
         ? { question: 'Auto mode lets Claude run commands without asking first.', options: ['Continue', 'Also scan shell history'], descriptions: [null, 'on'], text: [], multiSelect: false, at: ago(20) }
+        : options.multi
+        ? { question: 'Which checks should run before the payout fix ships?', options: ['Unit tests', 'Integration tests', 'Lint', 'Type something'],
+          descriptions: ['tests/test_payouts.py', 'Against the staging database', null, null], text: [3], multiSelect: true, at: ago(20) }
         : { question: 'Bash command\n  pytest tests/test_payouts.py\nDo you want to proceed?', options: ['Yes', 'Yes, and don’t ask again for this command', 'No, and tell Claude what to do differently (esc)'],
           descriptions: [null, null, null], text: [], multiSelect: false, at: ago(20) },
       draft: { text: 'Once the tests pass, also add one for two regions at once.', images: [], at: ago(8), action: 'mock-draft' },
@@ -917,7 +922,17 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
     // again, refused unless it is the one the page was shown; then the keys typed, and the question closes a moment
     // after the reply, as the node's next read of the screen finds it gone.
     if (message.kind === 'session.reply') {
-      if (!Number.isInteger(args.choice) || args.choice < 1) return badArgs('session.reply needs choice, an option’s number from 1');
+      const several = args.choices !== undefined;
+      if (several) {
+        if (args.choice !== undefined) return badArgs('session.reply takes choice or choices, not both');
+        if (!Array.isArray(args.choices) || !args.choices.every(Number.isInteger)) return badArgs('session.reply’s choices are a list of options’ numbers from 1');
+        if (!args.choices.length) return badArgs('session.reply’s choices name no option: tick at least one');
+        if (args.choices.length > 32) return badArgs('session.reply takes at most 32 choices');
+        const low = args.choices.find((n) => n < 1);
+        if (low !== undefined) return badArgs(`session.reply’s choices are options’ numbers from 1, not ${low}`);
+        const twice = args.choices.find((n, i) => args.choices.indexOf(n) !== i);
+        if (twice !== undefined) return badArgs(`session.reply’s choices name option ${twice} twice`);
+      } else if (!Number.isInteger(args.choice) || args.choice < 1) return badArgs('session.reply needs choice, an option’s number from 1');
       const text = typeof args.text === 'string' && args.text.trim() ? args.text : null;
       const found = hostedSession(args.session, 'session.reply');
       if (found.refusal) return found.refusal;
@@ -930,7 +945,22 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
       if (args.options != null && JSON.stringify(args.options) !== JSON.stringify(menu.options)) {
         return no('its options aren’t the ones you were shown; they are now: ' + menu.options.map((option, index) => `${index + 1}. ${option}`).join('; '));
       }
-      if (menu.multiSelect) return no('its question takes several ticks: answer it in the session’s terminal');
+      if (several) {
+        // As `SessionReplyTicks.plan`: only the options it offers, words only for its free-text row.
+        if (!menu.multiSelect) return no('its question takes one choice, not several: answer it with choice');
+        const count = menu.options.length;
+        if (args.choices.length > count) return no(`its question has ${count} options: ${args.choices.length} choices are more than it offers`);
+        const past = args.choices.find((n) => n > count);
+        if (past !== undefined) return no(`its question has ${count} options, not ${past}`);
+        const ticked = [...args.choices].sort((a, b) => a - b).map((n) => n - 1);
+        const writing = ticked.filter((index) => (menu.text || []).includes(index));
+        if (writing.length && !text) return no(`option ${writing[0] + 1} takes your words: give them with the choices`);
+        if (!writing.length && text) return no('none of the options chosen takes words');
+        later(250, () => answered(target.id));
+        return { ok: true, result: { session: target.id, terminal: target.terminal, choices: ticked.map((index) => index + 1),
+          options: ticked.map((index) => (writing.includes(index) ? text : menu.options[index])), question: menu.question } };
+      }
+      if (menu.multiSelect) return no('its question takes several ticks: give them as choices');
       const index = args.choice - 1;
       if (index >= menu.options.length) return no(`its question has ${menu.options.length} options, not ${args.choice}`);
       if (menu.descriptions?.[index] != null && options.toggle) {

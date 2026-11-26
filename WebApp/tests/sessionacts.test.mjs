@@ -197,11 +197,89 @@ test('U1: an option that takes words opens a field; the answer carries them', as
   assert.deepEqual(r.sent[0].args, { session: SID, choice: 2, question: QUESTION, options: ['Yes', 'Type something.'], text: 'Use the staging database' });
 });
 
-test('U1: a multi-select keeps saying to answer it in its terminal, and sends nothing', () => {
+// C5 (the no-terminal inventory, 2026-11-26): a multi-select's ticks and Submit, where the page acts.
+const MULTI = { question: 'Which checks should run before the payout fix ships?', options: ['Unit tests', 'Integration tests', 'Lint', 'Type something'],
+  descriptions: ['tests/test_payouts.py', null, null, null], text: [3], multiSelect: true };
+const boxes = (el) => findAll(el, (node) => node.tag === 'input' && node.attrs.type === 'checkbox');
+const tick = (box, on = true) => { box.checked = on; box.dispatch('change'); };
+const submitButton = (el) => find(el, (node) => node.tag === 'button' && node.classList.contains('ticks-submit'));
+
+test('C5: an acting page ticks a multi-select’s options and submits them: the Blocking answer’s seconds, then choices, and the card says so', async () => {
   setLanguage('en');
-  const r = rig({ sessions: [asking({ prompt: prompt({ multiSelect: true }) })] });
+  const r = rig({ sessions: [asking({ prompt: prompt(MULTI) })],
+    replies: { 'session.reply': (args) => ({ ok: true, result: { session: args.session, terminal: 'pts/7', choices: args.choices, options: ['Unit tests', 'Lint'], question: MULTI.question } }) } });
+  const view = card(r);
+  assert.match(view.el.shownText, /Tick any that apply, then Submit\./);
+  assert.equal(boxes(view.el).length, 4, 'a box for each option');
+  assert.equal(find(view.el, byClass('copy-button')), null, 'no line to paste where the page answers');
+  const submit = submitButton(view.el);
+  assert.equal(submit.disabled, true, 'nothing ticked: nothing to submit');
+  const [unit, , lint, other] = boxes(view.el);
+  tick(unit);
+  tick(lint);
+  // A tick changes the card in place: the same box, the same Submit, nothing drawn again (the focus stays put).
+  assert.equal(boxes(view.el)[0], unit, 'not drawn again');
+  assert.equal(submitButton(view.el), submit);
+  assert.equal(submit.disabled, false);
+  assert.ok(find(view.el, (node) => node.tag === 'label' && node.classList.contains('chosen') && node.textContent.includes('Lint')), 'a ticked row shows it');
+  const words = find(view.el, byClass('ticks-words'));
+  assert.equal(words.hidden, true, 'no field for words until the row that takes them is ticked');
+  tick(other);
+  assert.equal(words.hidden, false);
+  assert.equal(submit.disabled, true, 'the free-text row ticked takes words first');
+  tick(other, false);
+  assert.equal(submit.disabled, false);
+  submit.click();
+  assert.match(view.el.shownText, /Sending “Unit tests, Lint”…/);
+  assert.ok(find(view.el, button('Undo')));
+  assert.equal(r.sent.length, 0, 'nothing sent while it waits');
+  assert.deepEqual(r.waiting.map((timer) => timer.ms), [UNDO_MS]);
+  r.fire();
+  assert.deepEqual(r.sent.map((one) => one.kind), ['session.reply']);
+  assert.deepEqual(r.sent[0].args, { session: SID, choices: [1, 3], question: MULTI.question, options: MULTI.options });
+  await flush();
+  assert.match(view.el.shownText, /You answered Unit tests, Lint/);
+});
+
+test('C5: the free-text row goes with its words; Undo keeps the ticks; a refusal says why and the ticks stay to answer again', async () => {
+  setLanguage('en');
+  const r = rig({ sessions: [asking({ prompt: prompt(MULTI) })],
+    replies: { 'session.reply': () => ({ ok: false, error: { code: 'refused', message: 'session e91d05a3: its boxes didn’t show the ticks asked before Submit (a key lost?): nothing submitted, answer again' } }) } });
+  const view = card(r);
+  const [, integration, , other] = boxes(view.el);
+  tick(integration);
+  tick(other);
+  const words = find(view.el, byClass('ticks-words'));
+  words.value = 'Load test the scheduler';
+  words.dispatch('input');
+  submitButton(view.el).click();
+  assert.match(view.el.shownText, /Sending “Integration tests, Load test the scheduler”…/);
+  find(view.el, button('Undo')).click();
+  assert.deepEqual(boxes(view.el).map((box) => box.checked), [false, true, false, true], 'Undo: the ticks as they were');
+  assert.equal(find(view.el, byClass('ticks-words')).value, 'Load test the scheduler');
+  submitButton(view.el).click();
+  r.fire();
+  assert.deepEqual(r.sent[0].args, { session: SID, choices: [2, 4], question: MULTI.question, options: MULTI.options, text: 'Load test the scheduler' });
+  await flush();
+  assert.match(view.el.shownText, /nothing submitted, answer again/);
+  assert.deepEqual(boxes(view.el).map((box) => box.checked), [false, true, false, true], 'refused: the ticks stay');
+});
+
+test('C5: the multi-select’s card in Spanish', () => {
+  setLanguage('es');
+  const r = rig({ sessions: [asking({ prompt: prompt(MULTI) })] });
+  const view = card(r);
+  assert.match(view.el.shownText, /Marca las que correspondan y pulsa Enviar\./);
+  assert.ok(submitButton(view.el).textContent.includes('Enviar'));
+  setLanguage('en');
+});
+
+test('U1: a multi-select on a page that doesn’t act keeps saying to answer it in its terminal, and sends nothing', () => {
+  setLanguage('en');
+  const r = rig({ rights: ['read', 'draft'], sessions: [asking({ prompt: prompt({ multiSelect: true }) })] });
   const view = card(r);
   assert.equal(optionButton(view.el, 'Yes'), null, 'no choice to click');
+  assert.equal(boxes(view.el).length, 0, 'no box to tick');
   assert.match(view.el.shownText, /It takes several ticks: answer it in the session’s own terminal/);
   assert.equal(r.sent.length, 0);
 });
@@ -416,6 +494,26 @@ test('the mock answers session.reply as the node does: the question checked agai
   assert.deepEqual(done, { ok: true, result: { session: SID, terminal: done.result.terminal, choice: 1, option: 'Yes', question: QUESTION } });
   await closes;
   assert.match((await ask({ choice: 1 })).error.message, /no question is open on its screen/, 'answered: nothing open any more');
+  mock.stop();
+});
+
+test('C5: the mock with multi answers choices as the node does: only the options it offers, each once, words only for its free-text row', async () => {
+  const { store, snapshot, mock } = await started({ multi: true });
+  const shown = snapshot.state.sessions.find((one) => one.id === SID).prompt;
+  assert.equal(shown.multiSelect, true);
+  const ask = (args) => mock.request({ kind: 'session.reply', args: { session: SID, question: shown.question, options: shown.options, ...args } });
+  assert.match((await ask({ choice: 1 })).error.message, /takes several ticks: give them as choices/);
+  assert.match((await ask({ choices: [1, 5] })).error.message, /has 4 options, not 5/, 'an option it hasn’t');
+  assert.match((await ask({ choices: [1, 2, 3, 4, 5] })).error.message, /5 choices are more than it offers/);
+  assert.equal((await ask({ choices: [2, 2] })).error.code, 'bad-args', 'one twice');
+  assert.equal((await ask({ choices: [] })).error.code, 'bad-args', 'none');
+  assert.equal((await ask({ choices: [1], choice: 1 })).error.code, 'bad-args', 'both');
+  assert.match((await ask({ choices: [1], text: 'more' })).error.message, /none of the options chosen takes words/);
+  assert.match((await ask({ choices: [4] })).error.message, /option 4 takes your words/);
+  const closes = store.when(changed(SID, (value) => value.prompt === null && value.status === 'working'));
+  const done = await ask({ choices: [3, 1, 4], text: 'Load test' });
+  assert.deepEqual(done.result, { session: SID, terminal: done.result.terminal, choices: [1, 3, 4], options: ['Unit tests', 'Lint', 'Load test'], question: shown.question });
+  await closes;
   mock.stop();
 });
 
