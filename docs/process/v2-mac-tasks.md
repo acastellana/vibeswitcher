@@ -470,6 +470,21 @@ or decided. Done on Linux, tested on both systems (`ApprovalJudgmentTests`, `App
    `NodeAgent.Job.node`), so an installed plist passes `start`'s check for that build, and any other is refused with the
    key that differs; the plist no longer holds `HOME` or `PATH`. *Owed:* a switch (or `start`) rewriting the plist for
    the build it goes to; the design's "What it doesn't cover" for step 5.
+   *The review's round (2026-11-26, "ready with fixes"; `5dfbde9b` red, `ed1a053b` and `abab3abd` green):* I1, a
+   plist swapped between start's read-back and launchd's read (`KeepAlive`, an extra variable, a file or its folder
+   swapped away and back) is refused and unloaded: start holds the file it checked (inode, ctime, size, bytes) and its
+   folder, and reads launchd's own word for the job (`path` by inode, `arguments`, the `environment` block, the output
+   paths, `properties`). I2, a running job of the label loaded from another plist, or from other bytes at the agent's
+   own path, or running a byte copy of the pinned host elsewhere, is refused by start, status and stop and left alone.
+   N1, stop asks once by the server's rule and a refusal stops nothing; N2, it waits for the host's descendants and the
+   sessions they lead; N3, the stale socket goes after a crash too; N4, the plist folder and the plist must be the
+   user's and writable by no one else; N5, `status --json` checks the host; the test shape's lock by file. *What can't
+   be bound:* an ancestor of the plist folder swapped and back with a key launchd's `print` doesn't show; a process that
+   left its session and lost its parent before stop's look. *For the installer (step 7):* it must write exactly the
+   plist `start` writes (`vibeswitcher agent-plist`, the same `NodeAgent.Job.node`), `0644`, in a `~/Library/LaunchAgents`
+   of the user's that no one else can write; a plist an earlier install wrote (with `HOME` and `PATH`) is refused by
+   `start`, which says to remove it and start again, so the installer's upgrade must replace it. *Owed:* a switch must
+   rewrite the plist for the build it goes to (until then, the next `start` after a switch refuses the old build's).
 
 ## What `v2` found on the Mac and doesn't change
 

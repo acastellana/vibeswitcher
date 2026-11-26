@@ -736,6 +736,16 @@ old's, hardened, at the same pid (`MacSwitchedHostTokenTests`): so `see`, and wi
 host by the build it now runs. No Background Task Management item and no notification came of any of these loads (the
 unified log after the runs).
 
+**What the round proved on this Mac** (red on `5dfbde9b`, green from `abab3abd`): `MacAgentRoundTests`, the reviewer's
+tests taken over (a swap to `KeepAlive` true or an extra variable at the bootstrap; the pinned host's exact command
+line in a job from another plist, and a byte copy of it at another path; a plist folder that is a link; a grandchild in
+a session of its own outliving a stop; a killed host's socket file after stop), and the round's own (the file and the
+folder swapped away and back with `Nice` 5, a line the agent doesn't compare; a job loaded from other bytes at the
+agent's own path, then start's bytes written back; a folder writable by others; a `0666` plist said by start; the
+earlier installer's plist; the server's stop refused, taken, and not there; `status --json`); `MacCheckedSessionsRoundTests`
+(nothing a starter plants, `ZDOTDIR`, `BASH_ENV`, `HOME`, `SHELL` and `LC_ALL` among it, reaches a session; the test
+shape's lock by file). The reviewer's seventeen others pass as they did.
+
 **What no test reaches while `macUnbuilt` and `isCheckedMacNode` are off, and what only the functions cover.** The
 real plist's program: a `--node` host on the Mac refuses at once (`macNodeRefusal`), and a checked start needs the
 installed root record, which no test chooses; so the plist's checked command line is tested as data (it parses back to
@@ -743,8 +753,8 @@ the build's folder and server, `NodeAgentTests/theProgramArgumentsAreACheckedNod
 a scratch host's arguments with a scratch environment (the real plist's `SWIFT_BACKTRACE` alone would leave the host's
 `HOME`, and so its files, the user's). The command line's Mac arm (`MacAgentCommand`: the build by its own code in the
 installed record, `~/Library/LaunchAgents`, the label `dev.vibeswitcher.node`) runs only past `usersNodeRefusal`, never
-here. The server's stop inside `stop` (no scratch job has a server child: the server needs a checked node's connector
-check) and so a stop that ends sessions through it; with no server, the bootout ends the host and the host's sessions
+here. The server's stop inside `stop` is tested at function level only (refused, taken, none; no scratch job has a
+server child: the server needs a checked node's connector check), and so a stop that ends sessions through it; with no server, the bootout ends the host and the host's sessions
 lose their terminal (shown for the group and a session-leader child in the measurement above, not with a scratch job's
 own sessions: a launchd job's stdin is `/dev/null`, so no app key reaches it and no session can be spawned there). The
 `launchctl getenv` refusal of a loader variable (no test sets one in the user's launchd: that would reach every job of
