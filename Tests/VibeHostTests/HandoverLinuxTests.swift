@@ -228,8 +228,13 @@ extension HandoverLinuxTests {
         #expect(await host.handOver(to: host.newBinary, through: client) == .ok, "\(host.log)")
         #expect(await eventually { host.log.contains("took over 1 sessions") }, "\(host.log)")
         _ = try await TestClient.welcomed(host.socket, appKey: host.appKey)
-        // A change of the test's own, after the handover: once the watch has told it, it has told everything before.
-        FileManager.default.createFile(atPath: host.dir + "/marker", contents: nil)
+        // A change of the test's own, after the handover: once the watch has told it, it has told everything before. One
+        // entry event, by open(O_CREAT): Foundation's createFile on Linux writes a temporary name and renames it over
+        // (IN_CREATE, IN_MOVED_FROM, IN_MOVED_TO), which the watch told as one change or two as its reads fell (v2 linux,
+        // host job, 35499e25: 2).
+        let made = open(host.dir + "/marker", O_CREAT | O_EXCL | O_WRONLY | O_CLOEXEC, 0o600)
+        #expect(made >= 0, "marker: errno \(errno)")
+        if made >= 0 { Sys.close(made) }
         #expect(await eventually { seen.lock.withLock { seen.changes } >= 1 })
         #expect(seen.lock.withLock { seen.changes } == 1, "the lock's folder changed during the handover")
         let after = try FileManager.default.contentsOfDirectory(atPath: host.dir).filter { $0 != "marker" }.sorted()

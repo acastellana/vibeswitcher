@@ -42,12 +42,10 @@ struct MacCheckedSessionsRoundTests {
         }, late: { [CheckedSessions.testShapeFlag, home] })
         defer { second.stop() }
         let (client, _, _, _, _, _, _) = try await TestClient.welcomed(second.socket, appKey: second.appKey)
-        // And, for a PATH without the marker, whether the shell was a login one and what its home held (the v2 macos host job
-        // of 568df3b5: bash, the marker in .bash_profile, and still not in PATH, where MacCheckedSessionsTests' passed).
-        let session = try await client.spawn("env; echo umask=$(umask); echo shell=$0; "
-            + "(shopt -q login_shell 2>/dev/null || [[ -o login ]] 2>/dev/null) && echo login=yes || echo login=no; "
-            + "echo home-files=$(ls -A \"$HOME\" | tr '\\n' ' '); echo DONE-ENV", cwd: home)
+        // Printed once attached (`MacCheckedSessionsTests.printOnceAttached`): never an ended session's 80-column screen.
+        let session = try await client.spawn(MacCheckedSessionsTests.printOnceAttached("env; echo umask=$(umask); echo shell=$0"), cwd: home)
         await client.attach(session.id)
+        client.send(.input(id: session.id, bytes: Data("go\r".utf8), reply: false))
         #expect(await eventually { client.text(session.id).contains("DONE-ENV") }, "\(client.text(session.id))\n\(second.log)")
         let text = client.text(session.id).replacingOccurrences(of: "\r", with: "")
         let lines = text.split(separator: "\n").map(String.init)
