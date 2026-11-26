@@ -40,6 +40,16 @@ public struct MacAgent {
         case other(String)
     }
 
+    /// What the node's server said of `stop` (`Steps.serverStop`).
+    public enum ServerStop: Equatable, Sendable {
+        /// It took the stop: the leads and every session end, and the host shuts down, in order.
+        case stopped
+        /// It answered and refused, or its answer couldn't be read: why, in the user's words.
+        case refused(StartRefusal)
+        /// No server answered: why.
+        case none(String)
+    }
+
     public struct Steps {
         /// Runs `/bin/launchctl` with these arguments (the place's `launchctl` first); nil when it couldn't run.
         public var launchctl: ([String]) -> Ran?
@@ -53,8 +63,9 @@ public struct MacAgent {
         public var say: (String) -> Void
         /// `stop`'s confirmation, `what` shown (the typed code); a failure stops nothing.
         public var confirm: (_ what: String) -> Result<Void, StartRefusal>
-        /// The server's own stop, when one answers (it ends the leads and every session, and the host shuts down).
-        public var serverStop: () -> Void
+        /// The server's own stop, `what` shown, asked under the rule the other commands use (the typed code, or the Mac's
+        /// dialog), and its answer.
+        public var serverStop: (_ what: String) -> ServerStop
         /// A process's children, by pid and start (`Platform.Processes.children` and `link`).
         public var children: (pid_t) -> [Platform.Processes.Link]
         /// The process `link` names still runs (the same pid and start).
@@ -74,12 +85,14 @@ public struct MacAgent {
         /// How many sessions the node's server says the host runs (`status`'s `host.liveSessions`), nil when no server
         /// answers: the host's own welcome lists only the sessions its caller may end, none for the command line.
         public var liveSessions: () -> Int?
+        /// The file a process runs (`Platform.Processes.executable`: the kernel's path of its image).
+        public var executable: (pid_t) -> String? = Platform.Processes.executable
 
         public init(launchctl: @escaping ([String]) -> Ran?, pins: @escaping () -> Result<NodePins, NodePins.Refused>,
                     cdhashOf: @escaping (String) -> Data?,
                     see: @escaping (_ socket: String, _ pid: pid_t, _ builds: [NodePins.Build]) -> Seen,
                     say: @escaping (String) -> Void, confirm: @escaping (_ what: String) -> Result<Void, StartRefusal>,
-                    serverStop: @escaping () -> Void, children: @escaping (pid_t) -> [Platform.Processes.Link],
+                    serverStop: @escaping (_ what: String) -> ServerStop, children: @escaping (pid_t) -> [Platform.Processes.Link],
                     alive: @escaping (Platform.Processes.Link) -> Bool, lockFree: @escaping (String) -> Bool,
                     patience: TimeInterval = 30, now: @escaping () -> Date = Platform.Clock.steadyDate, pause: @escaping () -> Void = { usleep(50_000) },
                     arguments: @escaping (pid_t) -> [String] = Platform.Processes.arguments,
@@ -224,7 +237,7 @@ public struct MacAgent {
         // launchd's children, outside the job's group, and are waited for by these.
         let snapshot = Platform.Processes.link(pid).map { [$0] } ?? []
         let processes = snapshot + steps.children(pid)
-        steps.serverStop()
+        _ = steps.serverStop(what)
         if let why = bootout() { return .failure(why) }
         let deadline = steps.now().addingTimeInterval(steps.patience)
         while true {
@@ -337,6 +350,11 @@ public struct MacAgent {
             }
         }
         return nil
+    }
+
+    /// Whether `status` checks the node's host first (the user's node on the Mac, past its refusal).
+    public static func statusChecksHost(onTheMac: Bool, isScratch: Bool, refused: Bool, json: Bool) -> Bool {
+        onTheMac && !isScratch && !refused && !json
     }
 
     // MARK: Helpers
@@ -476,7 +494,7 @@ extension MacAgent.Steps {
     /// file, the host checked by `MacAgent.see`, the process table and the lock; the record (`pins`), what is said, the
     /// confirmation and the server's stop as the caller gives them.
     public static func system(place: NodeAgent.Place, pins: @escaping () -> Result<NodePins, NodePins.Refused>, say: @escaping (String) -> Void,
-                              confirm: @escaping (_ what: String) -> Result<Void, StartRefusal>, serverStop: @escaping () -> Void,
+                              confirm: @escaping (_ what: String) -> Result<Void, StartRefusal>, serverStop: @escaping (_ what: String) -> MacAgent.ServerStop,
                               jobArguments: @escaping (NodePins.Build) -> [String]?, liveSessions: @escaping () -> Int? = { nil }) -> MacAgent.Steps {
         MacAgent.Steps(
             launchctl: { arguments in

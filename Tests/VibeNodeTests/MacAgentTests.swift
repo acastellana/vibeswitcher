@@ -175,7 +175,7 @@ struct MacAgentTests {
         let steps = MacAgent.Steps(launchctl: { ran.append($0); return MacAgent.Ran(status: 113, output: "") },
                                    pins: { .success(NodePins(uid: getuid(), builds: [row])) },
                                    cdhashOf: { $0.hasSuffix("vibeswitcher-host") ? Data(repeating: 9, count: 20) : row.server },
-                                   see: { _, _, _ in .nothing("") }, say: { _ in }, confirm: { _ in .success(()) }, serverStop: {},
+                                   see: { _, _, _ in .nothing("") }, say: { _ in }, confirm: { _ in .success(()) }, serverStop: { _ in .none("no server answers") },
                                    children: { _ in [] }, alive: { _ in false }, lockFree: { _ in true })
         let job = NodeAgent.Job(label: place.label, programArguments: ["/x/bin/vibeswitcher-host"], environment: [:], standardErrorPath: place.log, atLogin: false)
         let started = MacAgent(place: place, steps: steps).start(job, build: row, folder: "/x")
@@ -237,7 +237,8 @@ struct MacAgentTests {
                                        pins: { .success(NodePins(uid: getuid(), builds: [row])) },
                                        cdhashOf: { $0.hasSuffix("vibeswitcher-host") ? row.host : row.server },
                                        see: { _, pid, _ in .host(MacAgent.Host(commit: row.commit, pid: pid, startedAt: nil)) },
-                                       say: { log.say($0) }, confirm: { log.say($0); return .failure(StartRefusal("not typed")) }, serverStop: {},
+                                       say: { log.say($0) }, confirm: { log.say($0); return .failure(StartRefusal("not typed")) },
+                                       serverStop: { what in log.say(what); return sessions == nil ? .none("no server answers") : .refused(StartRefusal("not typed")) },
                                        children: { _ in [] }, alive: { _ in false }, lockFree: { _ in true }, patience: 2,
                                        arguments: { _ in arguments ?? job.programArguments }, jobArguments: { $0 == row ? job.programArguments : nil },
                                        liveSessions: { sessions })
@@ -370,7 +371,7 @@ final class ScratchAgent: @unchecked Sendable {
                             standardErrorPath: place.log, atLogin: false)
         let arguments = job.programArguments
         agent = MacAgent(place: place, steps: MacAgent.Steps.system(place: place, pins: { .success(pins) }, say: { _ in },
-                                                                     confirm: { _ in .success(()) }, serverStop: {},
+                                                                     confirm: { _ in .success(()) }, serverStop: { _ in .none("no server answers") },
                                                                      jobArguments: { $0 == build ? arguments : nil }))
     }
 

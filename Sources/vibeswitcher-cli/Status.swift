@@ -74,7 +74,8 @@ enum StatusCommand {
         let context = NodeContext.current()
         // The Mac: the user's node's LaunchAgent says first whether its host runs, and its build (MacAgentCommand.swift);
         // reached only once the Mac's refusal (`usersNodeRefusal`) is lifted.
-        if Platform.Service.manager == .launchd, !context.isScratch, context.usersNodeRefusal == nil, !asJSON, let code = MacAgentCommand.status() { return code }
+        if MacAgent.statusChecksHost(onTheMac: Platform.Service.manager == .launchd, isScratch: context.isScratch, refused: context.usersNodeRefusal != nil,
+                                     json: asJSON), let code = MacAgentCommand.status() { return code }
         context.sayScratch()
         let client: NodeClient
         switch NodeClient.connect(context) {

@@ -38,7 +38,7 @@ enum MacAgentCommand {
         case .success(let made): job = made
         }
         let agent = MacAgent(place: place, steps: .system(place: place, pins: { pins }, say: { Say.out($0) },
-                                                          confirm: { _ in .success(()) }, serverStop: {}, jobArguments: jobArguments))
+                                                          confirm: { _ in .success(()) }, serverStop: { _ in .none("no server is asked") }, jobArguments: jobArguments))
         switch agent.start(job, build: own.build, folder: own.folder) {
         case .success: return 0
         case .failure(let why): return said(why)
@@ -57,9 +57,10 @@ enum MacAgentCommand {
                                               connection.typed = typed
                                               return outcome == .typed ? .success(()) : .failure(StartRefusal(outcome.refusal))
                                           },
-                                          serverStop: {
-                                              guard let client = connection.client else { return }
+                                          serverStop: { _ in
+                                              guard let client = connection.client else { return .none("no server answered") }
                                               _ = StopCommand.throughServer(context, client, action: action, typed: connection.typed)
+                                              return .stopped
                                           },
                                           jobArguments: jobArguments,
                                           // The server's count (`host.liveSessions`), asked before the confirmation; its
@@ -79,7 +80,7 @@ enum MacAgentCommand {
     static func status() -> Int32? {
         guard let place = place() else { return Say.unbuilt("this system has no launchctl") }
         let agent = MacAgent(place: place, steps: .system(place: place, pins: { NodePins.read() }, say: { Say.out($0) },
-                                                          confirm: { _ in .success(()) }, serverStop: {}, jobArguments: jobArguments))
+                                                          confirm: { _ in .success(()) }, serverStop: { _ in .none("no server is asked") }, jobArguments: jobArguments))
         switch agent.status() {
         case .success: return nil
         case .failure(let why): return said(why)
