@@ -93,7 +93,8 @@ struct KeychainCallLintTests {
     static let lockStateProbe: Set<String> = ["Sec" + "KeychainOpen", "Sec" + "KeychainGetStatus", "Sec" + "KeychainStatus"]
 
     struct Finding: Equatable, CustomStringConvertible {
-        let file: String, line: Int, text: String, rule: String
+        /// `text`: the line; `command`: it with the lines it continues onto, which an allowed entry is matched against.
+        let file: String, line: Int, text: String, command: String, rule: String
         var description: String { "\(file):\(line): \(rule): \(text.trimmingCharacters(in: .whitespaces))" }
     }
 
@@ -139,19 +140,30 @@ struct KeychainCallLintTests {
         return text
     }
 
-    /// Whether the SecItem call at `lines[index]` (its `(` at `open`) asks with no UI: the flag in its arguments, or
-    /// in the definition of the query it's handed (`query as CFDictionary`), or set on that query in the file.
-    static func asksWithoutUI(_ lines: [String], at index: Int, open: String.Index) -> Bool {
+    /// Whether the SecItem call at `lines[index]` (its `(` at `open`) asks with no UI: the flag in its arguments, or in
+    /// the query it's handed (`query as CFDictionary`) as the call sees it: the nearest definition above the call
+    /// (another function's `query` of the same name doesn't count), or set on it between that definition and the call.
+    static func asksWithoutUI(_ lines: [String], at index: Int, open: String.Index, in path: String) -> Bool {
         let call = balanced(lines, from: index, at: open)
         if call.contains(noUI) { return true }
         guard let name = call.firstMatch(of: #/^\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?:as\s+CFDictionary)?\s*[,)]/#)?.1 else { return false }
-        for (row, line) in lines.enumerated() {
-            // From its `=`: a type annotation's brackets (`: [String: Any]`) come before it.
-            if let definition = line.firstMatch(of: try! Regex(#"\b(?:let|var)\s+\#(name)\b[^=]*="#)),
-               balanced(lines, from: row, at: definition.range.upperBound).contains(noUI) { return true }
-            if line.contains("\(name)[") && line.contains(noUI) { return true }
+        let definition = try! Regex(#"\b(?:let|var)\s+\#(name)\b[^=]*="#)
+        guard let row = (0...index).reversed().first(where: { !isComment(lines[$0], in: path) && lines[$0].contains(definition) }) else { return false }
+        // From its `=`: a type annotation's brackets (`: [String: Any]`) come before it.
+        let equals = lines[row].firstMatch(of: definition)!.range.upperBound
+        if balanced(lines, from: row, at: equals).contains(noUI) { return true }
+        return (row...index).contains { lines[$0].contains("\(name)[") && lines[$0].contains(noUI) && !isComment(lines[$0], in: path) }
+    }
+
+    /// `lines[index]` with the lines it continues onto (each ending in `\\`) joined to it: a wrapped command read whole.
+    static func logical(_ lines: [String], at index: Int) -> String {
+        var text = lines[index], row = index
+        while text.hasSuffix("\\"), row + 1 < lines.count {
+            text.removeLast()
+            row += 1
+            text += " " + lines[row]
         }
-        return false
+        return text
     }
 
     /// What the lint flags under `root`, in file and line order, before the allowed entries are taken out.
@@ -162,21 +174,23 @@ struct KeychainCallLintTests {
                 // One finding a line: a never-allowed rule first.
                 var rules: [String] = []
                 func flag(_ rule: String) { rules.append(rule) }
-                let unsafe = line.matches(of: securityCall).contains { match in
+                // The command whole, its continued lines joined: `list-keychains -d user \\` then `-s …` sets the list.
+                let command = logical(lines, at: index)
+                let unsafe = command.matches(of: securityCall).contains { match in
                     let subcommand = String(match.output[1].substring ?? "")
                     guard readOnly.contains(subcommand) else { return true }
-                    return subcommand == "list-keychains" && line[match.range.upperBound...].contains(#/\s-s\b/#)
+                    return subcommand == "list-keychains" && command[match.range.upperBound...].contains(#/\s-s\b/#)
                 }
-                if unsafe || line.contains(securityOpen) || line.contains(securityLaunch) { flag("security outside \(helper)'s keychain_call") }
+                if unsafe || line.contains(securityOpen) || command.contains(securityLaunch) { flag("security outside \(helper)'s keychain_call") }
                 for match in line.matches(of: secItemCall) {
                     let open = line[match.range].lastIndex(of: "(")!
-                    if !asksWithoutUI(lines, at: index, open: open) { flag("SecItem call without \(noUI)") }
+                    if !asksWithoutUI(lines, at: index, open: open, in: path) { flag("SecItem call without \(noUI)") }
                 }
                 if line.matches(of: aclOrKeychainCall).contains(where: { !lockStateProbe.contains(String($0.output[1].substring ?? "")) }) {
                     flag("keychain or ACL call")
                 }
-                if line.contains(never) { rules.insert("never: an access-list change, or security killed at a timeout", at: 0) }
-                if let rule = rules.first { flagged.append(Finding(file: path, line: index + 1, text: line, rule: rule)) }
+                if command.contains(never) { rules.insert("never: an access-list change, or security killed at a timeout", at: 0) }
+                if let rule = rules.first { flagged.append(Finding(file: path, line: index + 1, text: line, command: command, rule: rule)) }
             }
         }
         return flagged
@@ -188,7 +202,7 @@ struct KeychainCallLintTests {
         let offending = findings(under: root).filter { finding in
             if finding.rule.hasPrefix("never:") { return true }
             if allowedFiles.contains(where: { $0.file == finding.file }) { return false }
-            guard let entry = allowed.firstIndex(where: { $0.file == finding.file && finding.text.contains($0.text) }) else { return true }
+            guard let entry = allowed.firstIndex(where: { $0.file == finding.file && finding.command.contains($0.text) }) else { return true }
             used.insert(entry)
             return false
         }
@@ -246,6 +260,8 @@ struct KeychainCallLintTests {
             security \\
                 add-generic-password -s probe "$kc"
             security -q list-keychains -d user
+            security list-keychains -d user \\
+                -s "$kc"
             """
         try script.write(to: root.appendingPathComponent("scripts/probe.sh"), atomically: true, encoding: .utf8)
         try "security add-generic-password\n".write(to: root.appendingPathComponent(Self.helper), atomically: true, encoding: .utf8)
@@ -283,10 +299,19 @@ struct KeychainCallLintTests {
                 #expect(\(item)CopyMatching(bad as CFDictionary, nil) == errSecSuccess)
                 // \(item)Add(bad as CFDictionary, nil) in a comment
             }
+            func a() {
+                let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecUseAuthenticationUI as String: kSecUseAuthenticationUIFail]
+                \(item)CopyMatching(query as CFDictionary, nil)
+            }
+            func b() {
+                let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword]
+                // query[kSecUseAuthenticationUI as String] = kSecUseAuthenticationUIFail
+                \(item)CopyMatching(query as CFDictionary, nil)
+            }
             """
         try swift.write(to: root.appendingPathComponent("Tests/SomeTests/Probe.swift"), atomically: true, encoding: .utf8)
-        let planted = (2...13).map { "scripts/probe.sh:\($0)" } + (20...25).map { "scripts/probe.sh:\($0)" }
-            + [4, 5, 14, 15, 16, 17, 18, 21, 22, 23, 24].map { "Tests/SomeTests/Probe.swift:\($0)" }
+        let planted = (2...13).map { "scripts/probe.sh:\($0)" } + (20...25).map { "scripts/probe.sh:\($0)" } + ["scripts/probe.sh:28"]
+            + [4, 5, 14, 15, 16, 17, 18, 21, 22, 23, 24, 34].map { "Tests/SomeTests/Probe.swift:\($0)" }
         #expect(Self.findings(under: root).map { "\($0.file):\($0.line)" } == (2...4).map { "scripts/build-app.sh:\($0)" } + planted)
         #expect(Self.check(under: root).offending.map { "\($0.file):\($0.line)" } == (3...4).map { "scripts/build-app.sh:\($0)" } + planted)
     }
