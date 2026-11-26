@@ -567,10 +567,13 @@ No `Sockets` (the host holds the web port, item 9), no `WatchPaths`, `KeepAlive`
 **Who writes it, and a changed or planted one.** `start` writes it when there is none: the bytes made for this build
 as a new file at the plist's path (`open` with `O_EXCL` and `O_NOFOLLOW`, the user's, `0644` as LaunchAgents' are),
 then read back and checked (a write cut short leaves a file the next `start` refuses, naming why). When there is one, `start` reads it (`O_NOFOLLOW`, a regular file, at most 64 KiB) and it must
-be exactly what `start` would write for this build (`NodeAgent.check`: every key and value, nothing added); otherwise
+be exactly what `start` would write for this build (`NodeAgent.check`: every key and value, nothing added, and byte for
+byte, so a value of another type that reads back equal, an integer for a boolean, is refused); otherwise
 it refuses, naming the key, and loads nothing, the file left as it is (the install of another build writes its own,
 step 7). Between the check and `bootstrap` the path is read again by launchd: a file swapped in that gap is a program
-launchd starts, and the check after the load (below) is what catches it: it is refused and booted out.
+launchd starts, and the check after the load (below) is what catches it: the job's process must run the job's own
+command line as well as the pinned host's code, so the pinned host started with arguments of the swapped file's (its
+own `--socket` and `--lock`, a plain host) is refused and booted out.
 
 **How `start` knows the host is the one it meant: by audit token and code, never launchctl's text** (M11: `program` is
 the configured program, any path's text a session can give). The build is chosen by code first: the command line finds
@@ -581,18 +584,25 @@ pin, refuses before anything is written. After the load `start` waits for the ho
 to take a connection, and takes the connection's `LOCAL_PEERTOKEN`: its pid must be launchd's `pid` for the job (the
 one word of `launchctl print` used, as item 12 does), its running code (Security's dynamic check) the host the record
 pins for that build, with the Hardened Runtime, and the process the same before and after those reads
-(`Link.isProcess(of:)`); then the host's welcome, whose pid must be the token's. Only then "the node runs". While it
+(`Link.isProcess(of:)`); then the host's welcome, whose pid must be the token's; and the process's command line (the
+kernel's, to its own user) exactly the job's (`Steps.jobArguments`: `NodeUnit.execStart` for the user's node). Only then
+"the node runs". `status` and `stop` check the same, a switched node's process allowed the keeper's two flags and their
+numbers after it (`NodeAgent.keeperFlags`, a checked node's next image's). While it
 waits, a job whose process ended (`state = not running`) refuses at once with the end of `node.log`; at the limit
 (30 s) it refuses; and every refusal after the load boots out what `start` loaded, so it leaves no job behind.
 
 **A job of that label already there.** Running: the host at the socket is checked as above against any build the record
 pins; it passes, and `start` says the node runs already (nothing loaded or written); it doesn't, and `start` refuses
 ("a job labelled … runs pid N, which isn't the node's host: …") and leaves it alone. Loaded and not running (a crash, an
-exit): nothing of it runs, so `start` boots it out and loads its own checked plist.
+exit) from the agent's own file (`print`'s `path`, by device and inode): nothing of it runs, so `start` boots it out and
+loads its own checked plist; loaded from another file, it is refused and left loaded. A `bootstrap` that fails (a job of
+the label loaded meanwhile, by a second `start` or a login) loaded nothing of this start's: nothing is booted out.
 
 **`stop`: what it ends and what the user is told first.** The job's host checked as above (a job running another program
 is refused and left alone, as `start` does). Then it says what ends: "the node's host (pid N, build C), its server and
-its K sessions end, and the job is unloaded" (K from the host's welcome), and asks for the typed code (`TypedWord`). It
+its K sessions end, and the job is unloaded" (K the server's count, `status`'s `host.liveSessions`, as on Linux: the
+host's welcome lists only the sessions its caller may end, none for the command line; "every session it runs" when no
+server answers), and asks for the typed code (`TypedWord`). It
 then asks the server to stop when one answers (it ends the leads and every session, and the host shuts down, as on
 Linux), takes a snapshot of the host's children (pid and start), and boots the job out: launchd ends the host's group;
 the sessions and the server child are outside it (measured above), and end with the host (the server's connector
@@ -603,7 +613,8 @@ node isn't running" (69).
 
 **`status`: from the host itself.** Not loaded: not running. Loaded, no pid: not running, with launchd's last exit or
 signal. A pid: the host at the socket checked as above against every build the record pins, then its welcome: "the node
-runs: build C (the record's row its running code is), host pid N since T, K sessions". A host that fails the check is
+runs: build C (the record's row its running code is), host pid N since T", then the server's own status. A host that
+fails the check is
 said with why ("a job labelled … runs pid N, which isn't the node's host").
 
 **Sessions' environment** (step 5's debt from the checked start's reset). A session's program on the Mac runs as
@@ -692,6 +703,16 @@ the user's). The plist written at the user's login (`--at-login`, `RunAtLoad`).
 - *Sessions keep a hard core limit of 0* (the reset's): soft-only in the reset would give `ulimit -c` back.
 - *A session that ignores the hangup* outlives a `stop` without the server: `stop` names it by pid and fails after its
   limit (it doesn't kill what may be the user's own program).
+- *The Mac's `start` is not Linux's start sequence*: no not-promised acknowledgment (S11), typed code, journal entry,
+  interop refusal or preflight runs before it (the Mac has no journal yet, step 6). For the switch-on review to decide.
+- *The plist outlives a refused start* once written (a failed bootstrap, a host that ended at its start, no host in
+  30 s): with `--at-login` it is in `~/Library/LaunchAgents` with `RunAtLoad`, and launchd loads it at the next login
+  unchecked (its host then runs its own checked start). And a plist written by a plain `start` refuses a later
+  `start --at-login` (its `RunAtLoad` differs), with no command yet that rewrites or removes it.
+- *The welcome is waited for 5 s* on each look: a checked node that listens but answers late on a loaded Mac makes
+  `start` look again until its 30 s, then refuse and unload it.
+- *Two `start`s at once* have no lock between them: the second's plist write (`O_EXCL`) or `bootstrap` fails and it
+  refuses, touching nothing; a start lock as Linux's is an idea for the reviewer.
 
 **Where it is built.** `NodeAgent` (the plist as data: `Job`, `Place`, `check`, the `launchctl` lines and `print`'s
 lines), `MacAgent` (VibeNode: `start`, `stop`, `status` with every step injected, and the host check by token and
