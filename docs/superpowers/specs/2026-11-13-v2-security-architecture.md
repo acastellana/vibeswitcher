@@ -2481,8 +2481,9 @@ environment's names, its `--settings` keys and env names, a worker's branch sett
   are gone (`HostedSession.requestCommand`), so under the floor its bind is refused ("start it again") and a retry works;
 - a settings file (the Mac's, S10) changed after the bind read it: the digest the builder gives proves only what the bind
   read; what Claude Code reads after is V3's (the running agent's check above);
-- whether a pinned key in a role's `--settings` env (the models, ANTHROPIC_BASE_URL) wins over the same key in the user's
-  or the branch's settings, key by key, is unverified; a worker's branch naming a routing key is refused at its bind.
+- whether a pinned key in a role's `--settings` env (the models) wins over the same key in the user's or the branch's
+  settings, key by key, is unverified; a worker's branch naming a routing key is refused at its bind;
+- pin ANTHROPIC_BASE_URL once a real subscription session is seen to start and answer with it set.
 The post-merge Claude re-audit's obligation and its security mark live on the board (`task.claudeReaudit`: `pending`,
 `sensitive`, and the task's `riskRaised`, in board.json, which anyone of the uid can write): moving them into the vault is open.
 Also not seen, with (a): a race on the worktree's settings, written before the worker starts (it reads them), then
