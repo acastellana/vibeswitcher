@@ -4694,3 +4694,7 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-26 07:54 Planned review-v2-s-mac-4: Review v2's Mac rows 7 and 10 (branch v2-mac-anchored-cli: the command line's anchored identity, and the switch that rewrites the plist) as an independent security reviewer: report only
 - 2026-11-26 07:54 Started a worker on review-v2-s-mac-4
 - 2026-11-26 08:09 Kept v2-design-device-keys unmerged: By design nothing of it merges into main: the device keys design (docs/superpowers/specs/2026-11-26-v2-device-keys-design.md) is on the local branch v2-device-keys-design in its clone (.vibeswitcher/v2-keys-design, tip d11bddfd), on top of v2-no-terminal: independently reviewed ('sound with changes'), every finding applied, and the user's two answers (A64D1FC7, CB1AC032) written as decided. The build slices branch from it; pushed as a branch for v2 at the user's say. No merge and no cleanup until then.
+- 2026-11-26 08:10 Planned v2-device-keys-slice: v2 device keys, slice 1: the signed frame envelope and its P-256 check (VibeCore, new file; in a clone, a branch for v2)
+- 2026-11-26 08:10 Planned v2-device-keys-slices: v2 device keys, slices 2 and 3: the WebAuthn assertion and registration checks (VibeCore, new file; in a clone, a branch for v2)
+- 2026-11-26 08:10 Started a worker on v2-device-keys-slice
+- 2026-11-26 08:10 Started a worker on v2-device-keys-slices
