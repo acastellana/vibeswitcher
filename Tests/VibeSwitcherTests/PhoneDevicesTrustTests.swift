@@ -28,10 +28,13 @@ extension TailscaleFakeTests { @MainActor @Suite(.serialized) struct PhoneDevice
     }
 
     /// A loopback port nothing holds right now, below the range the system hands out for port 0 (as
-    /// PhoneTailscaleFlowTests picks its own).
+    /// PhoneTailscaleFlowTests picks its own), never the real app's phone ports (`PhonePorts.server` and its preview
+    /// slots after it): a test holding one stops the user's app from listening there.
     private func freePort() throws -> UInt16 {
+        let appsPorts = PhonePorts.server...(PhonePorts.server + UInt16(PhonePorts.previewSlots))
         for _ in 0..<100 {
             let port = UInt16.random(in: 40_000..<49_000)
+            if appsPorts.contains(port) { continue }
             let fd = socket(AF_INET, SOCK_STREAM, 0)
             defer { close(fd) }
             var address = sockaddr_in()
