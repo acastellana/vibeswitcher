@@ -61,7 +61,7 @@ function settingRow(setting, { folder, home, editing, toggle, app = null, words 
     h('p', { class: 'setting-about' }, marked(setting.about, words)),
     h('p', { class: 'setting-where' }, words.some((word) => String(setting.key).toLowerCase().includes(word)) ? [h('code', null, marked(setting.key, words)), ' · '] : null,
       where.length ? where.join(' · ') + ' · ' : null,
-      place ? h('span', { class: 'setting-file', title: place, tabindex: 0 }, t('svWhereKept'), ' ', h('span', { class: 'setting-file-path' }, elided(place))) : null),
+      place ? h('details', { class: 'setting-file' }, h('summary', null, t('svWhereKept')), h('span', { class: 'setting-file-path', title: place }, elided(place))) : null),
     setting.note ? h('p', { class: 'setting-note' }, icon('warning', 12), setting.note) : null,
     drafted != null ? editor(setting, folder, editing, app) : null);
 }

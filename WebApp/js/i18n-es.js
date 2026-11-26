@@ -1270,7 +1270,7 @@ export const ES = {
   owNoneYet: "Aún no tienes sesiones propias. Arranca una con + arriba: te da la línea para ejecutar en una terminal.",
   owCount: { one: "1 sesión tuya", other: "{n} sesiones tuyas" },
   // Settings' switches and ranges (D16)
-  svWhereKept: "Se guarda en",
+  svWhereKept: "Dónde se guarda",
   svSwitchedOn: "Activado: los líderes de cada proyecto lo siguen desde su siguiente paso.",
   svSwitchedOff: "Desactivado: los líderes de cada proyecto lo siguen desde su siguiente paso.",
   svRange: "de {low} a {high}",

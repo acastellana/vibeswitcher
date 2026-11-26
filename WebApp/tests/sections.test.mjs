@@ -183,7 +183,9 @@ test('D16: a setting the node keeps to a terminal shows no control but Change an
     assert.equal(find(slots, byClass('setting-range')).textContent, t('svRange', { low: 1, high: 12 }));
     // Where it is kept: behind its words, shortened, whole on hover; never in the row's own line.
     const file = find(slots, byClass('setting-file'));
-    assert.equal(file.attrs.title, '~/.vibeswitcher/mac-limits.json');
+    assert.equal(file.tag, 'details', 'folded');
+    assert.equal(find(file, (node) => node.tag === 'summary').textContent, t('svWhereKept'));
+    assert.equal(find(file, byClass('setting-file-path')).attrs.title, '~/.vibeswitcher/mac-limits.json');
     assert.doesNotMatch(find(slots, byClass('setting-about')).textContent, /mac-limits/);
     app.leave();
   }

@@ -1282,7 +1282,7 @@ const EN = {
   owNoneYet: "No sessions of your own yet. Start one with + above: it gives you the line to run in a terminal.",
   owCount: { one: "1 session of yours", other: "{n} sessions of yours" },
   // Settings' switches and ranges (D16)
-  svWhereKept: "Kept in",
+  svWhereKept: "Where it’s kept",
   svSwitchedOn: "On: every project’s leads follow it from their next step.",
   svSwitchedOff: "Off: every project’s leads follow it from their next step.",
   svRange: "from {low} to {high}",

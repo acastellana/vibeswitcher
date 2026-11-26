@@ -239,9 +239,9 @@ textarea.field { padding: 6px 10px; line-height: var(--lh-body); resize: vertica
 .check[type="radio"]:checked::after { width: 6px; height: 6px; margin: 0; border: 0; border-radius: 50%; background: var(--on-accent); transform: none; } /* the dot */
 .check:disabled { background: var(--fill); cursor: default; }
 .check:disabled:checked { background: var(--ink-3); }
-.check.toggle { place-content: center start; width: 32px; height: 20px; padding: 2px; border-radius: var(--r-pill); background: var(--fill-2); box-shadow: none; } /* a switch: its knob's travel and its knob, as the Mac's small one */
+.check.toggle { place-content: center start; width: 32px; height: 20px; padding: 2px; border-radius: var(--r-pill); background: var(--fill-2); box-shadow: var(--e-1-in); } /* a switch: its knob's travel and its knob, as the Mac's small one */
 .check.toggle::after { content: ""; width: 16px; height: 16px; margin: 0; border: 0; border-radius: 50%; background: var(--on-scrim); box-shadow: var(--e-thumb); transform: none; transition: transform var(--dur-1) var(--ease-out); } /* the knob, white in both looks as the Mac's */
-.check.toggle:checked { background: var(--accent); }
+.check.toggle:checked { background: var(--accent); box-shadow: none; }
 .check.toggle:checked::after { width: 16px; height: 16px; margin: 0; border: 0; transform: translateX(12px); } /* the knob at the other end */
 .check.toggle:disabled { background: var(--fill); }
 .check.toggle:disabled:checked { background: var(--ink-3); }
@@ -854,8 +854,10 @@ small { font-size: var(--t-caption); }
 .setting-value.words { font-size: var(--t-body); }
 .setting-switch { display: inline-flex; align-items: center; gap: 10px; align-self: center; }
 .setting-range { flex: none; color: var(--ink-3); font-size: var(--t-caption); }
-.setting-file { cursor: help; }
-.setting-file-path { color: var(--ink-2); }
+.setting-file { display: inline; }
+.setting-file > summary { display: inline; color: var(--ink-3); cursor: pointer; }
+.setting-file[open] > summary::after { content: ": "; }
+.setting-file-path { color: var(--ink-2); cursor: help; }
 
 kbd { padding: 1px 6px; border-radius: var(--r-1); box-shadow: var(--e-1-in); color: var(--ink-2); font-size: var(--t-caption); white-space: nowrap; }
 
@@ -1732,7 +1734,7 @@ main.centre-wrap[tabindex="-1"]:focus { outline: none; }
 :is(.button, .send, .icon-button, .segment, .option, .copy-button, .code-run, .fold, .confirm-clear, .link, .inspect-link,
   .strip-board, .summary-count, .summary-brief, .offer button, .attach-choice, .send-way, .suggestion, .palette-row, .project, .place, .tc-row, .own-row,
   .task-link, .task-row2, .line, .now, .latest-said, .latest, .goal-title, .road-band, .card-unfold, .records-row > summary, .records-earlier > summary,
-  .facts-files summary, .node-technical > summary, .inspect-technical > summary, .card-terminal > summary, .all-done-tasks > summary, .chat-image-button, .dial-fold, .strip-fold, .look-colour, .brand,
+  .facts-files summary, .node-technical > summary, .inspect-technical > summary, .setting-file > summary, .card-terminal > summary, .all-done-tasks > summary, .chat-image-button, .dial-fold, .strip-fold, .look-colour, .brand,
   .strip-team, .attached-remove, .field, .check) {
   transition: var(--state-transition);
 }
@@ -1753,7 +1755,7 @@ main.centre-wrap[tabindex="-1"]:focus { outline: none; }
   :is(.place, .summary-brief):not(:where([aria-current], .confirming, .copied, .listening, .done, .failed, .asked)):hover { color: var(--ink); }
   /* Words that darken. */
   :is(.segment, .fold, .confirm-clear, .latest-said, .code-run, .strip-fold, .tab-banner-close, .strip-team, .brand,
-    .facts-files summary, .node-technical > summary, .inspect-technical > summary, .card-terminal > summary, .all-done-tasks > summary):not(:where([aria-current], [aria-selected="true"], [aria-pressed="true"], :disabled, .confirming, .copied, .listening, .done, .failed, .asked)):hover { color: var(--ink); }
+    .facts-files summary, .node-technical > summary, .inspect-technical > summary, .setting-file > summary, .card-terminal > summary, .all-done-tasks > summary):not(:where([aria-current], [aria-selected="true"], [aria-pressed="true"], :disabled, .confirming, .copied, .listening, .done, .failed, .asked)):hover { color: var(--ink); }
   .code-run:hover { border-color: var(--ink-3); }
   /* Links: underlined. */
   :is(.link, .inspect-link, .strip-board, .summary-count[href]):hover { text-decoration: underline; }
@@ -1777,7 +1779,7 @@ main.centre-wrap[tabindex="-1"]:focus { outline: none; }
 :is(.icon-button, .segment, .option, .copy-button, .code-run, .fold, .confirm-clear, .link, .inspect-link, .strip-board,
   .summary-count, .summary-brief, .offer button, .attach-choice, .send-way, .suggestion, .palette-row, .project, .place, .tc-row, .own-row, .task-link,
   .task-row2, .line, .now, .latest-said, .goal-title, .road-band, .card-unfold, .records-row > summary, .records-earlier > summary,
-  .facts-files summary, .node-technical > summary, .inspect-technical > summary, .card-terminal > summary, .all-done-tasks > summary, .chat-image-button, .dial-fold, .strip-fold, .button.quiet, .button.plain, .brand, .look-colour,
+  .facts-files summary, .node-technical > summary, .inspect-technical > summary, .setting-file > summary, .card-terminal > summary, .all-done-tasks > summary, .chat-image-button, .dial-fold, .strip-fold, .button.quiet, .button.plain, .brand, .look-colour,
   .strip-team):not(:where(:disabled, .read-only > *)):active { background-color: var(--fill-3); }
 .attached-remove:active { transform: scale(0.9); }
 .latest:active { background-color: var(--raised-press); transform: scale(0.97); }
