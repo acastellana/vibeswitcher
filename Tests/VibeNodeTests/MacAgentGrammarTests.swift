@@ -16,7 +16,7 @@ struct MacAgentGrammarTests {
         let dir = try scratch.shortFolder("vsgr").path
         let place = NodeAgent.Place(label: "dev.vibeswitcher.node.test-gr", plistFolder: dir + "/la", dataRoot: dir + "/node",
                                     lock: dir + "/node/host.lock", uid: getuid(), launchctl: "/bin/launchctl")
-        let job = NodeAgent.Job(label: place.label, programArguments: [dir + "/b/bin/vibeswitcher-host", "--socket", dir + "/node/host.sock"],
+        let job = NodeAgent.Job(label: place.label, programArguments: [dir + "/b/bin/vibeswitcher-host", "--socket", dir + "/node/host.sock", "--lock", dir + "/node/h.lock"],
                                 environment: ["SWIFT_BACKTRACE": "enable=no", "HOME": dir + "/home"], standardErrorPath: place.log, atLogin: false)
         try FileManager.default.createDirectory(atPath: place.plistFolder, withIntermediateDirectories: true)
         return (place, job, MacAgent.canonicalPlistPath(place))
