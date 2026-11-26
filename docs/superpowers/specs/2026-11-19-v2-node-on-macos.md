@@ -1134,7 +1134,8 @@ noted at the join of 2026-11-26.)
 
 Off as the rest: `NodeSystem.macUnbuilt`, `HostImages.isCheckedMacNode`, `approvalMeasured` and `macServerRefusal`
 untouched; proven on scratch homes, roots and vaults. State at the join of 2026-11-26: built, fix round done (R1–R9
-below, then 01a05734), re-check running.
+below, then 01a05734), re-check done ("ready with fixes", N1–N7 below); second fix round done on `v2-mac-seal-fix2`
+(2026-11-26: N1, N2, N4, N5, N6 fixed; N3, N7 owed).
 
 **What is built.** `MacSealList` (`Sources/VibeCore/V2/MacSealList.swift`) is the Mac's list in `LinuxSealList`'s shape:
 the rows as data (`homeEntries`, `startupFiles`, `outsideEntries`), the same `ConfigSeal.Watched` kinds, Linux's
@@ -1275,8 +1276,63 @@ the round's own tests, `MacSealFixRoundTests`, on top):
 | R7 (note) | a Cellar file rewritten behind a `bin` link; `brew shellenv`'s files | the three files as rows; each link's target's `stat` line |
 | Global domain (note) | likely read by Terminal; the cheap close is the effective read | not sound in the host (measured, above): owed |
 
+**The re-check and its second fix round** (re-check-v2-s-5, 2026-11-26, "ready with fixes": the first findings closed but
+R5, reopened by zsh's compiled twins; its tests are `MacSealRecheckTests`, `MacSealRecheckFindingsTests` and
+`MacSealRecheckVaultTests`, copied as they ran at 5a6044ab, one red per finding; the fixes and the round's own tests,
+`MacSealFix2Tests`, on top, branch `v2-mac-seal-fix2` on `v2-mac-joined`):
+
+| Finding | What the re-check found | What changed |
+| --- | --- | --- |
+| N1 (important) | zsh runs `<file>.zwc` (made by `zcompile`) in place of a startup file, a sourced file or a saved session when it is as new or the file is absent, and no row read one; a snapshot's twin came into the snapshots row as an entry coming | a `.file` row for each zsh startup file's twin (`~/.zshenv.zwc`, `.zprofile`, `.zshrc`, `.zlogin`, `.zlogout`: `MacSealList.twinnedStartupFiles`) and each sourced file's on the Mac (`addSourced`'s `twins`), absent hashed as absent; `<id>.session.zwc` (any case) read in the sessions row by its bytes, never as the restore line; a `.zwc` entry (any case) coming into or going from any `.entries` row judged as ever (`cameOrWent`), so held |
+| N2 (important) | a link's target went into the preferences and sessions hashes with no length before it: a ByHost link whose target's name spelt key lines hashed as a real plist with `Shell=/opt/evil` | every link target in those hashes said as `link <bytes>:<target> ` (`MacSealList.linkSaid`; read by `readlink`, hex when not UTF-8); a listing's link whose target holds a newline said as ` ->x <hex>` (`LinuxSealList.targetSaid`), any other as before |
+| N5 (note) | `sourced` took time in the square of a file's lines, rows had no cap: a 5,000-line `.zshrc` took 47 s, a 100,000-line one more than 30 minutes | `sourced` keeps a set of what it found; `addSourced` reads at most 1,024 rows' files (`maxSourcedRows`, twins counted) and 32 MB in all (`maxSourcedBytes`), each file whole up to 16 MB; at any cap it stops and adds one row, `~/(sourced files past the seal's cap)` (`Kind.capped`, hashed by which cap), so the look that crosses it holds a change; 100,000 lines return in well under the hang guard (`aHundredThousandSourceLinesAreBounded`) |
+| N4 (note) | the 256-file read cap hid a file sourced past it, silently | the read cap is the row cap (a file read is a row), and hitting it holds (N5's row) |
+| N6 (note) | a lone UTF-16 surrogate read as U+FFFD, so profiles `P\u{D800}` and `P\u{DC00}` hashed as one | a string or key with a lone surrogate hashed by its code units (`MacSealList.form`: `u<count>:<hex>`), at every level and at the top; a valid string's form is the one before |
+| N3 (note) | at the 4,096-entry cap a listing's card says every sealed entry was removed | owed (below): its fix (keep keys past the cap) contradicts the re-check's own `aPaddedListingStillHashesEveryEntry`, which asserts no keys past the cap |
+| N7 (note) | a new node book's first look takes the home files (`homeFiles`) as they are | owed (below), before `isCheckedMacNode` is lifted |
+
+The zsh behaviour, probed in scratch homes only (`env -i HOME=<scratch> /bin/zsh`, zsh 5.9, 2026-11-26), each twin
+compiled from `echo EVIL…` and its source rewritten benign with an older time: `zsh -i` printed the `~/.zshrc.zwc`'s
+text; `zsh -l` ran `~/.zlogin.zwc` with no `~/.zlogin`; `zsh -c` ran `~/.cargo/env.zwc` sourced from `.zshenv`;
+`. /etc/zshrc_Apple_Terminal` with `TERM_SESSION_ID=A` ran `A.session.zwc` beside a restore-line `A.session`; `source`
+of a snapshot ran its twin; and `~/.zshrc.ZWC`, upper case, ran in place of `~/.zshrc`.
+
+What a user sees once, when the list is lifted on a book that recorded the rows before this round: one card for each
+new row (the twins, absent: a book that watches the list holds each Mac row first read, R9), and one for each recorded
+row whose hash moved: a preferences or sessions row with a link in it (its target now said with its length), a
+preferences row holding a lone surrogate, a listing with a link whose target holds a newline. No book records any of
+them today (`isCheckedMacNode` is false), so no one sees these cards now.
+
+What each read's work is bounded by (N5's audit): `addSourced` by its caps above; a `.file` row and a session or ByHost
+file are hashed as a stream, so by their size on disk; a preferences file is parsed whole only up to 16 MB (past it, by
+its bytes); a `.entries` row by `ConfigSeal.maxEntries` (cut, held); a listing walks every entry, uncapped, one `lstat`
+each (Homebrew's `bin`, the largest, 1,213 here); the sessions and ByHost folders read every matching file. Each of
+these is linear in what is on disk, which a worker must write first; none grows faster.
+
+Shared code, for Linux: `LinuxSealList.sourced` keeps a set (same result, linear); `addSourced` caps as above (no twins
+on Linux: bash reads none), so a Linux startup file that reaches a cap shows the cap's row once where it named nothing
+before; a `.zwc` entry coming into or going from any `.entries` row (the snapshots, the hooks, the launch folders, the
+manager's `transient`) is held; a listing's link target holding a newline is said in hex. A Linux listing's hash bytes
+are otherwise unchanged (`MacSealRecheckTests.aListingsHashBytesAreUnchanged`, run here). What Linux must run:
+`LinuxSealListTests`, `MacSealListTests.theListIsEmptyOnLinux`, the ConfigSeal suites,
+`MacSealRecheckTests.aListingsHashBytesAreUnchanged`, and `MacSealFix2Tests`' tests without the Mac trait
+(`aTwinComingIntoAnEntriesFolderIsHeld`, `aListingLinksNewlineCantSpellALine`, `aHundredThousandSourceLinesAreBounded`,
+`eachSourcingCapAddsAHeldRow`).
+
 **Owed:**
 
+- N7 (the re-check's, R9's remainder): a new node book's first look takes the home files (`ConfigSeal.homeFiles`: zsh's,
+  bash's, `.gitconfig`…) as they are; only the Mac list's rows are held at their first read. Before `isCheckedMacNode`
+  is lifted, a checked Mac node book holds its whole first look (`holdsFirstLook`, as Linux's node does) or is seeded
+  from the app book's record with what that holds still held. `MacSealRecheckVaultTests.aNewNodeBooksFirstLookHoldsAPlantedZshrc`
+  stands as a known issue.
+- N3: at the 4,096-entry cap a listing's card names every sealed entry "removed" (the hash is whole, so the change is
+  held; the card's words are wrong). Its fix, keys kept past the cap, contradicts the re-check's own
+  `aPaddedListingStillHashesEveryEntry` (no keys past the cap): one of the two is the lead's to change.
+  `aListingsCardAtTheCapDoesntSayItsEntriesWereRemoved` stands as a known issue.
+- What lies past a sourcing cap (`addSourced`): after the cap's row is accepted, the files past it are unwatched until
+  the startup files are under the caps again; and a compiled twin is hashed, never read for what it sources (as R6b).
+- `$ZDOTDIR`'s startup files and their twins when `ZDOTDIR` is set (zsh reads them there, not in the home).
 - The node's own folders under its root (`~/.vibeswitcher/v2/node`): the launch presets, the allowed projects, the
   roles' launch folders and the lead's accepted hooks, which Linux's list seals at `~/.vibeswitcher/…`; and the builds
   folder (`~/.vibeswitcher/v2/builds`). Linux's quiet rules for them (`cameOrWent`'s hooks and launch rules,
@@ -1293,9 +1349,9 @@ the round's own tests, `MacSealFixRoundTests`, on top):
   Settings", "Startup Window Settings", "Window Settings") read from `.GlobalPreferences.plist` and its ByHost files by
   the `.preferences` code, the rest of that file's churn left out. Not built.
 - R6b: a `source` or `.` whose path starts with a variable other than HOME (`$ZSH/oh-my-zsh.sh`) and a loop over a glob
-  (`for f in ~/.zsh.d/*.zsh; do source "$f"; done`) name no row; and a startup file past 16 MB names none (its own row
-  holds the padding). `MacSealReviewTests.sourceFormsThePatternMissesAreWatched` stands as a known issue
-  (`withKnownIssue`), so it says when it starts passing.
+  (`for f in ~/.zsh.d/*.zsh; do source "$f"; done`) name no row (a startup file past 16 MB, which named none, now adds the cap's row:
+  N5). `MacSealReviewTests.sourceFormsThePatternMissesAreWatched` stands as a known issue (`withKnownIssue`), so it
+  says when it starts passing.
 - `$ZDOTDIR/.zsh_sessions` when `ZDOTDIR` is set (above), and bash's `~/.bash_sessions`, which
   `/etc/bashrc_Apple_Terminal` restores the same way (absent here: the user's shell is zsh).
 - A real checked node host's book watching the list (`isCheckedMacNode` is false: `MacCheckedStartTests` proves the
