@@ -1333,6 +1333,7 @@ const EN = {
   tlLines: "lines",
   dpAProgram: "a program",
   drNameLabel: "Name",
+  drModelPlaceholderCodex: "Codex’s default",
 };
 
 

@@ -33,7 +33,7 @@ export const sectionSlug = (title) => String(title || '').toLowerCase().normaliz
 
 // One setting's row: its title and value, what it does, where it lives; Change opens its field and the drafted line.
 // With `words` (a search's), each one is marked where it is found: in the title, what it does, or its key.
-function settingRow(setting, { folder, home, editing, toggle, app = null, words = [], changed = () => {} }) {
+function settingRow(setting, { folder, home, editing, toggle, app = null, words = [], changed = () => {}, receipts = new Map() }) {
   const drafted = editing.get(setting.key);
   // On or off, where the page may set it: the switch, one press (D16). Else its value in words, and Change.
   const switched = setting.form === 'flag' && pageSets(app, setting, 'on') && pageSets(app, setting, 'off');
@@ -47,7 +47,7 @@ function settingRow(setting, { folder, home, editing, toggle, app = null, words 
   // A control that looks like one (the page's quiet button), always at the row's end with the value beside it.
   const change = switched ? null : kit.button('plain', { size: 's', class: 'setting-change', 'aria-expanded': String(drafted != null), onclick: () => toggle(setting) },
     drafted != null ? t('svClose') : t('svChange'));
-  const end = switched ? flagSwitch(app, setting, folder, changed) : [value, change];
+  const end = switched ? flagSwitch(app, setting, folder, changed, receipts) : [value, change];
   // Where it is kept is a file a person never needs to act here: behind "Where it's kept", ~/… and the middle elided,
   // whole on hover (D16, D18). The machine-wide limits' file keeps the Mac's name (mac-limits.json): this node's.
   const place = setting.home === 'floor' ? setting.where : tilde(setting.where, home);
@@ -78,9 +78,13 @@ export function rangeWords(setting) {
 }
 
 // An on/off setting the page may set: the switch, sent at one press (`set`, as Set sends it), busy while the node
-// answers, what it did said beside it, its refusal too with the switch put back.
-function flagSwitch(app, setting, folder, changed) {
-  const said = h('span', { class: 'act-said', role: 'status' });
+// answers, what it did said beside it, its refusal too with the switch put back. What it said is kept in `receipts`
+// (by the setting's scope and key), so the row drawn again once the settings are read back still says it. The words
+// beside it are its label: a press on them presses it, a fingertip's height on a touch screen.
+function flagSwitch(app, setting, folder, changed, receipts) {
+  const key = `${setting.scope}:${folder || ''}:${setting.key}`;
+  const kept = receipts.get(key);
+  const said = h('span', { class: 'act-said' + (kept ? ' ' + kept.tone : ''), role: 'status' }, kept?.words || '');
   const box = kit.toggle({ 'aria-label': setting.title, checked: setting.value === 'on' });
   box.checked = setting.value === 'on';
   box.addEventListener('change', () => {
@@ -93,17 +97,21 @@ function flagSwitch(app, setting, folder, changed) {
       box.disabled = false;
       box.removeAttribute('aria-busy');
       if (reply.ok) {
-        setText(said, value === 'on' ? t('svSwitchedOn') : t('svSwitchedOff'));
+        const words = value === 'on' ? t('svSwitchedOn') : t('svSwitchedOff');
+        setText(said, words);
         said.classList.add('receipt');
+        receipts.set(key, { words, tone: 'receipt' });
         changed();
         return;
       }
       box.checked = !box.checked;
-      setText(said, refusalWords(reply.error, setting.title));
+      const why = refusalWords(reply.error, setting.title);
+      setText(said, why);
       said.classList.add('refused');
+      receipts.set(key, { words: why, tone: 'refused' });
     });
   });
-  return h('span', { class: 'setting-switch' }, said, box);
+  return h('label', { class: 'setting-switch' }, said, box);
 }
 
 // Whether the page sets `setting` to `value` itself: it acts for you (`set`), and the setting is one a page may set.
@@ -214,6 +222,8 @@ export function settingsView(app) {
   // Per section's scope (the node's, each project's) and key: the value being drafted (its field open). Kept while the
   // page reads the settings again.
   const editing = new Map();
+  // What each switch last said (its receipt or the node's refusal), kept while the page reads the settings again.
+  const receipts = new Map();
   const editingOf = (scope) => { if (!editing.has(scope)) editing.set(scope, new Map()); return editing.get(scope); };
   let result = null;
   let failed = null;
@@ -271,7 +281,7 @@ export function settingsView(app) {
     return [
       usage,
       h('div', { class: 'setting-section' }, shown.map((setting) => settingRow(setting, {
-        folder: item.folder, home, editing: editingOf(scope), toggle: (one) => toggle(scope, one), app, words, changed: () => load() }))),
+        folder: item.folder, home, editing: editingOf(scope), toggle: (one) => toggle(scope, one), app, words, changed: () => load(), receipts }))),
     ].filter(Boolean);
   }
 
@@ -288,7 +298,8 @@ export function settingsView(app) {
     columns.setItems(items, chosen?.key, { empty: result && words.length ? t('svNoMatch', { query: query.trim() }) : '' });
     // Someone typing in a field keeps it: the page draws again once they leave it.
     const active = document.activeElement;
-    if (!typing && active && columns.detail.contains(active) && active.matches?.('input, textarea, select')) return;
+    // A switch keeps no typing: a row drawn again under it keeps what it said (`receipts`).
+    if (!typing && active && columns.detail.contains(active) && active.matches?.('input:not([type="checkbox"]), textarea, select')) return;
     const now = JSON.stringify([result && chosen ? [chosen.key, chosen.settings, result.usage, result.leftOut] : null, failed, chosen?.kind,
       [...(editing.get(chosen?.scope) || new Map()).keys()], query, store.acts(), store.state.node?.home]);
     if (now === drawn) return;

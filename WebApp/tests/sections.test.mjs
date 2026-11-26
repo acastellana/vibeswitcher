@@ -116,9 +116,14 @@ async function settingsPage(code, { acts = true, reply = null } = {}) {
   setLanguage(code);
   const { settingsView } = await import('../js/views/settings.js');
   const answers = [];
+  const values = new Map();
   const app = fakeApp({ route: { name: 'settings', id: null }, acts, kinds: ['set', 'settings'], state: { node: { home: '/home/u' } },
-    reply: (kind, args) => (kind === 'settings' ? { ok: true, result: { node: { root: '/home/u/.vibeswitcher', settings: NODE_SETTINGS }, project: null, leftOut: [], usage: null } }
-      : reply ? reply(kind, args, answers) : { ok: true, result: { key: args.key, value: args.value } }) });
+    reply: (kind, args) => {
+      if (kind === 'settings') return { ok: true, result: { node: { root: '/home/u/.vibeswitcher', settings: NODE_SETTINGS.map((one) => (values.has(one.key) ? { ...one, value: values.get(one.key), isDefault: values.get(one.key) === one.default } : one)) }, project: null, leftOut: [], usage: null } };
+      const answered = reply ? reply(kind, args, answers) : { ok: true, result: { key: args.key, value: args.value } };
+      // The node keeps what it took: the next read of the settings has it.
+      return Promise.resolve(answered).then((done) => { if (done.ok && kind === 'set') values.set(args.key, args.value); return done; });
+    } });
   const view = settingsView(app);
   await flush();
   const row = (key) => find(view.columns.detail, (node) => node.classList.contains('setting') && node.dataset.key === key);
@@ -148,14 +153,21 @@ test('D16: an on/off setting the page may set is a switch, one press sends what 
     assert.equal(box.disabled, false);
     assert.equal(box.attrs['aria-busy'], undefined);
     assert.match(ignore.textContent, new RegExp(t('svSwitchedOn').slice(0, 12)));
+    // The settings are read again and the row drawn anew with the value the node now has: it still says what happened.
+    await flush();
+    const again = row('ignore_usage_limits');
+    assert.notEqual(again, ignore, 'drawn again from the node’s new value');
+    assert.equal(find(again, (node) => node.tag === 'input').checked, true);
+    assert.match(again.textContent, new RegExp(t('svSwitchedOn').slice(0, 12)), 'the receipt survives the redraw');
     // The node refuses: said beside it, the switch put back.
-    box.checked = false;
-    box.dispatch('change');
+    const now = find(again, (node) => node.tag === 'input');
+    now.checked = false;
+    now.dispatch('change');
     assert.deepEqual(app.sent.at(-1).args, { key: 'ignore_usage_limits', value: 'off' });
     answer({ ok: false, error: { code: 'refused', message: 'the node is stopping' } });
     await flush();
-    assert.equal(box.checked, true, 'put back');
-    assert.match(ignore.textContent, /the node is stopping/);
+    assert.equal(now.checked, true, 'put back');
+    assert.match(row('ignore_usage_limits').textContent, /the node is stopping/);
     app.leave();
   }
   setLanguage('en');
@@ -194,6 +206,9 @@ test('D16: a setting the node keeps to a terminal shows no control but Change an
   assert.equal(find(reading.row('ignore_usage_limits'), (node) => node.tag === 'input'), null);
   assert.ok(find(reading.row('ignore_usage_limits'), (node) => node.tag === 'button' && node.textContent === 'Change'));
   reading.app.leave();
+  // On a touch screen the switch is a fingertip wide inside its label, which the touch block makes a fingertip tall.
+  assert.match(bareCss, /@media \(hover: none\) and \(pointer: coarse\) \{\s*\.check\.toggle \{ width: var\(--ctl-touch\); height: 28px; \}/);
+  assert.match(bareCss, /label:has\(> input\[type="checkbox"\]\) \{ display: flex; align-items: center; gap: 10px; min-height: var\(--ctl-touch\); \}/);
   const { elided } = await import('../js/views/settings.js');
   assert.equal(elided('~/projects/site/.vibeswitcher/workflow.md'), '~/projects/…/.vibeswitcher/workflow.md');
   assert.equal(elided('~/.vibeswitcher/policy.md'), '~/.vibeswitcher/policy.md');

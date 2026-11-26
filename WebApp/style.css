@@ -246,6 +246,12 @@ textarea.field { padding: 6px 10px; line-height: var(--lh-body); resize: vertica
 .check.toggle:disabled { background: var(--fill); }
 .check.toggle:disabled:checked { background: var(--ink-3); }
 .check.toggle[aria-busy="true"] { cursor: progress; animation: busy var(--loop) ease-in-out infinite alternate; }
+/* A touch screen: the switch a fingertip wide, inside its label's fingertip height (the touch block's). */
+@media (hover: none) and (pointer: coarse) {
+  .check.toggle { width: var(--ctl-touch); height: 28px; } /* the Mac's switch at a fingertip's width */
+  .check.toggle::after, .check.toggle:checked::after { width: 24px; height: 24px; } /* its knob, the track less its padding */
+  .check.toggle:checked::after { transform: translateX(16px); } /* the knob at the other end */
+}
 
 .badge { flex: none; display: inline-flex; align-items: center; padding: 0 6px; border-radius: var(--r-1); background: var(--fill-2); color: var(--ink-2); font-size: var(--t-caption); font-weight: var(--w-medium); line-height: var(--lh-caption); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .badge.asking { background: color-mix(in srgb, var(--asked) 12%, transparent); color: var(--asked); }

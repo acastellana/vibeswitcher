@@ -762,6 +762,7 @@ export function newSessionForm(app, { folder, recent = () => [] }) {
       onclick: () => { chosen = one.name; picked = true; draw(); },
     }, one.name)));
     modelRow.hidden = preset.kind === 'shell' || !!preset.command?.includes('--model');
+    model.placeholder = preset.kind === 'codex' ? t('drModelPlaceholderCodex') : t('drModelPlaceholder');
     const words = preset.builtIn ? '' : presetWords(preset);
     about.hidden = !words;
     setText(about, words);

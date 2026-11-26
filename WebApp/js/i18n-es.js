@@ -1321,4 +1321,5 @@ export const ES = {
   tlLines: "líneas",
   dpAProgram: "un programa",
   drNameLabel: "Nombre",
+  drModelPlaceholderCodex: "El que use Codex por defecto",
 };
