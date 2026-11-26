@@ -113,8 +113,8 @@ The other four lines (ancestry, terminal, environment, branch-code runner) are g
 check as other code (`Platform.CodeIdentity.runs`, the host's app check today); click a system authentication dialog
 (LocalAuthentication's, drawn by the system: synthetic events need Accessibility consent, which Terminal and Claude
 Code don't have by default; **measured for a process not trusted for Accessibility** (2026-11-26, K-LA-7): an Escape
-it posted while the dialog was frontmost didn't end it, the person's Cancel did 14 s later; a trusted process is not
-measured, and a key can at most cancel or type, never give the finger); read a Hardened Runtime process's memory without
+it posted while the dialog was frontmost didn't end it, the person's Cancel did 14 s later (dropped or ignored, not
+told apart; no Escape by hand yet); a trusted process is not measured, and a key can at most cancel or type, never give the finger); read a Hardened Runtime process's memory without
 `get-task-allow`.
 
 **What the Mac app's code identity already gives.** The app's host takes the app as the app's code (cdhash beside the
@@ -166,11 +166,13 @@ VibeSwitcher shell card, not Terminal.app). **Settled, not built**: `ApprovalVoi
 `NodeSystem.approvalMeasured` stays false until the two lines are built, the independent review that precedes any
 switch-on has read them, and the user says go.
 
-**What carries the guarantee: the dialog**, never the guard rails. Every process fact below a session can shed by going
-through launchd: `open -a Terminal`, AppleScript and a job of its own each pass every line (K-ESC-1 to 3), as the design
-said. The lines refuse early and quietly what they can tell, so honest callers that aren't the user never reach the
-dialog; the review counts the dialog (what it shows, that only the person can answer it), the caller's code and the
-Hardened Runtime, and not the lines.
+**What carries the guarantee: the dialog alone.** Every line in the table is a guard rail, the caller's code and the
+Hardened Runtime included: a session runs the installed command line itself, and every process fact below it can shed
+by going through launchd (`open -a Terminal`, AppleScript and a job of its own each pass every line, K-ESC-1 to 3), as
+the design said. The code check keeps any program but the command line, and a steered one, off the server; the lines
+refuse early and quietly what they can tell, so honest callers that aren't the user never reach the dialog. The review
+counts the dialog (what it shows, and that only the person at the Mac can answer it) and none of the lines as the
+boundary.
 
 | Line | Refuses (and the record) | Lets through | A legitimate caller refused | Unreadable | Settled |
 | --- | --- | --- | --- | --- | --- |
@@ -178,8 +180,8 @@ Hardened Runtime, and not the lines.
 | Ancestry: no live session's program, the host or the server above the peer | a node session's descendant that didn't detach | a double fork (M3); every escape (K-ESC-1/2: `bash` → `zsh` → `login` → Terminal → launchd; K-ESC-3: launchd); item 11's fallback read the escaped chain whole through root's `login` (K-ESC-1/2, as M8) | a command line typed in a node session (meant) | refused | **kept** |
 | The controlling terminal isn't a live session's | a peer on a session's terminal | `setsid`; an escape, which gets a fresh terminal of Terminal's (K-ESC-1/2: `ttys014`) | none | refused | **kept** |
 | No branch code runner above | a peer under one | (not measured on the Mac) | none | refused | **kept** |
-| **The coalition: the peer isn't in the server's own resource coalition** (the node job's: the host, the server and every session descend from it; the server reads its own once at its start, M4's `self`) | every descendant of a node session that didn't go through launchd, however detached: a process keeps its coalition through fork, exec, `setsid` and reparenting to launchd (M4); a `setsid` child of a LaunchAgent job stays in the job's coalition (K-AG-1, two runs) | the escapes through launchd: a job of its own gets a new coalition (K-ESC-3), `open -a Terminal` and AppleScript land in Terminal's (K-ESC-1/2) | none expected: the user's Terminal is Terminal's coalition (by inference from K-ESC-1, Terminal's process in it; **open**, closed by ANC-1), the app's shell cards the app's (1841, every caller block); a command line typed in a node session is ancestry's already | refused: the installed command line is the user's hardened build, which M4 read detached and hardened; a private read (flavour 20, not in the SDK's headers) a later macOS may change makes every state change refused, loudly, never open | **added** (settled here on the records, for the review) |
-| **The peer's environment: `VIBESWITCHER_SESSION` set on the peer itself** (never an ancestor: Apple's binaries read empty, M2 and K-ESC-1/2's chains) | any process carrying the variable: the Mac app's shell cards and agent sessions (`VIBESWITCHER_SESSION=set` in every caller block, K-ESC-1 to 3), which no other line refuses (not a node session, not the node's coalition: an app agent's Bash tool running the command line would otherwise reach the dialog); a node session's descendant that kept it | anything that dropped it: `env -u`, a re-exec with an environment of its own, a job a session loads itself (K-ESC-3: unset, `ppid=1`), an escape into Terminal (K-ESC-1/2: unset) | **the user's own shell cards in the Mac app**: on a node they make state changes from Terminal or the page; the refusal says so | refused (readable for the user's builds with SIP on, M2) | **added as an early refusal, not a boundary** (the lead's call, 2026-11-26, reversible): the approval's guarantee rests on the dialog (its words, open below; a synthetic key from an untrusted process doesn't answer it, K-LA-7) and on the lines above, never on this one, and the review is not to count it |
+| **The coalition: the peer isn't in the server's own resource coalition** (the node job's: the host, the server and every session descend from it; the server reads its own once at its start, M4's `self`) | every descendant of a node session that didn't go through launchd, however detached: a process keeps its coalition through fork, exec, `setsid` and reparenting to launchd (M4); a `setsid` child of a LaunchAgent job is in the job's coalition while the job runs (K-AG-1, two runs) | the escapes through launchd: a job of its own gets a new coalition (K-ESC-3), `open -a Terminal` and AppleScript land in Terminal's (K-ESC-1/2) | none expected: the user's Terminal is Terminal's coalition (by inference from K-ESC-1, Terminal's process in it; **open**, closed by ANC-1), the app's shell cards the app's (1841, every caller block); a command line typed in a node session is ancestry's already | refused: the installed command line is the user's hardened build, which M4 read detached and hardened; a private read (flavour 20, not in the SDK's headers) a later macOS may change makes every state change refused, loudly, never open | **added** (settled here on the records, for the review) |
+| **The peer's environment: `VIBESWITCHER_SESSION` set on the peer itself** (never an ancestor: Apple's binaries read empty, M2 and K-ESC-1/2's chains) | any process carrying the variable: the Mac app's shell cards and agent sessions (`VIBESWITCHER_SESSION=set` in every caller block, K-ESC-1 to 3), which no other line refuses (not a node session, not the node's coalition: an app agent's Bash tool running the command line would otherwise reach the dialog); a node session's descendant that kept it | anything that dropped it: `env -u`, a re-exec with an environment of its own, a job a session loads itself (K-ESC-3: unset, `ppid=1`), an escape into Terminal (K-ESC-1/2: unset) | **the user's own shell cards in the Mac app**: on a node they make state changes from Terminal or the page; the refusal says so | refused (readable for the user's builds with SIP on, M2) | **added as an early refusal, not a boundary** (the lead's call, 2026-11-26, reversible): the approval's guarantee rests on the dialog alone (its words, open below; one Escape posted by an untrusted process didn't end it, K-LA-7), never on this line or any other, and the review is not to count it |
 | The responsible process | — | — | — | — | **no line**: after `open -a Terminal` the escaped shell, `bash` and `zsh` name Terminal (K-ESC-1), after AppleScript each names itself (K-ESC-2), a self-loaded job itself (K-ESC-3), and under the app's session host every process names itself (M5, every caller block): no fact to judge by, and private |
 
 **The `approval` mode's guard rails, with the dialog:**
@@ -194,9 +196,10 @@ Hardened Runtime, and not the lines.
   doesn't depend on the system. **Open**: what the system does with two LocalAuthentication dialogs at once, which is
   what the user sees when a session's own dialog (M9) comes while the server's is up: K-LA-6's first was cancelled
   before the second was asked. Closed by LA-6 with the first left up (the measurement record's owed step 3).
-- **No synthetic key answers it**: an Escape posted by a process not trusted for Accessibility, with the dialog
-  frontmost, didn't end it (K-LA-7). Rail: the node's host, server and command line never ask for Accessibility or
-  Automation. **Open**, and left so: a trusted process (an escaped shell is attributed to Terminal, K-ESC-1, so a
+- **A synthetic key, so far**: one Escape posted by a process not trusted for Accessibility, with the dialog
+  frontmost, didn't end it (K-LA-7); whether macOS dropped it or the dialog ignored it isn't told apart, and no Escape
+  was pressed by hand on it (owed step 1 adds that control). Rail: the node's host, server and command line never ask
+  for Accessibility or Automation. **Open**, and left so: a trusted process (an escaped shell is attributed to Terminal, K-ESC-1, so a
   Terminal holding Accessibility would lend it its trust) can at most cancel the dialog or type into it; approving
   needs the enrolled finger or the login password.
 - **Open: the dialog's words** (its title, whether the request's word reads first after the program's name). No record
@@ -227,8 +230,8 @@ What launchd gives less than systemd, said now so later steps don't assume it:
 - No cgroup: `launchctl bootout` kills the job's process group, not a session in a POSIX session of its own. So "every
   session ends with the unit" (`KillMode=control-group`) doesn't hold: the host ends its sessions itself on a stop, and a
   crashed host leaves them running, as the app's host does today (S9's row "A host exit"). Measured (step 5's "What
-  `bootout` ends", and the user's AG-1, K-AG-1, twice): the job's process and its group end, a `setsid` child runs on,
-  still in the job's coalition.
+  `bootout` ends", and the user's AG-1, K-AG-1, twice): the job's process and its group end, a `setsid` child runs on
+  (in the job's coalition while the job ran; its coalition after the `bootout` not read).
 - The server check: the listener's audit token, its cdhash against the installed build's server, and its parent the
   job's pid (`launchctl print gui/<uid>/dev.vibeswitcher.node`): stronger than Linux's "non-dumpable, in the unit's
   cgroup" on the code, weaker on containment.
@@ -633,10 +636,11 @@ plists in the clone's `.build`, never `~/Library/LaunchAgents`).**
   session of its own (`sleep 303`, parent pid 1) ran on. A process of the job killed by a signal took its group with it
   too (`sleep 302` gone, `sleep 303` running). So launchd ends the job's process group and nothing outside it: the host's
   sessions (each in a session of its own, `PTYSpawn`) and its server child (a group of its own) are the node's to end.
-  The user's AG-1 (2026-11-26, twice; the measurement record's K-AG-1) gives the same, and adds that the survivor stays
-  in the job's coalition: a process that detached and dropped `VIBESWITCHER_SESSION`, which `stop`'s search by the
-  session ids environments carry misses, is still findable by the job's coalition. A sweep by coalition for `stop` is
-  proposed for this step's review, not decided.
+  The user's AG-1 (2026-11-26, twice; the measurement record's K-AG-1) gives the same, and adds that the `setsid`
+  child was in the job's coalition while the job ran. Its coalition after the `bootout` was not read, so whether a
+  process that detached and dropped `VIBESWITCHER_SESSION` (which `stop`'s search by the session ids environments
+  carry misses) stays findable by the job's coalition is not measured: a sweep by coalition for `stop` is an idea for
+  this step's review, to be measured first, not decided.
 
 **The plist** (`NodeAgent.Job`, written by `NodeAgent.plist`, the same function `agent-plist` prints for the install):
 

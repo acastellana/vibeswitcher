@@ -50,7 +50,7 @@ wording, and nothing here infers it.
 | … with the lid closed | step 4 | script LA-4 (needs an external display): **not run** |
 | … over ssh (`.notInteractive` read as unavailable) | step 4 | script LA-5 (needs Remote Login: off here): **not run** |
 | A second dialog while one is open | the tasks' `8f8b7e20` row | run (K-LA-6), **still open**: the first was cancelled before the second was asked |
-| Whether a process of the user's can answer it (Accessibility) | item 3 | **taken** for an untrusted process (K-LA-7): its Escape didn't reach the dialog; a trusted one open |
+| Whether a process of the user's can answer it (Accessibility) | item 3 | **taken** for an untrusted process (K-LA-7): one Escape it posted didn't end the dialog (dropped or ignored: not told apart); a trusted one open; no Escape by hand yet (owed step 1) |
 | Whether an agent session's process can raise the dialog | design, "What it can't do" | **taken** (M9): it can |
 | Item 3: `DYLD_INSERT_LIBRARIES` into the hardened command line refused | item 3 | **taken** (M6) |
 | Item 3: the connect-write-exec race | item 3 | **taken** (M7) |
@@ -369,7 +369,7 @@ time; the records' `at=` are UTC, an hour behind). The records are copied unchan
 a shell session of the app's host (a shell card)`; the caller blocks read `VIBESWITCHER_SESSION=set CLAUDECODE=unset`,
 a pty of the app's (`ttys005`, `ttys009`), `coalition=read resource=1841 jetsam=1842` (the coalition M4 read for an
 agent's session under the same app) and `responsible=` each process itself. That matters for the comparisons ESC-1 and
-ESC-2 make with "yours" (below); not for the LA-* steps, whose asks run in a job of their own (`la: … ppid=1`), nor for
+ESC-2 make with "yours" (below); not for the LA-* steps, whose asks run in a job of their own (`la: … ppid=1`, or the job's own `sh` for LA-6), nor for
 ESC-3 and AG-1.
 
 **Done:** ESC-3, AG-1 (each twice), LA-1, LA-2, LA-3, LA-6, LA-7, ESC-1, ESC-2. **Not done:** ANC-1 (it refuses a shell
@@ -449,7 +449,9 @@ Escape. Seen: `took more than 10sec and i cancelled`.
 
 *Answer.* **For a process not trusted for Accessibility: no.** With the dialog frontmost (drawn by `coreautha`, bundle
 `com.apple.LocalAuthentication.UIAgent`), its Escape didn't end the dialog; the person's Cancel did, 14 s later. Whether
-macOS dropped the key at the post or the dialog ignored it, the record can't tell. Sure: high for this case. **Not
+macOS dropped the key at the post or the dialog ignored it, the record can't tell: there is no positive control (no
+Escape pressed by hand on this dialog; owed step 1 adds it), and it was one key from one untrusted process. Sure: high
+that this key didn't end it; not a measurement that synthetic keys can't. **Not
 shown:** a process that is trusted (or whose responsible process is: the shell an escape opens in Terminal is
 attributed to Terminal, K-ESC-1, so a Terminal holding Accessibility would lend it). Even then a key can only cancel
 or type: approving needs the enrolled finger or the login password, which no key gives a session that doesn't know it.
@@ -486,11 +488,13 @@ has ended (within 5 s) and then ends the survivor itself.
 in the spec ("What `bootout` ends", step 5: a `setsid` child ran on after `bootout` returned). For `stop`: every
 session (a session of its own, `PTYSpawn`), the server child (a group of its own) and anything a session detached
 survive the `bootout`; ending them is the node's, as the spec's `stop` does (the server's stop, the snapshot of the
-host's children, survivors found by the session ids their environments carry). **New here:** the `setsid` survivor stays
-in the job's coalition, so a process that detached and dropped `VIBESWITCHER_SESSION` (which `stop`'s search by
-environment misses) is still findable by the job's coalition: a candidate for `stop`, for the step 5 review, not
-decided here. And it is the coalition line's evidence: a LaunchAgent job's coalition holds its `setsid` descendants
-(the spec's row 3). `print`'s lines: as M11. Sure: high (two runs, and the agent's).
+host's children, survivors found by the session ids their environments carry). **New here, while the job ran:** the
+`setsid` child was in the job's coalition (read before the `bootout`), so a LaunchAgent job's coalition holds its
+`setsid` descendants: the coalition line's evidence (the spec's row 3). **Not read after the `bootout`:** the record's
+after-lines are `kill -0` only, so whether the survivor is still in that coalition, and findable by it, is not
+measured. A sweep by coalition for `stop` (to find a detached process that dropped `VIBESWITCHER_SESSION`, which
+`stop`'s search by environment misses) would need that measured first: an idea for the step 5 review, not decided.
+`print`'s lines: as M11. Sure: high for what ended and what ran on (two runs, and the agent's).
 
 ### K-ESC-1. `open -a Terminal x.command` from a detached process
 
@@ -516,7 +520,7 @@ through launchd stays in its host's coalition. Item 11: the chain through `login
 Sure: high for the escape's facts.
 
 *From a shell card instead of Terminal.app.* The escape's own block doesn't depend on where the caller ran (Terminal
-starts the shell through launchd either way). What changes is the "yours" block: it is a shell card's (1841, its own
+starts the shell through `login` either way, the caller's place no part of the chain). What changes is the "yours" block: it is a shell card's (1841, its own
 responsible, the variable set), not a Terminal shell's, so the record doesn't put the user's own Terminal shell beside
 the escape; the user's Terminal shell's coalition and responsible process are the inference above. ANC-1, run in
 Terminal.app, reads them directly (owed step 2).
@@ -565,8 +569,10 @@ A run again replaces its record in `.build/mac-measure-records/`; today's are ke
    ```
 
    While the dialog is up, press ⌘⇧4, then Space, then click the dialog (a picture on the Desktop; if the system won't
-   capture it, copy its words). Then touch Touch ID. At the record's question type the dialog's words exactly, title
-   and line, and say where the picture is.
+   capture it, copy its words). Then press the **Escape key** on the keyboard (not Touch ID, not Cancel): the record's
+   `outcome=` then shows whether a real Escape ends this dialog, the positive control K-LA-7 lacks (`declined(…)`
+   within a second: it does; still open: Cancel it). At the record's question type the dialog's words exactly, title
+   and line, whether Escape closed it, and where the picture is.
 
 2. **ANC-1: your own Terminal's facts** (under 30 s, nothing on screen; it refuses a shell card). Closes: the user's own
    Terminal shell's coalition (the coalition line refuses no legitimate caller: expected 109496, not the node's) and its
@@ -587,16 +593,69 @@ A run again replaces its record in `.build/mac-measure-records/`; today's are ke
    Leave "MEASURE-6 FIRST" alone until "MEASURE-6 SECOND" has appeared (3 s), note whether the second waits, replaces
    the first or shows beside it, then Cancel each. At the record's question say which.
 
-4. **The `sudo` trial of the anchor's record** (about 3 minutes, two passwords): T1, T2 and T3 of the runbook, as
-   written there. Closes the real root-owned record on this Mac (row 4's anchor; the tasks' item 3, "the real record (a
-   `sudo` trial)").
+4. **The `sudo` trial of the anchor's record** (about 3 minutes, two passwords; the runbook's T1 to T3, what each
+   prints there). Closes the real root-owned record on this Mac (row 4's anchor; the tasks' item 3, "the real record (a
+   `sudo` trial)"). Write the trial record (`sudo` asks the password in this Terminal):
 
-5. **LA-5 and ANC-2 over ssh** (about 6 minutes; Remote Login on, then off): runbook steps 11 to 15. Closes: what a
-   request made over ssh does (`.notInteractive` read as unavailable, nothing on the Mac's screen) and `managername`
-   (`Background`, which `LimitLoadToSessionType Aqua` keeps the node out of).
+   ```
+   /usr/bin/env -i /bin/bash -p /Users/albert/dev/vibeswitcher/.vibeswitcher/worktrees/v2-on-the-mac-8/.vibeswitcher/v2-runbook/scripts/node-pins-mac.sh --record "/Library/Application Support/VibeSwitcher-trial/node-501.pins" --build 1111111111111111111111111111111111111111 2222222222222222222222222222222222222222 3333333333333333333333333333333333333333 4444444444444444444444444444444444444444
+   ```
 
-6. **LA-4 with the lid closed** (about 3 minutes; only with an external display and keyboard): runbook step 16. Closes
-   which route the dialog offers in clamshell; worth it only if the user works with the lid closed.
+   Record its owners, modes and text, and a write and a create as you, both refused:
+
+   ```
+   /bin/mkdir -p .build/mac-measure-records; { /bin/ls -lde / /Library "/Library/Application Support" "/Library/Application Support/VibeSwitcher-trial" "/Library/Application Support/VibeSwitcher-trial/node-501.pins"; /bin/cat "/Library/Application Support/VibeSwitcher-trial/node-501.pins"; echo x >> "/Library/Application Support/VibeSwitcher-trial/node-501.pins" && echo "WRITE ALLOWED"; /usr/bin/touch "/Library/Application Support/VibeSwitcher-trial/x" && echo "CREATE ALLOWED"; } > .build/mac-measure-records/sudo-trial.txt 2>&1; cat .build/mac-measure-records/sudo-trial.txt
+   ```
+
+   Undo it, the file then its folder:
+
+   ```
+   sudo /bin/rm "/Library/Application Support/VibeSwitcher-trial/node-501.pins"
+   ```
+
+   ```
+   sudo /bin/rmdir "/Library/Application Support/VibeSwitcher-trial"
+   ```
+
+5. **LA-5 and ANC-2 over ssh** (about 6 minutes; the runbook's steps 11 to 15). Closes: what a request made over ssh
+   does (`.notInteractive` read as unavailable, nothing on the Mac's screen) and `managername` (`Background`, which
+   `LimitLoadToSessionType Aqua` keeps the node out of). Turn Remote Login on (System Settings › General › Sharing ›
+   Remote Login), check it:
+
+   ```
+   /usr/bin/nc -z -G 2 localhost 22 && echo "Remote Login: on" || echo "Remote Login: off"
+   ```
+
+   Log in (first time: type `yes`; then your login password at ssh's own `Password:` prompt):
+
+   ```
+   ssh localhost
+   ```
+
+   In that login, the clone's `cd` line above, then:
+
+   ```
+   bash scripts/mac-measure/la-ssh.sh
+   ```
+
+   ```
+   bash scripts/mac-measure/ancestry-ssh.sh
+   ```
+
+   Then leave the login, turn Remote Login off in the same place, and check with the `nc` line that it says `off`:
+
+   ```
+   exit
+   ```
+
+6. **LA-4 with the lid closed** (about 3 minutes; only with an external display and keyboard; the runbook's step 16).
+   Closes which route the dialog offers in clamshell; worth it only if the user works with the lid closed. In a
+   Terminal window on the external display, the `cd` line above, then (it asks you to close the lid first; approve the
+   dialog with whatever it offers, a password into the dialog only):
+
+   ```
+   bash scripts/mac-measure/la-lid-closed.sh
+   ```
 
 7. **One word, no command: which route LA-3 took** (password or finger). Turns K-LA-3's "medium" into a fact.
 
@@ -696,7 +755,7 @@ user's decisions are named.
 | 6 | Item 11: Darwin ancestry through root's processes | **built, unproven** (`Platform.Processes.link`'s fallback, `PeerFacts.runner`) | M8 here; K-ESC-1/2 (an escaped Terminal window's chain through `login` read whole by the fallback); ANC-1, ANC-2 owed | **yes** (owed) | a worker for the review; the user runs ANC-1/2 |
 | 7 | Item 3's owed half: the CLI's cdhash anchored where the host anchors the server's, not re-read from `<root>/bin` | **built and reviewed** on `v2-mac-anchored-cli` (the spec's "Rows 7 and 10"; the lead's word, 2026-11-26) | `NodePinsAnchorTests/everyPlaceTakingTheCommandLinesIdentityRefusesOneSwappedInTheBuild` | **yes** (done for the branch) | the signing with `--options runtime` stays row 12's |
 | 8 | Item 9: the Mac's H1, the web port held by the host (`SCM_RIGHTS` over the stream, or launchd's `Sockets`), or `web` refused on the Mac until then | **built and reviewed** on `v2-mac-anchored-cli`: the host holds the web port (the spec's step 5: "No `Sockets` (the host holds the web port, item 9)"; the lead's word, 2026-11-26) | a second process can't bind the port while the host holds it; the server gets the descriptor | **yes** (done for the branch) | — |
-| 9 | Step 5: the LaunchAgent wired (`start`/`stop`/`status` by `launchctl`, the plist written and checked, the server check by audit token and cdhash) | **built and reviewed** on `v2-mac-anchored-cli` (the spec's "The LaunchAgent: start, stop and status" and its review rounds; the lead's word, 2026-11-26); `start` still refused by `NodeSystem.macUnbuilt` | scratch jobs on this Mac's launchd; the user's AG-1 (K-AG-1, twice) agrees with its `bootout` measurement; a coalition sweep for `stop` proposed for its review | **yes** (done for the branch) | the switch-on (row 15) |
+| 9 | Step 5: the LaunchAgent wired (`start`/`stop`/`status` by `launchctl`, the plist written and checked, the server check by audit token and cdhash) | **built and reviewed** on `v2-mac-anchored-cli` (the spec's "The LaunchAgent: start, stop and status" and its review rounds; the lead's word, 2026-11-26); `start` still refused by `NodeSystem.macUnbuilt` | scratch jobs on this Mac's launchd; the user's AG-1 (K-AG-1, twice) agrees with its `bootout` measurement; a coalition sweep for `stop` an idea for its review, the survivor's coalition after `bootout` not yet read | **yes** (done for the branch) | the switch-on (row 15) |
 | 10 | Item 12: the check reads the host's running image (`proc_pidpath` bound to the token), not `launchctl print`'s `program` | **built and reviewed** on `v2-mac-anchored-cli` (the spec's "Rows 7 and 10": the host check across a switch; the lead's word, 2026-11-26) | `MacAgentSwitchTests` (a scratch switch for real) | **yes** (done for the branch) | — |
 | 11 | Step 6: the unified log for events and the ack rule | **not built** (`Platform.Journal` sends nothing on the Mac) | M10 shows `processImagePath` forgeable by UUID: the ack rule needs another anchor | yes | a worker; the design to change first |
 | 12 | Step 7: `install-node-mac.sh` and signing | **built, unproven** (`install-node-mac.sh`, `lib/mac-sign.sh`, `MacSigningTests` pass here; its dry run runs on the hosted Mac) | an install from a v2 commit on this Mac (gh's token from the login keychain, curl, the App Store Xcode, `find`'s time) | **yes** (it is the Mac's S9) | **the user's decision**: the signing identity (`setup-signing.sh`'s local identity vs ad hoc, which makes the vault's Keychain key ask at each switch); the user at the keyboard for the Keychain read; then a worker |
