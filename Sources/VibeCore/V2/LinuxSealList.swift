@@ -104,7 +104,7 @@ public enum LinuxSealList {
 
     /// The name of the row `addSourced` adds when it stops at a cap (`Kind.capped`): no sourced path can be it (a
     /// target's name holds no space or parenthesis, `sourced`).
-    static let capName = "~/(sourced files past the seal's cap)"
+    static var capName: String { "~/(sourced files past the seal's cap)" }
 
     /// What the startup files (`startupFiles`, under `home`) source (`sourced`), and what those source in turn, every
     /// level (the review's R6: a line added to a sourced file is held as that file's change, and its target is then a
@@ -143,8 +143,10 @@ public enum LinuxSealList {
                 capped = "more than \(maxSourcedBytes >> 20) MB read"
                 break
             }
-            // Read whole, or the cap is hit: it grew past its limit since the `stat`, or can't be read now.
+            // Read whole, or the cap is hit when it grew past its limit since the `stat`; one that can't be read now
+            // (its mode) names nothing, and its own row holds it as unreadable.
             guard let data = ConfigSeal.regularContents(file, limit: min(startupLimit, maxSourcedBytes - bytes)) else {
+                guard stat(file, &info) == 0, info.st_size > Int64(min(startupLimit, maxSourcedBytes - bytes)) else { continue }
                 capped = "a file not read whole: " + ConfigSeal.shown(file, home: home)
                 break
             }
