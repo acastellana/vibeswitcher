@@ -4656,3 +4656,6 @@ Seen again, already reported, so only counted (the daily trend has the counts): 
 - 2026-11-26 03:26 Update: v2: la página entera, unida en una sola rama (`v2-web-app`) — **Qué cambió:** todo el rediseño de la página está ya en una rama local, `v2-web-app` (32 commits): el sistema de diseño y los componentes compartidos, el chat, el marco y las secciones, más la vista …
 - 2026-11-26 03:26 Planned v2-web-one-spacing: v2 web: one spacing scale under every screen, and the join's four leftovers (the review's group G; in a clone)
 - 2026-11-26 03:26 Started a worker on v2-web-one-spacing
+- 2026-11-26 04:05 Kept v2-on-the-mac-5 unmerged: By design nothing of it merges into main: its commits are on the local branch v2-mac-agent in its clone (.vibeswitcher/v2-agent), review fix round done (tip 24265335: I1, I2, N1–N5), awaiting the re-check of that round and then delivery as a branch for v2 at the user's say. No merge and no cleanup until then (decision 2026-11-25 16:27).
+- 2026-11-26 04:05 Planned re-check-v2-s-2: Re-check v2's Mac LaunchAgent wiring after its fix round (branch v2-mac-agent, I1, I2, N1–N5): report only
+- 2026-11-26 04:05 Started a worker on re-check-v2-s-2
