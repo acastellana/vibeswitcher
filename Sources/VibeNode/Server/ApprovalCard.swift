@@ -298,11 +298,12 @@ extension Requests {
     }
 
     /// `project.new`'s dialog text: the project's name and the folder it will be made in, by its resolved path (Where, else
-    /// the projects folder, `~` the user's home), and the goal, each whole.
+    /// the projects folder, `~` the user's home; a folder not there yet by the path its deepest folder that is resolves
+    /// to), and the goal, each whole.
     static func projectNewPhrase(name: String, location: String?, goal: String?, projectsFolder: String, home: String) -> String {
         let typed = location.flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 }
         let place = ProjectCreation.expand(typed ?? projectsFolder, home: home)
-        let resolved = LeadInit.kind(place) == nil ? place : LeadInit.resolved(place)
+        let resolved = place.hasPrefix("/") ? ProjectMaker.resolvedAsFarAsItGoes(place) : place
         let folder = (resolved as NSString).appendingPathComponent(ProjectCreation.folderName(for: name))
         return "make the project \(whole(name.trimmingCharacters(in: .whitespacesAndNewlines))) in \(ConfigSeal.inert(folder, limit: .max)) and start its lead"
             + (goal.map { " with the goal \(whole($0))" } ?? "")

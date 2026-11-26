@@ -11,8 +11,9 @@ import VibeCore
 /// - **Only in the projects folder.** The parent is the node's projects folder (`projects_folder`, else `~/dev`) or a
 ///   folder inside it, named without `.` or `..`; each folder below the projects folder is opened from its parent's
 ///   descriptor with `O_NOFOLLOW`, so a link on the way (to anywhere, inside or out) refuses. The projects folder itself is
-///   the user's setting, taken as it resolves (checked to be the folder opened); `/` refuses. A hidden folder on the way
-///   (`.claude`), in Where or in the projects folder, refuses. What `LeadInit` plans must be the folder made by its path
+///   the user's setting, taken as it resolves (checked to be the folder opened); `/` refuses, and no missing level of it
+///   is made through a link. A hidden folder on the way (`.claude`), in Where or in the projects folder, by its path as
+///   set or as it resolves, refuses. What `LeadInit` plans must be the folder made by its path
 ///   too, not only by its inode (a folder moved out and reached through a link in its place refuses), and the lead's
 ///   start is pinned to it (`stillMade`).
 /// - **Never over anything.** The project's folder is made with `mkdirat` on the parent's descriptor: anything with its
@@ -92,8 +93,10 @@ public enum ProjectMaker {
         guard root.hasPrefix("/") else {
             return .failure(Refusal(.failed, "The node's projects folder, \(ConfigSeal.inert(projectsFolder, limit: 200)), isn't a full path: set it again (projects_folder)."))
         }
-        if root.split(separator: "/").contains(where: { $0.hasPrefix(".") }) {
-            return .failure(Refusal(.hidden, "The projects folder, \(ConfigSeal.inert(shown(root, home), limit: 200)), is in a hidden folder: a project from here isn't made there; set projects_folder to a folder of its own."))
+        // Hidden by its path as set, or by the path it resolves to (a link on the way into `.claude` is the same folder).
+        let resolvedRoot = resolvedAsFarAsItGoes(root)
+        if isHidden(root) || isHidden(resolvedRoot) {
+            return .failure(hiddenRoot(root, resolvedRoot, home))
         }
         let below: [String]
         switch place(location, root: root, home: home) {
@@ -116,6 +119,10 @@ public enum ProjectMaker {
             while level != "/", LeadInit.kind(level) == nil {
                 missing.insert(level, at: 0)
                 level = (level as NSString).deletingLastPathComponent
+            }
+            // No level made through a link: the folder it would be made in must be that folder by its own path.
+            guard components(resolvedRoot) == components(root) else {
+                return .failure(Refusal(.location, "\(shown(root, home)) isn't there, and the way to it goes through a link (to \(ConfigSeal.inert(shown(resolvedRoot, home), limit: 200))): a project from here makes no folder through a link; make the projects folder first, or set projects_folder to the folder it leads to."))
             }
             for level in missing {
                 guard mkdir(level, 0o755) == 0 else {
@@ -143,6 +150,12 @@ public enum ProjectMaker {
             close(top)
             undoLevels()
             return .failure(Refusal(.outside, "The projects folder is /: set projects_folder to a folder of its own first."))
+        }
+        // The folder opened, by the path it resolves to now: never in a hidden folder (the re-check's R1).
+        guard !isHidden(real) else {
+            close(top)
+            undoLevels()
+            return .failure(hiddenRoot(root, real, home))
         }
         // Each folder below the projects folder, from its parent's descriptor, never through a link.
         var parent = top
@@ -318,6 +331,29 @@ public enum ProjectMaker {
     }
 
     static func shown(_ path: String, _ home: String) -> String { ProjectCreation.tildePath(path, home: home) }
+
+    /// `path` with its links followed as far as it is there: the deepest folder of it that is there, resolved, and the
+    /// rest as written (what the make would make and where, and what the dialog names).
+    static func resolvedAsFarAsItGoes(_ path: String) -> String {
+        var level = path
+        var rest: [String] = []
+        while level != "/", !level.isEmpty, LeadInit.kind(level) == nil {
+            rest.insert((level as NSString).lastPathComponent, at: 0)
+            level = (level as NSString).deletingLastPathComponent
+        }
+        let there = level.isEmpty ? "/" : LeadInit.resolved(level)
+        return rest.reduce(there) { ($0 as NSString).appendingPathComponent($1) }
+    }
+
+    /// Whether a component of `path` starts with “.” (a hidden folder, or `.`/`..`).
+    static func isHidden(_ path: String) -> Bool { path.split(separator: "/").contains { $0.hasPrefix(".") } }
+
+    static func components(_ path: String) -> [Substring] { path.split(separator: "/", omittingEmptySubsequences: true) }
+
+    static func hiddenRoot(_ root: String, _ resolved: String, _ home: String) -> Refusal {
+        let leads = components(resolved) == components(root) ? "" : " (it leads to \(ConfigSeal.inert(shown(resolved, home), limit: 200)))"
+        return Refusal(.hidden, "The projects folder, \(ConfigSeal.inert(shown(root, home), limit: 200))\(leads), is in a hidden folder: a project from here isn't made there; set projects_folder to a folder of its own.")
+    }
 }
 
 extension Requests {
