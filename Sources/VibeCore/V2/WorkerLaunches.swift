@@ -69,13 +69,16 @@ public enum WorkerLaunch {
 
     /// The `env` each team session's `--settings` carries under the floor (`LeadLaunch.prepare`'s `pinModels`): each
     /// family's alias pinned to its id
-    /// (ANTHROPIC_DEFAULT_<FAMILY>_MODEL), and ANTHROPIC_MODEL to the model the session is launched with (`model`, as
-    /// its id; none without one). Not ANTHROPIC_BASE_URL: no subscription (claude.ai login) session has been seen to
-    /// start and answer with it set (the security architecture's open list). Whether a project's or a worktree's
-    /// settings `env` can still win key by key is unverified (the same list); a worker's project settings naming a
+    /// (ANTHROPIC_DEFAULT_<FAMILY>_MODEL), ANTHROPIC_MODEL to the model the session is launched with (`model`, as its
+    /// id; none without one), and ANTHROPIC_BASE_URL to Anthropic's own API (`baseURL`: a gateway another settings file
+    /// names could serve another model under the name). Seen 2026-11-26 with Claude Code 2.1.332 on a claude.ai login
+    /// (Linux): a session with these in its `--settings` env starts and answers, and a `--settings` env key beats the
+    /// same key in the project's and the local settings, a key it doesn't name staying theirs (tried with plain names,
+    /// not these, and not on the Mac: the security architecture's open list). A worker's project settings naming a
     /// routing key are refused at its bind (`routingKeys`).
     public static func pins(model: String?) -> [String: String] {
         var pins = Dictionary(uniqueKeysWithValues: currentIDs.map { ("ANTHROPIC_DEFAULT_\($0.key.uppercased())_MODEL", $0.value) })
+        pins["ANTHROPIC_BASE_URL"] = baseURL
         if let model { pins["ANTHROPIC_MODEL"] = fullID(model) }
         return pins
     }
@@ -211,6 +214,9 @@ public enum WorkerLaunch {
         }
         return true
     }
+
+    /// Anthropic's own API, the base URL the pins hold.
+    public static let baseURL = "https://api.anthropic.com"
 
     /// The `env` names that send Claude Code to another endpoint or provider than the one its `--model` names there:
     /// a base URL, Bedrock, Vertex or Foundry and theirs, a proxy and the certificates that let one read it. A worker

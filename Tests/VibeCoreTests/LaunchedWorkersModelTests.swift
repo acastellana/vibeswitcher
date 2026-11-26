@@ -987,8 +987,8 @@ extension LeadAdvanceTests {
             return
         }
         #expect(why.contains("ANTHROPIC_BASE_URL in .claude/settings.local.json"), "\(why)")
-        // Refused, never pinned: no subscription session has been seen to start with it set.
-        #expect(WorkerLaunch.pins(model: "opus")["ANTHROPIC_BASE_URL"] == nil)
+        // A role's own is pinned to Anthropic's API (a subscription session was seen to start with it, 2026-11-26).
+        #expect(WorkerLaunch.pins(model: "opus")["ANTHROPIC_BASE_URL"] == "https://api.anthropic.com")
         guard case .grant(let other) = book.answer(.issue(role: .worker, root: root, task: "y", auditing: nil), from: .session("lead")) else { return }
         guard case .refused(let restart) = book.answer(.bind(grant: other, root: root, session: "clipped"), from: .session("lead"),
                                                        bound: .init(command: "claude --model sonnet --settings '…' -- go", full: false)) else {
