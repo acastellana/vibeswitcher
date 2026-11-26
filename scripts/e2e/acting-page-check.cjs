@@ -73,12 +73,15 @@ const HOLD = `(() => {
 
 // The card in the waiting block whose text holds `text`, as an expression.
 const card = (text) => `[...document.querySelectorAll('.wait-box .card')].find((el) => el.innerText.includes(${JSON.stringify(text)}))`;
+// The same card opened whole (one of several open ones folds to its line): its answer form's submit button's words.
+const submitOf = (text) => `(() => { const c = ${card(text)}; if (c?.classList.contains('folded')) { c.querySelector('.card-unfold').click(); return null; } return c?.querySelector('.answer button[type=submit]')?.innerText.trim() || null; })()`;
 // Clicks the option of the card holding `text` whose words start with `option`: true once clicked.
 const clickOption = (text, option) => `(() => {
   const c = ${card(text)};
   if (!c) return null;
   if (c.classList.contains('folded')) { c.querySelector('.card-unfold').click(); return null; }
-  const button = [...c.querySelectorAll('button.option')].find((b) => (b.querySelector('.option-text') || b).innerText.trim().startsWith(${JSON.stringify(option)}));
+  // By its words, or by the option itself where the words differ (its title: an approval's "Approve <sha>").
+  const button = [...c.querySelectorAll('button.option')].find((b) => (b.querySelector('.option-text') || b).innerText.trim().startsWith(${JSON.stringify(option)}) || (b.title || '').startsWith(${JSON.stringify(option)}));
   if (!button || button.disabled) return null;
   button.click();
   return true;
@@ -142,7 +145,7 @@ async function run() {
       const details = card.querySelector('.hc-details');
       const face = [...card.children].filter((el) => el !== details && el.tagName !== 'HEADER');
       // The words, its command aside (a card's id is in the command the node gives to settle it).
-      const words = face.filter((el) => !el.classList.contains('hc-terminal')).map((el) => el.innerText).join(' ');
+      const words = face.filter((el) => !el.classList.contains('hc-terminal') && !el.classList.contains('hc-action')).map((el) => el.innerText).join(' ');
       // Four blocks: the title (with the things named under it), what it holds back, the rules that would change, the
       // action (Accept, or the terminal's line); quiet lines beside them. Every thing that isn't an update is named, so
       // blocks are counted, not lines; what may be capped is: rules at five, updates at three.
@@ -158,9 +161,12 @@ async function run() {
     } catch (error) { return 'FAIL ' + error.message; } })()`, WAIT);
     await page.evaluate(`document.querySelector('.wait-box .card.held-config')?.scrollIntoView({ block: 'center' })`);
     await page.shot('held-config');
-    await page.evaluate(`(() => { const d = document.querySelector('.wait-box .card.held-config .hc-details'); if (d) d.open = true; })()`);
+    // Its whole: Show it whole opens the side sheet (the paths, the rules' table, the technical details).
+    await page.evaluate(`[...document.querySelectorAll('.wait-box .card.held-config .show-whole button')][0]?.click()`);
+    const whole = await page.until(`(() => { const sheet = document.querySelector('.sheet:not([hidden])'); return sheet && sheet.querySelector('.hc-rails') ? sheet.querySelector('.sheet-title').innerText : null; })()`, WAIT);
     await page.shot('held-config-details');
-    await page.evaluate(`(() => { const d = document.querySelector('.wait-box .card.held-config .hc-details'); if (d) d.open = false; })()`);
+    await page.evaluate(`document.querySelector('.sheet-close')?.click()`);
+    if (!whole) record('Held config whole', false, 'Show it whole opened no sheet with the rules’ table');
     // Dark, and at a phone's width.
     await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'dark' }] });
     await page.shot('held-config-dark');
@@ -206,7 +212,7 @@ async function run() {
     record('Approve', approved, approved || 'the approval’s option didn’t approve it');
 
     // Changed: the frames held, the question reworded by its lead, the option the page drew clicked.
-    const drawn = await page.until(`(() => { const c = ${card(expect.second)}; return c && !c.classList.contains('folded') && c.querySelector('button.option') ? true : null; })()`, WAIT);
+    const drawn = await page.until(`(() => { const c = ${card(expect.second)}; if (c?.classList.contains('folded')) { c.querySelector('.card-unfold').click(); return null; } return c && c.querySelector('button.option') ? true : null; })()`, WAIT);
     await page.evaluate('window.__vsHold = true');
     fs.writeFileSync(path.join(out, 'revise.want'), 'reword the second question');
     const revised = drawn && await waitFile(path.join(out, 'revise.done'), 90000);
@@ -219,14 +225,17 @@ async function run() {
 
     // Told and taken back: a message at the lead's next step (`tell`) offers Take back until the lead has it; taken
     // back, it says so. A second one stays, for the read mark below.
-    const tell = (text) => page.evaluate(`(() => { const say = document.querySelector('.project-view .say'); say.value = ${JSON.stringify(text)}; document.querySelector('.project-view .lead-send .send-main').click(); return true; })()`);
+    // The lead's message box (its text area, then its Send: at the lead's next step).
+    const say = (text) => `(() => { const box = document.querySelector('.project-view .lead-box .composer-input'); box.value = ${JSON.stringify(text)}; box.dispatchEvent(new Event('input', { bubbles: true })); return box; })()`;
+    const tell = (text) => page.evaluate(`(() => { ${say(text)}; document.querySelector('.project-view .lead-box button.send').click(); return true; })()`);
     const noteOf = (text) => `[...document.querySelectorAll('.project-view .note')].find((el) => el.querySelector('.mine')?.innerText === ${JSON.stringify(text)})`;
     await tell('Keep the old name');
     const offered = await page.until(`(() => { const note = ${noteOf('Keep the old name')}; const back = note?.querySelector('.take-back'); if (!back) return null; back.click(); return true; })()`, WAIT);
     const takenBack = offered && await page.until(`(() => { const said = ${noteOf('Keep the old name')}?.querySelector('.confirm-note')?.innerText || ''; return /Taken back/.test(said) ? said : null; })()`, WAIT);
     await tell('And ship it on Monday');
     const stays = await page.until(`${noteOf('And ship it on Monday')}?.querySelector('.take-back') ? true : null`, WAIT);
-    record('Told and taken back', takenBack && stays, !offered ? 'no Take back under a message the lead hasn’t had' : !takenBack ? 'taking it back didn’t say so' : !stays ? 'the second message offers no Take back' : takenBack);
+    const toldSaid = await page.evaluate(`${noteOf('Keep the old name')}?.innerText.replace(/\\s+/g, ' ') || 'no note'`);
+    record('Told and taken back', takenBack && stays, !offered ? 'no Take back under a message the lead hasn’t had' : !takenBack ? 'taking it back didn’t say so: ' + toldSaid : !stays ? 'the second message offers no Take back' : takenBack);
 
     // Change while unread: the third question answered by click; its pill offers Change while the lead hasn't had it,
     // and the answer changes.
@@ -270,7 +279,7 @@ async function run() {
     const secondWay = fits && ways.length > 1 ? ways[1] : null;
     if (secondWay) {
       await page.evaluate(`(() => {
-        document.querySelector('.project-view .say').value = 'Run the audits on Fable';
+        ${say('Run the audits on Fable')};
         [...document.querySelectorAll('.lead-send .send-way')].find((el) => el.querySelector('strong')?.innerText.trim() === ${JSON.stringify(secondWay)})?.click();
       })()`);
     }
@@ -285,16 +294,17 @@ async function run() {
     const switched = await waitFile(path.join(out, 'switch.done'), 90000);
     if (switched) await page.evaluate('window.__vsSockets.at(-1).close()');
     const older = switched && await page.until(`(() => { const b = document.querySelector('.tab-banner:not([hidden])'); return b && /older build/.test(b.innerText) && /ends acting/.test(b.innerText) && [...b.querySelectorAll('button')].some((el) => el.innerText.trim() === 'Reload') ? b.innerText.replace(/\\s+/g, ' ').slice(0, 90) : null; })()`, WAIT);
-    const stillActs = older && await page.until(`(() => { const c = ${card(expect.second)}; return c && c.querySelector('.answer button[type=submit]')?.innerText.trim() === 'Answer' ? true : null; })()`, WAIT);
+    const stillActs = older && await page.until(`${submitOf(expect.second)} === 'Answer' ? true : null`, WAIT);
     await page.shot('older-build');
     record('Older build', older && stillActs, !switched ? 'the test never changed the served page' : !older ? 'no banner saying the tab is from an older build, with Reload' : !stillActs ? 'the tab stopped acting' : older + '; still acts');
 
     // Level off: This node's Turn off; the page reconnects, reading and drafting.
-    await page.go('#/node');
-    const off = await page.until(`(() => { const b = [...document.querySelectorAll('.node-column .acts-line button')].find((el) => el.innerText.trim() === 'Turn off'); if (!b || b.disabled) return null; b.click(); return true; })()`, WAIT);
-    const reads = off && await page.until(`(() => { const line = document.querySelector('.node-column .acts-line'); return line && line.innerText.includes('vibeswitcher set web_acts trust') ? line.innerText.replace(/\\s+/g, ' ').slice(0, 80) : null; })()`, WAIT);
+    // This node's acting group (its own row in This node's list).
+    await page.go('#/node/acting');
+    const off = await page.until(`(() => { const b = [...document.querySelectorAll('.acts-line button')].find((el) => el.innerText.trim() === 'Turn off'); if (!b || b.disabled) return null; b.click(); return true; })()`, WAIT);
+    const reads = off && await page.until(`(() => { const line = [...document.querySelectorAll('.acts-line')].find((el) => el.offsetParent); return line && line.innerText.includes('vibeswitcher set web_acts trust') ? line.innerText.replace(/\\s+/g, ' ').slice(0, 80) : null; })()`, WAIT);
     await page.go(expect.projectHref);
-    const drafts = reads && await page.until(`(() => { const c = ${card(expect.second)}; return c && c.querySelector('.answer button[type=submit]')?.innerText.trim() === 'Draft' ? 'the card drafts' : null; })()`, WAIT);
+    const drafts = reads && await page.until(`${submitOf(expect.second)} === 'Draft' ? 'the card drafts' : null`, WAIT);
     // The tab acted and no longer does: said at the top of the centre, with why (acting turned off; this tab, from an
     // older build and no longer acting, may have reloaded to the node's meanwhile, which it says too).
     const banner = drafts && await page.until(`(() => { const b = document.querySelector('.tab-banner:not([hidden])'); return b && /no longer acts/.test(b.innerText) && /(turned off|is off too)/.test(b.innerText) && b.innerText.includes('vibeswitcher set web_acts trust') ? b.innerText.replace(/\\s+/g, ' ').slice(0, 90) : null; })()`, WAIT);

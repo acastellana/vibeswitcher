@@ -19,17 +19,23 @@ bash scripts/test.sh --web WebApp/tests
 | Address | Shows |
 | --- | --- |
 | `/#pair=CODE` | The node, live: what `vibeswitcher web` prints. The code is taken off the address bar and exchanged for a token this tab keeps. |
-| `/` | The node again in this tab (its token), or "Not paired" with what to run. |
+| `/` | The node again in this tab (its token), or "Pair this page with your node": what this is, the line to run in a terminal, what happens then. A node that doesn't answer for 5 s gets "The node isn't answering" with Try again now; until the first snapshot every column is a skeleton in the shape the last load had. |
 | `/?mock` | The mock node: a lead's team moves tasks across its board, a question arrives, sessions finish. |
 | `/?still` | The mock's snapshot with nothing happening after it (for screenshots). |
-| `/?empty` | A mock node with no sessions. |
+| `/?empty` | A mock node with no sessions: home says what this is and offers Start a session and New project. |
+| `/?mock&delay=MS`, `/?mock&delay=never` | The mock as a slow node (its first snapshot MS late: the skeletons, then the content without a jump), or one that never answers (the page that says so). |
+| `/?older` | A mock node that doesn't take a session's answer or a start from a page (it lists no `session.reply`, `session.new`, `session.resume` or `lead`): their lines, and why. |
+| `/?toggle` | The mock's asking session shows Claude's auto-mode popup, whose Space-toggled option the node refuses from a page. |
+| `/?mock&rich` | "Add dark mode…" (`#/s/local:a47e9d05-4f6a-4c1e-9b7d-2e5a8c0d1f3b`) holds what an agent writes: a heading, emphasis, a quote, links, nested lists, a table, fenced code, a long output and a failed command. |
+| `/?mock&stream` | "Bank webhooks…" streams a long reply on load, and again each time one ends. |
+| `/?mock&refuse=send,tell` | The node refuses a session's send and a lead's message: the refusal beside the box, with Try again. Any kind the mock's `REFUSALS` names works so. |
 | `/?rows=10000` | One mock session ("Add dark mode…") with a 10,000-row chat: its newest 200 first, the rest paged in as you scroll up. |
 | `/#/p/<project>/lead?show=asks\|all&tab=stats\|files&task=<slug>&sheet=<line>` | A project: you and its lead in the centre (the dial's level, the right column's tab, a task open in place, a line's side sheet). `/#/p/<project>` (the board page's address before) opens it too. |
 | `/#/p/<project>/roadmap?open=<goal>,unsorted,done` | Its roadmap: a row per goal opening in place to its tasks, Unsorted, the done goals folded (each named in `open` is open); with no goals, in motion, blocked and the queue as one band (`open=queue`). |
-| `/#/sessions`, `/#/s/<session>` | Your own sessions (outside every project's team); a session's chat, terminal and inspector. |
-| `/#/new`, `/#/node` | New project; This node. |
+| `/#/sessions`, `/#/sessions/new`, `/#/s/<session>` | Your own sessions (outside every project's team) as a list beside the start form, or beside a session's chat, terminal and inspector (a team's session shows alone). |
+| `/#/new`, `/#/node`, `/#/node/<group>` | New project; This node, a group of it chosen (`#/node` opens what needs you, else the first). |
 | `/?lang=es` | The page's words in Spanish whatever the browser says (it follows the browser's language otherwise). |
-| `/#/settings`, `/#/settings/<project id>` | Settings: the node's and a project's, each change drafted as the `vibeswitcher set` line to run in a terminal (`js/views/settings.js`). |
+| `/#/settings`, `/#/settings/node/<section>`, `/#/settings/<project id>[/<section>]`, `/#/settings/terminal` | Settings: the node's and every project's sections beside the chosen one, each change drafted as the `vibeswitcher set` line to run in a terminal (`js/views/settings.js`). |
 | `/?theme=dark`, `/?theme=light` | The other look, whatever the system says. |
 
 Screenshots of each main state, light and dark, wide and at 390 px, are in `shots/`, made from `PageCheckTests`' scratch node: `PAGE_SHOTS=$PWD/WebApp/shots bash scripts/test.sh --filter PageCheckTests`.
@@ -43,7 +49,9 @@ Screenshots of each main state, light and dark, wide and at 390 px, are in `shot
   a string as HTML. `index.html`'s content policy allows the page's own scripts and styles only, with Trusted Types and
   no policy, so the browser refuses it too. `tests/lint.test.mjs` holds the source and the policy to this.
 - **Nothing remote.** No image, font or script from another origin; the icons are drawn in `js/marks.js`. A link in
-  an agent's text is shown as text.
+  the chat (`[words](address)`, `<address>` or a bare one) is an anchor only for http, https and mailto, from the
+  address as the browser's URL parser reads it, opening in a new tab with `noopener`; any other is shown as typed, and
+  the page fetches nothing a message names. What the node made inert (a board's, a card's words) keeps its links as text.
 - **The Mac app is the reference** for words, status colours and layout. Where they pull apart, this leans calmer.
 
 ## Files
@@ -62,10 +70,14 @@ Screenshots of each main state, light and dark, wide and at 390 px, are in `shot
 | `js/conversation.js` | The redesign's reads of the board and cards, no page in them: the lead conversation's lines and the dial's counts, a question's head line, a task's five steps and colour, whom a blocked task waits on, the projects and which opens first. |
 | `js/i18n.js`, `js/i18n-es.js` | Every view's own words: the English with the keys and `t(key, values)` (the browser's language chosen once), and the Spanish, a file a language. |
 | `js/words.js` | The vocabulary: state words, durations, a task's words (from `VibeCore`). |
-| `js/dom.js`, `js/marks.js`, `js/text.js` | Building nodes; status marks, agent badges, icons; markdown and diffs as nodes. |
+| `js/dom.js`, `js/marks.js`, `js/text.js` | Building nodes; status marks, agent badges, icons; markdown and diffs as nodes (`parseMarkdown` reads text into a plain tree, then `h` builds it: emphasis, strikethrough, code, links, quotes, nested lists, headings, tables, rules, fenced code; a marker that doesn't close is shown as typed; `tests/markdown.test.mjs` is its corpus). |
+| `js/copying.js` | Copy on a block of the chat (fenced code, a diff, a tool's output): exactly its text, "Copied" for a moment. A diff's Copy takes the new text (its kept and added lines, no signs); Copy diff the change with its signs. |
+| `js/views/composer.js` | The one message box: the lead's, a session's and a card's answer box, one behaviour (the keys below); it grows to about nine lines, then scrolls; what you typed and didn't send is kept per box in this tab (sessionStorage) across navigation and a reload; a refused send says why beside it, with Try again. |
 | `js/terminal.js` | A session's terminal over the socket (the contract's §9): the binary frames, and the stream's life (open, the replay drawn whole, live, resync, reconnect, close). |
 | `vendor/` | xterm.js and its fit add-on, at the versions and hashes `vendor/README.md` records; nothing else is vendored. |
-| `js/notify.js` | The browser's notifications while the page is open (a card opens, a session's prompt waits, a lead stops), asked once and toggled on This node; the title bar's count of what needs you. |
+| `js/viewport.js` | A phone's on-screen keyboard: while a box is being typed in, the page keeps to the visible part above the keyboard (`keyboard`, `--vv-height`, `--vv-top` on the root, style.css's 760 px blocks) and the box stays in sight. |
+| `js/notify.js` | The browser's notifications while the page is open (a card opens, a session's prompt waits, a lead stops), asked once (a note in the left column's gap, where nothing moves; "Not now" kept) and toggled on This node; the title bar's count of what needs you. |
+| `js/views/frame.js` | The frame before there is anything to show: the centre's and the right column's skeletons until the first snapshot, and the pages for a page not paired, a node out of reach and a node with nothing on it (what this is, what to do, what happens then). The left column's skeleton is `left.js`'s, in the shape the last load had (`vs.frame` in this browser). |
 | `js/images.js` | A chat's pictures: their bytes asked of the node (`chat.image`) a part at a time, shown as object URLs; the 400 lately used kept, 96 MB at most. |
 | `js/composing.js` | The composer's word at the caret (`/` and `@`, as the app's composer finds it) and an image's parts for `session.attach`. In the box, `/` and `@` complete from the node (`session.complete`); a pasted, dropped or picked image (the + button) goes to the node and the draft names it, and one that is a file on the node gets the line that sends it (`send … --image PATH`); the messages the node holds behind a question show over the box. |
 | `js/settings.js` | The settings' parts with no page in them: grouped by section, a change's `vibeswitcher set` line quoted as the shell needs, what a draft is checked against. |
@@ -78,13 +90,23 @@ Screenshots of each main state, light and dark, wide and at 390 px, are in `shot
 | Key | Does |
 | --- | --- |
 | ⌘K / Ctrl+K | Go to a session or run a command |
-| ⌘J / Ctrl+J, ⌥J / Alt+J | Next project with something waiting on you |
-| Esc | Closes the side sheet, a drawer, the inspector where it is a sheet |
+| ⌘J or ⌥J / Alt+J | Next with something waiting on you: a project, a session of your own, This node (Ctrl+J stays the browser's Downloads, ⌥⌘J Chrome's console) |
+| ⌥1–9 / Ctrl+Shift+1–9 | The left column's first nine, in its order (⌘1–9, Ctrl+1–9 and, on Linux, Alt+1–9 are the browser's tabs) |
+| ⌥] ⌥[ / Alt+↓ Alt+↑ | The next or previous in the left column (on a Mac ⌥↓ ⌥↑ stay the browser's scroll by a screen) |
+| ⌥F, or / | The left column's filter, also a letter typed while the keyboard is in the column: the projects and your own sessions by name or folder, what needs you first (↑ ↓ move, ↩ opens, Esc clears). Off a Mac only / (Alt+F is the browser's menu) |
+| Esc | Closes the side sheet, a drawer, the inspector where it is a sheet; clears a list's search |
+| / | Your own sessions, This node, Settings: the list's search (↑ ↓ move in the list, ↩ opens); elsewhere the left column's filter |
 | ⌥⌘1 2 / Ctrl+Alt+1 2 | Terminal, Chat |
 | ⌥⌘0 / Ctrl+Alt+0, ⌥0 / Alt+0 | Toggle Inspector (the Mac's View › Toggle Inspector) |
 | ⌥⌘3 / Ctrl+Alt+3 | The inspector's Team tab, for a lead or a session of its team |
+| ↩ in a message box | Sends: to a session (Steer while a Claude works, Queue behind its open question; the button's word says which), to the lead, a card's answer. Where the page doesn't act, it leaves the draft and its line instead |
+| ⇧↩ / ⌥↩ / ⌘↩ (Ctrl+↩) in a message box | A new line / after the agent's turn / now, where its agent takes those (else at its next step) |
+| Esc in a message box | Leaves the box (closes `/` and `@` completion first) |
+| On a touch screen | The soft keyboard's ↩ is a new line: Send is the button (a phone's keyboard has no ⇧↩) |
 | ↑ in an empty message box | Into the last open card |
 | In a card: 1–9, ↑ ↓, ↩, H | Answer with that option; move; answer with the focused one; hold the timer |
+
+None of the left column's keys fires while typing in a field or a terminal; each is in the palette beside its command (`js/keys.js`).
 
 ## The inspector
 

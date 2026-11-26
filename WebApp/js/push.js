@@ -28,3 +28,10 @@ export function pushLines(push, root) {
     decline: `vibeswitcher decline-push ${word(root)}`,
   };
 }
+
+// What came of a push settled from this page (the waiting block's receipt: `outcome` pushed, upToDate or declined, the
+// `short` sha and `target` taken at the click), as its line in the lead's conversation.
+export function pushReceipt(receipt) {
+  if (receipt.outcome === 'declined') return t('puDeclined');
+  return t(receipt.outcome === 'upToDate' ? 'puUpToDate' : 'puPushed', { target: receipt.target, short: receipt.short });
+}

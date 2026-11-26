@@ -7,6 +7,7 @@ import { sessionMark, icon } from '../marks.js';
 import { STATES, stateOf, since } from '../words.js';
 import { projectOf } from '../ui.js';
 import { t } from '../i18n.js';
+import { focusKeeper } from './sheet.js';
 
 // How well `text` answers `query`: a run at the start of a word beats one inside it, and the letters in order
 // anywhere beat nothing. 0: no match.
@@ -37,7 +38,7 @@ export function palette(app) {
   const el = h('div', { class: 'palette', hidden: true }, panel);
   let entries = [];
   let chosen = 0;
-  let before = null;
+  const keeper = focusKeeper();
 
   function candidates() {
     const sessions = app.order().map((session) => ({
@@ -108,12 +109,12 @@ export function palette(app) {
     const open = ui.state.palette;
     el.hidden = !open;
     if (open) {
-      before = document.activeElement;
+      keeper.remember();
       input.value = '';
       chosen = 0;
       draw();
       input.focus();
-    } else if (before?.isConnected) before.focus();
+    } else keeper.restore();
   });
   // The rows stay true while it's open: a status that changes shows here as it does in the list.
   store.subscribe('sessions', () => { if (ui.state.palette) draw(); });

@@ -23,10 +23,10 @@ test('the briefing is a read a page may ask, in its shape, and the mock answers 
   mock.stop();
 });
 
-test('the line under it says what waits on you and who wrote it', () => {
-  assert.equal(briefFoot({ asks: 0, byModel: false }), 'Nothing waits on you. Written from the boards and logs.');
-  assert.equal(briefFoot({ asks: 1, byModel: true }), '1 thing waits on you. Written by Claude Haiku from the boards and logs.');
-  assert.equal(briefFoot({ asks: 3, byModel: false }), '3 things wait on you. Written from the boards and logs.');
+test('the line under it says what needs you and who wrote it', () => {
+  assert.equal(briefFoot({ asks: 0, byModel: false }), 'Nothing needs you. Written from the teams’ tasks and the logs.');
+  assert.equal(briefFoot({ asks: 1, byModel: true }), '1 thing needs you. Written by Claude Haiku from the teams’ tasks and the logs.');
+  assert.equal(briefFoot({ asks: 3, byModel: false }), '3 things need you. Written from the teams’ tasks and the logs.');
 });
 
 test('the browser’s speech: none where it has none; reading stops what was read first, in the briefing’s language', () => {

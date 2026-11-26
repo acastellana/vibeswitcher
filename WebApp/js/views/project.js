@@ -11,19 +11,25 @@
 //
 // Every line is the sessions' writing, drawn as text.
 
+import * as kit from '../kit.js';
 import { h, s, setText, setClass, framed } from '../dom.js';
 import { icon } from '../marks.js';
 import { clock, moment, tilde, lastPart, taskLine, since } from '../words.js';
 import { t, listed, lang, nodeWords } from '../i18n.js';
 import { hasDates, dated, timeAxis, axisPoints, landingWords, basisWords } from '../forecast.js';
-import { leadLines, shownLines, dialCounts, waitingCards, waitingCount, cut, shortHashes, dayOf, teamCounts, standing, taskTone, taskStep, waitsOn, goalRows, lineKey } from '../conversation.js';
+import { leadLines, shownLines, dialCounts, waitingCards, waitingCount, withPushLines, cut, shortHashes, dayOf, teamCounts, standing, taskTone, taskStep, waitsOn, goalRows, lineKey } from '../conversation.js';
 import { projectHref, routeHref } from '../ui.js';
-import { questionStack, pluginCard, copyLine, cardSheet } from './cards.js';
+import { questionStack, pluginCard, copyLine, cardSheet, optionWords } from './cards.js';
+import { heldParts, sinceWord } from './sheet.js';
+import { leadStartOrLine, baseMoveOf } from './drive.js';
 import { tellLine, shellWord, leadLine } from '../actions.js';
+import { pushReceipt } from '../push.js';
+import { pluginFacts } from '../plugincard.js';
 import { actsFor, doButton, cardArgs, refusalWords } from '../acting.js';
 import { waysFor, sendArgs, sentWords } from '../sendways.js';
 import { heldSummary, itemLabel } from '../heldconfig.js';
 import { sendMenu } from './sendmenu.js';
+import { composer as messageBox, keepFor } from './composer.js';
 
 // The line marks: a diamond for a question (filled while open, an outline once answered), a check for a result, a
 // small dot for a status update.
@@ -58,33 +64,68 @@ export function projectView(app, { sheet }) {
   const { store, ui } = app;
   const big = h('h1', { class: 'big' });
   const name = h('span', { class: 'pname' });
-  const leadLink = h('a', { class: 'switch-link' }, t('lead'));
-  const roadLink = h('a', { class: 'switch-link' }, t('roadmap'));
-  const switcher = h('nav', { class: 'switch', 'aria-label': t('lead') + ' / ' + t('roadmap') }, leadLink, roadLink);
+  const leadLink = kit.segment({ tag: 'a' }, t('lead'));
+  const roadLink = kit.segment({ tag: 'a' }, t('roadmap'));
+  const switcher = kit.segmented({ tag: 'nav', 'aria-label': t('lead') + ' / ' + t('roadmap') }, leadLink, roadLink);
   const dialLinks = ['asks', 'decisions', 'all'].map((level) => {
     const count = h('small');
-    return { level, count, el: h('a', { class: 'switch-link' }, t({ asks: 'dialAsks', decisions: 'dialDecisions', all: 'dialAll' }[level]), count) };
+    return { level, count, el: kit.segment({ tag: 'a' }, t({ asks: 'dialAsks', decisions: 'dialDecisions', all: 'dialAll' }[level]), count) };
   });
-  const dial = h('nav', { class: 'switch dial', 'aria-label': t('dialLabel') }, dialLinks.map((link) => link.el));
-  const menuButton = h('button', { class: 'icon-button phone-only', type: 'button', 'aria-label': t('menu'), onclick: () => app.drawer('left') }, icon('menu', 16));
-  const teamButton = h('button', { class: 'icon-button phone-only team-button', type: 'button', 'aria-label': t('showTeam'), onclick: () => app.drawer('right') }, icon('team', 16));
-  const head = h('header', { class: 'centre-head' }, menuButton, h('div', { class: 'head-words' }, big, name), switcher, h('span', { class: 'grow' }), dial, teamButton);
+  const dial = kit.segmented({ tag: 'nav', class: 'dial', 'aria-label': t('dialLabel') }, dialLinks.map((link) => link.el));
+  // On a phone (style.css's 760 px) the header is one row (the menu, the project's name, what needs you as a count, the
+  // team), with Lead | Roadmap under it and the dial folded behind one button there: the level shown and its count,
+  // opening the same three links as a menu. Wider, neither the count nor the fold shows and the dial stays as it is.
+  const phoneQuery = globalThis.matchMedia?.('(max-width: 760px)');
+  const phone = () => !!phoneQuery?.matches;
+  const count = h('span', { class: 'head-count', hidden: true, 'aria-hidden': 'true' });
+  const foldWords = h('span');
+  const foldCount = h('small');
+  const dialFold = h('button', { class: 'dial-fold', type: 'button', 'aria-haspopup': 'true', 'aria-expanded': 'false', onclick: () => foldDial(!dialOpen) },
+    foldWords, foldCount, icon('chevron', 12));
+  let dialOpen = false;
+  function foldDial(open) {
+    dialOpen = open;
+    setClass(dial, 'open', open);
+    dialFold.setAttribute('aria-expanded', String(open));
+  }
+  // A link chosen, Esc, or a touch outside it closes it.
+  dial.addEventListener('click', (event) => { if (dialOpen && event.target.closest?.('a')) foldDial(false); });
+  dial.addEventListener('keydown', (event) => { if (dialOpen && event.key === 'Escape') { event.stopPropagation(); foldDial(false); dialFold.focus(); } });
+  globalThis.document?.addEventListener?.('click', (event) => { if (dialOpen && !dial.contains(event.target) && !dialFold.contains(event.target)) foldDial(false); });
+  const menuButton = kit.iconButton({ class: 'phone-only', 'aria-label': t('menu'), onclick: () => app.drawer('left') }, icon('menu', 16));
+  const teamButton = kit.iconButton({ class: 'phone-only team-button', 'aria-label': t('showTeam'), onclick: () => app.drawer('right') }, icon('team', 16));
+  // One row, the left and right columns' header height, in Lead and in Roadmap alike (D11): the switch first, where
+  // nothing that grows or shrinks moves it; then what needs you and the project's name; the dial at the right end.
+  const head = h('header', { class: 'centre-head' }, menuButton, switcher, count, h('div', { class: 'head-words' }, big, name), h('span', { class: 'grow' }), dialFold, dial, teamButton);
   const strip = h('div', { class: 'team-strip' });
+  // The team strip is one row, whole counts only, that opens to all of them at a click or a touch (Lead and Roadmap
+  // share it, so it is the same height in both).
+  const stripFold = h('button', { class: 'strip-fold', type: 'button', hidden: true, 'aria-expanded': 'false', 'aria-label': t('stripAll') }, icon('chevron', 12));
+  let stripOpen = false;
+  strip.addEventListener('click', () => {
+    if (stripFold.hidden) return;
+    stripOpen = !stripOpen;
+    setClass(strip, 'open', stripOpen);
+    stripFold.setAttribute('aria-expanded', String(stripOpen));
+  });
   const col = h('div', { class: 'col' });
   const talk = h('div', { class: 'talk' }, col);
   // What waits on the user, at the bottom above the message box: never more than about 60% of the centre's height
-  // (it scrolls inside itself beyond that), so the conversation stays in sight above it.
+  // (it scrolls inside itself beyond that), so the conversation stays in sight above it. At "What waits on me"
+  // (`show=asks`, the class `show-asks`) there is no conversation: it takes the centre, the one thing that scrolls.
   const waitBox = h('section', { class: 'wait-box', hidden: true, 'aria-label': t('cQuestionsForYou') });
   const toWho = h('span', { class: 'to' });
-  const input = h('input', { class: 'say', type: 'text', placeholder: t('messageLead'), 'aria-label': t('messageLead'), autocomplete: 'off', maxlength: 4000 });
-  // With the `act` right, one Send and a menu of the ways the lead's agent takes a message (js/sendways.js): at its
-  // next step (Enter: `tell`, as the lead's mail), now (Ctrl+Enter), after this turn where it has one, or interrupt,
-  // then send (the others `send` to the lead's session with `when`).
-  const sender = sendMenu({ className: 'lead-send', send: (way) => note({ way }) });
-  input.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && !sender.el.hidden && waysNow().includes('now')) { event.preventDefault(); note({ way: 'now' }); }
+  // The one message box (views/composer.js), as a session's: Enter sends to the lead at its next step (`tell`, as the
+  // lead's mail), ⌘↩ / Ctrl+↩ now and ⌥↩ after this turn where its agent takes them; Shift+Enter a new line. With the
+  // `act` right the arrow beside Send opens every way the lead's agent takes a message (js/sendways.js): the others
+  // `send` to the lead's session with `when`. Where the page doesn't act, Enter drafts the note and its line.
+  const sender = sendMenu({ className: 'lead-send', send: (way) => note({ way }), main: false });
+  const box = messageBox({
+    className: 'composer lead-box', label: t('messageLead'), placeholder: t('messageLead'), maxLength: 4000, menu: sender.el,
+    onSend: (way) => note({ way: way === 'send' ? 'step' : way }),
   });
-  const composer = h('form', { class: 'composer-lead', onsubmit: (event) => { event.preventDefault(); note(); } }, toWho, input, sender.el);
+  const input = box.input;
+  const composer = h('div', { class: 'composer-lead' }, box.notice, toWho, box.el);
   // While an answer is being changed here: its line's key, and what the node said if it refused.
   const changing = new Map();
   // A project whose lead isn't running: how to start it again, plainly (the line, and New project's lead form).
@@ -94,21 +135,102 @@ export function projectView(app, { sheet }) {
   const quiet = h('section', { class: 'quiet-block', hidden: true, 'aria-label': t('quietProject') },
     h('h2', { class: 'quiet-title' }, t('quietProject')), quietWords, quietLines, h('p', { class: 'confirm-note' }, t('quietNote'), ' ', quietForm));
   let quietDrawn = '';
-  const gone = h('div', { class: 'empty-state', hidden: true }, h('h2', null, t('goneProject')), h('p', null, t('goneProjectSub')));
-  const el = h('section', { class: 'centre project-view', 'aria-label': t('lead') }, head, strip, quiet, talk, waitBox, composer, gone);
+  const gone = kit.empty({ size: 'page', class: 'empty-state', hidden: true }, h('h2', null, t('goneProject')), h('p', null, t('goneProjectSub')), kit.button('plain', { tag: 'a', href: '#/' }, t('seStartPage')));
+  // The conversation and what waits on the user: two panes wide (the waiting block under the conversation, scrolling
+  // in itself), one scroll on a phone (what waits first, the conversation under it): style.css's `.centre-scroll`.
+  const scroller = h('div', { class: 'centre-scroll' }, talk, waitBox);
+  const scrollBox = () => scroller;
+  // The reading position across a redraw (D10): the line, or the waiting block, nearest the top of what shows, and
+  // how far from that top it was; put back there after, so a card arriving or answered moves nothing being read.
+  waitBox.dataset.anchor = 'wait';
+  function readingAt(box) {
+    if (typeof box.getBoundingClientRect !== 'function') return null;
+    const view = box.getBoundingClientRect();
+    let best = null;
+    for (const node of box.querySelectorAll('[data-anchor]')) {
+      const rect = node.getBoundingClientRect();
+      if (rect.bottom <= view.top || rect.top >= view.bottom || (!rect.height && !rect.width)) continue;
+      const offset = rect.top - view.top;
+      if (!best || Math.abs(offset) < Math.abs(best.offset)) best = { key: node.dataset.anchor, offset };
+    }
+    return best;
+  }
+  // Where the reader is, as last seen: noted on every scroll and after every draw, so a change the waiting block makes
+  // by itself before the draw (a card arriving above on a phone, an answered one leaving) is measured from where the
+  // reader was, not from after it moved.
+  let seen = { atEnd: true, reading: null };
+  function noteReading() {
+    const atEnd = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 40;
+    seen = { atEnd, reading: atEnd ? null : readingAt(scroller) };
+  }
+  scroller.addEventListener('scroll', noteReading, { passive: true });
+  // Where a project opens on a desktop: the conversation's end with what waits under it; where the waiting block is
+  // taller than about 60% of the view, its top at 40% down, the conversation's end above it (the old capped block's
+  // place), never the bottom of its last card.
+  function opening(box) {
+    if (phone() || waitBox.hidden || ui.state.route.show === 'asks' || typeof box.getBoundingClientRect !== 'function') return box.scrollHeight;
+    const view = box.getBoundingClientRect();
+    const wait = waitBox.getBoundingClientRect();
+    if (!wait.height || wait.height <= view.height * 0.6) return box.scrollHeight;
+    return box.scrollTop + (wait.top - view.top) - view.height * 0.4;
+  }
+  function keepReading(box, at) {
+    if (!at) return;
+    const node = [...box.querySelectorAll('[data-anchor]')].find((one) => one.dataset.anchor === at.key);
+    if (!node) return;
+    const moved = node.getBoundingClientRect().top - box.getBoundingClientRect().top - at.offset;
+    if (Math.abs(moved) >= 1) box.scrollTop += moved;
+  }
+  const el = h('section', { class: 'centre project-view', 'aria-label': t('lead') }, head, strip, quiet, scroller, composer, gone);
   // The project's name beside "N things need you" shrinks to an ellipsis; squeezed to a mark, it goes (the right
   // column's head names the project).
   const fitName = () => {
     name.classList.remove('squeezed');
     if (name.textContent && name.clientWidth < 56 && name.scrollWidth > name.clientWidth) name.classList.add('squeezed');
   };
-  if (typeof ResizeObserver === 'function') new ResizeObserver(fitName).observe(head);
+  // Wider than a phone the row never wraps: where it doesn't fit, the dial folds behind its one button (the level and
+  // its count, opening the three as a menu, as on a phone), then the sentence gives way to its count. A phone's
+  // header is its own (style.css's 760 px block), the dial always folded.
+  function fitHead() {
+    const narrow = phone();
+    setClass(head, 'dial-folded', narrow);
+    setClass(head, 'words-short', false);
+    name.classList.remove('squeezed');
+    if (!narrow && head.clientWidth) {
+      const over = () => head.scrollWidth > head.clientWidth + 1 || (!!name.textContent && name.scrollWidth > name.clientWidth + 1);
+      if (!dial.hidden && over()) setClass(head, 'dial-folded', true);
+      if (over()) setClass(head, 'words-short', true);
+    }
+    if (!head.classList.contains('dial-folded') && dialOpen) foldDial(false);
+    fitName();
+  }
+  if (typeof ResizeObserver === 'function') new ResizeObserver(fitHead).observe(head);
+  // The strip's fold only where a count is past its first line (or it is open): measured while the strip has a
+  // layout (not while the keyboard hides it, nor before the view is placed), and again as its width changes.
+  function fitStrip() {
+    if (stripOpen) { stripFold.hidden = false; return; }
+    if (!strip.clientHeight) return;
+    stripFold.hidden = !(strip.scrollHeight > strip.clientHeight + 1);
+  }
+  if (typeof ResizeObserver === 'function') new ResizeObserver(() => fitStrip()).observe(strip);
 
   // The waiting block's cards, one stack a project (it keeps what was typed in a card across updates).
   const stacks = new Map();
   const stackOf = (project) => {
-    if (!stacks.has(project)) stacks.set(project, questionStack(app, project, { onChange: () => { drawn = ''; render(); } }));
+    if (!stacks.has(project)) stacks.set(project, questionStack(app, project, { onChange: () => { drawn = ''; render(); }, others: () => othersOf(project) }));
     return stacks.get(project);
+  };
+  // The project's other cards (held config, a base move, a plugin's request) for the stack to place by priority: each
+  // drawn again only when it or what the page may do changed, so a button's refusal under it stays.
+  const others = new Map();
+  const othersOf = (project) => {
+    const cards = waitingCards(store.state.cards.values(), project).filter((card) => !['question', 'approval'].includes(card.kind));
+    for (const id of others.keys()) if (!cards.some((card) => card.id === id)) others.delete(id);
+    return cards.map((card) => {
+      const shape = JSON.stringify([card, store.acts(), lang()]);
+      if (others.get(card.id)?.shape !== shape) others.set(card.id, { shape, el: otherCard(card) });
+      return { key: card.id, at: card.at, priority: card.kind === 'plugin' ? pluginFacts(card).severity : 'blocking', el: others.get(card.id).el };
+    });
   };
   // Notes drafted for a lead, this page's only: the line that tells it from a terminal.
   const notes = new Map();
@@ -117,6 +239,9 @@ export function projectView(app, { sheet }) {
   let lastLevel = null;
   let sheetShown = null;
   let waitShown = false;
+  let lastWaiting = 0;
+  // The roadmap shown last (its project): drawn again in place, it keeps where it was scrolled.
+  let roadShown = null;
 
   // The ways past the next step reach the lead's own session (`send`): that kind and a live lead session.
   const sendsTo = (lead) => actsFor(app, 'send') && !!lead?.session && store.state.sessions.has(lead.session);
@@ -135,7 +260,7 @@ export function projectView(app, { sheet }) {
     const told = toldOf(lead, entry);
     if (told?.delivered) return [t('swReadByLead')];
     const back = told && actsFor(app, 'tell.retract')
-      ? h('button', { class: 'link take-back', type: 'button', onclick: () => takeBack(entry) }, t('swTakeBack')) : null;
+      ? kit.button('quiet', { size: 's', class: 'take-back', onclick: () => takeBack(entry) }, t('swTakeBack')) : null;
     return [entry.said || t('acToldLead'), back ? ' ' : null, back, entry.backWhy ? h('span', { class: 'refused' }, ' ', entry.backWhy) : null];
   }
   // Takes back a message the lead hasn't read (`tell.retract`); the node refuses once it has (`delivered`).
@@ -152,7 +277,7 @@ export function projectView(app, { sheet }) {
   // with the line that sends it from a terminal.
   function note({ way = 'step' } = {}) {
     const route = ui.state.route;
-    const text = input.value.trim();
+    const text = box.value.trim();
     const lead = store.state.leads.get(route.id);
     if (!text || !lead?.root) return;
     const sends = way !== 'step' && sendsTo(lead) && waysNow().includes(way);
@@ -160,25 +285,34 @@ export function projectView(app, { sheet }) {
     const action = crypto.randomUUID();
     const entry = { text, way: chosen, action, state: actsFor(app, 'tell') || sends ? 'sending' : 'draft', why: '' };
     notes.set(route.id, [...(notes.get(route.id) || []), entry]);
-    input.value = '';
+    box.clear();
     if (entry.state === 'sending') {
-      input.disabled = true;
       const asked = sends ? store.request('send', sendArgs(store.state.sessions.get(lead.session), text, chosen), action) : store.request('tell', { folder: lead.root, text }, action);
       asked.then((reply) => {
-        input.disabled = false;
         entry.state = reply.ok ? 'sent' : 'refused';
         entry.why = reply.ok ? '' : refusalWords(reply.error);
         // What became of it, in the node's words where it gives them.
         entry.result = reply.ok ? reply.result || {} : null;
         entry.said = reply.ok ? reply.result?.said || null : null;
-        if (!reply.ok) input.value = text;
+        // Refused: why, beside the box, with Try again, the words back in it; but only in this project's box. Moved to
+        // another project meanwhile, the words wait in this one's (its conversation says it was refused).
+        if (!reply.ok && ui.state.route.name === 'project' && ui.state.route.id === route.id) box.refused(t('cmRefused', { why: entry.why }), text, () => note({ way: chosen }));
+        else if (!reply.ok) keepFor('lead:' + route.id, text);
         drawn = '';
         render();
       });
     }
     drawn = '';
     render();
-    talk.scrollTop = talk.scrollHeight;
+    // What was sent and what comes of it: the note's line at the conversation's end, in sight (on a desktop the waiting
+    // block is under it, so not the scroll's end).
+    // In a frame queued after the draw's own (which keeps a reader at the end at the scroll's end), so this is the last word.
+    requestAnimationFrame(() => {
+      const sent = col.lastElementChild;
+      if (typeof sent?.scrollIntoView === 'function') sent.scrollIntoView({ block: 'nearest' });
+      else scroller.scrollTop = scroller.scrollHeight;
+      noteReading();
+    });
   }
 
   // An answer's state under its pill, as the node says it (`delivered`): read by the lead, or not yet, when it can be
@@ -198,7 +332,7 @@ export function projectView(app, { sheet }) {
     const why = changing.get(line.key) || '';
     if (!open) {
       return [h('p', { class: 'answer-state' }, t('swNotReadYet'), ' ',
-        h('button', { class: 'link', type: 'button', onclick: () => { changing.set(line.key, ''); drawn = ''; render(); } }, t('swChange')))];
+        kit.button('quiet', { size: 's', onclick: () => { changing.set(line.key, ''); drawn = ''; render(); } }, t('swChange')))];
     }
     const replace = (text) => {
       if (!text.trim()) return;
@@ -210,21 +344,30 @@ export function projectView(app, { sheet }) {
       });
     };
     const options = (card?.question?.options || []).filter((option) => option !== line.answer);
-    const own = h('input', { class: 'answer-input', type: 'text', placeholder: t('cOwnWords'), 'aria-label': t('yourAnswer'), autocomplete: 'off', maxlength: 4000 });
+    const own = kit.field({ class: 'answer-input', type: 'text', placeholder: t('cOwnWords'), 'aria-label': t('yourAnswer'), autocomplete: 'off', maxlength: 4000 });
     return [h('div', { class: 'answer-change' },
       h('p', { class: 'answer-state' }, t('swChangeTo')),
       options.length ? h('div', { class: 'options' }, options.map((option) => h('button', { class: 'option', type: 'button', onclick: () => replace(option) }, h('span', { class: 'option-text' }, option)))) : null,
-      h('form', { class: 'answer', onsubmit: (event) => { event.preventDefault(); replace(own.value); } }, own, h('button', { class: 'button', type: 'submit' }, t('cAnswer')),
-        h('button', { class: 'button quiet', type: 'button', onclick: () => { changing.delete(line.key); drawn = ''; render(); } }, t('swKeep'))),
+      h('form', { class: 'answer', onsubmit: (event) => { event.preventDefault(); replace(own.value); } }, own, kit.button('primary', { type: 'submit' }, t('cAnswer')),
+        kit.button('plain', { onclick: () => { changing.delete(line.key); drawn = ''; render(); } }, t('swKeep'))),
       why ? h('p', { class: 'card-notice', role: 'alert' }, why) : null)];
   }
 
   function lineEl(line, route) {
+    // A push settled from this page: what came of it, one quiet line (the lead hears it from the node).
+    if (line.kind === 'push') return [h('p', { class: `line kind-push ${line.outcome}`, data: { anchor: `push:${line.key}` } }, icon(line.outcome === 'declined' ? 'close' : 'check', 13), h('span', { class: 'line-text' }, line.head), h('time', null, clock(line.at)))];
     const answered = line.kind === 'ask';
-    const button = h('a', { class: `line kind-${line.kind}${answered ? ' answered' : ''}`, href: routeHref(route, { sheet: line.key }) },
+    const button = h('a', { class: `line kind-${line.kind}${answered ? ' answered' : ''}`, href: routeHref(route, { sheet: line.key }), data: { anchor: line.key } },
       lineMark(line.kind), h('span', { class: 'line-text' }, cut(shortHashes(line.head), 140)), h('time', null, clock(line.at)));
+    // A question the lead withdrew: nobody answers it now, and the line under it says so, with the lead's reason.
+    if (answered && line.state === 'withdrawn') return [button, h('p', { class: 'withdrawn-note' }, t('withdrawn') + (line.why ? `: ${cut(shortHashes(line.why), 160)}` : ''))];
     if (!answered || !line.answer) return [button];
-    const said = line.state === 'autoDecided' ? t('wentAhead', { x: cut(line.answer, 60) }) : cut(shortHashes(line.answer), 140);
+    // An approval's answer as its button said it (Approve merging 4e1c9a7b into landing-base, Not yet), by its card;
+    // with the card gone, an answer that names a whole commit to approve still says it in words.
+    const answerCard = (line.card ? store.state.cards.get(line.card) : null)
+      || (/^Approve ([0-9a-f]{40}|[0-9a-f]{64})$/i.test(String(line.answer || '').trim()) ? { kind: 'approval' } : null);
+    const answer = optionWords(answerCard, line.answer);
+    const said = line.state === 'autoDecided' ? t('wentAhead', { x: cut(answer, 60) }) : cut(shortHashes(answer), 140);
     const pill = h('p', { class: 'mine' + (line.state === 'autoDecided' ? ' auto' : '') }, said);
     return [button, pill, ...answerState(line)];
   }
@@ -237,8 +380,10 @@ export function projectView(app, { sheet }) {
       const items = card.config.items || [];
       const rails = card.config.guarded || [];
       return h('div', { class: 'facts' }, h('div', { class: 'facts-head' }, t('cFacts')), h('dl', null,
-        items.map((item) => fact(item.name, [item.change || '', item.files?.length ? h('ul', { class: 'files' }, item.files.map((file) => h('li', null, h('code', null, file)))) : null])),
-        rails.map((rail) => fact(rail.key, h('code', null, rail.value), rail.sinceAccept ? ` (${rail.sinceAccept})` : ''))));
+        // A held folder's files as the node sends them ({ path, change }; a name alone from an older one).
+        items.map((item) => fact(item.name, [item.change || '', item.files?.length ? h('ul', { class: 'files' }, item.files.map((file) => h('li', null, h('code', null, typeof file === 'string' ? file : file?.path || ''),
+          typeof file === 'object' && file?.change ? ` · ${t({ added: 'shAdded', changed: 'shChanged', removed: 'shRemoved' }[file.change] || 'shChanged')}` : ''))) : null])),
+        rails.map((rail) => fact(rail.key, h('code', null, rail.value), rail.sinceAccept ? ` (${sinceWord(rail.sinceAccept)})` : ''))));
     }
     if (card.kind === 'base' && card.base) {
       const base = card.base;
@@ -251,9 +396,9 @@ export function projectView(app, { sheet }) {
     return null;
   }
 
-  // A held-config card, four lines at most before a click (the Mac's economy): what changed, what it holds back, the
-  // guard rails that changed (only those), Accept and Show details; the terminal's line instead of Accept when the
-  // node would refuse a page's accept (a rail changed or can't be compared). The rest behind Show details.
+  // A held-config card, four blocks before a click (the Mac's economy): what changed (the things named under it), what
+  // it holds back (the node's `blocking`), the rules that would change (only those), and Accept or the node's `settle`
+  // line when the page may not accept; the whole in the side sheet (Show it whole).
   function configCard(card) {
     const root = card.root || '';
     const summary = heldSummary(card.config);
@@ -268,10 +413,10 @@ export function projectView(app, { sheet }) {
     // command shows them and takes the accept (`approve` doesn't list such a card).
     if (summary.confirmOnly) {
       return h('article', { class: 'card held-config confirm-only' }, head,
-        terminalLine(t('hcConfirmOnly')),
-        h('details', { class: 'hc-details' }, h('summary', null, t('hcShowRules')), heldDetails(card, summary)));
+        h('div', { class: 'hc-action' }, terminalLine(t('hcConfirmOnly')), showWhole(card, t('hcShowRules')).el));
     }
-    const details = h('details', { class: 'hc-details' }, h('summary', null, t('hcShowDetails')), heldDetails(card, summary));
+    // One way to see it whole: Show it whole, the side sheet (paths, the rules' table, the technical details).
+    const whole = showWhole(card);
     const acts = actsFor(app, 'config.accept') && !summary.terminal;
     const shown = summary.changed.slice(0, 5);
     const more = summary.changed.length - shown.length;
@@ -294,33 +439,16 @@ export function projectView(app, { sheet }) {
       // The rules that would change: five at most, the rest one click away.
       shown.length ? h('div', { class: 'hc-rules' }, h('p', { class: 'hc-rules-label' }, t('hcRulesChange')),
         shown.map((rail) => h('p', { class: 'hc-rail' }, h('code', null, rail.key), ': ',
-          rail.state === 'new' ? [rail.value, ' ', t('hcNew')] : rail.state === 'records' ? [rail.value, ' ', t('hcRecords')] : [rail.before ?? '?', ' → ', rail.value])),
-        more > 0 ? h('p', { class: 'hc-quiet' }, t('hcMoreRules', { n: more }), ' ', h('button', { class: 'link', type: 'button', onclick: () => { details.open = true; } }, t('hcShowThem'))) : null) : null,
-      summary.unknown ? h('p', { class: 'hc-quiet' }, t('hcUnknown', { n: summary.unknown }), ' ',
-        h('button', { class: 'link', type: 'button', onclick: () => { details.open = true; } }, t('hcShowThem'))) : null,
-      acts ? h('div', { class: 'card-acts' },
-        doButton(app, { label: t('acAccept'), kind: 'config.accept', args: () => cardArgs(card), done: () => receipt(t('hcAcceptedN', { what: summary.holdsEvery ? t('hcHomeConfig') : summary.holds || lastPart(root) || root, n: (card.config?.items || []).length })) }).el)
-        : terminalLine(summary.changed.length ? t('hcNeedsTerminal') : t('hcNeedsTerminalUnknown')),
-      details);
-  }
-
-  // Behind Show details: each held thing with when it changed, the rails as a table; hashes only under Technical details.
-  function heldDetails(card, summary) {
-    const items = card.config?.items || [];
-    const stateWord = (rail) => t({ same: 'hcSame', changed: 'hcChangedWord', new: 'hcNewWord', unknown: 'hcUnknownWord', records: 'hcRecordsWord' }[rail.state] || 'hcNoAccept');
-    return [
-      h('ul', { class: 'hc-items' }, items.map((item) => h('li', null, h('strong', null, itemLabel(item)), ' ', h('code', null, item.name),
-        item.changedAt ? h('small', null, ' · ', t('hcWhen', { time: since(item.changedAt) })) : null,
-        item.files?.length ? h('ul', { class: 'files' }, item.files.map((file) => h('li', null, h('code', null, file)))) : null))),
-      // Why a rule can't be compared, only here (the long view): never "the node restarted" alone.
-      summary.rails.some((rail) => rail.state === 'unknown') ? h('p', { class: 'hc-quiet' }, t('hcUnknownWhy')) : null,
-      summary.rails.length ? h('table', { class: 'hc-rails' }, h('tbody', null, summary.rails.map((rail) => h('tr', { class: ['changed', 'new', 'records'].includes(rail.state) ? 'changed' : null },
-        h('th', null, rail.key), h('td', null, h('code', null, rail.value)), h('td', { class: 'hc-state' }, stateWord(rail)))))) : null,
-      h('details', { class: 'hc-technical' }, h('summary', null, t('hcTechnical')),
-        h('ul', { class: 'files' }, items.map((item) => h('li', null, h('code', null, `${item.name}  ${item.hash || ''}`), item.sinceAccept ? ` (${item.sinceAccept})` : '')),
-          summary.rails.map((rail) => (rail.sinceAccept ? h('li', null, h('code', null, rail.key), ` ${rail.sinceAccept}`) : null))),
-        card.config?.lastAccept ? h('p', null, t('hcLastAccept', { time: since(card.config.lastAccept) })) : null),
-    ];
+          rail.state === 'new' ? [rail.value, ' ', t('hcNew')] : rail.state === 'records' ? [rail.value, ' ', t('hcRecords')]
+            : rail.before == null ? [rail.value, ' ', t('hcChangedNote')] : [rail.before, ' → ', rail.value])),
+        more > 0 ? h('p', { class: 'hc-quiet' }, t('hcMoreRules', { n: more }), ' ', kit.button('quiet', { size: 's', onclick: () => whole.open() }, t('hcShowThem'))) : null) : null,
+      summary.unknown ? h('p', { class: 'hc-quiet' }, t('hcUnknown', { n: summary.unknown }), ' ', kit.button('quiet', { size: 's', onclick: () => whole.open() }, t('hcShowThem'))) : null,
+      // The action block: Accept where the page may (a click wins), else the node's `settle` line; Show it whole beside.
+      h('div', { class: 'hc-action' },
+        acts ? h('div', { class: 'card-acts' },
+          doButton(app, { label: t('acAccept'), kind: 'config.accept', args: () => cardArgs(card), done: () => receipt(t('hcAcceptedN', { what: summary.holdsEvery ? t('hcHomeConfig') : summary.holds || lastPart(root) || root, n: (card.config?.items || []).length })) }).el)
+          : terminalLine(summary.changed.length ? t('hcNeedsTerminal') : t('hcNeedsTerminalUnknown')),
+        whole.el));
   }
 
   // A one-line record of what was done from the page, kept in the conversation (this page's). A config accept's counts
@@ -332,6 +460,40 @@ export function projectView(app, { sheet }) {
     render();
   }
 
+  // Show it whole: the node asked for the card as it is now (`config.held` or `base.show`, the project's folder), and the
+  // side sheet opens with it whole; Reading… meanwhile, the node's refusal beside the button. Where this tab may not
+  // ask, the sheet opens with the card as the page has it. Returns { el, open }.
+  function showWhole(card, label = t('shShowWhole')) {
+    const config = card.kind === 'config';
+    const kind = config ? 'config.held' : 'base.show';
+    const said = h('span', { class: 'act-said', role: 'status' });
+    const open = () => {
+      if (!actsFor(app, kind)) { sheet.open(heldParts(card, { root: card.root, kicker: lastPart(card.root) })); return; }
+      button.click();
+    };
+    const button = kit.button('plain', { onclick: () => {
+      button.disabled = true;
+      button.setAttribute('aria-busy', 'true');
+      button.textContent = t('shReading');
+      said.classList.remove('refused');
+      setText(said, '');
+      store.read(kind, { folder: card.root }).then((reply) => {
+        button.disabled = false;
+        button.removeAttribute('aria-busy');
+        button.textContent = label;
+        const result = reply?.ok ? reply.result : null;
+        if (result?.card) { sheet.open(heldParts(result.card, { root: card.root, kicker: lastPart(card.root), read: store.read, kind })); return; }
+        // The base hasn't moved since (`unmoved`), or an answer without its card: said, nothing opened.
+        setText(said, result?.unmoved ? t('shUnmoved', { branch: result.branch || '' }) : refusalWords(reply?.error, t('shShowWhole')));
+        if (!result?.unmoved) said.classList.add('refused');
+      });
+    } }, label);
+    // A tab that may not ask the node reads the card it has: the same button, opening the sheet at once.
+    const el = h('div', { class: 'card-acts show-whole' }, h('span', { class: 'act' }, actsFor(app, kind) ? button
+      : kit.button('plain', { onclick: () => open() }, label), said));
+    return { el, open };
+  }
+
   function otherCard(card) {
     if (card.kind === 'plugin') return pluginCard(card, app);
     if (card.kind === 'config' && card.config) return configCard(card);
@@ -339,16 +501,20 @@ export function projectView(app, { sheet }) {
     const config = card.kind === 'config';
     // With the `act` right: accept the held config, or accept or keep the base, from here (the card and its seen).
     const acts = config ? actsFor(app, 'config.accept') : actsFor(app, 'base.accept');
+    const whole = actsFor(app, config ? 'config.held' : 'base.show');
     return h('article', { class: 'card' },
       h('header', { class: 'card-head' }, h('span', { class: 'priority blocking' }, t('blocking')), h('time', { class: 'asked' }, t('askedAt', { who: t('vibeswitcher'), time: clock(card.at) }))),
       h('h3', { class: 'card-question' }, t(config ? 'heldConfig' : 'baseMove')),
       h('p', { class: 'card-why' }, t(config ? 'heldConfigWhy' : 'baseMoveWhy')),
       heldFacts(card),
+      // To see it whole first: Show it whole where the node lists the read (`config.held`, `base.show`), in the side
+      // sheet; else the terminal's line beside the buttons when this tab acts, or one click away, never the pile of them.
+      whole ? showWhole(card).el : null,
       acts ? h('div', { class: 'card-acts' },
         doButton(app, { label: t(config ? 'acAccept' : 'acAcceptMove'), kind: config ? 'config.accept' : 'base.accept', args: () => cardArgs(card) }).el,
-        !config && actsFor(app, 'base.keep') ? doButton(app, { label: t('acKeepBase'), kind: 'base.keep', quiet: true, args: () => cardArgs(card) }).el : null) : null,
-      // The terminal's lines: beside the buttons when this tab acts; else one click away, never the pile of them.
-      acts ? h('div', { class: 'card-command' }, h('span', { class: 'card-command-label' }, t('acSeeFirst')),
+        !config && actsFor(app, 'base.keep') ? doButton(app, { label: t('acKeepBase'), kind: 'base.keep', plain: true, args: () => cardArgs(card) }).el : null) : null,
+      acts && whole ? null
+      : acts ? h('div', { class: 'card-command' }, h('span', { class: 'card-command-label' }, t('acSeeFirst')),
         config ? copyLine(`vibeswitcher config held ${shellWord(root)}`, 'the command that shows it') : copyLine(`vibeswitcher base show ${shellWord(root)}`, 'the command that shows it'))
         : h('details', { class: 'card-terminal' }, h('summary', null, t('cUseTerminal')),
           h('div', { class: 'card-command' }, h('span', { class: 'card-command-label' }, t('settleInTerminal')),
@@ -366,16 +532,24 @@ export function projectView(app, { sheet }) {
       if (link.level === route.show) link.el.setAttribute('aria-current', 'true'); else link.el.removeAttribute('aria-current');
       setText(link.count, String(counts[link.level]));
     }
+    setText(foldWords, t({ asks: 'dialAsks', decisions: 'dialDecisionsShort', all: 'dialAll' }[route.show] || 'dialDecisionsShort'));
+    setText(foldCount, String(counts[route.show] ?? ''));
+    dialFold.setAttribute('aria-label', `${t('dialLabel')}: ${t({ asks: 'dialAsks', decisions: 'dialDecisions', all: 'dialAll' }[route.show] || 'dialDecisions')}`);
+    fitHead();
     const stack = stackOf(route.id);
     stack.update();
     const extra = cards.filter((card) => !['question', 'approval'].includes(card.kind));
     const mine = notes.get(route.id) || [];
+    const pushes = stack.receipts();
     const key = JSON.stringify([route.id, route.show, lines.map((line) => [line.key, line.answer, line.state, line.delivered, line.replaceable]), extra.map((card) => [card.id, card.seen]), mine, waiting, lang(), store.acts(),
-      lead?.told || null, [...changing]]);
+      lead?.told || null, [...changing], pushes, stack.el.hidden]);
     if (key === drawn) return;
-    const atEnd = talk.scrollHeight - talk.scrollTop - talk.clientHeight < 40;
+    const box = scrollBox();
+    const { atEnd, reading } = seen;
     drawn = key;
-    const shown = shownLines(lines, route.show);
+    const asks = route.show === 'asks';
+    setClass(el, 'show-asks', asks);
+    const shown = withPushLines(shownLines(lines, route.show), asks ? [] : pushes, pushReceipt);
     const children = [];
     let day = null;
     for (const line of shown) {
@@ -389,17 +563,17 @@ export function projectView(app, { sheet }) {
       children.unshift(h('a', { class: 'latest-said', href: routeHref(route, { sheet: latest.key }) }, h('small', null, t('leadSaid', { time: moment(latest.at) })), cut(shortHashes(latest.head), 220)),
         h('span', { class: 'col-gap' }));
     }
-    if (!shown.length && route.show !== 'asks') children.push(h('p', { class: 'empty-line' }, t('emptyTalk')));
-    if (route.show === 'asks' && !waiting) children.push(h('p', { class: 'empty-line' }, t('emptyAsks')));
+    if (!shown.length && !asks) children.push(kit.empty({ tag: 'p', size: 'page', class: 'empty-line' }, t('emptyTalk')));
     const waits = [];
+    if (asks && !waiting) waits.push(kit.empty({ tag: 'p', size: 'page', class: 'empty-line' }, t('emptyAsks')));
     if (waiting) {
       const push = lead?.push ? 1 : 0;
       waits.push(h('h2', { class: 'asked-title' }, push && waiting === 1 ? t('pushWaits') : t('questionsForYou', { n: waiting - push }) + (push ? t('andAPush') : '')));
     }
-    waits.push(stack.el, ...extra.map(otherCard));
+    waits.push(stack.el);
     const inner = h('div', { class: 'wait-col' }, waits);
     waitBox.replaceChildren(inner);
-    waitShown = !!waiting || !stack.el.hidden || extra.length > 0;
+    waitShown = asks || !!waiting || !stack.el.hidden;
     waitBox.hidden = !waitShown;
     for (const entry of mine) {
       if (entry.state === 'receipt') { children.push(h('p', { class: 'receipt' }, icon('check', 12), ' ', entry.text)); continue; }
@@ -414,7 +588,13 @@ export function projectView(app, { sheet }) {
     const changedView = lastProject !== route.id || lastLevel !== route.show;
     lastProject = route.id;
     lastLevel = route.show;
-    if (changedView || atEnd) requestAnimationFrame(() => { talk.scrollTop = talk.scrollHeight; });
+    // Opened on a phone with something waiting: its top, where the waiting comes first; else the conversation's end.
+    // The last thing waiting answered there: the conversation's end, the lead's latest words, not its oldest lines.
+    const top = changedView && phone() && waitShown && !asks;
+    const settled = !changedView && phone() && !asks && lastWaiting > 0 && !waiting;
+    lastWaiting = waiting;
+    if (changedView || atEnd || settled) requestAnimationFrame(() => { box.scrollTop = top ? 0 : changedView ? opening(box) : box.scrollHeight; noteReading(); });
+    else { keepReading(box, reading); noteReading(); }
   }
 
   // The date column: the landing as the node says it, its range under it, and where it comes from on hover and focus
@@ -489,6 +669,29 @@ export function projectView(app, { sheet }) {
   // The address with `id` opened or closed among the roadmap's open rows.
   const toggled = (route, id) => projectHref(route.id, { view: 'roadmap', open: route.open.includes(id) ? route.open.filter((one) => one !== id) : [...route.open, id] });
 
+  // A roadmap opened (or another project's): from its top; drawn again in place (a goal opened, a minute on), where it was.
+  function roadTop(route) {
+    roadOpen = { id: route.id, open: [...route.open] };
+    if (roadShown === route.id) return;
+    roadShown = route.id;
+    scroller.scrollTop = 0;
+  }
+
+  // What the roadmap showed open last, and what folds away: a goal, the done goals and the queue open and close in
+  // place over the short motion (D22), once, as the address changes them; drawn again for any other reason (a minute
+  // on, a task moved), they are just there.
+  let roadOpen = null;
+  const roadClosing = new Set();
+  function roadChanged(route) {
+    if (roadOpen?.id !== route.id) roadClosing.clear();
+    else for (const id of roadOpen.open) if (!route.open.includes(id)) roadClosing.add(id);
+    for (const id of route.open) roadClosing.delete(id);
+  }
+  function roadUnfold(route, id, body) {
+    if (!route.open.includes(id)) return kit.unfold({ motion: 'closing', onclosed: () => { roadClosing.delete(id); drawn = ''; render(); } }, body);
+    return kit.unfold({ motion: roadOpen?.id === route.id && !roadOpen.open.includes(id) ? 'opening' : null }, body);
+  }
+
   // With goals: one row per goal (its tasks' marks and counts; with estimates its bar to its landing, the likely–worst
   // band, a mark per task landing, and its date), opening in place to its tasks joined to it by branch lines; Unsorted
   // last of the open ones; the done goals folded at the end.
@@ -500,8 +703,9 @@ export function projectView(app, { sheet }) {
     const goalRow = (row) => {
       const id = row.goal ? row.goal.id : 'unsorted';
       const open = route.open.includes(id);
-      const counts = [['motion', 'roadCountMotion'], ['blocked', 'roadCountBlocked'], ['queued', 'roadCountQueued'], ['merged', 'roadCountMerged']]
-        .filter(([where]) => row.counts[where]).map(([where, key]) => t(key, { n: row.counts[where] }));
+      // Its progress at a glance (D28): each count as the rows' badge, in its tone (working only for what moves).
+      const counts = [['motion', 'roadCountMotion', 'working'], ['blocked', 'roadCountBlocked', 'neutral'], ['queued', 'roadCountQueued', 'neutral'], ['merged', 'roadCountMerged', 'done']]
+        .filter(([where]) => row.counts[where]).map(([where, key, tone]) => kit.badge(tone, t(key, { n: row.counts[where] })));
       const marks = axis
         ? trackEl(axis, {
           start: Math.min(...row.tasks.map((task) => Date.parse(task.startedAt || '') || Infinity)), landing: row.goal?.forecast, tone: 'goal',
@@ -511,14 +715,19 @@ export function projectView(app, { sheet }) {
         : h('span', { class: 'goal-marks', 'aria-hidden': 'true' }, row.tasks.map((task) => h('i', { class: `goal-mark tone-${taskTone(task)}${whereOf(task) === 'blocked' ? ' blocked' : ''}`, title: task.title })));
       // A group, not a button: the title side opens and closes the goal; the track and the date (which takes focus for
       // where it comes from) do nothing.
-      const head = h('div', { class: 'goal-row' + (row.goal ? '' : ' unsorted') + (row.goal?.state === 'done' ? ' done' : ''), role: 'group', 'aria-label': row.goal ? row.goal.title : t('roadUnsorted') },
-        h('button', { class: 'goal-title', type: 'button', 'aria-expanded': String(open), onclick: () => ui.go(toggled(route, id)) },
-          h('b', null, row.goal ? row.goal.title : t('roadUnsorted'), h('span', { class: 'goal-toggle' }, icon('chevron', 10))),
-          h('small', null, [counts.join(', ') || t('roadNoTasks'), row.goal?.done ? `${t('roadDoneMeans')} ${row.goal.done}` : null].filter(Boolean).join(' · '))),
+      // The whole row is the button's target (its title's ::after covers it); the date over it still takes focus and a
+      // tap for where it comes from. A long name keeps to two lines, whole on hover and for a screen reader.
+      const title = row.goal ? row.goal.title : t('roadUnsorted');
+      const head = h('div', { class: 'goal-row' + (row.goal ? '' : ' unsorted') + (row.goal?.state === 'done' ? ' done' : ''), role: 'group', 'aria-label': title },
+        h('button', { class: 'goal-title', type: 'button', title, 'aria-expanded': String(open), onclick: () => ui.go(toggled(route, id)) },
+          h('span', { class: 'goal-name' }, h('b', null, title), h('span', { class: 'goal-toggle' }, icon('chevron', 10))),
+          h('span', { class: 'goal-counts' }, counts.length ? counts : h('small', null, t('roadNoTasks')))),
         marks, axis ? whenEl(row.goal?.forecast, basisWords(row.goal?.forecast, { score, goal: true }), { board }) : h('span', { class: 'road-when' }));
-      if (!open) return [head];
+      const closing = !open && roadClosing.has(id);
+      if (!open && !closing) return [head];
       const tasks = row.tasks.map((task, index) => taskLine2(task, roadNote(task, board, cards, whereOf(task)), { axis, score, board, cls: 'goal-task' + (index === row.tasks.length - 1 ? ' last' : '') }));
-      return [head, h('div', { class: 'goal-tasks' }, tasks.length ? tasks : [h('p', { class: 'road-note goal-empty' }, t('roadNoTasks'))])];
+      const means = row.goal?.done ? h('p', { class: 'road-note goal-means' }, `${t('roadDoneMeans')} ${row.goal.done}`) : null;
+      return [head, roadUnfold(route, id, h('div', { class: 'goal-tasks' }, means, tasks.length ? tasks : [h('p', { class: 'road-note goal-empty' }, t('roadNoTasks'))]))];
     };
     const children = [h('p', { class: 'road-intro' }, axis ? [t('roadGoalsDated'), score?.line ? ' ' + score.line : ''].join('') : t('roadGoalsIntro'))];
     if (axis) children.push(axisHead(axis));
@@ -528,11 +737,11 @@ export function projectView(app, { sheet }) {
       const open = route.open.includes('done');
       children.push(h('button', { class: 'road-band', type: 'button', 'aria-expanded': String(open), onclick: () => ui.go(toggled(route, 'done')) },
         h('span', null, t('roadDoneGoals', { n: rows.done.length })), h('span', { class: 'road-band-toggle' }, open ? t('roadQueueClose') : t('roadQueueOpen'), icon('chevron', 10))));
-      if (open) for (const row of rows.done) children.push(...goalRow(row));
+      if (open || roadClosing.has('done')) children.push(roadUnfold(route, 'done', h('div', { class: 'road-done' }, rows.done.flatMap(goalRow))));
     }
     col.replaceChildren(...children);
     setClass(col, 'dated', !!axis);
-    talk.scrollTop = 0;
+    roadTop(route);
   }
 
   function drawRoadmap(route, board) {
@@ -541,6 +750,7 @@ export function projectView(app, { sheet }) {
     const key = JSON.stringify([route, board?.tasks, board?.goals, board?.score, cards.map((card) => [card.id, card.open]), lang(), Math.floor(Date.now() / 60000)]);
     if (key === drawn) return;
     drawn = key;
+    roadChanged(route);
     // With estimates, the time axis; without, what the roadmap drew before them.
     const axis = hasDates(board) ? timeAxis(axisPoints(board)) : null;
     if (board?.goals?.length) { drawGoals(route, board, cards, axis); return; }
@@ -558,12 +768,12 @@ export function projectView(app, { sheet }) {
         axis ? whenEl(lastLanding(team.queued), '') : null,
         h('span', { class: 'road-band-toggle' }, open ? t('roadQueueClose') : t('roadQueueOpen'), icon('chevron', 10)));
       children.push(h('h2', { class: 'road-head' }, t('roadQueued')), band);
-      if (open) children.push(h('div', { class: 'road-queue' }, team.queued.map((task) => taskRow(task, task.after?.length ? [t('after', { list: listed(titles(task.after)) })] : [], dates))));
+      if (open || roadClosing.has('queue')) children.push(roadUnfold(route, 'queue', h('div', { class: 'road-queue' }, team.queued.map((task) => taskRow(task, task.after?.length ? [t('after', { list: listed(titles(task.after)) })] : [], dates)))));
     }
-    if (!team.motion.length && !team.blocked.length && !team.queued.length) children.push(h('p', { class: 'empty-line' }, t('roadNothing')));
+    if (!team.motion.length && !team.blocked.length && !team.queued.length) children.push(kit.empty({ tag: 'p', size: 'page', class: 'empty-line' }, t('roadNothing')));
     col.replaceChildren(...children);
     setClass(col, 'dated', !!axis);
-    talk.scrollTop = 0;
+    roadTop(route);
   }
 
   // The queue's band says when its last dated task lands ("all by …").
@@ -620,38 +830,51 @@ export function projectView(app, { sheet }) {
     const waiting = waitingCount(state, route.id);
     setText(big, waiting ? t('thingsHereNeedYou', { n: waiting }) : t('nothingHereNeedsYou'));
     setClass(big, 'asked', waiting > 0);
+    setText(count, String(waiting));
+    count.hidden = !waiting;
     setText(name, lastPart(root));
-    fitName();
     name.title = tilde(root, state.node?.home);
     leadLink.setAttribute('href', projectHref(route.id));
     roadLink.setAttribute('href', projectHref(route.id, { view: 'roadmap' }));
     if (route.view === 'roadmap') { roadLink.setAttribute('aria-current', 'page'); leadLink.removeAttribute('aria-current'); } else { leadLink.setAttribute('aria-current', 'page'); roadLink.removeAttribute('aria-current'); }
     dial.hidden = route.view !== 'lead';
+    dialFold.hidden = dial.hidden;
+    if (dial.hidden && dialOpen) foldDial(false);
+    fitHead();
     composer.hidden = route.view !== 'lead';
     waitBox.hidden = route.view !== 'lead' || !waitShown;
-    strip.replaceChildren(h('b', null, t('team')), ...stripCounts(board));
+    strip.replaceChildren(h('b', null, t('team')), ...stripCounts(board), stripFold);
+    // Its fold only where a count is past the first line (or it is open).
+    fitStrip();
     const live = !!lead?.session && state.sessions.has(lead.session);
     setText(toWho, lead?.root ? t('toLead', { p: lastPart(root) }) : t('noLeadToTell'));
+    // On a phone the header names the project: the line over the box shows only when there is no lead to tell.
+    setClass(toWho, 'no-lead', !lead?.root);
     input.disabled = !lead?.root;
+    // What was typed for this lead and not sent comes back with it.
+    box.setKey('lead:' + route.id);
+    const tells = actsFor(app, 'tell') || sendsTo(lead);
+    box.setMode({ word: tells ? t('swSend') : t('cmDraft'), title: tells ? t('cmLeadSendTitle') : t('cmLeadDraftTitle'), way: 'step', disabled: !lead?.root });
     // The buttons only where the page sends: next step with `tell`; now with `send` to a live lead session.
     sender.el.hidden = !lead?.root || (!actsFor(app, 'tell') && !sendsTo(lead));
     sender.update(waysNow());
     setClass(el, 'quiet', !live);
     quiet.hidden = live || route.view !== 'lead' || !root;
-    const quietKey = JSON.stringify([root, live, lang(), store.acts()]);
+    const quietKey = JSON.stringify([root, live, lang(), store.acts(), store.can('lead'), baseMoveOf(app, root)?.id ?? null]);
     if (!quiet.hidden && quietKey !== quietDrawn) {
       quietDrawn = quietKey;
       setText(quietWords, t('quietWords'));
-      // With the `act` right, the two starts are buttons (`lead`, back in its conversation or fresh), the lines beside.
+      // With the `act` right, the two starts are buttons (`lead`, back in its conversation or fresh), and where its base
+      // moved, Take the base as it is with what it does (views/drive.js); the lines where the page doesn't start it.
       const acts = actsFor(app, 'lead');
-      quietLines.replaceChildren(...[acts ? h('div', { class: 'card-acts' },
-        doButton(app, { label: t('acResumeLead'), kind: 'lead', args: () => ({ folder: root, resume: true }) }).el,
-        doButton(app, { label: t('acFreshLead'), kind: 'lead', quiet: true, args: () => ({ folder: root }) }).el) : null,
-      copyLine(`${leadLine(root)} --resume`, 'the command that starts its lead again in its conversation'),
-      copyLine(leadLine(root), 'the command that starts a new lead there')].filter(Boolean));
+      quietLines.replaceChildren(...(acts ? [h('div', { class: 'card-acts quiet-starts' },
+        ...leadStartOrLine(app, { folder: root, extra: () => ({ resume: true }), label: t('acResumeLead') }),
+        ...leadStartOrLine(app, { folder: root, label: t('acFreshLead'), plain: true, baseChoice: false }))]
+        : [copyLine(`${leadLine(root)} --resume`, 'the command that starts its lead again in its conversation'),
+          copyLine(leadLine(root), 'the command that starts a new lead there')]));
       quietForm.onclick = (event) => { event.preventDefault(); app.startLead?.(root); };
     }
-    if (route.view === 'roadmap') { lastProject = null; drawRoadmap(route, board); } else drawLead(route, board, lead);
+    if (route.view === 'roadmap') { lastProject = null; setClass(el, 'show-asks', false); drawRoadmap(route, board); } else { roadShown = null; roadOpen = null; drawLead(route, board, lead); }
     drawSheet(route, board);
   }
 
