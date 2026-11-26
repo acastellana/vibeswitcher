@@ -214,7 +214,7 @@ extension NodeSettings.Shown {
         return .init(key: setting.key, title: setting.title, about: setting.about, section: setting.section, scope: setting.scope.rawValue,
                      form: setting.form.rawValue, home: setting.home.rawValue, choices: setting.choices, limits: limits,
                      value: Requests.capped(self.value), default: Requests.capped(defaultValue), isDefault: isDefault, where: place,
-                     guardRail: setting.guardRail, note: note)
+                     guardRail: setting.guardRail, note: note, page: setting.page.word, pageWhy: setting.page.why)
     }
 
 }

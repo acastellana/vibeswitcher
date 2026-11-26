@@ -65,6 +65,28 @@ public enum NodeSettings {
         case lowersOnly(String)
         /// The terminal's alone: why.
         case terminalOnly(String)
+
+        /// As `settings` carries it (`WireKinds.Settings.Setting.page`): the rule's word, which the page reads to offer Set
+        /// only where this rule lets it (`acting.js`'s `pageMaySet`); `set` from a page is still refused by
+        /// `Requests.pageSetRefusal` whatever the page offers.
+        public var word: String {
+            switch self {
+            case .sets: return "sets"
+            case .lowersOnly: return "lowersOnly"
+            case .terminalOnly: return "terminalOnly"
+            }
+        }
+
+        /// Why a page may not set it (or not raise it); nil for one it sets.
+        public var why: String? {
+            switch self {
+            case .sets: return nil
+            case .lowersOnly(let why), .terminalOnly(let why): return why
+            }
+        }
+
+        /// Every word `word` gives (the wire's `setting.page`).
+        public static let words = ["sets", "lowersOnly", "terminalOnly"]
     }
 
     public struct Setting: Equatable, Sendable {

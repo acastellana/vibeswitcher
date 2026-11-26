@@ -67,14 +67,30 @@ extension LeadEngine {
         })
     }
 
+    /// `node`'s `reopenOffer` (the no-terminal inventory's C3, 2026-11-26): the offer as the page shows it, null while
+    /// there is none (no host restart, none of the user's sessions ended with it, or all reopened or put away).
+    var reopenOfferValue: NodeWire.Value { Self.reopenOffer(hostRestart) }
+
+    /// The offer `restart` makes, as `node` carries it: when the host restarted (`at`) and each session it ended and
+    /// nobody reopened yet, in the offer's order, by the id `session.reopen` takes and the names the page shows (its
+    /// own name and its project's), never its folder, its conversation or its command. Null when it offers none.
+    static func reopenOffer(_ restart: EngineState.Restart?) -> NodeWire.Value {
+        guard let restart, let sessions = restart.sessions, !sessions.isEmpty else { return .null }
+        return .object([
+            "at": .date(Date(timeIntervalSince1970: restart.at)),
+            "sessions": .array(RestartReopen.ordered(sessions).map { entry in
+                .object(["session": .string(NodeIds.session(host: entry.id)), "name": .string(ConfigSeal.inert(entry.name, limit: 60)),
+                         "project": .string(ConfigSeal.inert(entry.project, limit: 60)), "agent": .string(entry.agent.rawValue)])
+            }),
+        ])
+    }
+
     /// The offered sessions taken for a reopen (gone from the offer, so a second ask can't start them twice), each
     /// named by `ids` (host ids), in the offer's order. On `queue`.
     func takeOffered(_ ids: Set<UUID>) -> [RestartReopen.Entry] {
-        guard var restart = hostRestart, let sessions = restart.sessions else { return [] }
-        let taken = RestartReopen.ordered(sessions).filter { ids.contains($0.id) }
+        guard var restart = hostRestart else { return [] }
+        let taken = restart.takeOffered(ids)
         guard !taken.isEmpty else { return [] }
-        restart.sessions = sessions.filter { !ids.contains($0.id) }
-        if restart.sessions?.isEmpty == true { restart.sessions = nil }
         hostRestart = restart
         saveState()
         return taken
@@ -91,11 +107,11 @@ extension LeadEngine {
 
     /// The offer put away (`vibeswitcher reopen --forget`): how many it held. On `queue`.
     func forgetOffered() -> Int {
-        guard var restart = hostRestart, let sessions = restart.sessions else { return 0 }
-        restart.sessions = nil
+        guard var restart = hostRestart, restart.sessions != nil else { return 0 }
+        let count = restart.forgetOffered()
         hostRestart = restart
         saveState()
-        return sessions.count
+        return count
     }
 
     /// What a reopen starts, from an entry that checked out.
@@ -413,5 +429,25 @@ public enum ResumeText {
         }
         lines.append("`vibeswitcher resume SESSION` starts one again on the node, in its same conversation")
         return lines
+    }
+}
+
+extension EngineState.Restart {
+    /// The offered sessions named by `ids` (host ids) taken out of the offer, in its order (`session.reopen`'s); the
+    /// offer gone once none is left.
+    mutating func takeOffered(_ ids: Set<UUID>) -> [RestartReopen.Entry] {
+        guard let offered = sessions else { return [] }
+        let taken = RestartReopen.ordered(offered).filter { ids.contains($0.id) }
+        guard !taken.isEmpty else { return [] }
+        sessions = offered.filter { !ids.contains($0.id) }
+        if sessions?.isEmpty == true { sessions = nil }
+        return taken
+    }
+
+    /// The offer put away (`session.reopen` with `forget`): how many it held.
+    mutating func forgetOffered() -> Int {
+        let count = sessions?.count ?? 0
+        sessions = nil
+        return count
     }
 }

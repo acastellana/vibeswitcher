@@ -31,7 +31,7 @@ public final class NodeStatusStore: @unchecked Sendable {
 
     /// On the server's `Requests` (its queue, its `statusValue()`).
     public convenience init(requests: Requests, web: @escaping () -> NodeWire.Value = { NodeStatusStore.webOff }) {
-        self.init(queue: requests.queue, status: { [weak requests] in requests?.statusValue() ?? .null }, web: web)
+        self.init(queue: requests.queue, status: { [weak requests] in requests?.statusValue(forPage: true) ?? .null }, web: web)
     }
 
     /// The node's value now: `status` without `sessions` and `leads`, with `web`. Without `webTailnet` too (the user's

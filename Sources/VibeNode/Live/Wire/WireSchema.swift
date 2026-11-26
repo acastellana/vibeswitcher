@@ -243,7 +243,15 @@ public enum WireSchema {
                 field("restart", Kind.shape("node.restart").orNull), field("reopen", .list(.shape("node.reopen"))), field("ended", .list(.shape("node.ended"))), field("ending", .list(.shape("node.ending"))),
                 field("builds", Kind.any.orNull), field("web", .shape("node.web")), field("usage", Kind.shape("node.usage").orNull),
                 optional("health", .shape("node.health")), field("boost", Kind.shape("node.boost").orNull),
-                optional("update", .shape("node.update")), optional("plugins", .list(.shape("hello.plugin")))]),
+                optional("update", .shape("node.update")), optional("plugins", .list(.shape("hello.plugin"))),
+                // The restart's reopen offer and the prompt audits due, as values for the page's cards (C3, C4, 2026-11-26).
+                optional("reopenOffer", Kind.shape("node.reopenOffer").orNull), optional("promptAudits", .list(.shape("node.promptAudit")))]),
+            shape("node.reopenOffer", from: "LeadEngine.reopenOffer (2026-11-26)", [field("at", .date), field("sessions", .list(.shape("node.reopenOffer.session")))]),
+            shape("node.reopenOffer.session", from: "LeadEngine.reopenOffer", [field("session", .string), field("name", .string), field("project", .string),
+                                                                             field("agent", .words(["claude", "codex"]))]),
+            shape("node.promptAudit", from: "PromptAuditWatch.value (2026-11-26)", [
+                field("project", .string), field("folder", .string), field("session", Kind.string.orNull), field("reason", .words(["interval", "model"])),
+                optional("days", .int), optional("ranBefore", .bool), optional("from", .string), optional("to", .string)]),
             // A reminder due now (`NodeSessions.Reminder`, 2026-11-22): waiting on you 10 minutes, or no progress for 15.
             shape("node.reminder", from: "NodeSessions.Reminder.value", [
                 field("session", .string), field("kind", .words(["waiting", "stalled"])), field("since", .date), field("dueAt", .date),
@@ -520,7 +528,9 @@ public enum WireSchema {
                 field("scope", .words(["node", "project"])), field("form", .words(["flag", "count", "number", "choice", "model", "paths", "text", "folder"])),
                 field("home", .words(["limits", "preferences", "policy", "workflow", "floor", "plugin"])), field("choices", strings),
                 field("limits", Kind.string.orNull), field("value", .string), field("default", .string), field("isDefault", .bool),
-                field("where", .string), field("guardRail", .bool), field("note", Kind.string.orNull)]),
+                field("where", .string), field("guardRail", .bool), field("note", Kind.string.orNull),
+                // Whether an acting page may set it, and why not (B10, 2026-11-26): absent from a node before it.
+                optional("page", .words(NodeSettings.Page.words)), optional("pageWhy", .string)]),
             shape("settings.node", from: "Requests.settings", [field("root", .string), field("settings", .list(.shape("setting")))]),
             shape("settings.project", from: "Requests.settings", [field("project", .string), field("root", .string),
                                                                    field("settings", .list(.shape("setting")))]),

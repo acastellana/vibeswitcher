@@ -131,7 +131,9 @@ struct NodeStatusStoreTests {
         let store = NodeStatusStore(requests: requests, web: { web })
         queue.sync { store.look() }
 
-        var expected = try #require(queue.sync { requests.statusValue() }.object)
+        // The page's `status` (`forPage`: the notices a value of its own carries for the page left out, C3 and C4).
+        var expected = try #require(queue.sync { requests.statusValue(forPage: true) }.object)
+        #expect(expected["reopenOffer"] == .null && expected["promptAudits"] == .array([]))
         #expect(expected["sessions"] != nil && expected["leads"] != nil)
         expected["sessions"] = nil
         expected["leads"] = nil

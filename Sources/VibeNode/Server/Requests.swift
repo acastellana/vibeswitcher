@@ -865,13 +865,16 @@ public final class Requests: @unchecked Sendable {
     /// with no role (E8); a project due a prompt audit, a team session behind a dialog nothing reads, a board that
     /// cleared, and a session left alone (2026-11-20). On `queue`.
     /// `reminders`: the sessions' (`NodeSessions.reminderNotices`), when the caller has them already.
-    func statusNotices(reminders: [String]? = nil) -> [String] {
+    /// `forPage`: the `node` stream's (`NodeStatusStore`), without the notices a value of its own carries for the page
+    /// to show with its buttons (the no-terminal inventory's C3 and C4): the reopen offer (`reopenOffer`) and the prompt
+    /// audits due (`promptAudits`); the command line's `status` keeps them as they are.
+    func statusNotices(reminders: [String]? = nil, forPage: Bool = false) -> [String] {
         var notices = stopping ? ["the node is stopping"] : []
         notices += engine?.leads.leads.values.sorted { $0.root < $1.root }.compactMap(\.notice) ?? []
         notices += engine?.notices.sorted { $0.key < $1.key }.flatMap(\.value) ?? []
         notices += engine?.secondAcceptNotices ?? []
-        notices += (engine?.restartNotices ?? []) + (engine?.rolelessNotices ?? [])
-        notices += engine?.promptAuditNotices ?? []
+        notices += ((forPage ? engine?.leadRestartNotices : engine?.restartNotices) ?? []) + (engine?.rolelessNotices ?? [])
+        if !forPage { notices += engine?.promptAuditNotices ?? [] }
         notices += engine?.unknownDialogNotices ?? []
         notices += engine?.allDoneNotices ?? []
         notices += engine?.toolchainNotices ?? []
@@ -891,10 +894,11 @@ public final class Requests: @unchecked Sendable {
     /// session the vault doesn't bind, E5; a base move that refused a running lead's merge, E7's refresh; a host restart
     /// that ended a project's team, and a running lead the vault gives no role, E8), and the last host restart
     /// (`restart`, E8: the command line shows it with how the host ended). On `queue`.
-    public func statusValue() -> NodeWire.Value { NodeWire.Value(wire: statusResult()) }
+    /// `forPage`: as the `node` stream carries it (`statusNotices(forPage:)`).
+    public func statusValue(forPage: Bool = false) -> NodeWire.Value { NodeWire.Value(wire: statusResult(forPage: forPage)) }
 
-    /// `status`'s result, typed (`WireKinds.Status`). On `queue`.
-    public func statusResult() -> WireKinds.Status.Result {
+    /// `status`'s result, typed (`WireKinds.Status`); `forPage`: the `node` stream's notices. On `queue`.
+    public func statusResult(forPage: Bool = false) -> WireKinds.Status.Result {
         typealias Status = WireKinds.Status
         let list = sessions?.sessions ?? []
         // Each once per status (the review's row 19): the switch's blockers walk the host's sessions, the reminders the scan's.
@@ -917,12 +921,15 @@ public final class Requests: @unchecked Sendable {
         result.cards = Self.counts(engine?.cards.counts() ?? [:])
         result.plugins = engine?.plugins.onValue ?? .array([])
         result.accepted = accepted.map(\.value)
-        result.notices = statusNotices(reminders: reminders)
+        result.notices = statusNotices(reminders: reminders, forPage: forPage)
         // The reminders due now, each its session's (the page notifies once an episode: "Remind me about waiting or
         // stuck sessions", 2026-11-22).
         result.reminders = due.map(\.value)
         result.restart = engine?.restartValue ?? .null
         result.reopen = engine?.offeredValue ?? .array([])
+        // The offer and the prompt audits due as values (C3, C4, 2026-11-26): the page's cards and their buttons.
+        result.reopenOffer = engine?.reopenOfferValue ?? .null
+        result.promptAudits = engine?.promptAuditValue ?? .array([])
         result.ended = engine?.endedValue ?? .array([])
         result.ending = engine?.endingValue ?? .array([])
         // As last read off the queue (`refreshBuilds`): null until the first read is in.

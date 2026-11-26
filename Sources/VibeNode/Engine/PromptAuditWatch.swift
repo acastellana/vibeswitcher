@@ -113,6 +113,32 @@ final class PromptAuditWatch {
         }
     }
 
+    /// `node`'s `promptAudits` (the no-terminal inventory's C4, 2026-11-26): each project due an audit, as the page
+    /// shows its reminder and its buttons. On the engine's queue.
+    func value(session: (String) -> String?) -> NodeWire.Value { Self.value(due, now: now(), session: session) }
+
+    /// `due` as `node` carries it, by root: the project's name, its folder (what `prompt-audit` takes), why it's due (the
+    /// interval: how many days, and whether a run was ever seen; or the model its sessions moved to, and from which),
+    /// and its lead's session (what `send` takes, for the page's Run it; null when none runs). The page says it in its
+    /// own words: no command, no path shown. An empty list when none is due.
+    static func value(_ due: [String: PromptAudit.Due], now: Date, session: (String) -> String?) -> NodeWire.Value {
+        .array(due.sorted { $0.key < $1.key }.map { root, why in
+            var fields: [String: NodeWire.Value] = ["project": .string(LeadMail.project(of: root)), "folder": .string(root),
+                                                    "session": session(root).map(NodeWire.Value.string) ?? .null]
+            switch why {
+            case .interval(let since, let ranBefore):
+                fields["reason"] = .string("interval")
+                fields["days"] = .int(max(0, Int((now.timeIntervalSince(since) / 86_400 + 0.001).rounded(.down))))
+                fields["ranBefore"] = .bool(ranBefore)
+            case .modelChanged(let from, let to):
+                fields["reason"] = .string("model")
+                fields["from"] = .string(ConfigSeal.inert(from, limit: 80))
+                fields["to"] = .string(ConfigSeal.inert(to, limit: 80))
+            }
+            return .object(fields)
+        })
+    }
+
     /// `change` made to `root`'s record (a project the record doesn't know yet starts from now), then which are due
     /// again; `done` with the project's record as it then is. On the engine's queue; `done` on it too.
     func change(root: String, _ change: Change, done: @escaping (PromptAudit.Project) -> Void) {
@@ -149,6 +175,13 @@ extension LeadEngine: PromptAuditLeads {
 
     /// What `status` says of each project due an audit.
     var promptAuditNotices: [String] { promptAudit.notices }
+
+    /// `node`'s `promptAudits`: each project due an audit, with its lead's session (the one holding its role). On `queue`.
+    var promptAuditValue: NodeWire.Value {
+        let sessions = Dictionary(leads.leads.values.compactMap { lead in lead.session.map { ((lead.root as NSString).standardizingPath, $0) } },
+                                  uniquingKeysWith: { first, _ in first })
+        return promptAudit.value { root in sessions[root].map { NodeIds.session(host: $0) } }
+    }
 
     /// A look at the running leads' projects' transcripts; `done` once it's out. On `queue`.
     func lookAtPromptAudits(done: (() -> Void)? = nil) { promptAudit.look(done: done) }

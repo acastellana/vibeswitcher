@@ -141,13 +141,19 @@ extension LeadEngine {
     /// What `status` says of a host restart, one notice per project whose team it ended, until a lead starts there.
     var restartNotices: [String] {
         guard let restart = hostRestart else { return [] }
+        return leadRestartNotices + sessionsNotice(restart, at: NodeWire.dateText(Date(timeIntervalSince1970: restart.at)))
+    }
+
+    /// `restartNotices` less the user's own sessions' (the page shows that one as its card, `reopenOfferValue`).
+    var leadRestartNotices: [String] {
+        guard let restart = hostRestart else { return [] }
         let at = NodeWire.dateText(Date(timeIntervalSince1970: restart.at))
         return restart.gone.map { root in
             "the session host restarted at \(at): the lead and team of \(LeadMail.project(of: root)) (\(root)) ended with the host before it, "
                 + "and its vault started over (" + Self.resetByRestart + "). Run `vibeswitcher config held \(root)`, `config accept CARD`, "
                 + "`base show \(root)` and `base accept CARD`, reading the values, then " + reopenStep(root: root)
                 + (formerLeadWaits[root].map { ". \($0) message(s) wait in the inbox of the lead that ended: `vibeswitcher lead \(root) --resume` takes them" } ?? "")
-        } + sessionsNotice(restart, at: at)
+        }
     }
 
     /// What a host restart resets (the security document's S7).
