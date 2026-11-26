@@ -105,14 +105,22 @@ test('a card’s request carries the card, the seen the page drew it with and it
 });
 
 test('the settings a page may not set even when it acts stay the terminal’s: web_acts raised, a floor, the policy, a guard rail', () => {
-  assert.equal(pageMaySet('web_acts', 'off'), true, 'off, the one value');
-  assert.equal(pageMaySet('web_acts', ' OFF '), true);
-  assert.equal(pageMaySet('web_acts', 'on'), false);
-  assert.equal(pageMaySet('floor_audit_finders', '1'), false);
-  assert.equal(pageMaySet('policy', 'auto'), false);
+  // Each by the rule the node sends with it (`settings`' `page`, B10).
+  const webActs = (value) => ({ key: 'web_acts', page: 'lowersOnly', pageWhy: 'acting from the page is raised from a terminal', choices: ['off', 'confirm', 'trust'], value });
+  const kept = (key) => ({ key, page: 'terminalOnly', pageWhy: 'a review rule’s floor' });
+  assert.equal(pageMaySet(webActs('trust'), 'off'), true, 'off, from trust');
+  assert.equal(pageMaySet(webActs('confirm'), 'off'), true, 'off, from confirm');
+  assert.equal(pageMaySet(webActs('off'), 'off'), true, 'off, the lowest, always');
+  assert.equal(pageMaySet(webActs('trust'), 'default'), true);
+  assert.equal(pageMaySet(webActs('trust'), ' OFF '), false, 'not a value the node takes as off');
+  assert.equal(pageMaySet(webActs('trust'), 'on'), false);
+  assert.equal(pageMaySet(webActs('trust'), 'trust'), false, 'raising it, or keeping it, is the terminal’s');
+  assert.equal(pageMaySet(webActs('off'), 'confirm'), false, 'confirm from off raises it');
+  assert.equal(pageMaySet(kept('floor_audit_finders'), '1'), false);
+  assert.equal(pageMaySet(kept('policy'), 'auto'), false);
   // B10: a guard rail the node keeps to a terminal (`terminalOnly`), offered no Set.
-  assert.equal(pageMaySet('max_workers', '3'), false);
-  assert.equal(pageMaySet('node_heavy_slots', '3'), true);
+  assert.equal(pageMaySet(kept('max_workers'), '3'), false);
+  assert.equal(pageMaySet({ key: 'node_heavy_slots', page: 'sets' }, '3'), true);
   assert.equal(refusalWords({ code: 'voice', message: 'not the user' }), 'A page can’t do this one: run it in a terminal. Nothing was done.');
   assert.equal(refusalWords({ code: 'acts-ended', message: 'this page doesn’t act' }), 'This page no longer acts: pair it again with `vibeswitcher web` to act. Nothing was done.');
   assert.equal(refusalWords({ code: 'gone', message: 'That card is gone.' }), 'That card is gone.', 'any other: the node’s own words');

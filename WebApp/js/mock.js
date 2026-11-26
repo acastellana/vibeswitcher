@@ -227,6 +227,14 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
     notices: options.empty ? [] : ['example-site: landing-base moved outside the lead’s merges; its next merge is refused until you accept the move'],
     restart: null,
     reopen: [],
+    // `?restart`: a session host restart ended three of your sessions (`reopenOffer`), and the site is due a prompt
+    // audit (`promptAudits`): the node's two offers, each a card (C3, C4).
+    reopenOffer: options.restart ? { at: ago(25 * 60), sessions: [
+      { session: id('3b8e1f07'), name: 'example-api', project: 'example-api', agent: 'claude' },
+      { session: id('a41c6d92'), name: 'Tidy the notes', project: 'notes', agent: 'claude' },
+      { session: id('c07f5e3a'), name: 'Sketch the onboarding', project: 'example-site', agent: 'codex' },
+    ] } : null,
+    promptAudits: options.restart ? [{ project: 'example-site', folder: SITE, session: LEAD, reason: 'interval', days: 15, ranBefore: true }] : [],
     ending: [],
     // Pages acting for the user (`web_acts` on) since an hour ago.
     web: { state: 'listening', port: 8765, tokens: 1, connections: 1, acts: { on: true, since: ago(3600), pages: 1 } },
@@ -776,6 +784,17 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
     + '- Parallelize independent implementation work. Serialize expensive builds and tests so workers don\'t compete for CPU.\n'
     + '- Fix material bugs. Cosmetic observations don\'t automatically become tasks or block delivery.\n'
     + '- Stop when the requested behavior works and relevant checks pass. No recursive audit loop without a concrete unresolved concern.';
+  // Each setting's page rule, as `NodeSettings`' `page` says it (B10): what a page may set; the rest the terminal's, why.
+  const PAGE_SETS = new Set(['projects_folder', 'node_max_sessions', 'load_threshold', 'node_heavy_slots', 'ignore_usage_limits', 'boost',
+    'boost_load_threshold', 'boost_max_sessions', 'boost_max_workers', 'boost_heavy_slots', 'prompt_audit', 'prompt_audit_days', 'ai_summaries',
+    'lead_model', 'lead_advisor', 'worker_advisor', 'lead_rotation']);
+  const PAGE_WHY = {
+    lead_mail: 'it opens one project\'s lead to another\'s messages', policy: 'the rules every agent works under: a page\'s token would loosen its own',
+    verifier_model: 'what reviews the work: a page\'s token would choose a weaker review of its own',
+    security_audit_model: 'what audits sensitive work (a guard rail): a page\'s token would choose its own audit', max_workers: 'a guard rail, recorded in the vault as yours',
+  };
+  const pageRule = (key) => (PAGE_SETS.has(key) ? { page: 'sets' }
+    : { page: 'terminalOnly', pageWhy: PAGE_WHY[key] || 'a review rule\'s floor: a page\'s token would lower what holds its own merge' });
   function settingsResult(folder) {
     const at = (file) => `${HOME}/.vibeswitcher/${file}`;
     const workflow = `${SITE}/.vibeswitcher/workflow.md`;
@@ -783,7 +802,7 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
       const value = setValues.has(key) ? (setValues.get(key) === 'default' ? fallback : setValues.get(key)) : invented;
       return {
       key, title, about, section, scope, form, home, choices: extra.choices || [], limits: extra.limits ?? null, value, default: fallback,
-      isDefault: value === fallback, where, guardRail: !!extra.rail, note: extra.note ?? null,
+      isDefault: value === fallback, where, guardRail: !!extra.rail, note: extra.note ?? null, ...pageRule(key),
       };
     };
     const limits = (key, title, about, form, value, fallback, extra) => row(key, title, about, extra?.section || 'Machine-wide limits', 'node', form, 'limits', value, fallback, at('mac-limits.json'), extra);
@@ -947,6 +966,36 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
       if (kind === 'codex') return refused('no codex for this node');
       const sid = startSession(folder, kind, null);
       return { ok: true, result: { session: sid, terminal: sessionTerminal(sid), agent: kind, folder, model: args.model || null, preset: name ? started.name : null } };
+    }
+    // The restart's offer answered (`session.reopen`, as `Requests.reopenSessions`): all, the chosen ones, or put away.
+    if (message.kind === 'session.reopen') {
+      const offered = node.reopenOffer?.sessions || [];
+      if (!offered.length) return { ok: false, error: { code: 'gone', message: 'no session host restart left sessions of yours to reopen' } };
+      if (args.forget === true) {
+        node.reopenOffer = null;
+        emit({ in: 'node', id: 'local', value: node });
+        return { ok: true, result: { forgotten: offered.length } };
+      }
+      const wanted = args.all === true ? offered : offered.filter((one) => (args.sessions || []).includes(one.session));
+      if (!wanted.length) return badArgs('session.reopen needs all, sessions or forget');
+      const left = offered.filter((one) => !wanted.includes(one));
+      node.reopenOffer = left.length ? { ...node.reopenOffer, sessions: left } : null;
+      const reopened = wanted.map((one) => {
+        const folder = `${HOME}/projects/${one.project}`;
+        const sid = startSession(folder, one.agent, one.name);
+        return { was: one.session, folder, conversation: crypto.randomUUID(), session: sid, terminal: sessionTerminal(sid) };
+      });
+      emit({ in: 'node', id: 'local', value: node });
+      return { ok: true, result: { reopened, refused: [] } };
+    }
+    // A project's prompt-audit reminder snoozed a week, turned off or back on (`prompt-audit`, as `Requests.promptAudit`).
+    if (message.kind === 'prompt-audit') {
+      if (typeof args.folder !== 'string' || !args.folder.startsWith('/')) return badArgs('prompt-audit needs folder, an absolute path');
+      if (!['snooze', 'off', 'on'].includes(args.do)) return badArgs(`prompt-audit's do is snooze, off or on, not ${args.do}`);
+      const root = args.folder.replace(/\/+$/, '');
+      node.promptAudits = (node.promptAudits || []).filter((one) => one.folder !== root);
+      emit({ in: 'node', id: 'local', value: node });
+      return { ok: true, result: { project: root.split('/').pop(), root, do: args.do, until: args.do === 'snooze' ? soon(7 * 86400) : null } };
     }
     // An ended session started again in its conversation (`session.resume`, as `Requests.resumeSession`).
     if (message.kind === 'session.resume') {
@@ -1272,7 +1321,8 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
   // `?older` lists none of the buttons' kinds either (BUTTONS: what an acting page sends a node in place of the lines
   // it showed before, docs/process/v2-no-terminal.md's table B and A5), so their lines can be seen.
   const STARTS = ['lead', 'session.new', 'session.reply', 'session.resume'];
-  const BUTTONS = ['config.held', 'config.accept', 'base.show', 'base.accept', 'base.keep', 'shells', 'session.close-shells', 'presets.edit', 'update.check', 'web.revoke'];
+  const BUTTONS = ['config.held', 'config.accept', 'base.show', 'base.accept', 'base.keep', 'shells', 'session.close-shells', 'presets.edit', 'update.check', 'web.revoke',
+    'session.reopen', 'prompt-audit'];
   const KINDS = ['chat.page',
     'answer', 'answer.replace', 'tell', 'tell.retract', 'hold', 'send', 'session.draft', 'session.draft.clear', 'session.complete',
     'session.attach', 'session.usage', 'stats', 'session.ports', 'board.task', 'board.image', 'chat.image', 'session.presets', 'brief', 'recent',

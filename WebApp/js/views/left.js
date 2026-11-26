@@ -338,7 +338,9 @@ export function leftColumn(app, { brief }) {
     ownBone.hidden = phase !== 'loading';
     own.title = mine.length ? t('owCount', { n: mine.length }) : '';
     setClass(nodeLink, 'asked', waits.some((place) => place.kind === 'node'));
-    const count = state.node?.notices?.length || 0;
+    // The node's offers count as notices here (a restart's reopen offer, each prompt audit due: their cards on This node).
+    const count = (state.node?.notices?.length || 0) + (state.node?.reopenOffer?.sessions?.length ? 1 : 0)
+      + (Array.isArray(state.node?.promptAudits) ? state.node.promptAudits.length : 0);
     setText(notices, count ? t('placeNotices', { n: count }) : '');
     notices.hidden = !count;
     const mark = boostMarkText(state.node?.boost);

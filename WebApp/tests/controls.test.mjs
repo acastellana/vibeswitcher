@@ -41,10 +41,11 @@ function fakeApp({ route = { name: 'settings', id: null }, state = {}, kinds = n
   return { store, ui, sent, goTo, changed, leave: () => goTo({ name: 'home' }) };
 }
 
-const slots = { key: 'node_heavy_slots', title: 'Test and build slots at once', form: 'count', scope: 'node', limits: '1 to 12', value: '3', default: '2' };
-const workers = { key: 'max_workers', title: 'Workers at once, at most', form: 'count', scope: 'project', limits: '1 to 8', value: '4', default: '4' };
+// Each with its page rule as the node sends it (`settings`' `page`, B10).
+const slots = { key: 'node_heavy_slots', title: 'Test and build slots at once', form: 'count', scope: 'node', limits: '1 to 12', value: '3', default: '2', page: 'sets' };
+const workers = { key: 'max_workers', title: 'Workers at once, at most', form: 'count', scope: 'project', limits: '1 to 8', value: '4', default: '4', page: 'terminalOnly', pageWhy: 'a guard rail, recorded in the vault as yours' };
 // A project's setting a page may set (max_workers is a guard rail the node keeps to a terminal).
-const leadModel = { key: 'lead_model', title: 'The lead’s model', form: 'model', scope: 'project', limits: null, value: 'opus', default: '' };
+const leadModel = { key: 'lead_model', title: 'The lead’s model', form: 'model', scope: 'project', limits: null, value: 'opus', default: '', page: 'sets' };
 const buttons = (el) => findAll(el, (node) => node.tag === 'button').map((one) => one.textContent);
 const copies = (el) => findAll(el, byClass('copy-button'));
 
@@ -106,7 +107,7 @@ test('U14: where the page doesn’t act (or may not set this one), the open sett
     for (const [app, setting, value, line] of [
       [fakeApp({ kinds: ['set'], acts: false }), slots, '4', 'vibeswitcher set node_heavy_slots 4'],
       [fakeApp({ kinds: ['answer'], acts: true }), slots, '4', 'vibeswitcher set node_heavy_slots 4'],
-      [fakeApp({ kinds: ['set'], acts: true }), { ...slots, key: 'web_acts', form: 'choice', choices: ['off', 'confirm', 'trust'], limits: null, value: 'off' }, 'trust', 'vibeswitcher set web_acts trust'],
+      [fakeApp({ kinds: ['set'], acts: true }), { ...slots, key: 'web_acts', form: 'choice', choices: ['off', 'confirm', 'trust'], limits: null, value: 'off', page: 'lowersOnly', pageWhy: 'acting from the page is raised from a terminal' }, 'trust', 'vibeswitcher set web_acts trust'],
     ]) {
       const box = editor(setting, null, new Map([[setting.key, value]]), app);
       assert.deepEqual(buttons(box).filter((word) => word === set), [], 'no Set');
@@ -143,6 +144,9 @@ const { nodeView, nodeVerdict } = await import('../js/views/node.js');
 function healthyNode() {
   const node = nodeValue();
   node.notices = [];
+  // No offer of the node's waiting (the vectors' example has a reopen offer and an audit due: C3, C4).
+  node.reopenOffer = null;
+  node.promptAudits = [];
   node.health = { freezes: [], errors: [], waiting: [], slowRefreshes: 0, serverRestarts: 0 };
   for (const limit of node.usage.limits) { limit.holds = false; limit.reached = false; }
   return node;

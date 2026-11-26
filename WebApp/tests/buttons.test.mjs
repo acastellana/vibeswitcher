@@ -46,33 +46,65 @@ export function fakeApp({ route = { name: 'node' }, state = {}, kinds = null, ac
 
 export const buttonNamed = (el, text) => find(el, (node) => node.tag === 'button' && !node.hidden && node.textContent.trim() === text);
 
-// B10: the settings the node keeps to a terminal (`NodeSettings`' `terminalOnly`, every plugin's) offer no Set.
-test('B10: no Set for a setting the node keeps to a terminal; the line and why, where the page acts', async () => {
+// B10: the page offers Set exactly where the node's rule for the setting says (`settings`' `page`, `NodeSettings`'
+// `page`): never for one it keeps to a terminal (lead_mail, verifier_model, security_audit_model, max_workers, every
+// plugin's), nor for one it sends no rule for; and it reads the rule, not a list of its own.
+test('B10: Set exactly where the node’s rule says; the line and why where it keeps a setting to a terminal', async () => {
   const { editor } = await import('../js/views/settings.js');
-  for (const key of ['lead_mail', 'verifier_model', 'security_audit_model', 'max_workers', 'policy', 'floor_strict_paths', 'shell_allow', 'some_new_setting']) {
-    assert.equal(pageMaySet(key, '1'), false, key);
+  const ruled = (setting, page, why = 'a guard rail, recorded in the vault as yours') => ({ ...setting, page, ...(page === 'sets' ? {} : { pageWhy: why }) });
+  const maxWorkers = { key: 'max_workers', title: 'Workers at once, at most', form: 'count', scope: 'project', limits: '1 to 99', value: '4', default: '4' };
+  const slotsRow = { key: 'node_heavy_slots', title: 'Test and build slots', form: 'count', scope: 'node', value: '3', default: '2' };
+  for (const key of ['lead_mail', 'verifier_model', 'security_audit_model', 'max_workers', 'policy', 'floor_strict_paths', 'shell_allow']) {
+    assert.equal(pageMaySet(ruled({ key }, 'terminalOnly'), '1'), false, key);
   }
-  for (const key of ['node_heavy_slots', 'boost', 'lead_model', 'lead_rotation', 'projects_folder', 'ai_summaries']) assert.equal(pageMaySet(key, '1'), true, key);
+  for (const key of ['node_heavy_slots', 'boost', 'lead_model', 'lead_rotation', 'projects_folder', 'ai_summaries']) assert.equal(pageMaySet(ruled({ key }, 'sets'), '1'), true, key);
+  // No rule (a node from before it), or one the page doesn't know: the terminal's.
+  assert.equal(pageMaySet({ key: 'node_heavy_slots' }, '1'), false, 'no rule');
+  assert.equal(pageMaySet(ruled({ key: 'node_heavy_slots' }, 'askFirst'), '1'), false, 'an unknown rule');
+  assert.equal(pageMaySet(null, '1'), false);
+  // The rule, not the key: the same key under the other rule gets the other answer.
+  assert.equal(pageMaySet(ruled(maxWorkers, 'sets'), '5'), true, 'max_workers where a node says sets');
+  assert.equal(pageMaySet(ruled(slotsRow, 'terminalOnly'), '4'), false, 'node_heavy_slots where a node says terminalOnly');
   for (const [code, set] of [['en', 'Set'], ['es', 'Fijar']]) {
     setLanguage(code);
     const app = fakeApp({ kinds: ['set'], acts: true });
     for (const setting of [
-      { key: 'max_workers', title: 'Workers at once, at most', form: 'count', scope: 'project', limits: '1 to 99', value: '4', default: '4' },
-      { key: 'lead_mail', title: 'Let project leads message each other', form: 'flag', scope: 'node', value: 'off', default: 'off', draft: 'on' },
-      { key: 'verifier_model', title: 'Verifier’s model', form: 'model', scope: 'project', value: 'opus', default: '', draft: 'sonnet' },
-      { key: 'shell_allow', title: 'Allowed commands', form: 'text', scope: 'node', home: 'plugin', value: '', default: '', draft: 'ls' },
+      ruled(maxWorkers, 'terminalOnly'),
+      ruled({ key: 'lead_mail', title: 'Let project leads message each other', form: 'flag', scope: 'node', value: 'off', default: 'off', draft: 'on' }, 'terminalOnly'),
+      ruled({ key: 'verifier_model', title: 'Verifier’s model', form: 'model', scope: 'project', value: 'opus', default: '', draft: 'sonnet' }, 'terminalOnly'),
+      ruled({ key: 'security_audit_model', title: 'Security audits’ model', form: 'model', scope: 'project', value: 'mythos', default: 'mythos', draft: 'opus' }, 'terminalOnly'),
+      ruled({ key: 'shell_allow', title: 'Allowed commands', form: 'text', scope: 'node', home: 'plugin', value: '', default: '', draft: 'ls' }, 'terminalOnly'),
+      { ...slotsRow, draft: '4' },
     ]) {
       const box = editor(setting, setting.scope === 'project' ? '/home/u/site' : null, new Map([[setting.key, setting.draft || '5']]), app);
       assert.equal(buttonNamed(box, set), null, `${code} ${setting.key}: no Set`);
       assert.match(box.textContent, /vibeswitcher set/, `${setting.key}: its line`);
       assert.match(box.textContent, new RegExp(t('svTerminalKeeps').slice(0, 24)), `${setting.key}: why there is no Set`);
     }
-    // One the page may set still has Set, and no reason.
-    const slots = editor({ key: 'node_heavy_slots', title: 'Test and build slots', form: 'count', scope: 'node', value: '3', default: '2' }, null, new Map([['node_heavy_slots', '4']]), app);
-    assert.ok(buttonNamed(slots, set));
-    assert.doesNotMatch(slots.textContent, new RegExp(t('svTerminalKeeps').slice(0, 24)));
+    // One the node says a page sets has Set, and no reason; so does max_workers on a node whose rule said so.
+    for (const setting of [ruled(slotsRow, 'sets'), ruled(maxWorkers, 'sets')]) {
+      const box = editor(setting, setting.scope === 'project' ? '/home/u/site' : null, new Map([[setting.key, '5']]), app);
+      assert.ok(buttonNamed(box, set), `${code} ${setting.key}: Set`);
+      assert.doesNotMatch(box.textContent, new RegExp(t('svTerminalKeeps').slice(0, 24)));
+    }
   }
   setLanguage('en');
+});
+
+// B10: the mock (`?mock`, as the node's catalog says each rule) offers Set nowhere the node keeps to a terminal.
+test('B10: the mock’s settings carry the node’s rules, and lead_mail, max_workers and the models get no Set', async () => {
+  const { createMock } = await import('../js/mock.js');
+  const mock = createMock({ apply() {}, setConnection() {}, chatSnapshot() {}, chatOps() {} }, { still: true });
+  const reply = await mock.request({ v: 1, id: 'r1', kind: 'settings', args: { folder: '/home/dev/projects/example-site' } });
+  const result = reply.result;
+  const all = [...result.node.settings, ...result.project.settings];
+  for (const setting of all) assert.ok(['sets', 'terminalOnly', 'lowersOnly'].includes(setting.page), setting.key);
+  for (const key of ['lead_mail', 'verifier_model', 'security_audit_model', 'max_workers', 'policy']) {
+    const setting = all.find((one) => one.key === key);
+    assert.equal(setting.page, 'terminalOnly', key);
+    assert.equal(pageMaySet(setting, setting.value), false, key);
+  }
+  assert.equal(pageMaySet(all.find((one) => one.key === 'node_heavy_slots'), '4'), true);
 });
 
 // This node as the node sends it (wire/vectors.json), with an update watch's record.

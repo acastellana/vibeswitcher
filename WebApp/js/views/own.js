@@ -17,6 +17,7 @@ import { sessionHref, leadMarks } from '../ui.js';
 import { ownSession } from './left.js';
 import { newSessionForm, newLeadForm, newProjectForm, resumeOrLine } from './drive.js';
 import { recentProjects, recentFolders } from '../actions.js';
+import { reopenCard } from './offers.js';
 
 const ENDED_SHOWN = 5;
 
@@ -75,7 +76,9 @@ export function ownSessionsView(app, { session = null } = {}) {
   const newProject = kit.iconButton({ tag: 'a', href: '#/new', 'aria-label': t('newProject'), title: t('newProject') }, icon('team', 16));
   const columns = twoColumns(app, { label: t('ownSessions'), title: t('ownSessions'), searchLabel: t('owSearch'), placeholder: t('owSearchShort'), listHref: '#/sessions', head: [newSession, newProject] });
   columns.onSearch(() => render());
-  const startPage = h('div', { class: 'screen-col tc-start' }, h('p', { class: 'tc-lede' }, t('ownSub')), starting.el, ended);
+  // The restart's reopen offer (`node.reopenOffer`): the sessions of yours a host restart ended, first.
+  const reopen = reopenCard(app);
+  const startPage = h('div', { class: 'screen-col tc-start' }, h('p', { class: 'tc-lede' }, t('ownSub')), reopen.el, starting.el, ended);
   const el = columns.el;
   let endedDrawn = '';
 
@@ -98,6 +101,7 @@ export function ownSessionsView(app, { session = null } = {}) {
     if (route.name === 'sessions') newSession.setAttribute('aria-current', 'page'); else newSession.removeAttribute('aria-current');
     if (route.name === 'session' && session) { columns.own(session.el); return; }
     starting.el.hidden = state.connection === 'unpaired' || state.connection === 'revoked';
+    reopen.update(state.node?.reopenOffer);
     starting.update();
     const endedNow = (state.node?.ended || []).slice(0, ENDED_SHOWN);
     const key = JSON.stringify([endedNow, state.node?.home, store.acts(), store.can('session.resume')]);

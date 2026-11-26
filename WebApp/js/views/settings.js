@@ -115,7 +115,7 @@ function flagSwitch(app, setting, folder, changed, receipts) {
 }
 
 // Whether the page sets `setting` to `value` itself: it acts for you (`set`), and the setting is one a page may set.
-const pageSets = (app, setting, value) => !!app && actsFor(app, 'set') && pageMaySet(setting.key, value);
+const pageSets = (app, setting, value) => !!app && actsFor(app, 'set') && pageMaySet(setting, value);
 
 // The field for a new value and one way to apply it: Set where the page sets it (pageSets), else the line that sets it
 // from a terminal with its Copy, and what running it does. Never both, so it is clear which one applies it.
@@ -140,7 +140,7 @@ export function editor(setting, folder, editing, app = null) {
       lineSlot.replaceChildren(...[copyLine(setLine(setting, value, folder), t('svSetsCommand', { key: setting.key })),
         h('p', { class: 'confirm-note' }, project ? t('svRunItInATerminal') : t('svRunItInATerminal2')),
         // A page that acts, on a setting the node keeps to a terminal: why there is no Set here.
-        app && actsFor(app, 'set') && !pageMaySet(setting.key, value) ? h('p', { class: 'confirm-note set-why' }, t('svTerminalKeeps')) : null].filter(Boolean));
+        app && actsFor(app, 'set') && !pageMaySet(setting, value) ? h('p', { class: 'confirm-note set-why' }, t('svTerminalKeeps')) : null].filter(Boolean));
     }
   };
   const take = (value) => { editing.set(setting.key, value); draw(); };

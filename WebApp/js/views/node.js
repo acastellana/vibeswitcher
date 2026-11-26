@@ -15,6 +15,7 @@ import { actsLine, actsFor, doButton } from '../acting.js';
 import { twoColumns, queryWords, holdsAll, marked } from './twocol.js';
 import { settingsHref } from './settings.js';
 import { waitingPlaces } from '../conversation.js';
+import { reopenCard, promptAuditCards } from './offers.js';
 
 // A group's address: `#/node/<group>`; `#/node` opens the one that needs you, else the first.
 export const nodeHref = (key) => '#/node' + (key ? '/' + key : '');
@@ -198,6 +199,11 @@ export function nodeVerdict(node, { accept = 0, cards = 0 } = {}) {
   else if (cards) asked.push({ words: t('nvCards', { n: cards }), group: null });
   const notices = node.notices?.length || 0;
   if (notices) asked.push({ words: t('placeNotices', { n: notices }), group: 'notices' });
+  // The node's offers (C3, C4): the sessions a restart ended, the prompt audits due.
+  const reopen = node.reopenOffer?.sessions?.length || 0;
+  if (reopen) asked.push({ words: t('roToReopen', { n: reopen }), group: 'reopen' });
+  const audits = Array.isArray(node.promptAudits) ? node.promptAudits.length : 0;
+  if (audits) asked.push({ words: t('paDue', { n: audits }), group: 'audits' });
   if (node.host && node.host.state !== 'connected') asked.push({ words: t('nvHost'), group: 'host' });
   const health = healthFacts(node.health);
   if (health && health.tone !== 'done') asked.push({ words: t('nvHealth'), group: 'health' });
@@ -236,6 +242,13 @@ export function nodeView(app) {
   const el = columns.el;
   let drawn = '';
   const dictation = dictationGroup();
+  // The node's offers as cards (views/offers.js), made once so a node update keeps what each said; an OK that puts an
+  // answered one away draws the list again.
+  const again = () => { drawn = ''; render(); };
+  const reopen = reopenCard(app, { changed: again });
+  const audits = promptAuditCards(app, { changed: again });
+  const reopenGroup = h('section', { class: 'node-group' }, kit.sectionTitle('h2', {}, t('roGroup')), reopen.el);
+  const auditsGroup = h('section', { class: 'node-group' }, kit.sectionTitle('h2', {}, t('paGroup')), audits.el);
   // With the `act` right: what one plain accept settles (`approve.list`: the held config, the vouched base moves, the
   // hooks), each listed whole before the click, and the batch approved as the node listed it (`approve`, each item's
   // seen in its order); what needs your own decision listed apart, with its command.
@@ -298,6 +311,8 @@ export function nodeView(app) {
     const approving = actsFor(app, 'approve') && store.can('approve.list') && !approveActs.el.hidden;
     const top = usage?.limits?.length ? Math.max(...usage.limits.map((limit) => limit.percent)) : null;
     return [
+      reopen.shown() ? { key: 'reopen', title: t('roGroup'), meta: reopen.count() ? String(reopen.count()) : '', tone: reopen.count() ? 'asked' : '', metaTone: reopen.count() ? 'asked' : '', el: reopenGroup } : null,
+      audits.shown() ? { key: 'audits', title: t('paGroup'), meta: audits.count() ? String(audits.count()) : '', tone: audits.count() ? 'asked' : '', metaTone: audits.count() ? 'asked' : '', el: auditsGroup } : null,
       approving ? { key: 'approve', title: t('acApproveTitle'), meta: approveActs.count ? String(approveActs.count) : '', tone: 'asked', metaTone: 'asked', el: approveActs.el } : null,
       notices.length ? { key: 'notices', title: t('noNotices'), meta: String(notices.length), metaTone: '', el: h('section', { class: 'node-group' }, kit.sectionTitle('h2', {}, plural(notices.length, t('noNotice'))),
         h('ul', { class: 'notices' }, notices.map((notice) => h('li', null, icon('warning', 14), h('span', null, notice))))) } : null,
@@ -389,6 +404,7 @@ export function nodeView(app) {
     const now = JSON.stringify([node, store.state.connection, store.acts(), store.state.phrase, store.state.pageWords, query, approveActs.count, approveActs.el.hidden]);
     if (node && actsFor(app, 'plugin.on') && store.can('plugin.list')) pluginActs.refresh(JSON.stringify(node.plugins));
     if (node && actsFor(app, 'approve') && store.can('approve.list')) approveActs.refresh(JSON.stringify(node.cards));
+    if (node) { reopen.update(node.reopenOffer); audits.update(node.promptAudits); }
     columns.fold(!!route.group);
     elsewhere.replaceChildren(
       h('a', { class: 'link', href: '#/mail', title: t('noWhatTheProjectsLeadsTold') }, t('noBetweenLeads')),

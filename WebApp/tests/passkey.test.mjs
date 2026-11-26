@@ -123,9 +123,11 @@ test('the terminal’s offer to add a passkey: shown, added through the browser,
 });
 
 test('a page may lower acting to a passkey per action, never raise it', () => {
-  assert.equal(pageMaySet('web_acts', 'confirm'), true);
-  assert.equal(pageMaySet('web_acts', 'off'), true);
-  assert.equal(pageMaySet('web_acts', 'trust'), false);
+  // web_acts as the node sends it: `lowersOnly`, its choices lowest first, at trust now.
+  const webActs = { key: 'web_acts', page: 'lowersOnly', pageWhy: 'acting from the page is raised from a terminal', choices: ['off', 'confirm', 'trust'], value: 'trust' };
+  assert.equal(pageMaySet(webActs, 'confirm'), true);
+  assert.equal(pageMaySet(webActs, 'off'), true);
+  assert.equal(pageMaySet(webActs, 'trust'), false);
 });
 
 test('an authenticator that can’t make an ES256 passkey is said plainly, apart from a cancel', async () => {

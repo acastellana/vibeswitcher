@@ -101,15 +101,16 @@ test('D25: every icon-only button has a name for screen readers and a tooltip', 
 
 // ---- D16: Settings' on/off values ----
 
+// Each with its page rule as the node sends it (`settings`' `page`, B10): lead_mail the terminal's.
 const NODE_SETTINGS = [
   { key: 'ignore_usage_limits', title: 'Ignore usage limits', about: 'Leads keep starting work at any share of a Claude limit.', section: 'Usage limits', scope: 'node', form: 'flag',
-    home: 'limits', choices: [], limits: 'on or off', value: 'off', default: 'off', isDefault: true, where: '/home/u/.vibeswitcher/mac-limits.json', guardRail: false, note: null },
+    home: 'limits', choices: [], limits: 'on or off', value: 'off', default: 'off', isDefault: true, where: '/home/u/.vibeswitcher/mac-limits.json', guardRail: false, note: null, page: 'sets' },
   { key: 'lead_mail', title: 'Let project leads message each other', about: 'Lets one project’s lead send messages to another’s.', section: 'Usage limits', scope: 'node', form: 'flag',
-    home: 'preferences', choices: [], limits: 'on or off', value: 'on', default: 'on', isDefault: true, where: '/home/u/.vibeswitcher/settings.plist', guardRail: false, note: null },
+    home: 'preferences', choices: [], limits: 'on or off', value: 'on', default: 'on', isDefault: true, where: '/home/u/.vibeswitcher/settings.plist', guardRail: false, note: null, page: 'terminalOnly', pageWhy: 'it opens one project’s lead to another’s messages' },
   { key: 'node_heavy_slots', title: 'Test and build slots at once', about: 'How many builds may run at once.', section: 'Usage limits', scope: 'node', form: 'count',
-    home: 'limits', choices: [], limits: '1 to 12', value: '3', default: '2', isDefault: false, where: '/home/u/.vibeswitcher/mac-limits.json', guardRail: false, note: null },
+    home: 'limits', choices: [], limits: '1 to 12', value: '3', default: '2', isDefault: false, where: '/home/u/.vibeswitcher/mac-limits.json', guardRail: false, note: null, page: 'sets' },
   { key: 'boost', title: 'Boost', about: 'Raises the limits.', section: 'Usage limits', scope: 'node', form: 'choice',
-    home: 'preferences', choices: ['off', 'on', 'automatic'], limits: 'off, on, automatic', value: 'off', default: 'off', isDefault: true, where: '/home/u/.vibeswitcher/settings.plist', guardRail: false, note: null },
+    home: 'preferences', choices: ['off', 'on', 'automatic'], limits: 'off, on, automatic', value: 'off', default: 'off', isDefault: true, where: '/home/u/.vibeswitcher/settings.plist', guardRail: false, note: null, page: 'sets' },
 ];
 
 async function settingsPage(code, { acts = true, reply = null } = {}) {
