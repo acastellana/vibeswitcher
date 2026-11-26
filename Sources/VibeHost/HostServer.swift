@@ -90,6 +90,9 @@ public final class HostServer {
     /// on). Called on `queue` just before the exec. The new build gets exactly these bytes from
     /// `HostHandover.takeSecrets(from:)` (before it makes its server) or from `start(restoring:)`.
     public var secretsForHandover: (() -> Data)?
+    /// The vault's Keychain key, held by the user's host: each handover carries a proof under it that this host made it
+    /// (`HostHandover.Proof`), without which the user's host refuses it. Nil: none (a scratch or keyless host).
+    public var handoverKey: SymmetricKey?
 
     private let config: Config
     private let log: HostLog
@@ -768,12 +771,14 @@ public final class HostServer {
                 var secretFD: Int32?
                 var parsersStopped = false
                 do {
-                    if let secrets = self.secretsForHandover?() { secretFD = try HostHandover.SecretChannel.make(secrets) }
+                    let secrets = self.secretsForHandover?()
+                    if let secrets { secretFD = try HostHandover.SecretChannel.make(secrets) }
                     // A session that just ended is saved as ended, with the screen its parser showed last.
                     self.sessions.values.forEach { $0.finishNow() }
                     let state = self.handoverState(secretFD: secretFD)
                     if let bad = state.descriptors.first(where: { !HostHandover.isOpen($0) }) { throw HostHandover.Failure.badDescriptor(bad) }
-                    try HostHandover.write(state, to: path)
+                    let proof = try Self.proofArguments(key: self.handoverKey, state: try HostHandover.write(state, to: path), secrets: secrets,
+                                                        lockFD: self.lockFD, lockPath: self.config.lockPath)
                     reply(.ok)
                     // The new build starts its own parsers, from the replays; none of these is left running.
                     self.sessions.values.forEach { $0.suspendParser() }
@@ -783,6 +788,7 @@ public final class HostServer {
                     // The fallback is a private launcher copy, not next to the app. Carry the original app
                     // location through argv so restoring it never infers identity from the mutable state file.
                     if let app = self.config.appExecutable { arguments += ["--handover-fallback-app", app] }
+                    arguments += proof
                     throw HostHandover.exec(executable, arguments: arguments, inherit: state.descriptors)
                 } catch {
                     if parsersStopped { self.sessions.values.forEach { $0.resumeParser() } }
@@ -794,6 +800,17 @@ public final class HostServer {
                 }
             }
         }
+    }
+
+    /// What the build this host hands over to is told to prove the handover is this host's (`HostHandover.Proof`):
+    /// nothing without `key`. Throws when there's a key and the proof can't be made (the handover fails, this host
+    /// carrying on): the user's host would refuse a handover without one.
+    static func proofArguments(key: SymmetricKey?, state: Data, secrets: Data?, lockFD: Int32, lockPath: String) throws -> [String] {
+        guard let key else { return [] }
+        guard let proof = HostHandover.Proof.make(vaultKey: key, state: state, secrets: secrets, lockFD: lockFD, lockPath: lockPath) else {
+            throw HostHandover.Failure.refused("this host can't make its proof")
+        }
+        return [HostHandover.proofFlag, proof.description]
     }
 
     private func handoverState(secretFD: Int32?) -> HostHandover.State {

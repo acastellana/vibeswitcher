@@ -79,6 +79,8 @@ public enum HostHandover {
         case probe(String)
         case secretTooLarge(Int)
         case exec(Int32)
+        /// Not a handover from the running host this one replaces (see `receive`).
+        case refused(String)
 
         public var description: String {
             switch self {
@@ -90,12 +92,15 @@ public enum HostHandover {
             case .probe(let why): return "the new build can't take over: \(why)"
             case .secretTooLarge(let size): return "\(size) bytes of secrets don't fit the channel"
             case .exec(let error): return "couldn't execute the new build: \(String(cString: strerror(error)))"
+            case .refused(let why): return "handover refused: \(why)"
             }
         }
     }
 
-    /// Writes `state` to `path`, readable by this user only, replacing what was there.
-    static func write(_ state: State, to path: String) throws {
+    /// Writes `state` to `path`, readable by this user only, replacing what was there. Returns the bytes written (what
+    /// a `Proof` covers).
+    @discardableResult
+    static func write(_ state: State, to path: String) throws -> Data {
         let encoder = PropertyListEncoder()
         encoder.outputFormat = .binary
         let data: Data
@@ -123,11 +128,16 @@ public enum HostHandover {
             unlink(partial)
             throw Failure.write(error)
         }
+        return data
     }
 
-    public static func read(from path: String) throws -> State {
-        let data: Data
-        do { data = try Data(contentsOf: URL(fileURLWithPath: path)) } catch { throw Failure.unreadable(error.localizedDescription) }
+    public static func read(from path: String) throws -> State { try decode(contents(of: path)) }
+
+    static func contents(of path: String) throws -> Data {
+        do { return try Data(contentsOf: URL(fileURLWithPath: path)) } catch { throw Failure.unreadable(error.localizedDescription) }
+    }
+
+    static func decode(_ data: Data) throws -> State {
         // The format first: a state of another shape wouldn't decode, and that should say why.
         struct Header: Decodable { var format: Int }
         guard let header = try? PropertyListDecoder().decode(Header.self, from: data) else { throw Failure.unreadable("not a state file") }
@@ -141,14 +151,174 @@ public enum HostHandover {
         public var secrets: Data?
     }
 
-    /// `--handover PATH`: the state at `path` and the secrets of its channel, for the host on `lockPath`.
-    /// `userHost`: the user's host (on the user's lock), whose vault is sealed under `key()` (read only when asked).
-    /// `proof`: `--handover-proof`'s value. `logPath`: the host's log.
+    /// The argument the build before's proof comes in (see `Proof`).
+    public static let proofFlag = "--handover-proof"
+
+    /// `--handover PATH`: the state at `path` and the secrets of its channel, for the host on `lockPath`, taken only
+    /// from the running host this process replaces. A handover is this same process re-executed (see `exec`): what it
+    /// inherits is the old image's, and nothing else is. Anything else is refused (`Failure.refused`, said in the log
+    /// at `logPath`) before the secrets are read, and nothing is written:
+    /// - Every host: `state.lockFD` is the lock at `lockPath`, and it's this descriptor that holds it (the kernel's
+    ///   answer, not the file's). While a host runs, nothing else holds its lock.
+    /// - The user's host with its vault key (`userHost`, `key()`, read only after the lock): `proof` (`--handover-proof`)
+    ///   holds under that key for these state bytes, this process (its pid and start time, from the kernel) and this
+    ///   lock (see `Proof`), and the channel holds the secrets it names. Only a host holding the Keychain's key makes
+    ///   one, and only for its own exec. Without it a process of your account that holds a free lock could hand the
+    ///   genuine host a vault of its own to seal under that key.
+    /// A keyless host (a scratch host on its own lock, or the user's when the Keychain didn't give the key) keeps its
+    /// vault in memory only: it takes the secrets once the lock holds.
     public static func receive(from path: String, lockPath: String, userHost: Bool, proof: String?, logPath: String?,
                                key: () -> SymmetricKey?) throws -> Received {
-        var state = try read(from: path)
+        let refuse: (String) -> Failure = { why in
+            HostLog(path: logPath).note("host: handover refused: \(why)")
+            return Failure.refused(why)
+        }
+        let data = try contents(of: path)
+        var state = try decode(data)
+        if let why = Lock.notHeld(state.lockFD, path: lockPath) { throw refuse(why) }
+        guard userHost, let key = key() else {
+            return Received(state: state, secrets: takeSecrets(from: &state))
+        }
+        guard let proof else { throw refuse("it carries no proof that the running host made it (a build from before proofs, or not the host)") }
+        guard let claimed = Proof.Claim(proof), Proof.holds(claimed, key: key, state: data, lockFD: state.lockFD, lockPath: lockPath) else {
+            throw refuse("its proof doesn't hold for this state, this process and this lock")
+        }
         let secrets = takeSecrets(from: &state)
+        // The channel gone (a build that couldn't take over read it before going back): no secrets, the vault as saved.
+        if let secrets, Proof.digest(secrets) != claimed.secrets {
+            throw refuse("its secrets aren't the ones its proof names")
+        }
         return Received(state: state, secrets: secrets)
+    }
+
+    /// The lock a handover inherits.
+    enum Lock {
+        /// Why `fd` isn't the lock at `path` held through this very descriptor; nil when it is.
+        static func notHeld(_ fd: Int32, path: String) -> String? {
+            var held = stat()
+            var there = stat()
+            guard fd >= 0, fstat(fd, &held) == 0 else { return "its lock descriptor \(fd) isn't open" }
+            guard lstat(path, &there) == 0, (there.st_mode & S_IFMT) == S_IFREG, held.st_dev == there.st_dev, held.st_ino == there.st_ino else {
+                return "its lock descriptor isn't the lock file"
+            }
+            // Whether anyone holds it, asked through a description of its own: nobody, and the descriptor handed on
+            // wasn't holding it.
+            let probe = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
+            guard probe >= 0 else { return "the lock file doesn't open" }
+            defer { Darwin.close(probe) }
+            if flock(probe, LOCK_EX | LOCK_NB) == 0 { return "nobody held the lock" }
+            // Held: by this descriptor (taking it again through it succeeds), or by another process.
+            guard flock(fd, LOCK_EX | LOCK_NB) == 0 else { return "another process holds the lock" }
+            return nil
+        }
+    }
+
+    /// What tells the new image its handover came from the running host it replaces: an HMAC under a key derived from
+    /// the vault's Keychain key (never the sealing key itself), over the state file's bytes, the digest of the
+    /// secrets in the channel, the process (pid and start time, the same across the exec, as the kernel reports them
+    /// for the process checking: never fields of the file) and the lock (its path and file). Carried in argv
+    /// (`--handover-proof`): it gives nothing to a process that sees it, since it holds for this process alone.
+    enum Proof {
+        private static let domain = Data("vibeswitcher-host handover proof 1".utf8)
+        /// The digest of no secrets.
+        static let none = Data(count: 32)
+
+        struct Claim: Equatable {
+            var tag: Data
+            /// The secrets' digest (`digest`), `none` for none.
+            var secrets: Data
+
+            init(tag: Data, secrets: Data) {
+                self.tag = tag
+                self.secrets = secrets
+            }
+
+            /// Parsed from `text` (`description`); nil when it isn't one.
+            init?(_ text: String) {
+                let parts = text.split(separator: ".", omittingEmptySubsequences: false)
+                guard parts.count == 2, let tag = Proof.bytes(hex: parts[0]), let secrets = Proof.bytes(hex: parts[1]), tag.count == 32, secrets.count == 32 else {
+                    return nil
+                }
+                self.init(tag: tag, secrets: secrets)
+            }
+
+            var description: String { Proof.hex(tag) + "." + Proof.hex(secrets) }
+        }
+
+        static func hex(_ data: Data) -> String { data.map { String(format: "%02x", $0) }.joined() }
+
+        static func bytes<Text: StringProtocol>(hex text: Text) -> Data? {
+            let digits = Array(text.utf8)
+            guard digits.count % 2 == 0 else { return nil }
+            func value(_ digit: UInt8) -> UInt8? {
+                switch digit {
+                case 48...57: return digit - 48
+                case 97...102: return digit - 87
+                default: return nil
+                }
+            }
+            var data = Data(capacity: digits.count / 2)
+            for index in stride(from: 0, to: digits.count, by: 2) {
+                guard let high = value(digits[index]), let low = value(digits[index + 1]) else { return nil }
+                data.append(high << 4 | low)
+            }
+            return data
+        }
+
+        static func key(from vaultKey: SymmetricKey) -> SymmetricKey {
+            HKDF<SHA256>.deriveKey(inputKeyMaterial: vaultKey, info: Data("dev.vibeswitcher.host-handover".utf8), outputByteCount: 32)
+        }
+
+        static func digest(_ secrets: Data?) -> Data { secrets.map { Data(SHA256.hash(data: $0)) } ?? none }
+
+        /// The proof for a handover of `state` (its bytes as written) with `secrets` by this process, holding the lock
+        /// `lockFD` at `lockPath`; nil when the process or the lock can't be told.
+        /// The process a proof is for: this one (a test's another).
+        struct Process {
+            var pid: pid_t
+            var started: (seconds: UInt64, microseconds: UInt64)
+
+            static var this: Process? { startTime(of: getpid()).map { Process(pid: getpid(), started: $0) } }
+        }
+
+        static func make(vaultKey: SymmetricKey, state: Data, secrets: Data?, lockFD: Int32, lockPath: String,
+                         process: Process? = .this) -> Claim? {
+            let secrets = digest(secrets)
+            guard let process, let message = message(state: state, secrets: secrets, lockFD: lockFD, lockPath: lockPath, process: process) else {
+                return nil
+            }
+            return Claim(tag: Data(HMAC<SHA256>.authenticationCode(for: message, using: key(from: vaultKey))), secrets: secrets)
+        }
+
+        static func holds(_ claim: Claim, key vaultKey: SymmetricKey, state: Data, lockFD: Int32, lockPath: String) -> Bool {
+            guard let process = Process.this,
+                  let message = message(state: state, secrets: claim.secrets, lockFD: lockFD, lockPath: lockPath, process: process) else { return false }
+            return HMAC<SHA256>.isValidAuthenticationCode(claim.tag, authenticating: message, using: key(from: vaultKey))
+        }
+
+        private static func message(state: Data, secrets: Data, lockFD: Int32, lockPath: String, process: Process) -> Data? {
+            var lock = stat()
+            guard fstat(lockFD, &lock) == 0 else { return nil }
+            var message = domain
+            for number in [UInt64(UInt32(bitPattern: process.pid)), process.started.seconds, process.started.microseconds,
+                           UInt64(UInt32(bitPattern: lock.st_dev)), lock.st_ino] {
+                withUnsafeBytes(of: number.bigEndian) { message.append(contentsOf: $0) }
+            }
+            let path = Data(lockPath.utf8)
+            withUnsafeBytes(of: UInt64(path.count).bigEndian) { message.append(contentsOf: $0) }
+            message.append(path)
+            message.append(Data(SHA256.hash(data: state)))
+            message.append(secrets)
+            return message
+        }
+
+        /// When the process `pid` started, as the kernel has it (an exec in place keeps it).
+        static func startTime(of pid: pid_t) -> (seconds: UInt64, microseconds: UInt64)? {
+            var info = proc_bsdinfo()
+            let size = Int32(MemoryLayout<proc_bsdinfo>.size)
+            guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size) == size else { return nil }
+            return (info.pbi_start_tvsec, info.pbi_start_tvusec)
+        }
     }
 
     /// `--handover-probe PATH`: whether this build can take over from the state at `path`. Call first thing in `main`.

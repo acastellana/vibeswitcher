@@ -75,7 +75,7 @@ if let limit = value(after: "--parser-stall-limit").flatMap(TimeInterval.init), 
 config.logPath = value(after: "--log") ?? (ownsLaunchers ? VibePaths.root.appendingPathComponent("debug/host.log").path : nil)
 // What a build this one hands over to is started with: the same, without this start's handover.
 let handoverFlags: [String: Bool] = ["--handover": true, "--handover-fallback": true, "--handover-fail-restore": false,
-                                     "--handover-fallback-app": true, "--app-executable": true,
+                                     "--handover-fallback-app": true, "--app-executable": true, HostHandover.proofFlag: true,
                                      HostStart.appKeyFlag: false]
 config.arguments = arguments.dropFirst().enumerated().reduce(into: (kept: [String](), skip: false)) { result, item in
     if result.skip { result.skip = false; return }
@@ -96,6 +96,8 @@ func goBack(_ statePath: String, _ error: Error) -> Never {
         log("going back to \(fallback)")
         var arguments = config.arguments + ["--handover", statePath]
         if let app = value(after: "--handover-fallback-app") { arguments += ["--app-executable", app] }
+        // The proof holds for the build before too: the same process, state and lock.
+        if let proof = value(after: HostHandover.proofFlag) { arguments += [HostHandover.proofFlag, proof] }
         log("\(HostHandover.exec(fallback, arguments: arguments, inherit: nil))")
     }
     unlink(statePath)
@@ -120,7 +122,7 @@ if let handoverPath {
         // A test of the fallback: as if this build couldn't read the state.
         if arguments.contains("--handover-fail-restore") { throw HostHandover.Failure.unreadable("--handover-fail-restore") }
         let received = try HostHandover.receive(from: handoverPath, lockPath: lockPath, userHost: ownsLaunchers,
-                                                proof: value(after: "--handover-proof"), logPath: config.logPath, key: vaultKey)
+                                                proof: value(after: HostHandover.proofFlag), logPath: config.logPath, key: vaultKey)
         restoredSecrets = received.secrets
         restoring = received.state
     } catch {
@@ -150,6 +152,8 @@ let server = HostServer(config: config)
 server.onExit = { exit(0) }
 // The vault is what a build this one hands over to must hold in memory too.
 if let vault = config.vault { server.secretsForHandover = { vault.serialized } }
+// The user's host proves to the build it hands over to that the handover is its own (see `HostHandover.receive`).
+server.handoverKey = vaultKey()
 // A test of the secret channel: these bytes are handed over, and the next build says whether it got them.
 let testSecret = value(after: "--handover-test-secret").map { Data($0.utf8) }
 if let testSecret { server.secretsForHandover = { testSecret } }
