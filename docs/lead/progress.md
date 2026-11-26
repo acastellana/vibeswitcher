@@ -4903,3 +4903,9 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-26 22:45 Pipeline held: the-config-seal-watches ready to merge with none landing; cause: every test slot held
 - 2026-11-26 22:47 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns: 1 task paused since 22:47 (0 planned, 1 in review).
 - 2026-11-26 22:50 Merged the-config-seal-watches: The config seal watches zsh's compiled twins (.zwc): a compiled copy of a startup file can't run unseen (build dc707f3966c1)
+- 2026-11-26 22:50 Automatically (auto_advance): Merged the-config-seal-watches (The config seal watches zsh's compiled twins (.zwc): a compiled copy of a startup file can't run unseen) into main at 4641ca0b, on its passing audit and the full test run.
+- 2026-11-26 22:50 Automatically (auto_advance): Cleaned up the-config-seal-watches (freed 1.8 GB of build output and temporary folders). It stays done.
+- 2026-11-26 22:50 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns: no task paused yet, since 22:50.
+- 2026-11-26 22:50 Automatically (auto_advance): Released: on AC power, after 0 min.
+- 2026-11-26 22:50 Update: Config seal: a compiled copy of a shell startup file (.zwc) can't run unseen any more (in main, active after the next install) — **What changed** (on main, `4641ca0b`). zsh runs a newer compiled twin, such as `~/.zshrc.zwc`, in place of the startup file it was compiled from. The config seal watched the startup files but not the…
+- 2026-11-26 22:51 Started a worker on v2-device-keys-slice-4
