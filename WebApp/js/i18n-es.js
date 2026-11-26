@@ -466,7 +466,6 @@ export const ES = {
   svAChangeHereIsRecorded: "Un cambio aquí queda registrado como tuyo en el almacén del anfitrión, así que las comprobaciones del líder lo aceptan",
   svClose: "Cerrar",
   svChange: "Cambiar",
-  svThisNodeSLimits: "los límites de este nodo, ",
   svDraftTheLineThatPuts: "Devuelve el campo a su valor por defecto",
   svDefault: "Por defecto",
   svRunItInATerminal: "Ejecútalo en una terminal: muestra el cambio y pide un código. Se avisa al líder del proyecto en marcha.",
@@ -1270,4 +1269,11 @@ export const ES = {
   owNoMatch: "Ninguna sesión tuya coincide con «{query}».",
   owNoneYet: "Aún no tienes sesiones propias. Arranca una con + arriba: te da la línea para ejecutar en una terminal.",
   owCount: { one: "1 sesión tuya", other: "{n} sesiones tuyas" },
+  // Settings' switches and ranges (D16)
+  svWhereKept: "Se guarda en",
+  svSwitchedOn: "Activado: los líderes de cada proyecto lo siguen desde su siguiente paso.",
+  svSwitchedOff: "Desactivado: los líderes de cada proyecto lo siguen desde su siguiente paso.",
+  svRange: "de {low} a {high}",
+  svAtMost: "mayor que 0, como mucho {high}",
+  svAboveZero: "mayor que 0",
 };

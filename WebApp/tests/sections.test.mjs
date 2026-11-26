@@ -48,7 +48,9 @@ function fakeApp({ route = { name: 'node' }, state = {}, kinds = null, acts = tr
   const routeListeners = [];
   const ui = { state: { route, inspector: { open: true, tab: 'overview', sheet: false } }, subscribe(fn) { routeListeners.push(fn); }, go(hash) { went.push(hash); },
     inspectorShown: () => true, setInspector() {}, setInspectorTab() {} };
-  return { store, sent, ui, went };
+  // Leaving the page: its route listeners told (a view that reads again on a timer stops it).
+  const leave = () => { ui.state.route = { name: 'home' }; for (const fn of routeListeners) fn('route'); };
+  return { store, sent, ui, went, leave };
 }
 
 // ---- D25: the icons ----
@@ -95,4 +97,102 @@ test('D25: every icon-only button has a name for screen readers and a tooltip', 
     }
   }
   assert.deepEqual(missing, []);
+});
+
+// ---- D16: Settings' on/off values ----
+
+const NODE_SETTINGS = [
+  { key: 'ignore_usage_limits', title: 'Ignore usage limits', about: 'Leads keep starting work at any share of a Claude limit.', section: 'Usage limits', scope: 'node', form: 'flag',
+    home: 'limits', choices: [], limits: 'on or off', value: 'off', default: 'off', isDefault: true, where: '/home/u/.vibeswitcher/mac-limits.json', guardRail: false, note: null },
+  { key: 'lead_mail', title: 'Let project leads message each other', about: 'Lets one project’s lead send messages to another’s.', section: 'Usage limits', scope: 'node', form: 'flag',
+    home: 'preferences', choices: [], limits: 'on or off', value: 'on', default: 'on', isDefault: true, where: '/home/u/.vibeswitcher/settings.plist', guardRail: false, note: null },
+  { key: 'node_heavy_slots', title: 'Test and build slots at once', about: 'How many builds may run at once.', section: 'Usage limits', scope: 'node', form: 'count',
+    home: 'limits', choices: [], limits: '1 to 12', value: '3', default: '2', isDefault: false, where: '/home/u/.vibeswitcher/mac-limits.json', guardRail: false, note: null },
+  { key: 'boost', title: 'Boost', about: 'Raises the limits.', section: 'Usage limits', scope: 'node', form: 'choice',
+    home: 'preferences', choices: ['off', 'on', 'automatic'], limits: 'off, on, automatic', value: 'off', default: 'off', isDefault: true, where: '/home/u/.vibeswitcher/settings.plist', guardRail: false, note: null },
+];
+
+async function settingsPage(code, { acts = true, reply = null } = {}) {
+  setLanguage(code);
+  const { settingsView } = await import('../js/views/settings.js');
+  const answers = [];
+  const app = fakeApp({ route: { name: 'settings', id: null }, acts, kinds: ['set', 'settings'], state: { node: { home: '/home/u' } },
+    reply: (kind, args) => (kind === 'settings' ? { ok: true, result: { node: { root: '/home/u/.vibeswitcher', settings: NODE_SETTINGS }, project: null, leftOut: [], usage: null } }
+      : reply ? reply(kind, args, answers) : { ok: true, result: { key: args.key, value: args.value } }) });
+  const view = settingsView(app);
+  await flush();
+  const row = (key) => find(view.columns.detail, (node) => node.classList.contains('setting') && node.dataset.key === key);
+  return { app, view, row };
+}
+
+test('D16: an on/off setting the page may set is a switch, one press sends what Set sends, busy until the node answers, what happened said beside it', async () => {
+  for (const code of ['en', 'es']) {
+    let answer;
+    const { app, row } = await settingsPage(code, { reply: () => new Promise((resolve) => { answer = resolve; }) });
+    const ignore = row('ignore_usage_limits');
+    const box = find(ignore, (node) => node.tag === 'input');
+    assert.ok(box, `${code}: a switch in the row`);
+    assert.equal(box.attrs.type, 'checkbox', 'a native checkbox underneath');
+    assert.equal(box.attrs.role, 'switch');
+    assert.equal(box.attrs['aria-label'], 'Ignore usage limits');
+    assert.ok(box.classList.contains('toggle'));
+    assert.equal(box.checked, false);
+    assert.equal(find(ignore, (node) => node.tag === 'button' && /Change|Cambiar/.test(node.textContent)), null, 'no Change: the switch is the control');
+    box.checked = true;
+    box.dispatch('change');
+    assert.deepEqual(app.sent.at(-1), { kind: 'set', args: { key: 'ignore_usage_limits', value: 'on' } }, 'what Set sends');
+    assert.equal(box.disabled, true);
+    assert.equal(box.attrs['aria-busy'], 'true');
+    answer({ ok: true, result: { key: 'ignore_usage_limits', value: 'on' } });
+    await flush();
+    assert.equal(box.disabled, false);
+    assert.equal(box.attrs['aria-busy'], undefined);
+    assert.match(ignore.textContent, new RegExp(t('svSwitchedOn').slice(0, 12)));
+    // The node refuses: said beside it, the switch put back.
+    box.checked = false;
+    box.dispatch('change');
+    assert.deepEqual(app.sent.at(-1).args, { key: 'ignore_usage_limits', value: 'off' });
+    answer({ ok: false, error: { code: 'refused', message: 'the node is stopping' } });
+    await flush();
+    assert.equal(box.checked, true, 'put back');
+    assert.match(ignore.textContent, /the node is stopping/);
+    app.leave();
+  }
+  setLanguage('en');
+});
+
+test('D16: a setting the node keeps to a terminal shows no control but Change and its reason; a page that reads gets no switch; choices are the shared select; numbers say their range; no file name in the row', async () => {
+  for (const code of ['en', 'es']) {
+    const { row, app } = await settingsPage(code);
+    // lead_mail: a terminal's. Its value in words, Change, and (opened) the line and why.
+    const mail = row('lead_mail');
+    assert.equal(find(mail, (node) => node.tag === 'input'), null, 'no switch for what a page may not set');
+    assert.match(find(mail, byClass('setting-value')).textContent, new RegExp(t('noOn')));
+    find(mail, (node) => node.tag === 'button' && node.textContent === t('svChange')).click();
+    const opened = row('lead_mail');
+    assert.match(opened.textContent, /vibeswitcher set lead_mail/);
+    assert.match(opened.textContent, new RegExp(t('svTerminalKeeps').slice(0, 20)));
+    // A few named values: the shared select.
+    find(row('boost'), (node) => node.tag === 'button' && node.textContent === t('svChange')).click();
+    const select = find(row('boost'), (node) => node.tag === 'select');
+    assert.ok(select?.parentNode.classList.contains('select'), 'kit’s select');
+    // A number keeps its field, its range said beside it.
+    find(row('node_heavy_slots'), (node) => node.tag === 'button' && node.textContent === t('svChange')).click();
+    const slots = row('node_heavy_slots');
+    assert.ok(find(slots, (node) => node.tag === 'input' && node.classList.contains('field')));
+    assert.equal(find(slots, byClass('setting-range')).textContent, t('svRange', { low: 1, high: 12 }));
+    // Where it is kept: behind its words, shortened, whole on hover; never in the row's own line.
+    const file = find(slots, byClass('setting-file'));
+    assert.equal(file.attrs.title, '~/.vibeswitcher/mac-limits.json');
+    assert.doesNotMatch(find(slots, byClass('setting-about')).textContent, /mac-limits/);
+    app.leave();
+  }
+  // A page that only reads: no switch anywhere; the flag's Change and line.
+  const reading = await settingsPage('en', { acts: false });
+  assert.equal(find(reading.row('ignore_usage_limits'), (node) => node.tag === 'input'), null);
+  assert.ok(find(reading.row('ignore_usage_limits'), (node) => node.tag === 'button' && node.textContent === 'Change'));
+  reading.app.leave();
+  const { elided } = await import('../js/views/settings.js');
+  assert.equal(elided('~/projects/site/.vibeswitcher/workflow.md'), '~/projects/…/.vibeswitcher/workflow.md');
+  assert.equal(elided('~/.vibeswitcher/policy.md'), '~/.vibeswitcher/policy.md');
 });

@@ -108,7 +108,7 @@ export function talkButton(input, env = {}) {
 export function dictationGroup(env = {}) {
   const storage = 'storage' in env ? env.storage : globalThis.localStorage;
   const supported = Boolean(recognizer(env.window || globalThis));
-  const box = kit.checkbox({ class: 'dictation-toggle', disabled: !supported, onchange: () => setDictation(box.checked, storage, env.window || globalThis) });
+  const box = kit.toggle({ class: 'dictation-toggle', disabled: !supported, onchange: () => setDictation(box.checked, storage, env.window || globalThis) });
   box.checked = supported && dictationOn(storage);
   return h('section', { class: 'node-group dictation' }, kit.sectionTitle('h2', {}, t('diDictation')),
     h('label', { class: 'notify-line' }, box, t('diHoldTheMicBesideA')),

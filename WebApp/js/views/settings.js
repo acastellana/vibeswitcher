@@ -12,9 +12,9 @@ import { tilde, lastPart } from '../words.js';
 import { copyLine } from './cards.js';
 import { usageGroup } from './node.js';
 import { terminalLookSection } from './termlook.js';
-import { settingSections, setLine, draftProblem, shownValue, settingMatches } from '../settings.js';
+import { settingSections, setLine, draftProblem, shownValue, settingMatches, countRange, numberCeiling } from '../settings.js';
 import { t } from '../i18n.js';
-import { actsFor, doButton, pageMaySet } from '../acting.js';
+import { actsFor, doButton, pageMaySet, refusalWords } from '../acting.js';
 import { twoColumns, marked, queryWords } from './twocol.js';
 
 // How often the open page reads the settings again (a `set` from a terminal shows by then).
@@ -32,27 +32,85 @@ export const sectionSlug = (title) => String(title || '').toLowerCase().normaliz
 
 // One setting's row: its title and value, what it does, where it lives; Change opens its field and the drafted line.
 // With `words` (a search's), each one is marked where it is found: in the title, what it does, or its key.
-function settingRow(setting, { folder, home, editing, toggle, app = null, words = [] }) {
+function settingRow(setting, { folder, home, editing, toggle, app = null, words = [], changed = () => {} }) {
   const drafted = editing.get(setting.key);
-  const value = h('code', { class: 'setting-value', title: setting.value }, shownValue(setting) || t('svEmpty'));
+  // On or off, where the page may set it: the switch, one press (D16). Else its value in words, and Change.
+  const switched = setting.form === 'flag' && pageSets(app, setting, 'on') && pageSets(app, setting, 'off');
+  const flagWords = setting.form === 'flag' ? { on: t('noOn'), off: t('noOff') }[setting.value] : null;
+  const value = flagWords ? h('span', { class: 'setting-value words' }, flagWords)
+    : h('code', { class: 'setting-value', title: setting.value }, shownValue(setting) || t('svEmpty'));
   const marks = [
     setting.isDefault ? kit.badge('neutral', t('svMarkDefault'), { class: 'setting-mark' }) : kit.badge('neutral', t('svMarkChanged'), { class: 'setting-mark changed', title: t('svDefaultIs', { x: setting.default }) }),
     setting.guardRail ? kit.badge('neutral', t('svMarkRail'), { class: 'setting-mark rail', title: t('svAChangeHereIsRecorded') }) : null,
   ];
   // A control that looks like one (the page's quiet button), always at the row's end with the value beside it.
-  const change = kit.button('plain', { size: 's', class: 'setting-change', 'aria-expanded': String(drafted != null), onclick: () => toggle(setting) },
+  const change = switched ? null : kit.button('plain', { size: 's', class: 'setting-change', 'aria-expanded': String(drafted != null), onclick: () => toggle(setting) },
     drafted != null ? t('svClose') : t('svChange'));
-  // The machine-wide limits' file keeps the Mac's name (mac-limits.json, which the leads' tools read): this node's.
-  const where = [setting.home === 'floor' ? setting.where : (setting.home === 'limits' ? t('svThisNodeSLimits') : '') + tilde(setting.where, home)];
-  if (!setting.isDefault) where.push(t('svDefaultWhere', { x: setting.form === 'text' ? t('svFiveRules') : setting.default }));
-  if (setting.limits) where.push(setting.limits);
+  const end = switched ? flagSwitch(app, setting, folder, changed) : [value, change];
+  // Where it is kept is a file a person never needs to act here: behind "Where it's kept", ~/… and the middle elided,
+  // whole on hover (D16, D18). The machine-wide limits' file keeps the Mac's name (mac-limits.json): this node's.
+  const place = setting.home === 'floor' ? setting.where : tilde(setting.where, home);
+  const where = [];
+  if (!setting.isDefault) where.push(t('svDefaultWhere', { x: setting.form === 'text' ? t('svFiveRules') : setting.form === 'flag' ? ({ on: t('noOn'), off: t('noOff') }[setting.default] || setting.default) : setting.default }));
+  const range = rangeWords(setting);
+  if (range && setting.form !== 'flag') where.push(range);
   return h('div', { class: 'setting', data: { key: setting.key } },
     h('div', { class: 'setting-head' },
-      h('span', { class: 'setting-title' }, marked(setting.title, words)), marks, h('span', { class: 'setting-spacer' }), h('span', { class: 'setting-end' }, value, change)),
+      h('span', { class: 'setting-title' }, marked(setting.title, words)), marks, h('span', { class: 'setting-spacer' }), h('span', { class: 'setting-end' }, end)),
     h('p', { class: 'setting-about' }, marked(setting.about, words)),
-    h('p', { class: 'setting-where' }, words.some((word) => String(setting.key).toLowerCase().includes(word)) ? [h('code', null, marked(setting.key, words)), ' · '] : null, where.join(' · ')),
+    h('p', { class: 'setting-where' }, words.some((word) => String(setting.key).toLowerCase().includes(word)) ? [h('code', null, marked(setting.key, words)), ' · '] : null,
+      where.length ? where.join(' · ') + ' · ' : null,
+      place ? h('span', { class: 'setting-file', title: place, tabindex: 0 }, t('svWhereKept'), ' ', h('span', { class: 'setting-file-path' }, elided(place))) : null),
     setting.note ? h('p', { class: 'setting-note' }, icon('warning', 12), setting.note) : null,
     drafted != null ? editor(setting, folder, editing, app) : null);
+}
+
+// A path shortened for a line: its first part and its last two, the middle elided ("~/.vibeswitcher/…/mac-limits.json").
+export function elided(path, keep = 2) {
+  const text = String(path || '');
+  const parts = text.split('/');
+  if (parts.length <= keep + 2) return text;
+  return [parts[0] || '', parts[1], '…', ...parts.slice(-keep)].join('/');
+}
+
+// The values a setting takes, in the page's words where the node words them as numbers ("1 to 12", "above 0, at most
+// 48"); the node's own words otherwise (a list of choices, a model's name).
+export function rangeWords(setting) {
+  const range = countRange(setting.limits);
+  if (range) return t('svRange', range);
+  const ceiling = numberCeiling(setting.limits);
+  if (ceiling !== null) return t('svAtMost', { high: ceiling });
+  if (/^above 0$/.test(String(setting.limits || '').trim())) return t('svAboveZero');
+  return setting.limits || '';
+}
+
+// An on/off setting the page may set: the switch, sent at one press (`set`, as Set sends it), busy while the node
+// answers, what it did said beside it, its refusal too with the switch put back.
+function flagSwitch(app, setting, folder, changed) {
+  const said = h('span', { class: 'act-said', role: 'status' });
+  const box = kit.toggle({ 'aria-label': setting.title, checked: setting.value === 'on' });
+  box.checked = setting.value === 'on';
+  box.addEventListener('change', () => {
+    const value = box.checked ? 'on' : 'off';
+    box.disabled = true;
+    box.setAttribute('aria-busy', 'true');
+    setText(said, '');
+    said.classList.remove('refused', 'receipt');
+    app.store.request('set', { ...(folder && setting.scope === 'project' ? { folder } : {}), key: setting.key, value }).then((reply) => {
+      box.disabled = false;
+      box.removeAttribute('aria-busy');
+      if (reply.ok) {
+        setText(said, value === 'on' ? t('svSwitchedOn') : t('svSwitchedOff'));
+        said.classList.add('receipt');
+        changed();
+        return;
+      }
+      box.checked = !box.checked;
+      setText(said, refusalWords(reply.error, setting.title));
+      said.classList.add('refused');
+    });
+  });
+  return h('span', { class: 'setting-switch' }, said, box);
 }
 
 // Whether the page sets `setting` to `value` itself: it acts for you (`set`), and the setting is one a page may set.
@@ -103,13 +161,15 @@ export function editor(setting, folder, editing, app = null) {
         spellcheck: 'false', autocomplete: 'off', oninput: (event) => take(event.target.value) });
       control.value = editing.get(setting.key) ?? '';
   }
+  // A number keeps its field, with the values it takes said beside it.
+  const range = setting.form === 'count' || setting.form === 'number' ? rangeWords(setting) : '';
   const reset = kit.button('quiet', { size: 's', title: t('svDraftTheLineThatPuts'), onclick: () => {
     if (!control.control) control.value = 'default';
     take('default');
   } }, t('svDefault'));
   draw();
   return h('div', { class: 'confirm setting-editor', role: 'group', 'aria-label': t(pageSets(app, setting, setting.value) ? 'svChangeIt' : 'svChangeFrom', { title: setting.title }) },
-    h('div', { class: 'setting-controls' }, control, reset), problem, lineSlot);
+    h('div', { class: 'setting-controls' }, control, range ? h('span', { class: 'setting-range' }, range) : null, reset), problem, lineSlot);
 }
 
 
@@ -218,7 +278,7 @@ export function settingsView(app) {
     return [
       usage,
       h('div', { class: 'setting-section' }, shown.map((setting) => settingRow(setting, {
-        folder: item.folder, home, editing: editingOf(scope), toggle: (one) => toggle(scope, one), app, words }))),
+        folder: item.folder, home, editing: editingOf(scope), toggle: (one) => toggle(scope, one), app, words, changed: () => load() }))),
     ].filter(Boolean);
   }
 

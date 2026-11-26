@@ -191,7 +191,8 @@
                 and the inspector's tabs, Terminal | Chat, the presets, Statistics' period.
    Field        .field: 30, the page's background with a hairline inside, the ring on focus; .search filled (a
                 list's search); .code for a value a program reads. A <select> is a .field in .select, its chevron
-                the icons'; checkboxes and radios are .check. Native elements all: their keyboard and their reader.
+                the icons'; checkboxes and radios are .check, an on/off setting .check.toggle (a switch). Native elements
+                all: their keyboard and their reader.
    Badge        .badge at a row's end or after a title: neutral · .asking · .working · .done.
    Tile         .tile: the number on top (.tile-value), what it counts (.tile-label), a note (.tile-note).
    Title        .section-title: small, strong, quiet, sentence case.
@@ -238,6 +239,13 @@ textarea.field { padding: 6px 10px; line-height: var(--lh-body); resize: vertica
 .check[type="radio"]:checked::after { width: 6px; height: 6px; margin: 0; border: 0; border-radius: 50%; background: var(--on-accent); transform: none; } /* the dot */
 .check:disabled { background: var(--fill); cursor: default; }
 .check:disabled:checked { background: var(--ink-3); }
+.check.toggle { place-content: center start; width: 32px; height: 20px; padding: 2px; border-radius: var(--r-pill); background: var(--fill-2); box-shadow: none; } /* a switch: its knob's travel and its knob, as the Mac's small one */
+.check.toggle::after { content: ""; width: 16px; height: 16px; margin: 0; border: 0; border-radius: 50%; background: var(--on-scrim); box-shadow: var(--e-thumb); transform: none; transition: transform var(--dur-1) var(--ease-out); } /* the knob, white in both looks as the Mac's */
+.check.toggle:checked { background: var(--accent); }
+.check.toggle:checked::after { width: 16px; height: 16px; margin: 0; border: 0; transform: translateX(12px); } /* the knob at the other end */
+.check.toggle:disabled { background: var(--fill); }
+.check.toggle:disabled:checked { background: var(--ink-3); }
+.check.toggle[aria-busy="true"] { cursor: progress; animation: busy var(--loop) ease-in-out infinite alternate; }
 
 .badge { flex: none; display: inline-flex; align-items: center; padding: 0 6px; border-radius: var(--r-1); background: var(--fill-2); color: var(--ink-2); font-size: var(--t-caption); font-weight: var(--w-medium); line-height: var(--lh-caption); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .badge.asking { background: color-mix(in srgb, var(--asked) 12%, transparent); color: var(--asked); }
@@ -806,6 +814,11 @@ small { font-size: var(--t-caption); }
 .setting-input { flex: 1; }
 .select.setting-input { flex: none; }
 .field.setting-text { min-height: 120px; resize: vertical; line-height: var(--lh-code); white-space: pre-wrap; } /* a multi-line box: seven lines, as a row grows */
+.setting-value.words { font-size: var(--t-body); }
+.setting-switch { display: inline-flex; align-items: center; gap: 10px; align-self: center; }
+.setting-range { flex: none; color: var(--ink-3); font-size: var(--t-caption); }
+.setting-file { cursor: help; }
+.setting-file-path { color: var(--ink-2); }
 
 kbd { padding: 1px 6px; border-radius: var(--r-1); box-shadow: var(--e-1-in); color: var(--ink-2); font-size: var(--t-caption); white-space: nowrap; }
 

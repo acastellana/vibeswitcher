@@ -45,7 +45,7 @@ const COMPONENTS = {
   button: ['.button', '.button.plain', '.button.quiet', '.button.danger', '.button.small', '.button.large', '.button:disabled', '.button.confirming'],
   'icon button': ['.icon-button', '.icon-button.small'],
   switch: ['.segmented', '.segment', '.segment:is([aria-pressed="true"], [aria-current], [aria-selected="true"])', '.segment:disabled'],
-  field: ['.field', 'textarea.field', '.field:focus-visible', '.field:disabled', '.field.search', '.field.code', '.select', '.select > .field', '.select > .icon', '.check', '.check:checked', '.check[type="radio"]', '.check:disabled'],
+  field: ['.field', 'textarea.field', '.field:focus-visible', '.field:disabled', '.field.search', '.field.code', '.select', '.select > .field', '.select > .icon', '.check', '.check:checked', '.check[type="radio"]', '.check:disabled', '.check.toggle', '.check.toggle:checked'],
   badge: ['.badge', '.badge.asking', '.badge.working', '.badge.done'],
   tile: ['.tile', '.tile-value', '.tile-label', '.tile-note', '.tile.quiet .tile-value', '.tile.bad .tile-value'],
   'section title': ['.section-title'],
@@ -113,6 +113,10 @@ test('kit.js gives each role and size its class, and refuses a role it doesn’t
   assert.equal(dropdown.control.tag, 'select', 'the browser’s own select inside');
   assert.equal(dropdown.control.getAttribute('aria-label'), 'Theme', 'its words on the select, for a reader');
   assert.equal(kit.checkbox({ checked: true }).getAttribute('type'), 'checkbox');
+  // An on/off setting: the same native checkbox, a switch to a screen reader, drawn as one.
+  assert.equal(kit.toggle({}).getAttribute('type'), 'checkbox');
+  assert.equal(kit.toggle({}).getAttribute('role'), 'switch');
+  assert.equal(kit.toggle({}).className, 'check toggle');
   assert.deepEqual(classes(kit.badge('asking', '2')), ['badge', 'asking']);
   assert.equal(kit.badgeClass('neutral', 'tc-meta'), 'badge tc-meta');
   const tile = kit.tile({ value: '12', label: 'merged', note: 'today', tone: 'quiet' });
@@ -178,7 +182,7 @@ test('every view builds its buttons, switches, fields, badges, tiles, titles and
     for (const match of one.text.matchAll(/\bclass: ['`]([^'`]+)['`]/g)) {
       // Handed to a kit call: the nearest builder before it, on this line or the one before, is kit's, not h's.
       const prefix = (SOURCE.find((other) => other.file === one.file && other.line === one.line - 1)?.text || '') + '\n' + one.text.slice(0, match.index);
-      const kitAt = prefix.search(/\bkit\.(button|iconButton|segment|segmented|field|select|checkbox|badge|tile|sectionTitle|empty)\((?![\s\S]*\bkit\.[a-zA-Z]+\()/);
+      const kitAt = prefix.search(/\bkit\.(button|iconButton|segment|segmented|field|select|checkbox|toggle|badge|tile|sectionTitle|empty)\((?![\s\S]*\bkit\.[a-zA-Z]+\()/);
       const hAt = Math.max(prefix.lastIndexOf("h('"), prefix.lastIndexOf('h(`'));
       if (kitAt >= 0 && kitAt > hAt) {
         // A placement class handed to a kit call: allowed, unless it names a component itself.
@@ -191,7 +195,7 @@ test('every view builds its buttons, switches, fields, badges, tiles, titles and
     }
   }
   // Every helper is in use: the views moved to them.
-  for (const helper of ['button', 'iconButton', 'segmented', 'segment', 'field', 'select', 'checkbox', 'badge', 'badgeClass', 'fieldClass', 'tile', 'sectionTitle', 'empty']) {
+  for (const helper of ['button', 'iconButton', 'segmented', 'segment', 'field', 'select', 'checkbox', 'toggle', 'badge', 'badgeClass', 'fieldClass', 'tile', 'sectionTitle', 'empty']) {
     if (!new RegExp(`\\bkit\\.${helper}\\(`).test(all)) wrong.push(`kit.${helper} used by no view`);
   }
   assert.deepEqual(wrong, []);
@@ -200,7 +204,7 @@ test('every view builds its buttons, switches, fields, badges, tiles, titles and
 test('a class a view hands a component only places it: no rule outside the Components and States sections gives it a look', () => {
   const placements = new Set();
   for (const one of SOURCE) {
-    for (const match of one.text.matchAll(/\bkit\.(button|iconButton|segment|segmented|field|select|checkbox|badge|tile|sectionTitle|empty)\([^;]*?\b(class|wrap): '([a-z0-9 -]+)'/g)) {
+    for (const match of one.text.matchAll(/\bkit\.(button|iconButton|segment|segmented|field|select|checkbox|toggle|badge|tile|sectionTitle|empty)\([^;]*?\b(class|wrap): '([a-z0-9 -]+)'/g)) {
       for (const name of match[3].split(/\s+/)) placements.add(name);
     }
   }

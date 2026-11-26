@@ -476,7 +476,6 @@ const EN = {
   svAChangeHereIsRecorded: "A change here is recorded in the host’s vault as yours, so the lead’s checks take it",
   svClose: "Close",
   svChange: "Change",
-  svThisNodeSLimits: "this node’s limits, ",
   svDraftTheLineThatPuts: "Puts the field back to its default value",
   svDefault: "Default",
   svRunItInATerminal: "Run it in a terminal: it shows the change and asks for a code. The project’s running lead is told.",
@@ -1282,6 +1281,13 @@ const EN = {
   owNoMatch: "No session of yours matches “{query}”.",
   owNoneYet: "No sessions of your own yet. Start one with + above: it gives you the line to run in a terminal.",
   owCount: { one: "1 session of yours", other: "{n} sessions of yours" },
+  // Settings' switches and ranges (D16)
+  svWhereKept: "Kept in",
+  svSwitchedOn: "On: every project’s leads follow it from their next step.",
+  svSwitchedOff: "Off: every project’s leads follow it from their next step.",
+  svRange: "from {low} to {high}",
+  svAtMost: "above 0, at most {high}",
+  svAboveZero: "above 0",
 };
 
 

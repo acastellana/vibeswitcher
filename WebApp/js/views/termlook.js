@@ -39,7 +39,8 @@ export function terminalLookSection() {
       onchange: (event) => saveLook({ fontSize: Number(event.target.value) }) });
     const scrollInput = kit.field({ class: 'look-input narrow', type: 'number', min: SCROLLBACK.min, max: SCROLLBACK.max, step: 1000, value: current.scrollbackLines,
       onchange: (event) => saveLook({ scrollbackLines: Number(event.target.value) }) });
-    const check = (value, key) => kit.checkbox({ checked: value, onchange: (event) => saveLook({ [key]: event.target.checked }) });
+    // On or off: the switch (D16), applied as it is pressed.
+    const check = (value, key, name) => kit.toggle({ checked: value, 'aria-label': name, onchange: (event) => saveLook({ [key]: event.target.checked }) });
     const custom = current.theme === 'custom';
     const colour = (value, set) => h('input', { class: 'look-colour', type: 'color', value: value.toLowerCase(), disabled: !custom, onchange: (event) => set(event.target.value) });
     const named = Object.entries(COLOUR_NAMES).map(([key, name]) => h('span', { class: 'look-swatch' },
@@ -56,9 +57,9 @@ export function terminalLookSection() {
       row(t('tlFont'), fontInput, t('tlAFontInstalledOnThis')),
       row(t('tlSize'), sizeInput, t('tlRange', { min: FONT_SIZES.min, max: FONT_SIZES.max })),
       row(t('tlCursor'), h('span', { class: 'look-pair' }, select(CURSORS, current.cursorShape, (cursorShape) => saveLook({ cursorShape })),
-        h('label', { class: 'look-check' }, check(current.cursorBlink, 'cursorBlink'), t('tlBlink')))),
+        h('label', { class: 'look-check' }, check(current.cursorBlink, 'cursorBlink', t('tlBlink')), t('tlBlink')))),
       row(t('tlScrollback'), scrollInput, 'lines'),
-      row(KEY.mod === '⌘' ? t('tlOptionAsMeta') : t('tlAltAsMeta'), check(current.optionAsMeta, 'optionAsMeta'), t('tlOnAMacSendsMeta')),
+      row(KEY.mod === '⌘' ? t('tlOptionAsMeta') : t('tlAltAsMeta'), check(current.optionAsMeta, 'optionAsMeta', KEY.mod === '⌘' ? t('tlOptionAsMeta') : t('tlAltAsMeta')), t('tlOnAMacSendsMeta')),
       row(t('tlBell'), select(BELLS, current.bell, (bell) => saveLook({ bell }))),
       h('div', { class: 'look-row' }, h('span', { class: 'look-label' }, t('tlColours')),
         h('div', { class: 'look-colours' }, h('div', { class: 'look-named' }, named), h('div', { class: 'look-ansi' }, ansi),

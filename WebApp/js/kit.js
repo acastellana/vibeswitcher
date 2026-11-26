@@ -72,6 +72,12 @@ export function checkbox({ class: extra = '', type = 'checkbox', ...props } = {}
   return h('input', { ...props, type, class: join('check', extra) });
 }
 
+// An on/off setting (D16): the same native checkbox (its keyboard, its reader, which says it is a switch), drawn as the
+// Mac's switch. Changed with one press; the view says what happened beside it.
+export function toggle({ class: extra = '', ...props } = {}) {
+  return h('input', { ...props, type: 'checkbox', role: 'switch', class: join('check toggle', extra) });
+}
+
 // A badge at a row's end, or after a title: a count or a word. Its tones: neutral, asking (waits on you), working,
 // done.
 const TONES = { neutral: '', asking: ' asking', working: ' working', done: ' done' };
