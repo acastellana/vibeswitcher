@@ -479,3 +479,7 @@ The audit of the Phone Access fix found the key may be plantable; the measuremen
 
 The user chose 'Not now' while this is one Mac and their own sessions. The protected keychain is the only closing fix found and costs a paid identity plus a signing and installer rework.
 
+## 2026-11-26 10:04:14 Direction from the user (2026-11-26, "let's work on completing v2 totally"): the team's priority is finishing v2 end to end: the device-keys track through its cut-over, the remaining no-terminal node kinds, the Mac node's remaining rows up to the switch-on review, then joining the branch lines and proving them. The lead runs these as parallel lines that don't share files (keys; node kinds on the page line; the Mac line), each security piece keeping its separate review, and brings the user only what is theirs: pushes, the keyboard session and the real-device look, the signing and hooks decisions, and the switch-on's go-ahead. Work on the current app's main is limited to security fixes and incident checks; the flake backlog stays deferred while no feature merges into main.
+
+The user asked for the list of what is missing for v2 and then said to complete it. Most of it needs no decision from them, and the memory of their preference is to carry agreed directions through without per-step approvals.
+

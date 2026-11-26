@@ -4733,3 +4733,9 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-26 09:57 Pipeline held: the-app-s-keychain ready to merge with none landing; cause: every test slot held
 - 2026-11-26 10:00 Started a worker on review-v2-s-device-2
 - 2026-11-26 10:00 Merged the-app-s-keychain: The app's Keychain key can't be replaced by another process of the user's account (the app proof and the Phone Access list both rest on it) (no audit: review none) (build 2a06073b3d8a)
+- 2026-11-26 10:00 Automatically (auto_advance): Merged the-app-s-keychain (The app's Keychain key can't be replaced by another process of the user's account (the app proof and the Phone Access list both rest on it)) into main at 4c67ef58, review none: on its worker's done report on 32f0598f and the full test run.
+- 2026-11-26 10:00 Automatically (auto_advance): Cleaned up the-app-s-keychain; ended pid 4857 (Worker: The app's Keychain key can't be replaced by another process of the user's account (the app proof and the Phone Access list both rest on it)) (freed 1.8 GB of build output and temporary folders). It stays done.
+- 2026-11-26 10:04 Planned v2-node-new-project: v2 node: New project from the page (`project.new`, no-terminal items C1 and C2), with a baseline full-suite run of the branch first (in a clone; a branch for v2)
+- 2026-11-26 10:05 Planned v2-on-the-mac-7: v2 on the Mac, step 8: the Mac seal list (row 13), each row measured on this Mac (on top of v2-mac-anchored-cli, in a clone; a branch for v2)
+- 2026-11-26 10:05 Started a worker on v2-node-new-project
+- 2026-11-26 10:05 Started a worker on v2-on-the-mac-7
