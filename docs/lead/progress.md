@@ -4743,3 +4743,4 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-26 10:36 Exception on turn-this-incident-into-20 by lead of vibeswitcher: edits to docs/guide/development.md, scripts/test-signing.sh, Tests/**/KeychainLiveTests.swift accepted. Reason: Accepted by the lead: the new lint suite must be listed in docs/guide/development.md because DocLinksLint requires it; KeychainLiveTests' two SecItem queries gain the no-UI flag, which is the rule thi…
 - 2026-11-26 10:36 Sent turn-this-incident-into-20's worker contract v3 (it had v2)
 - 2026-11-26 10:37 Sent turn-this-incident-into-20's worker contract v4 (it had v3)
+- 2026-11-26 10:39 Automatically (auto_advance): Started the audit of turn-this-incident-into-20 at 8fe5a4a4 (It touches sensitive_paths (AGENTS.md), so it's treated as audit whatever its review says).
