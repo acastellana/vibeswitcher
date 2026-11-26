@@ -79,7 +79,7 @@ extension LeadVaultHostTests {
         #expect(asideFiles(file).count == 1)
     }
 
-    /// The files set aside beside `file`'s vault (`VaultStorage.setAsidePrefix`).
+    /// The files set aside beside `file`'s vault (`VaultStorage.setAsideSuffix`).
     func asideFiles(_ file: URL) -> [URL] {
         let folder = file.deletingLastPathComponent()
         return ((try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? [])
