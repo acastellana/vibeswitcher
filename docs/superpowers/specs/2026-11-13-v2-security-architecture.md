@@ -2483,9 +2483,14 @@ environment's names, its `--settings` keys and env names, a worker's branch sett
   in the launch's run folder) and its lead's tool server gives its digest with the grant, which the bind compares with
   what it reads; a check before the spawn isn't the vault's to make, and what Claude Code read is V3's (the running
   agent's check above);
-- whether a pinned key in a role's `--settings` env (the models) wins over the same key in the user's or the branch's
-  settings, key by key, is unverified; a worker's branch naming a routing key is refused at its bind;
-- pin ANTHROPIC_BASE_URL once a real subscription session is seen to start and answer with it set;
+- the pins' precedence, seen 2026-11-26 with Claude Code 2.1.332 (Linux, a claude.ai login): a `--settings` env key beats
+  the same key in the project's `.claude/settings.json` and `.claude/settings.local.json`, and a key it doesn't name stays
+  the project's; tried with plain variable names, not with the ANTHROPIC_* model keys themselves, not against the user's
+  `~/.claude/settings.json`, and not on the Mac; a worker's branch naming a routing key is still refused at its bind;
+- ANTHROPIC_BASE_URL (https://api.anthropic.com) is pinned with the models: seen 2026-11-26 with Claude Code 2.1.332
+  (Linux, a claude.ai login, haiku): `claude -p` and an interactive session with it, ANTHROPIC_MODEL and
+  ANTHROPIC_DEFAULT_HAIKU_MODEL in their `--settings` env start and answer on claude-haiku-5-5, with no login or key
+  prompt; not tried on the Mac;
 - the start-to-bind window (M2): a `--settings` file or a branch's settings rewritten before the role starts and restored
   before its bind passes the digest and the routing check (Linux's inline settings have no file to rewrite); whether
   Claude Code re-reads changed settings later is unverified;
