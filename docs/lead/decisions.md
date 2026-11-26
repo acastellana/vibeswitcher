@@ -475,3 +475,7 @@ The device-keys design's review showed that a node able to change serve means an
 
 The audit of the Phone Access fix found the key may be plantable; the measurement confirmed it and showed the cheap fixes don't close it. macOS refuses the needed entitlement to a locally signed binary (AMFI -424), so the only closing fix costs a paid identity, which is the user's decision. The probing itself crashed securityd, locked the user's login keychain and stopped every new session for about 20 minutes: two incidents the same morning.
 
+## 2026-11-26 09:41:36 No Apple Developer ID for now (the user's answer to 5D9D38F0, 2026-11-26): VibeSwitcher's Keychain keys stay a stated limit with the three visible safeguards (task keychain-keys-the-stated). Revisit when VibeSwitcher runs for someone other than the user, on a second Mac that runs teams, or when the signed-app question for v2 comes back (2026-11-25 22:20).
+
+The user chose 'Not now' while this is one Mac and their own sessions. The protected keychain is the only closing fix found and costs a paid identity plus a signing and installer rework.
+
