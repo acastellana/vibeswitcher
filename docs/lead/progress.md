@@ -4698,3 +4698,6 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-26 08:10 Planned v2-device-keys-slices: v2 device keys, slices 2 and 3: the WebAuthn assertion and registration checks (VibeCore, new file; in a clone, a branch for v2)
 - 2026-11-26 08:10 Started a worker on v2-device-keys-slice
 - 2026-11-26 08:10 Started a worker on v2-device-keys-slices
+- 2026-11-26 08:24 Exception on phone-access-a-process by lead of vibeswitcher: edits to Sources/VibeCore/SealedData.swift, Sources/VibeHost/VaultStorage.swift, Sources/VibeSwitcher/AppDelegate.swift, Sources/VibeSwitcher/Sandbox.swift accepted. Reason: Accepted by the lead: the contract told the worker to reuse the vault's storage seal rather than write new crypto, and the app target can't link VibeHost, so the seal/open moved to VibeCore as SealedD…
+- 2026-11-26 08:24 Sent phone-access-a-process's worker contract v2 (it had v1)
+- 2026-11-26 08:24 Automatically (auto_advance): Started the audit of phone-access-a-process at cfcd02b4 (Its review is audit).
