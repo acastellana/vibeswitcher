@@ -20,6 +20,7 @@ struct WireKindsTests {
         ("brief-folder", "brief"), ("update.check", "update.check"), ("update.check-problem", "update.check"), ("mail", "mail"),
         ("mail-folder", "mail"), ("mail-messages", "mail"), ("session.presets", "session.presets"), ("session.presets-values", "session.presets"),
         ("shells", "shells"), ("stats", "stats"), ("stats-today", "stats"), ("base.show", "base.show"), ("web.pairing", "web.pairing"),
+        ("logs", "logs"),
     ]
 
     /// `result` (a fixture's) through `kind`'s type and back: the bytes the wire writes.
@@ -41,6 +42,7 @@ struct WireKindsTests {
         case "stats": return try again(WireKinds.Stats.self)
         case "base.show": return try again(WireKinds.BaseShow.self)
         case "web.pairing": return try again(WireKinds.WebPairing.self)
+        case "logs": return try again(WireKinds.Logs.self)
         default: throw CocoaError(.featureUnsupported)
         }
     }
