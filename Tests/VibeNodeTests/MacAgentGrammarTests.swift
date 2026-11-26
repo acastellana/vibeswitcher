@@ -193,6 +193,36 @@ struct MacAgentGrammarTests {
         #expect(agent.printed() != nil, "it wasn't left loaded")
     }
 
+    /// The final re-check's note E: a `launchctl bootstrap` that didn't finish (timed out, or ended by a signal) may have
+    /// loaded start's job: it is judged, and start's own job booted out, the refusal saying so. Red before: refused with
+    /// no look, the job left loaded.
+    @Test func aBootstrapThatDidntFinishBootsOutWhatStartMayHaveLoaded() throws {
+        for answer in [nil, MacAgent.Ran(status: 137, output: "")] {
+            let stand = MacAgentTests.Stand(try scratch.shortFolder("vsme").path)
+            let log = MacAgentTests.Recorder()
+            let loaded = Locked(false)
+            var steps = stand.agent(log: log, printed: { loaded.value ? MacAgentTests.printed(stand.job, place: stand.place, pid: nil) : nil }).steps
+            let real = steps.launchctl
+            steps.launchctl = { words in
+                switch words.first {
+                case "bootstrap":
+                    log.add(words)
+                    loaded.value = true
+                    return answer
+                case "bootout":
+                    log.add(words)
+                    loaded.value = false
+                    return MacAgent.Ran(status: 0, output: "")
+                default: return real(words)
+                }
+            }
+            let started = MacAgent(place: stand.place, steps: steps).start(stand.job, build: stand.row, folder: "/x")
+            guard case .failure(let why) = started else { Issue.record("started"); continue }
+            #expect(log.bootouts == 1 && !loaded.value, "\(String(describing: answer)): \(log.calls)")
+            #expect(why.text.contains("was unloaded"), "\(why.text)")
+        }
+    }
+
     // MARK: Notes 6 and 7
 
     /// Note 6: only no listener at all is "no server"; a listener that fails the server check, or a hello that is
