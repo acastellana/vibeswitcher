@@ -485,6 +485,15 @@ or decided. Done on Linux, tested on both systems (`ApprovalJudgmentTests`, `App
    of the user's that no one else can write; a plist an earlier install wrote (with `HOME` and `PATH`) is refused by
    `start`, which says to remove it and start again, so the installer's upgrade must replace it. *Owed:* a switch must
    rewrite the plist for the build it goes to (until then, the next `start` after a switch refuses the old build's).
+   *The re-check's round (2026-11-26, "not yet"; `a290cb47` red, `5fe57dda` green):* launchd's `print` is read by one
+   ordered grammar of macOS 27.2's format derived from the job start wrote (every line placed, nothing searched for, its
+   path by `lstat` against the file start holds); the job is written in printable ASCII only; a newer macOS that prints
+   otherwise refuses until someone looks (the canary `thisMacsLaunchdPrintsTheJobAsTheGrammarSays`). Notes: the keys
+   `print` shows nothing of corrected (six, measured); ACLs refused; a link at the lock refused and `HostServer` opens
+   `--lock` with `O_NOFOLLOW` (the app's host too: shared code); only no listener is no server for `stop`; a failed
+   bootout said as failed; session ids read at every look. What start still can't bind is the design's table. *Owed for
+   a later step:* a host-side record of its sessions' ids, so `stop` can find an orphan whose session leader ended before
+   its first look.
 
 ## What `v2` found on the Mac and doesn't change
 
