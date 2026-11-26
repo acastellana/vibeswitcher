@@ -65,7 +65,8 @@ struct HostProofRefusedTests {
         let started = HostClient.keyResetAlert(reason: AppProof.vaultStartedOver, live: 0)
         #expect(started.messageText == "The team's vault could not be opened and was started again.")
         for words in ["Keychain reset", "another program on this Mac replaced the vault's key", "Check first", "VibeSwitcher lead vault",
-                      "don't teach the host until"] {
+                      "don't teach the host until", "kept as it was, at ~/.vibeswitcher/lead/vault.sealed",
+                      "nothing is saved over it until you answer", "vault.sealed\(VaultStorage.setAsideSuffix)<date>"] {
             #expect(started.informativeText.contains(words), "\(words)")
         }
         #expect(started.buttons.map(\.title) == ["Teach It This App's Key", "Not Now"])

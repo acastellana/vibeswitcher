@@ -8,7 +8,8 @@ import Testing
 /// program of your account that replaced the key, 2026-11-26) takes no app key on its own: not the one the app hands
 /// the host on stdin at its start, nor the one the app's connection enrolls. You're told, and the key goes in only
 /// through the app's own "Teach It This App's Key" (`replaceAppKey`). A first start (no vault file yet) takes the app's
-/// key as before, and a vault that opens is as it was. Scratch seams only: `VaultStorage(file:key:)` on a scratch
+/// key as before, and a vault that opens is as it was. Until you've answered, nothing is saved over the file that didn't
+/// open; once you have, it's set aside beside the new one. Scratch seams only: `VaultStorage(file:key:)` on a scratch
 /// file, the app's key from `AppProof.MemoryStore`; no Keychain.
 extension LeadVaultHostTests {
     /// The vault file `storage` keeps, holding `appKey`, sealed under `storage`'s key.
@@ -39,22 +40,82 @@ extension LeadVaultHostTests {
         #expect(VaultStorage(file: file, key: before).load() != nil)
         #expect(storage.load() == nil)
 
-        // A change meanwhile seals the vault under the new key: opened later, it still started over and holds no
-        // key, and still takes none on its own (fail closed: the next start isn't a first one).
-        _ = book.answer(.issue(role: .lead, root: root, task: nil, auditing: nil), from: .app)
-        #expect(storage.load() != nil)
+        // A change meanwhile isn't saved: the file that didn't open stays as it was, byte for byte, until you've
+        // answered (fail closed, lose nothing: put the Keychain's old key back and it opens again).
+        let kept = try Data(contentsOf: file)
+        guard case .grant = book.answer(.issue(role: .lead, root: root, task: nil, auditing: nil), from: .app) else {
+            Issue.record("no grant"); return
+        }
+        #expect(try Data(contentsOf: file) == kept)
+        #expect(VaultStorage(file: file, key: before).load() != nil)
+        #expect(storage.load() == nil)
+        #expect(asideFiles(file).isEmpty)
+        // A host started again before you answered: the file still doesn't open, so it starts over again, and still
+        // takes no key on its own (fail closed: the next start isn't a first one).
         let reopened = storage.book()
         guard case .startedOver(_?) = reopened.answer(.startedOver, from: .app) else { Issue.record("its start over forgotten"); return }
         #expect(!reopened.adoptAppKey(key))
         #expect(reopened.appKey == nil)
+        #expect(try Data(contentsOf: file) == kept)
 
-        // Your confirmation (the app's replaceAppKey): taken, kept, and from then on the vault is as any other.
-        #expect(reopened.adoptAppKey(key, replacing: true))
+        // Your confirmation (the app's replaceAppKey): taken and saved, with what changed while it waited; the file
+        // that didn't open is set aside beside it, as it was, under a name that says why and when.
+        #expect(book.adoptAppKey(key, replacing: true))
         let confirmed = storage.book()
         #expect(confirmed.appKey?.data == key)
+        guard case .member(let lead?) = confirmed.answer(.current(role: .lead, root: root, task: nil), from: .app) else {
+            Issue.record("the change made while it waited is lost"); return
+        }
+        #expect(lead.role == .lead)
+        let aside = asideFiles(file)
+        #expect(aside.count == 1)
+        #expect(aside.first.map { $0.lastPathComponent.hasPrefix("vault.sealed.didnt-open-") } == true, "\(aside)")
+        #expect(aside.first.flatMap { try? Data(contentsOf: $0) } == kept)
+        // From then on the vault is as any other.
         #expect(confirmed.adoptAppKey(key))
         #expect(!confirmed.adoptAppKey(try appKey()))
         #expect(confirmed.appKey?.data == key)
+        _ = confirmed.answer(.issue(role: .lead, root: root, task: nil, auditing: nil), from: .app)
+        #expect(asideFiles(file).count == 1)
+    }
+
+    /// The files set aside beside `file`'s vault (`VaultStorage.setAsidePrefix`).
+    func asideFiles(_ file: URL) -> [URL] {
+        let folder = file.deletingLastPathComponent()
+        return ((try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? [])
+            .filter { $0.hasPrefix(file.lastPathComponent + ".") }.map { folder.appendingPathComponent($0) }
+    }
+
+    /// The build before handed over a vault that started over and still waits for your answer: the new build doesn't
+    /// save it over the file that didn't open either.
+    @Test func aHandedOverStartedOverVaultKeepsTheFileThatDidntOpen() throws {
+        let file = folder.appendingPathComponent("handover/vault.sealed")
+        keptVault(VaultStorage(file: file, key: SymmetricKey(size: .bits256)), appKey: try appKey())
+        let kept = try Data(contentsOf: file)
+        let storage = VaultStorage(file: file, key: SymmetricKey(size: .bits256))
+        let before = storage.book()
+        #expect(before.awaitsAppKey)
+
+        let book = storage.book(handedOver: before.serialized)
+        #expect(book.awaitsAppKey)
+        _ = book.answer(.issue(role: .lead, root: root, task: nil, auditing: nil), from: .app)
+        #expect(try Data(contentsOf: file) == kept)
+        #expect(asideFiles(file).isEmpty)
+
+        #expect(book.adoptAppKey(try appKey(), replacing: true))
+        #expect(storage.book().appKey != nil)
+        #expect(asideFiles(file).count == 1)
+    }
+
+    /// A first start with a key saves as ever, and sets nothing aside.
+    @Test func aFirstStartSetsNothingAside() throws {
+        let file = folder.appendingPathComponent("plain/vault.sealed")
+        let storage = VaultStorage(file: file, key: SymmetricKey(size: .bits256))
+        let book = storage.book()
+        _ = book.answer(.issue(role: .lead, root: root, task: nil, auditing: nil), from: .app)
+        #expect(storage.load() != nil)
+        _ = storage.book().answer(.issue(role: .lead, root: root, task: nil, auditing: nil), from: .app)
+        #expect(asideFiles(file).isEmpty)
     }
 
     /// A file that opens under the key but isn't a vault this build reads (junk sealed under a planted key, a vault of

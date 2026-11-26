@@ -699,6 +699,13 @@ extension LeadVault {
             return state.startedOver != nil && state.appKey == nil
         }
 
+        /// `awaitsAppKey` of the vault `data` encodes (`onChange`'s, `serialized`): what its saver asks, since
+        /// `onChange` is called with the book's lock held.
+        public static func awaitsAppKey(_ data: Data) -> Bool {
+            guard let state = state(data) else { return false }
+            return state.startedOver != nil && state.appKey == nil
+        }
+
         /// The key the app proves itself with (see `AppProof`), once the app gave it.
         public var appKey: SymmetricKey? {
             lock.lock()

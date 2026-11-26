@@ -276,9 +276,11 @@ final class HostClient: ObservableObject {
                 + "yet. " + off + "\n\nThis happens after a Keychain reset, and it can also mean another program on this Mac "
                 + "replaced the vault's key. Check first: if you didn't reset your Keychain, open Keychain Access and look at "
                 + "the item \u{201C}VibeSwitcher lead vault\u{201D} (when it was modified), and don't teach the host until "
-                + "you're sure what changed it. Teaching the host this app's key starts the vault anew, sealed "
-                + "with whatever key your Keychain gives the session host now (if it gives none, the vault lives in memory "
-                + "only). " + next
+                + "you're sure what changed it. The file that didn't open is kept as it was, at "
+                + "~/.vibeswitcher/lead/vault.sealed, and nothing is saved over it until you answer. Teaching the host "
+                + "this app's key starts the vault anew, sealed with whatever key your Keychain gives the session host now "
+                + "(if it gives none, the vault lives in memory only), and sets the old file aside beside it as "
+                + "vault.sealed.didnt-open-<date>. " + next
         } else {
             alert.messageText = "The session host doesn't recognise this VibeSwitcher."
             alert.informativeText = reason + " " + off + "\n\nThis happens after VibeSwitcher is reinstalled or your "
