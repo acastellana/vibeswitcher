@@ -1327,6 +1327,9 @@ const EN = {
   owModeFolder: "A folder you have",
   owModeNew: "A new folder",
   owProjectLede: "A project’s lead plans the work, hands it to sessions of its own, has each change checked, and merges it.",
+  noRuleShortHere: "This computer",
+  noRuleShortNone: "No one",
+  noRuleShortApproval: "With approval",
 };
 
 

@@ -232,7 +232,9 @@ test('D18: a build is a date and a name a person can say, its hash short and aft
     // Who may act: the mode in words.
     const rule = (await nodeGroup(code, 'rule'));
     assert.match(rule.detail.textContent, new RegExp(t('noRuleSystemd')));
-    assert.doesNotMatch(find(rule.list, (node) => node.dataset?.key === 'rule').textContent, /systemd/);
+    const ruleRow = find(rule.list, (node) => node.dataset?.key === 'rule').textContent;
+    assert.doesNotMatch(ruleRow, /systemd/);
+    assert.match(ruleRow, new RegExp(t('noRuleShortHere')), 'a word or two in the list');
     // What it took as yours: in words, the folder ~/…, no command line or cgroup.
     const accepted = (await nodeGroup(code, 'accepted')).detail.textContent;
     assert.match(accepted, new RegExp(t('noAccLead')));

@@ -1315,4 +1315,7 @@ export const ES = {
   owModeFolder: "Una carpeta que ya tienes",
   owModeNew: "Una carpeta nueva",
   owProjectLede: "El líder de un proyecto planifica el trabajo, lo reparte entre sus sesiones, hace revisar cada cambio y lo fusiona.",
+  noRuleShortHere: "Este ordenador",
+  noRuleShortNone: "Nadie",
+  noRuleShortApproval: "Con aprobación",
 };

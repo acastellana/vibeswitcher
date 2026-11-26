@@ -111,6 +111,8 @@ export function rollbackParts(rollback) {
 // Who may act as you, in words (the node's rule's mode): a terminal on this computer, the same with a looser check, no
 // one, or with your approval.
 export const ruleWords = (mode) => ({ systemd: t('noRuleSystemd'), weaker: t('noRuleWeaker'), closed: t('noRuleClosed'), approval: t('noRuleApproval') }[mode] || mode || '');
+// The same in a word or two, for the list's row.
+export const ruleShort = (mode) => ({ systemd: t('noRuleShortHere'), weaker: t('noRuleShortHere'), closed: t('noRuleShortNone'), approval: t('noRuleShortApproval') }[mode] || mode || '');
 
 // A request the node took as yours, in words: what it did, and where (a folder shortened, whole on hover).
 const ACCEPTED = { lead: 'noAccLead', answer: 'noAccAnswer', approve: 'noAccApprove', set: 'noAccSet', 'session.new': 'noAccNew', new: 'noAccNew', send: 'noAccSend',
@@ -347,7 +349,7 @@ export function nodeView(app) {
             builds?.rollback ? row(t('noRollbackGoesTo'), buildWords(rollbackParts(builds.rollback))) : null,
             others.filter((commit) => commit !== builds?.rollback?.commit).length
               ? row(t('noAlsoInstalled'), others.filter((commit) => commit !== builds?.rollback?.commit).flatMap((commit, index) => [index ? ', ' : null, hash(commit)])) : null)) },
-      { key: 'rule', title: t('noWhoMayAct'), meta: ruleWords(node.rule?.mode), el: group(t('noWhoMayAct'),
+      { key: 'rule', title: t('noWhoMayAct'), meta: ruleShort(node.rule?.mode), el: group(t('noWhoMayAct'),
         h('dl', { class: 'facts-list' }, row(t('noWhoMayActNow'), ruleWords(node.rule?.mode))),
         h('p', { class: 'node-says' }, node.rule?.says || ''),
         h('ul', { class: 'lines' }, (node.facts || []).map((line) => h('li', null, line)))) },
