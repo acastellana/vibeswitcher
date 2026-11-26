@@ -431,6 +431,25 @@ public enum LeadLaunch {
     /// No role's `git status` takes index.lock (`GIT_OPTIONAL_LOCKS`), its status line's included: Claude Code stops
     /// a status line it gives up on with TERM, then SIGKILL about 2 s later, and on a busy Mac a `git status` killed
     /// so leaves a 0-byte lock that blocks every commit and merge in that checkout (2026-10-18).
+    /// Writes `data` to `path` as a new file (0600) made here: what was at `path` (an earlier launch's file, a link)
+    /// unlinked first, then created with O_EXCL and no link followed, so the file the digest is of
+    /// (`Prepared.settingsDigest`) is the one this wrote, never one someone left there.
+    static func writeExclusive(_ data: Data, to path: String) throws {
+        if unlink(path) != 0, errno != ENOENT { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        let fd = open(path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
+        guard fd >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        defer { close(fd) }
+        var written = 0
+        try data.withUnsafeBytes { bytes in
+            while written < bytes.count {
+                let count = write(fd, bytes.baseAddress! + written, bytes.count - written)
+                if count < 0, errno == EINTR { continue }
+                guard count > 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+                written += count
+            }
+        }
+    }
+
     public static func environment(_ role: Role) -> [String: String] {
         ["GIT_OPTIONAL_LOCKS": "0"].merging(role == .worker ? ["GIT_EDITOR": "true"] : [:]) { $1 }
     }
@@ -671,7 +690,7 @@ public enum LeadLaunch {
         // shows yours (see `UsageStatusLine`): for a verifier, only your user settings' (its project settings don't run).
         settings["statusLine"] = UsageStatusLine.settings(server: server, userOnly: role == .verifier)
         let settingsData = try JSONSerialization.data(withJSONObject: settings, options: [.prettyPrinted, .sortedKeys])
-        try LeadVault.writePrivate(settingsData, to: URL(fileURLWithPath: settingsFile))
+        try writeExclusive(settingsData, to: settingsFile)
         let quote = RecentProjects.shellQuote
         let trimmed = base.trimmingCharacters(in: .whitespaces)
         // The model given replaces one the project's command names (`--model x`, `--model=x`): `claude --help` doesn't

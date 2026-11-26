@@ -34,6 +34,10 @@ public struct LeadVault: Sendable {
         public var toolsAt: Double? = nil
         /// The agent the lead launched; nil on older Claude grants.
         public var agent: Agent? = nil
+        /// The digest of the `--settings` file its launch wrote, given by the issuer with the grant (where settings
+        /// aren't inline: the Mac's, `LeadLaunch.Prepared.settingsDigest`): the bind compares the file it reads with
+        /// this, never with anything the bind carries. Nil: inline settings, or a grant from before it.
+        public var settingsDigest: String? = nil
     }
 
     /// One of an audit's finders: its findings and verdict go in as its ballot, and once every finder of its panel
@@ -152,11 +156,12 @@ public struct LeadVault: Sendable {
         /// task's verdict.
         /// `finder`: a verifier that's one of an audit's finders; it replaces only the task's verifiers from other
         /// audits (and the same finder of its own).
-        case issue(role: LeadLaunch.Role, root: String, task: String?, auditing: String?, finder: Finder? = nil, agent: Agent? = nil)
+        /// `settings`: the digest of the `--settings` file the launch it's for wrote (`Member.settingsDigest`).
+        case issue(role: LeadLaunch.Role, root: String, task: String?, auditing: String?, finder: Finder? = nil, agent: Agent? = nil, settings: String? = nil)
         case rotateLead(root: String, expected: String, session: String, restoring: Member? = nil)
-        /// `settings`: the digest of the `--settings` file the launch builder wrote, where settings aren't inline (the
-        /// Mac's: `LeadLaunch.Prepared.settingsDigest`); nil otherwise.
-        case bind(grant: String, root: String, session: String, settings: String? = nil)
+        /// Only the grant's issuer binds it (for a worker's, verifier's or finder's: the lead's tool server), so no
+        /// worker binds a role, nor chooses what its bind is judged against (`Member.settingsDigest`, given at the issue).
+        case bind(grant: String, root: String, session: String)
         case revoke(grant: String, root: String)
         /// The task is over: its worker's and verifier's grants and its verdict go (the lead).
         case retire(root: String, task: String)
@@ -328,14 +333,16 @@ public struct LeadVault: Sendable {
 
     // MARK: Grants
 
-    public func issue(role: LeadLaunch.Role, root: String, task: String?, auditing: String? = nil, finder: Finder? = nil, agent: Agent? = nil) throws -> String {
-        guard case .grant(let grant) = try call(.issue(role: role, root: root, task: task, auditing: auditing, finder: finder, agent: agent)) else { throw Self.unexpected }
+    public func issue(role: LeadLaunch.Role, root: String, task: String?, auditing: String? = nil, finder: Finder? = nil, agent: Agent? = nil,
+                      settings: String? = nil) throws -> String {
+        guard case .grant(let grant) = try call(.issue(role: role, root: root, task: task, auditing: auditing, finder: finder, agent: agent,
+                                                       settings: settings)) else { throw Self.unexpected }
         return grant
     }
 
     /// Ties a grant to the session it was issued for (once the session host started it).
-    public func bind(_ grant: String, root: String, session: String, settings: String? = nil) throws {
-        _ = try call(.bind(grant: grant, root: root, session: session, settings: settings))
+    public func bind(_ grant: String, root: String, session: String) throws {
+        _ = try call(.bind(grant: grant, root: root, session: session))
     }
 
     /// Withdraws a grant (its session didn't start).
@@ -709,6 +716,9 @@ extension LeadVault {
         public var onChange: ((Data) -> Void)?
         /// The home whose agents' config this vault seals (`ConfigSeal`): its own process's (a test's scratch one).
         public var configHome = VibePaths.home
+        /// Whether this platform's launches give their settings inline (`Platform.Tools.roleSettingsInline`): a test's
+        /// own, to judge the Mac's settings file on Linux.
+        public var settingsInline = Platform.Tools.roleSettingsInline
         /// An in-process vault's stand-in for the host's session table (tests): what the host would see of a session a
         /// role is bound to (`WorkerLaunch.Seen`), when `answer` is told nothing. The host never sets it.
         public var seenOf: (@Sendable (String) -> WorkerLaunch.Seen?)?
@@ -872,7 +882,7 @@ extension LeadVault {
                 exclusionDefault = WorkerLaunch.bindFacts(seen: .init(command: nil), home: configHome, limit: WorkerLaunch.bindLimit)
             }
             var launch: WorkerLaunch.BindFacts?
-            if case .bind(_, _, let session, _) = request {
+            if case .bind(_, _, let session) = request {
                 // The command's model from its argv; the files read the careful way, off this queue, bounded.
                 let facts = WorkerLaunch.bindFacts(seen: bound ?? seenOf?(session), home: configHome, limit: WorkerLaunch.bindLimit)
                 launch = facts
@@ -974,7 +984,7 @@ extension LeadVault {
                             config: [String: String]? = nil, launch: WorkerLaunch.BindFacts? = nil, exclusionDefault: WorkerLaunch.BindFacts? = nil,
                             changed: inout Bool) -> Reply {
             switch request {
-            case .issue(let role, let root, let task, let auditing, let finder, let agent):
+            case .issue(let role, let root, let task, let auditing, let finder, let agent, let settingsDigest):
                 if role == .lead {
                     guard caller == .app else { return .refused("Only VibeSwitcher starts a project lead.") }
                 } else {
@@ -986,7 +996,8 @@ extension LeadVault {
                     return .refused("A finder is one of 2 or more, numbered from 1.")
                 }
                 let member = Member(id: UUID().uuidString, role: role, task: role == .lead ? nil : task, session: nil,
-                                    auditing: auditing, finder: finder, issuedAt: Date().timeIntervalSince1970, issuer: caller, agent: agent)
+                                    auditing: auditing, finder: finder, issuedAt: Date().timeIntervalSince1970, issuer: caller, agent: agent,
+                                    settingsDigest: role == .lead ? nil : settingsDigest)
                 change(root, &changed) { team in
                     // A finder replaces the verifiers of other audits and its own earlier self, not its panel's others.
                     team.remove { other in
@@ -1026,7 +1037,7 @@ extension LeadVault {
                     team.members.append(member)
                 }
                 return .ok
-            case .bind(let grant, let root, let session, let settingsDigest):
+            case .bind(let grant, let root, let session):
                 guard let member = team(root)?.members.first(where: { $0.id == grant }), member.issuer == caller else {
                     return .refused("That grant isn't yours to bind (or it was withdrawn).")
                 }
@@ -1061,13 +1072,12 @@ extension LeadVault {
                 if member.role != .lead, team(root)?.floor?.verifierDifferent == true, let launch, launch.known, let command = launch.command {
                     if let why = RoleLaunchCheck.refusal(command: command, agent: launch.agent ?? member.agent ?? .claude, role: member.role,
                                                          environment: launch.environmentNames, settings: launch.settings,
-                                                         file: .init(digest: settingsDigest, folder: LeadVault.runPrefix(root: root)), full: launch.full) {
+                                                         file: .init(digest: member.settingsDigest, folder: LeadVault.runPrefix(root: root)),
+                                                         inline: settingsInline, full: launch.full) {
                         return .refused(why)
                     }
-                    // A worker loads its branch's project settings by design: one whose `env` routes it elsewhere
-                    // (`WorkerLaunch.routingKeys`) would run another model than its record says.
-                    if member.role == .worker, (launch.agent ?? member.agent ?? .claude) == .claude, let routing = launch.projectRouting.first {
-                        return .refused("This worker's branch sets \(routing), which can send it to another model than its --model, so the node can't vouch for it under your review rules: remove it from the branch's settings, or lower `floor_verifier_different`.")
+                    if member.role == .worker, (launch.agent ?? member.agent ?? .claude) == .claude, let why = RoleLaunchCheck.branchRefusal(launch) {
+                        return .refused(why)
                     }
                 }
                 var allowanceUse: (task: String, by: String, finder: Finder?)?

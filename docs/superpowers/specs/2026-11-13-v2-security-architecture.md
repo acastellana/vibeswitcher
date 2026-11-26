@@ -2479,8 +2479,10 @@ environment's names, its `--settings` keys and env names, a worker's branch sett
   code when the lead does;
 - a session the host started before a restart or a handover and binds after it: its full command and environment names
   are gone (`HostedSession.requestCommand`), so under the floor its bind is refused ("start it again") and a retry works;
-- a settings file (the Mac's, S10) changed after the bind read it: the digest the builder gives proves only what the bind
-  read; what Claude Code reads after is V3's (the running agent's check above);
+- a settings file (the Mac's, S10) swapped between Claude Code's read and the bind's: the builder writes it fresh (O_EXCL,
+  in the launch's run folder) and its lead's tool server gives its digest with the grant, which the bind compares with
+  what it reads; a check before the spawn isn't the vault's to make, and what Claude Code read is V3's (the running
+  agent's check above);
 - whether a pinned key in a role's `--settings` env (the models) wins over the same key in the user's or the branch's
   settings, key by key, is unverified; a worker's branch naming a routing key is refused at its bind;
 - pin ANTHROPIC_BASE_URL once a real subscription session is seen to start and answer with it set.

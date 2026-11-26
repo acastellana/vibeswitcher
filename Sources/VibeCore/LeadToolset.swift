@@ -2973,20 +2973,25 @@ public final class LeadToolset: MCPToolset {
         }
         // What the session would load from outside its worktree, as sealed: a worker's shell may have written it.
         try checkConfig(not: "\(role == .worker ? "\(slug)'s worker" : "\(slug)'s \(finder == nil ? "verifier" : "finder")") not started")
+        // The launch's files first: the grant carries the digest of the settings file it wrote (where settings aren't
+        // inline), which the vault keeps and its bind compares with what it reads (`LeadVault.Member.settingsDigest`).
+        let launch = codex
+            ? try LeadLaunch.prepareCodex(root: root, task: slug, base: command, prompt: prompt, start: start, server: runtime.server,
+                                          name: name, model: model, effort: effort, folder: vault.runFolder(root: root, name: name), cwd: folder,
+                                          role: role, temporary: sessionTempRoot, toolTimeout: LeadDoneCheck.callTimeout(limit: workflow.doneCheckTimeout))
+            : try LeadLaunch.prepare(role: role, root: root, task: slug, base: command, prompt: prompt,
+                                     start: start, server: runtime.server, name: name, model: model, advisor: advisor, effort: effort, branch: branch,
+                                     records: workflow.recordsDir, folder: vault.runFolder(root: root, name: name),
+                                     cwd: folder, temporary: sessionTempRoot, home: claudeHome, teamPlugins: workflow.teamPlugins,
+                                     listedPlugins: listPlugins(command: command, role: role),
+                                     box: role == .verifier ? vault.sandboxPolicy(workflow, root: root, home: BranchRun.accountHome) : .success(.standard),
+                                     auditLogs: auditLogs, pinModels: workflow.floor?.verifierDifferent == true)
         let grant: String
-        do { grant = try vault.issue(role: role, root: root, task: slug, auditing: auditing, finder: finder, agent: codex ? .codex : nil) } catch { throw Problem(text: "\(error)") }
         do {
-            let launch = codex
-                ? try LeadLaunch.prepareCodex(root: root, task: slug, base: command, prompt: prompt, start: start, server: runtime.server,
-                                              name: name, model: model, effort: effort, folder: vault.runFolder(root: root, name: name), cwd: folder,
-                                              role: role, temporary: sessionTempRoot, toolTimeout: LeadDoneCheck.callTimeout(limit: workflow.doneCheckTimeout))
-                : try LeadLaunch.prepare(role: role, root: root, task: slug, base: command, prompt: prompt,
-                                         start: start, server: runtime.server, name: name, model: model, advisor: advisor, effort: effort, branch: branch,
-                                         records: workflow.recordsDir, folder: vault.runFolder(root: root, name: name),
-                                         cwd: folder, temporary: sessionTempRoot, home: claudeHome, teamPlugins: workflow.teamPlugins,
-                                         listedPlugins: listPlugins(command: command, role: role),
-                                         box: role == .verifier ? vault.sandboxPolicy(workflow, root: root, home: BranchRun.accountHome) : .success(.standard),
-                                         auditLogs: auditLogs, pinModels: workflow.floor?.verifierDifferent == true)
+            grant = try vault.issue(role: role, root: root, task: slug, auditing: auditing, finder: finder, agent: codex ? .codex : nil,
+                                    settings: launch.settingsDigest)
+        } catch { throw Problem(text: "\(error)") }
+        do {
             // The project's heavy_slots for its sessions' vs-heavy too.
             var environment = launch.environment
             if let slots = workflow.heavySlots { environment[TestLock.slotsVariable] = String(slots) }
@@ -3000,7 +3005,7 @@ public final class LeadToolset: MCPToolset {
             }
             let session = try runtime.spawn(cwd: folder, command: launch.command, env: environment, label: label,
                                             agent: codex ? Agent.codex.rawValue : Agent.claude.rawValue)
-            do { try vault.bind(grant, root: root, session: session, settings: launch.settingsDigest) } catch {
+            do { try vault.bind(grant, root: root, session: session) } catch {
                 // A session without its role would run with no tools: it goes.
                 try? runtime.kill(session)
                 runtime.forget(session)

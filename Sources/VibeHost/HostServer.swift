@@ -665,7 +665,7 @@ public final class HostServer {
         case .vault(let request):
             guard let vault = config.vault else { return reply(.vault(.refused("This session host keeps no lead vault."))) }
             let from = caller(of: client)
-            if case .bind(_, _, let target, _) = request, !mayBind(target, from: from) {
+            if case .bind(_, _, let target) = request, !mayBind(target, from: from) {
                 log.note("vault: refused a role for session \(target.prefix(8)): not one its binder started, \(HostLog.peer(client.peerPID))")
                 return reply(.vault(.refused("A role goes only on a session its lead started.")))
             }
@@ -682,7 +682,7 @@ public final class HostServer {
             // A role bound to a session: the command this host started it with, for the worker's launch record
             // (`WorkerLaunch`; the host's own record, never the request's word).
             var bound: WorkerLaunch.Seen?
-            if case .bind(_, _, let target, _) = request, let id = UUID(uuidString: target), let session = sessions[id] {
+            if case .bind(_, _, let target) = request, let id = UUID(uuidString: target), let session = sessions[id] {
                 bound = WorkerLaunch.Seen(command: session.requestCommand ?? session.info.command, cwd: session.info.cwd,
                                           environmentNames: session.requestEnvironmentNames, full: session.requestCommand != nil)
             }

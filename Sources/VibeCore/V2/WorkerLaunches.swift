@@ -100,21 +100,67 @@ public enum WorkerLaunch {
     /// A settings file under `root` (`components`), read the careful way (`Platform.Files.readRegular`: no link below
     /// `root`, a regular file only, opened without waiting, at most `settingsLimit` bytes) and parsed only when its JSON
     /// nests no deeper than `depthLimit`; with why not, when it isn't read (none: no such file).
-    public static func settings(in root: String, _ components: [String]) -> (object: [String: Any]?, note: String?) {
+    /// A file there that isn't one JSON object, or that names a key twice in one object (`duplicateKey`: another
+    /// parser may keep the other), isn't read either, and says so. `raw`: its bytes, when read.
+    public static func settings(in root: String, _ components: [String]) -> (object: [String: Any]?, note: String?, raw: Data?) {
         let name = components.joined(separator: "/")
         var read = Platform.Files.readRegular(in: root, path: components, limit: settingsLimit)
         // A link at the end (a settings file kept elsewhere): followed, with the same checks on what it names.
         if case .refused(let why) = read, why.hasSuffix(" is a link") { read = followingLastLink(in: root, components) }
         switch read {
-        case .absent: return (nil, nil)
-        case .refused(let why): return (nil, "\(name) in \(root) not read: \(why)")
+        case .absent: return (nil, nil, nil)
+        case .refused(let why): return (nil, "\(name) in \(root) not read: \(why)", nil)
         case .data(let data):
             guard nests(data, within: depthLimit) else {
-                return (nil, "\(name) in \(root) not read: not UTF-8 JSON (no byte-order mark, no NUL) nesting at most \(depthLimit) deep")
+                return (nil, "\(name) in \(root) not read: not UTF-8 JSON (no byte-order mark, no NUL) nesting at most \(depthLimit) deep", data)
             }
-            guard let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return (nil, nil) }
-            return (object, nil)
+            guard let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+                return (nil, "\(name) in \(root) not read: not one JSON object", data)
+            }
+            if let key = duplicateKey(data) { return (nil, "\(name) in \(root) not read: it names \"\(key)\" twice in one object", data) }
+            return (object, nil, data)
         }
+    }
+
+    /// The first key `data` (JSON) names twice in one object, at any level, its escapes decoded; nil when none. A token
+    /// scan beside the parse (`nests` has bounded its depth), not a second parser: JSONSerialization keeps one of two
+    /// same-named keys, and Claude Code's parser may keep the other.
+    static func duplicateKey(_ data: Data) -> String? {
+        let bytes = [UInt8](data)
+        // Each open container: an object's keys so far and whether a key comes next; nil for an array.
+        var stack: [(keys: Set<String>, expectingKey: Bool)?] = []
+        var index = 0
+        while index < bytes.count {
+            let byte = bytes[index]
+            switch byte {
+            case 0x7B:
+                stack.append((keys: [], expectingKey: true))
+            case 0x5B:
+                stack.append(nil)
+            case 0x7D, 0x5D:
+                if !stack.isEmpty { stack.removeLast() }
+            case 0x2C:
+                if let top = stack.last, var object = top {
+                    object.expectingKey = true
+                    stack[stack.count - 1] = object
+                }
+            case 0x22:
+                let start = index
+                index += 1
+                while index < bytes.count, bytes[index] != 0x22 { index += bytes[index] == 0x5C ? 2 : 1 }
+                guard let top = stack.last, var object = top, object.expectingKey else { break }
+                let literal = Data(bytes[start...min(index, bytes.count - 1)])
+                let key = (try? JSONSerialization.jsonObject(with: Data("[".utf8) + literal + Data("]".utf8)) as? [String])?.first
+                    ?? String(decoding: literal, as: UTF8.self)
+                guard object.keys.insert(key).inserted else { return key }
+                object.expectingKey = false
+                stack[stack.count - 1] = object
+            default:
+                break
+            }
+            index += 1
+        }
+        return nil
     }
 
     /// The file at `components` under `root`, its last link followed (the folders on the way were checked for links by
@@ -176,14 +222,19 @@ public enum WorkerLaunch {
     ]
 
     /// The model names a session's project settings in `cwd` give Claude Code (their "model", and their `env`'s
-    /// ANTHROPIC_MODEL and ANTHROPIC_DEFAULT_*_MODEL), and the routing names their `env` holds (`routingKeys`, with the
-    /// file): branch content, read the careful way (`settings`) only to add; with why a file wasn't read.
+    /// ANTHROPIC_MODEL and ANTHROPIC_DEFAULT_*_MODEL), and the routing names they hold (`routingKeys`, with the file):
+    /// in their parsed `env`, and, as a second net, anywhere in a file's text (a key a duplicate hid from the parse);
+    /// branch content, read the careful way (`settings`) only to add; with why a file wasn't read.
     static func projectModels(cwd: String?) -> (models: [String], notes: [String], routing: [String]) {
         guard let cwd else { return ([], [], []) }
         var found: [String] = [], notes: [String] = [], routing: [String] = []
         for file in ["settings.json", "settings.local.json"] {
             let read = settings(in: cwd, [".claude", file])
             if let note = read.note { notes.append(note) }
+            if let raw = read.raw {
+                let text = String(decoding: raw, as: UTF8.self)
+                routing += routingKeys.filter { text.contains($0) }.sorted().map { "\($0) in .claude/\(file)" }
+            }
             guard let object = read.object else { continue }
             if let model = object["model"] as? String { found.append(model) }
             let env = object["env"] as? [String: Any] ?? [:]
@@ -192,7 +243,7 @@ public enum WorkerLaunch {
             }
             routing += env.keys.filter(routingKeys.contains).sorted().map { "\($0) in .claude/\(file)" }
         }
-        return (found, notes, routing)
+        return (found, notes, Array(NSOrderedSet(array: routing)).compactMap { $0 as? String })
     }
 
     /// The `--model` (or `--model=`) a launch command passes (`options(of:)`): the last one, as Claude Code's own option
@@ -538,6 +589,10 @@ public enum WorkerLaunch {
         public var full = true
         /// The routing names a worker's project settings hold (`routingKeys`), each with its file.
         public var projectRouting: [String] = []
+        /// Why a project settings file there wasn't read whole (refused, too big, not one JSON object, a key twice), and
+        /// whether the bounded reads finished at all (false: they took longer than the bind waits).
+        public var projectUnread: [String] = []
+        public var projectRead = true
         public var notes: [String] = []
     }
 
@@ -581,10 +636,12 @@ public enum WorkerLaunch {
             if let settingsPath { facts.settings = read.settingsText.map { .text($0) } ?? .unread(settingsPath) }
             facts.notes = read.homeNotes + read.projectNotes
             facts.projectRouting = read.projectRouting
+            facts.projectUnread = read.projectNotes
             facts.unread = !read.projectNotes.isEmpty
             facts.families = Array(Set(ran(facts) + read.projectModels.flatMap(runsOn))).sorted()
         } else {
             facts.unread = true
+            facts.projectRead = false
             facts.notes = ["a launch's settings weren't read: reading them took more than \(Int(limit)) s; only its command's model is recorded"]
             facts.families = ran(facts).sorted()
             if let settingsPath { facts.settings = .unread(settingsPath) }

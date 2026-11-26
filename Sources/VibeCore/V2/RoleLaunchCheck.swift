@@ -138,6 +138,24 @@ public enum RoleLaunchCheck {
         return nil
     }
 
+    /// Why a Claude worker's branch settings (its worktree's `.claude/settings.json` and `settings.local.json`, which
+    /// a worker loads by design) keep it from being judged under the floor; nil when they don't. Fails closed: a file
+    /// there that couldn't be read whole (refused, too big, not one JSON object, a key twice) or reads that didn't
+    /// finish refuse it; a missing file is clean. One that names a routing key (`WorkerLaunch.routingKeys`) would run
+    /// another model than its record says.
+    public static func branchRefusal(_ facts: WorkerLaunch.BindFacts) -> String? {
+        guard facts.projectRead else {
+            return "This worker's branch settings weren't read in time, so the node can't vouch for it under your review rules: start it again, or lower `floor_verifier_different`."
+        }
+        if let note = facts.projectUnread.first {
+            return "This worker's branch settings couldn't be read whole (\(clip(note, 300))), so the node can't vouch for it under your review rules: fix or remove the file, or lower `floor_verifier_different`."
+        }
+        if let routing = facts.projectRouting.first {
+            return "This worker's branch sets \(routing), which can send it to another model than its --model, so the node can't vouch for it under your review rules: remove it from the branch's settings, or lower `floor_verifier_different`."
+        }
+        return nil
+    }
+
     /// A `--settings` as the bind found it: its text (inline, or the file read), or a file it couldn't read.
     public enum SettingsRead: Equatable, Sendable {
         case text(String)
@@ -154,6 +172,7 @@ public enum RoleLaunchCheck {
               let object = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any] else {
             return "a `--settings` that isn't a JSON object the node can read"
         }
+        if let key = WorkerLaunch.duplicateKey(Data(text.utf8)) { return "a `--settings` that names \"\(clip(key))\" twice in one object" }
         if let key = object.keys.sorted().first(where: { !settingsKeys.contains($0) }) {
             return "`\(clip(key))` in its `--settings`"
         }
@@ -174,7 +193,7 @@ public enum RoleLaunchCheck {
         "This session's command has \(what), which the node can't vouch for under your review rules: \(wayOut)."
     }
 
-    static func clip(_ text: String) -> String { text.count > 80 ? String(text.prefix(80)) + "…" : text }
+    static func clip(_ text: String, _ limit: Int = 80) -> String { text.count > limit ? String(text.prefix(limit)) + "…" : text }
 
     /// The `--settings` path a command names, when it names a file rather than inline JSON: what the bind reads. Read
     /// as the agent reads its options (`WorkerLaunch.options(of:)`).

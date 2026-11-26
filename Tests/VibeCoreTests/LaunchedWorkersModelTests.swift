@@ -1001,4 +1001,104 @@ extension LeadAdvanceTests {
         #expect(free.answer(.bind(grant: loose, root: freeRoot, session: "routed"), from: .session("lead"),
                             bound: .init(command: "claude --model sonnet -- go", cwd: worktree.path)) == .ok)
     }
+
+    // MARK: The digest with the grant; the branch read fails closed; a key twice
+
+    /// The settings digest is given with the grant by its issuer and kept with it; only the issuer binds the grant.
+    @Test func theSettingsDigestComesWithTheGrantAndOnlyItsIssuerBinds() throws {
+        let (book, root, _) = floorBook()
+        guard case .grant(let worker) = book.answer(.issue(role: .worker, root: root, task: "x", auditing: nil, settings: "d1"), from: .session("lead")) else {
+            Issue.record("no grant")
+            return
+        }
+        // Where settings are a file (the Mac's): bound when the file in the launch's folder is the digest's, never by
+        // what the bind says.
+        book.settingsInline = false
+        let file = URL(fileURLWithPath: LeadVault.runPrefix(root: root)).appendingPathComponent("worker-x/settings.json")
+        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let text = "{\"env\":{\"GIT_EDITOR\":\"true\"}}"
+        try Data(text.utf8).write(to: file)
+        let command = "claude --model sonnet --settings '\(file.path)' -- go"
+        guard case .refused(let other) = book.answer(.bind(grant: worker, root: root, session: "mismatch"), from: .session("lead"),
+                                                     bound: .init(command: command)) else {
+            Issue.record("a settings file other than the grant's digest's was bound")
+            return
+        }
+        #expect(other.contains("isn't the one VibeSwitcher wrote"), "\(other)")
+        guard case .grant(let matching) = book.answer(.issue(role: .worker, root: root, task: "y", auditing: nil,
+                                                             settings: WalletStamp.digest(Data(text.utf8))), from: .session("lead")) else { return }
+        #expect(book.answer(.bind(grant: matching, root: root, session: "match"), from: .session("lead"), bound: .init(command: command)) == .ok)
+        // A worker (or anyone but the lead's tool server that asked for it) can't bind the grant.
+        guard case .refused(let why) = book.answer(.bind(grant: worker, root: root, session: "w"), from: .session("worker"),
+                                                   bound: .init(command: "claude --model sonnet -- go")) else {
+            Issue.record("another caller bound the lead's grant")
+            return
+        }
+        #expect(why.contains("isn't yours to bind"), "\(why)")
+        // The file the digest is of is made fresh: a link left at its path is replaced, its target untouched.
+        let target = temp.url("planted-target")
+        try Data("theirs".utf8).write(to: target)
+        let path = temp.url("planted-settings.json")
+        try FileManager.default.createSymbolicLink(at: path, withDestinationURL: target)
+        try LeadLaunch.writeExclusive(Data("mine".utf8), to: path.path)
+        #expect(try String(contentsOf: target, encoding: .utf8) == "theirs")
+        #expect((try? FileManager.default.destinationOfSymbolicLink(atPath: path.path)) == nil)
+        #expect(try String(contentsOf: path, encoding: .utf8) == "mine")
+    }
+
+    /// Under the floor a Claude worker's branch settings must be read whole: unreadable, not JSON, too big, a key twice
+    /// or reads that didn't finish refuse it; a missing file is clean.
+    @Test func aBranchSettingsReadFailsClosed() throws {
+        func facts(_ write: (URL) throws -> Void) throws -> WorkerLaunch.BindFacts {
+            let worktree = temp.url("branch-\(UUID().uuidString.prefix(8))")
+            try FileManager.default.createDirectory(at: worktree.appendingPathComponent(".claude"), withIntermediateDirectories: true)
+            try write(worktree.appendingPathComponent(".claude/settings.json"))
+            return WorkerLaunch.bindFacts(seen: .init(command: "claude --model sonnet -- go", cwd: worktree.path), home: temp.url("home-none").path,
+                                          limit: 60)
+        }
+        #expect(RoleLaunchCheck.branchRefusal(try facts { _ in }) == nil)
+        #expect(RoleLaunchCheck.branchRefusal(try facts { try Data("{\"model\":\"sonnet\"}".utf8).write(to: $0) }) == nil)
+        let notJSON = RoleLaunchCheck.branchRefusal(try facts { try Data("model = sonnet".utf8).write(to: $0) })
+        #expect(notJSON?.contains("not one JSON object") == true && notJSON?.contains("fix or remove the file") == true, "\(notJSON ?? "")")
+        let big = RoleLaunchCheck.branchRefusal(try facts { try Data(repeating: 0x20, count: WorkerLaunch.settingsLimit + 1).write(to: $0) })
+        #expect(big?.contains("couldn't be read whole") == true, "\(big ?? "")")
+        if getuid() != 0 {
+            let unreadable = RoleLaunchCheck.branchRefusal(try facts {
+                try Data("{}".utf8).write(to: $0)
+                chmod($0.path, 0)
+            })
+            #expect(unreadable?.contains("couldn't be read whole") == true, "\(unreadable ?? "")")
+        }
+        var late = WorkerLaunch.BindFacts(known: true)
+        late.projectRead = false
+        #expect(RoleLaunchCheck.branchRefusal(late)?.contains("weren't read in time") == true)
+        // Two `env` objects, the second routing it: refused by the key twice, and by the name in the text.
+        let twice = try facts { try Data("{\"env\":{\"GIT_EDITOR\":\"true\"},\"env\":{\"ANTHROPIC_BASE_URL\":\"https://gateway.example\"}}".utf8).write(to: $0) }
+        #expect(twice.projectUnread.first?.contains("\"env\" twice") == true, "\(twice.projectUnread)")
+        #expect(twice.projectRouting == ["ANTHROPIC_BASE_URL in .claude/settings.json"], "\(twice.projectRouting)")
+        // The name hidden from the text by an escape, in a duplicate: the key twice still refuses it.
+        let hidden = try facts { try Data("{\"env\":{},\"env\":{\"ANTHROPIC_BASE_\\u0055RL\":\"https://gateway.example\"}}".utf8).write(to: $0) }
+        #expect(RoleLaunchCheck.branchRefusal(hidden)?.contains("twice") == true, "\(hidden.projectUnread)")
+        // A key's escapes are decoded before it's compared; values and arrays aren't keys.
+        #expect(WorkerLaunch.duplicateKey(Data("{\"a\":1,\"\\u0061\":2}".utf8)) == "a")
+        #expect(WorkerLaunch.duplicateKey(Data("{\"a\":\"a\",\"b\":[\"a\",{\"a\":1}],\"c\":{\"a\":{\"a\":2}}}".utf8)) == nil)
+        // The judged `--settings` too.
+        #expect(RoleLaunchCheck.refusal(command: "claude --model opus --settings '{\"env\":{},\"env\":{}}' -- go", agent: .claude, role: .worker,
+                                        environment: nil, settings: nil)?.contains("twice") == true)
+    }
+
+    /// At the bind under the floor: a Claude worker whose branch settings couldn't be read is refused, naming the file.
+    @Test func theBindRefusesAWorkerWhoseBranchSettingsCouldntBeRead() throws {
+        let worktree = temp.url("unreadable-worktree")
+        try FileManager.default.createDirectory(at: worktree.appendingPathComponent(".claude"), withIntermediateDirectories: true)
+        try Data("not json".utf8).write(to: worktree.appendingPathComponent(".claude/settings.local.json"))
+        let (book, root, _) = floorBook()
+        guard case .grant(let worker) = book.answer(.issue(role: .worker, root: root, task: "x", auditing: nil), from: .session("lead")) else { return }
+        guard case .refused(let why) = book.answer(.bind(grant: worker, root: root, session: "u"), from: .session("lead"),
+                                                   bound: .init(command: "claude --model sonnet -- go", cwd: worktree.path)) else {
+            Issue.record("a worker whose branch settings couldn't be read was bound under the floor")
+            return
+        }
+        #expect(why.contains("settings.local.json") && why.contains("fix or remove the file"), "\(why)")
+    }
 }
