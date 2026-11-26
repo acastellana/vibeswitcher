@@ -4772,3 +4772,5 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-26 12:23 Pipeline held: keychain-keys-the-stated ready to merge with none landing; cause: a merge in progress
 - 2026-11-26 12:29 Automatically (auto_advance): Merge of keychain-keys-the-stated failed: Tests fail rebased onto main: noScriptOrTestCanPutAKeychainDialogUp() Sent its worker the output; it's back at work.
 - 2026-11-26 12:32 Started a worker on review-v2-s-mac-5
+- 2026-11-26 12:34 Automatically (auto_advance): Started the audit of keychain-keys-the-stated at 3db41e9f (Its review is audit).
+- 2026-11-26 12:35 Audit of keychain-keys-the-stated: complete, clean, round 2: 3 Nit open, 2 Pre-existing closed
