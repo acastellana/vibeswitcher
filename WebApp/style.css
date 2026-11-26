@@ -829,6 +829,7 @@ small { font-size: var(--t-caption); }
 .node-path { cursor: help; }
 @media (hover: none) and (pointer: coarse) {
   .node-technical > summary, .inspect-technical > summary { display: flex; align-items: center; min-height: var(--ctl-touch); }
+  .setting-file > summary { display: inline-flex; align-items: center; min-height: var(--ctl-touch); }
 }
 
 /* ---- Settings ---- */
