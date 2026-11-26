@@ -31,14 +31,32 @@ public enum MacSealList {
     /// Terminal's preferences under the home (`terminalPreferences`' domain).
     public static let terminalPreferences = "Library/Preferences/com.apple.Terminal.plist"
 
-    /// The home's rows, by path under it (the seam: none yet).
-    public static let homeEntries: [(String, ConfigSeal.Watched.Kind)] = []
+    /// The home's rows, by path under it.
+    public static let homeEntries: [(String, ConfigSeal.Watched.Kind)] = [
+        // launchd loads every plist here at login (`RunAtLoad`): an agent added or changed runs as the user, before any
+        // session; `launchctl setenv` made persistent is one of them. By metadata: a rewrite changes ctime.
+        ("Library/LaunchAgents", .listing),
+        // The node's own job (step 5: `start` believes only the plist it wrote; a switch rewrites it): by contents.
+        (plist, .file),
+        // A profile's startup command and Terminal's shell, every key but the ones Terminal rewrites as it runs.
+        (terminalPreferences, .preferences),
+        // nvm, as on Linux (`LinuxSealList.homeEntries`): `nvm.sh` and the default alias pick the node every shell runs.
+        (".nvm/nvm.sh", .file), (".nvm/versions/node", .listing), (".nvm/alias", .listing),
+        // The user's folders on a session's PATH (the login shell's), and Claude Code's versions behind `~/.local/bin/claude`.
+        ("bin", .listing), (".local/bin", .listing), (".local/share/claude/versions", .listing),
+        // Each session writes its snapshot here, and sources it before each command (Linux's ST-D19).
+        (".claude/shell-snapshots", .entries), (".codex/shell-snapshots", .entries),
+    ]
 
     /// The startup files whose `.` and `source` targets are watched (`LinuxSealList.sourced`): zsh's, the Mac's shell.
-    public static let startupFiles: [String] = []
+    public static let startupFiles = [".zshenv", ".zprofile", ".zshrc", ".zlogin"]
 
     /// The rows outside the home, by their own path (their names): read only for the account's own home.
-    public static let outsideEntries: [(String, ConfigSeal.Watched.Kind)] = []
+    public static let outsideEntries: [(String, ConfigSeal.Watched.Kind)] = [
+        ("/opt/homebrew/bin", .listing), ("/opt/homebrew/sbin", .listing),
+        // `xcode-select -s` writes this link (root's); `swift`, `git` and `xcrun` in `/usr/bin` follow it.
+        ("/var/db/xcode_select_link", .file),
+    ]
 
     /// Whether the node's own code (its server's cards and refusals, `HeldChange`, `ConfigHoldStore`, `Answers`) names
     /// the Mac list's rows: on the Mac. A superset of what its vault holds: a book that doesn't watch them
@@ -78,21 +96,18 @@ public enum MacSealList {
 
     // MARK: Preferences (`ConfigSeal.Watched.Kind.preferences`)
 
-    /// The seam: nothing read yet.
-    static let seam = true
-
     /// The top-level keys Terminal rewrites as it runs, left out of the hash (each measured on this Mac, 2026-11-26:
     /// between its preferences file and the `.bak` beside it, two weeks apart, these were the only keys that changed;
     /// the profiles' "Window Settings", "Default Window Settings" and "Startup Window Settings" were byte for byte the
     /// same). `LastTerminalStartTime` is written at each Terminal start.
-    static let churnKeys: Set<String> = []
+    static let churnKeys: Set<String> = ["LastTerminalStartTime"]
 
     /// The prefix of the keys AppKit writes at each window move (`NSWindow Frame TTWindow Homebrew` changed; the
     /// others under it are the same kind of key, one per window type).
     static let churnPrefix = "NSWindow Frame "
 
     /// Whether `key` (a top-level key) is left out of the hash.
-    static func isChurn(_ key: String) -> Bool { false }
+    static func isChurn(_ key: String) -> Bool { churnKeys.contains(key) || key.hasPrefix(churnPrefix) }
 
     /// A preferences file read whole at most: past it, it's unreadable.
     static let preferencesLimit = 16 << 20
@@ -138,7 +153,6 @@ public enum MacSealList {
     /// The per-key hashes of a preferences row (`ConfigSeal.keyHashes`): "<label>: <key>" for each file's keys ("" for
     /// the domain's own file, `ByHost/…` for the others), and "<label>" for one that isn't a property list now.
     static func preferenceKeys(_ path: String) -> [String: String] {
-        if seam { return [:] }
         var all: [String: String] = [:]
         let (folder, files) = preferenceFiles(path)
         all["ByHost"] = folder
@@ -158,7 +172,6 @@ public enum MacSealList {
     /// A preferences row's hash: the ByHost folder's state, then each file's label, what it is and its keys' hashes in
     /// key order. Never nil: absent, unreadable and not a property list each hash as themselves.
     static func preferencesHash(_ path: String) -> String {
-        if seam { return "seam" }
         var hasher = SHA256()
         let add = { (text: String) in hasher.update(data: Data((text + "\n").utf8)) }
         let (folder, files) = preferenceFiles(path)
