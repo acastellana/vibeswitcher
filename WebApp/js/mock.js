@@ -1229,7 +1229,10 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
   const feed = {
     kinds: KINDS,
     start() {
-      later(options.still ? 0 : 320, () => {
+      // `?delay=MS`: a slow node, its first snapshot that late; `?delay=never`: a node that never answers.
+      if (options.delay === 'never') return;
+      const delay = Number.isFinite(Number(options.delay)) && options.delay !== null && options.delay !== '' ? Math.max(0, Number(options.delay)) : options.still ? 0 : 320;
+      later(delay, () => {
         store.setKinds?.(KINDS);
         store.apply(snapshot());
         if (!options.still && !options.empty) story();
