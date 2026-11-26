@@ -1220,39 +1220,39 @@ kbd { padding: 1px 6px; border-radius: var(--r-1); box-shadow: var(--e-1-in); co
 
 .stats-column { max-width: 980px; }
 .stats .head .segmented { flex: none; }
-.stat-figures { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
-.stat-figure { padding: 10px 12px; }
-.stat-figure > .tile-label + * { margin-top: 3px; }
+.stat-figures { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--s-4); }
+.stat-figure { padding: var(--s-4) var(--s-5); }
+.stat-figure > .tile-label + * { margin-top: var(--s-2); }
 .stat-meter { position: relative; height: 6px; border-radius: var(--r-pill); background: var(--fill-2); overflow: hidden; }
 .stat-meter-fill { position: absolute; inset: 0 auto 0 0; border-radius: var(--r-pill); background: var(--accent); }
 .stat-meter.reached .stat-meter-fill { background: var(--removed); }
 .stat-meter-pace { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--ink-2); }
-.stat-days { display: flex; align-items: flex-end; gap: 2px; height: 28px; }
+.stat-days { display: flex; align-items: flex-end; gap: var(--s-1); height: 28px; }
 .stat-day { flex: 1; display: flex; align-items: flex-end; height: 100%; }
 .stat-day-bar { width: 100%; min-height: 1px; border-radius: 2px 2px 0 0; background: var(--accent); opacity: 0.7; } /* a bar's top, drawn to its width */
 .stat-day.none .stat-day-bar { background: var(--ink-3); opacity: 0.3; }
 .stat-table-wrap { overflow-x: auto; }
 .stat-table { width: 100%; border-collapse: collapse; font-size: var(--t-caption); font-variant-numeric: tabular-nums; }
-.stat-table th, .stat-table td { padding: 6px 8px; border-bottom: 1px solid var(--line); text-align: right; white-space: nowrap; vertical-align: top; }
+.stat-table th, .stat-table td { padding: var(--s-3) var(--s-4); border-bottom: 1px solid var(--line); text-align: right; white-space: nowrap; vertical-align: top; }
 .stat-table th:first-child { text-align: left; white-space: normal; }
 .stat-table thead th { color: var(--ink-2); font-weight: var(--w-medium); }
 .stat-table tbody th { font-weight: var(--w-medium); }
 .stat-table tr.total th, .stat-table tr.total td { font-weight: var(--w-strong); }
-.stat-table tr.model th { padding-left: 22px; font-weight: var(--w-regular); color: var(--ink-2); }
+.stat-table tr.model th { padding-left: var(--s-7); font-weight: var(--w-regular); color: var(--ink-2); }
 .stat-note { display: block; color: var(--ink-3); font-size: var(--t-caption); font-weight: var(--w-regular); white-space: normal; }
-.stat-empty { color: var(--ink-3); font-size: var(--t-caption); margin: 6px 0; }
-.stat-none { margin: 6px 0; }
-.stat-weeks { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 8px; }
-.stat-week { display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 0; font-size: var(--t-caption); }
-.stat-week-bars { display: flex; align-items: flex-end; gap: 3px; height: 64px; width: 100%; justify-content: center; }
+.stat-empty { color: var(--ink-3); font-size: var(--t-caption); margin: var(--s-3) 0; }
+.stat-none { margin: var(--s-3) 0; }
+.stat-weeks { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: var(--s-4); }
+.stat-week { display: flex; flex-direction: column; align-items: center; gap: var(--s-1); min-width: 0; font-size: var(--t-caption); }
+.stat-week-bars { display: flex; align-items: flex-end; gap: var(--s-2); height: 64px; width: 100%; justify-content: center; }
 .stat-week-bar { width: 10px; min-height: 1px; border-radius: 2px 2px 0 0; } /* a bar's top, drawn to its width */
 .stat-week-bar.pass, .swatch.pass { background: var(--done); }
 .stat-week-bar.cost, .swatch.cost { background: var(--accent); }
 .stat-week-label { color: var(--ink-2); }
-.stat-legend { display: flex; align-items: center; gap: 6px; margin-top: 6px; color: var(--ink-3); font-size: var(--t-caption); }
-.swatch { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-left: 6px; } /* a legend's square */
-.stat-badge { margin-left: 8px; }
-.stat-compared + .stat-compared { margin-top: 10px; }
+.stat-legend { display: flex; align-items: center; gap: var(--s-3); margin-top: var(--s-3); color: var(--ink-3); font-size: var(--t-caption); }
+.swatch { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-left: var(--s-3); } /* a legend's square */
+.stat-badge { margin-left: var(--s-4); }
+.stat-compared + .stat-compared { margin-top: var(--s-4); }
 
 /* ---- Settings › Terminal, this browser's (views/termlook.js) ---- */
 
