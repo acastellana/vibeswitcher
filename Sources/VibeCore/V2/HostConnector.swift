@@ -106,10 +106,8 @@ public enum HostConnector {
     /// answered ok is refused unless its one socket listens on the address asked for, and on the port asked for (any,
     /// for 0). `timeout` bounds the whole call, the wait for the lock included. Throws as `connect` does.
     public static func web(_ request: HostWebListen.Request, over connector: Int32, timeout: TimeInterval) throws -> WebAnswer {
-        // Messages with edges: Linux's `SOCK_SEQPACKET` connector only (the Mac's is a stream; its node's H1 is its own step).
-        guard Platform.Sockets.connectorType == Platform.Sockets.seqpacket else {
-            return .refused("this system's connector carries no web request (a stream)")
-        }
+        // One message each way: Linux's `SOCK_SEQPACKET` keeps its edges, the Mac's stream frames it (the Mac's H1,
+        // `Platform.Sockets.sendConnectorMessage`/`receiveConnectorMessage`, ConnectorMessages+Darwin.swift).
         let deadline = Date().addingTimeInterval(timeout)
         let lock = locks.lock(for: connector)
         // A connection asked for meanwhile holds it up to its own patience: never longer than this call's.
@@ -118,7 +116,7 @@ public enum HostConnector {
         Platform.Sockets.noSigPipe(socket: connector)
         let bytes = HostWebListen.bytes(request)
         while true {
-            let sent = Platform.Sockets.send(bytes, with: [], over: connector)
+            let sent = Platform.Sockets.sendConnectorMessage(bytes, with: [], over: connector)
             if sent == bytes.count { break }
             if sent < 0, errno == EINTR { continue }
             guard sent < 0, errno == EAGAIN else { throw Failure.system("send", sent < 0 ? errno : EIO) }
@@ -126,7 +124,7 @@ public enum HostConnector {
         }
         while true {
             try wait(connector, for: Int16(POLLIN), until: deadline)
-            guard let got = Platform.Sockets.receive(over: connector, count: 512, room: 1) else {
+            guard let got = Platform.Sockets.receiveConnectorMessage(over: connector, count: 512, room: 1) else {
                 guard errno == EAGAIN || errno == EINTR else { throw Failure.system("receive", errno) }
                 continue
             }

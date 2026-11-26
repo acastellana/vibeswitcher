@@ -6,7 +6,7 @@ import VibeCore
 /// it while it stays on (across the server's restarts and the host's handovers, so no other process of the user can
 /// bind the port between two servers) and closes it when the server says the web went off. The server itself never
 /// binds then: a refusal is the web's state (`NodeWebListener.State.refused`), never a socket of its own instead.
-/// In-process tests, with no host, bind here (`direct`).
+/// In-process tests, with no host, bind here (`direct`); the server never does, on Linux or the Mac (`forServer`).
 public struct WebBind: Sendable {
     /// The socket for a place at an address and port (0: the kernel's pick, a scratch host's), listening, this
     /// process's to close; or why not.
@@ -27,12 +27,11 @@ public struct WebBind: Sendable {
     /// How long a question to the host waits: it answers on its one queue, and the server's queue waits meanwhile.
     public static let hostPatience: TimeInterval = 5
 
-    /// The server process's: the host's (`host`) where its connector carries web requests (Linux's `SOCK_SEQPACKET`);
-    /// on the Mac, whose connector is a stream, this process's (`direct`) until the Mac node's own H1 step, so its web
-    /// comes up as before. `connectorType`: `Platform.Sockets.connectorType` (a test's other).
-    public static func forServer(connector: Int32, connectorType: Int32 = Platform.Sockets.connectorType,
-                                 note: @escaping @Sendable (String) -> Void) -> WebBind {
-        connectorType == Platform.Sockets.seqpacket ? host(connector: connector, note: note) : direct
+    /// The server process's: always the host's (`host`), over its connector, on both systems: Linux's `SOCK_SEQPACKET`
+    /// connector, and the Mac's stream, whose web messages are framed (the Mac's H1, docs/process/v2-mac-tasks.md item
+    /// 9). Never `direct`: a server that gets no socket from its host has no web (`NodeWebListener.State.refused`).
+    public static func forServer(connector: Int32, note: @escaping @Sendable (String) -> Void) -> WebBind {
+        host(connector: connector, note: note)
     }
 
     /// From the session host, over the server's `connector` (`HostConnector.web`). `note`: the server's log.

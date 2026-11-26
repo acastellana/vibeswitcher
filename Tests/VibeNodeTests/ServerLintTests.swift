@@ -98,8 +98,8 @@ struct ServerLintTests {
 
     /// H1 (docs/process/v2-h1-plan.md): the server binds no web socket of its own; it takes the session host's
     /// (`WebBind.host`, over its connector). A listening socket is made in only two places, each for a process with no
-    /// host (an in-process test, the Mac's server until its H1 step): `WebBind.direct` and `WebListener.start` without a
-    /// `bindWith`; and the server's start hands its web `WebBind.forServer`, the host's form on Linux.
+    /// host (an in-process test): `WebBind.direct` and `WebListener.start` without a `bindWith`; and the server's start
+    /// hands its web `WebBind.forServer`, the host's form on both systems (the Mac's H1, v2-mac-tasks.md item 9).
     @Test func theServerBindsNoWebSocketOfItsOwn() throws {
         var found: [String] = []
         let allowed: Set<String> = ["Sources/VibeNode/Web/WebBind.swift", "Sources/VibeNode/Web/WebListener.swift"]

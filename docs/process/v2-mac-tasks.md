@@ -253,14 +253,44 @@ or decided. Done on Linux, tested on both systems (`ApprovalJudgmentTests`, `App
      (`stop` the live sessions it ends).
 8. **(LOW, done in `6f367200`, `03f406c9`)** A replayed action id answered before any dialog; the command line's
    approval rule per connection, so its own confirmations (`status --ack`) always ask the code.
-9. **(BEFORE THE MAC NODE STARTS) The Mac's own H1.** On Linux the host holds the web page's listening sockets (H1, merged
-   2026-11-21); on the Mac, with its stream connector, the server binds them itself (`WebBind.forServer` gives
-   `.direct`, as before H1), so a process of the user's can take the port in the gap between one server and the next
-   and serve its own page to a reconnecting browser. Owed: the host holds the web socket there too, handed to its
-   server with `SCM_RIGHTS` over the stream connector (with framing for it), or by launchd socket activation in the
-   LaunchAgent (`NodeAgent`'s `Sockets` key). Until then the Mac node keeps `web` refused, or behind an explicit opt-in
-   that says the port can be squatted. **Real Mac**: whichever is built, that the server gets the descriptor and that a
-   second process can't bind the port while the host holds it.
+9. **(BEFORE THE MAC NODE STARTS; built 2026-11-25, `v2-mac-web-port`, proven on a real Mac) The Mac's own H1.** On
+   Linux the host holds the web page's listening sockets (H1, merged 2026-11-21); the Mac's server bound them itself
+   (`WebBind.forServer` gave `.direct` on its stream connector), so a process of the user's could take the port in the
+   gap between one server and the next. **Built:** the host holds the web socket on the Mac too and hands it to its
+   server with `SCM_RIGHTS` over the stream connector, the web messages framed (`Platform.Sockets.sendConnectorMessage`,
+   `receiveConnectorMessage`, `receiveConnectorRequest`: Linux's are the `SOCK_SEQPACKET` calls as before; on the Mac a
+   byte other than `w` is a one-byte message, as the connection's request and answer were, and a message starting with
+   `w` runs to its newline, its descriptor on its first byte, read a byte at a time; a message cut, too long or with a
+   descriptor on a later byte fails, and the host ends the connector). A web request is the server child's on the Mac
+   when it comes on the child's own connector from the pid its first request named running the code the host loaded
+   (no token is read at the spawn there). `WebBind.forServer` is always the host's: the server never binds the web.
+   **Route:** this, not launchd's `Sockets` in `NodeAgent`: launchd binds at the job's load (shape (b), where H1 built
+   (a): the port free before `web` and after a revoke, LW-D3), a plist names no kernel-picked port, plugin page or
+   tailnet address, and a scratch host isn't a launchd job, so the real path couldn't be tested (launchd's own socket
+   options not measured). **What a real Mac proved** (2026-11-25). `MacWebHeldByHostTests`, on a scratch host with its
+   server child: the server gets the host's socket over the stream connector and serves the page on it; a bind of
+   127.0.0.1:P with `SO_REUSEADDR` is refused while the server runs, once it is killed (before or as the host starts the
+   next) and once the next runs; a page's request made between two servers
+   waits in the host's socket and the next server answers it on the same port; nothing reaches it on another address
+   of the Mac; a port another process already holds (with `SO_REUSEPORT` or without) refuses the web with "127.0.0.1:P
+   couldn't be bound: …" in `web.open`'s reply, `status` and the host's log, and nothing is bound elsewhere (item 32's
+   last line: the web's start fails, not the host's, which binds on demand). A C probe on the same Mac, against a
+   standalone holder of 127.0.0.1:P (`SO_REUSEADDR`, no `SO_REUSEPORT`): no bind of 127.0.0.1:P or
+   `::ffff:127.0.0.1`:P succeeds with `SO_REUSEADDR`, `SO_REUSEPORT`, both or neither; a holder with `SO_REUSEPORT` loses
+   127.0.0.1's connections to a squatter with it. The Mac's `AF_UNIX` has no `SOCK_SEQPACKET` (`EPROTONOSUPPORT`), and a stream read runs on past a
+   descriptor's message, hence the framing. **The Mac's residual** (as Linux's `SO_REUSEADDR` one, item 32): a socket
+   on the wildcard (`0.0.0.0` or `[::]`, with `SO_REUSEADDR` or `SO_REUSEPORT`) or on `[::1]` binds beside the host's
+   (BSD's rule; the host dropping `SO_REUSEADDR` changes nothing), but a connection to 127.0.0.1, the page's one name,
+   still reaches the node (`aWildcardSocketBesideTheHostsNeverTakesTheLoopbackPage`); a host holding with `SO_REUSEPORT`
+   would lose its connections to a squatter, so it never sets it. **Unproven:** a handover on the Mac with the web on: its
+   state carries the held sockets by the same code as Linux's (`State.webListeners`, `ServerChild.adopt`), and its
+   server child isn't carried there (the new image starts the next, which asks again), but no Mac handover was run
+   here; the tailnet's place on the Mac; the plugin page's place (it now goes through the host on the Mac too, and no Mac
+   test asks for it); a user's node started by launchd (`web` stays refused until the Mac node starts: `NodeSystem.macUnbuilt`,
+   `HostImages.isCheckedMacNode` unchanged); Linux's run of this change: the connector calls are Linux's own by
+   reading, but the new and changed cross-platform tests (`ConnectorMessagesTests`, `HostConnectorTests`' web asks, whose
+   stand-in host now sends a connection's answer with `sendDescriptor`, `HostWebListenTests`) were never compiled there
+   (CI's).
 
 10. **(BLOCKER before approvalMeasured, design; the review of 2026-11-21, its fifth finding)** A fake server passes the
    command line's server check on the Mac with no race. Every anchor the check uses is the user's to write: the job's
