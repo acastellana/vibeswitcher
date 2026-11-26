@@ -208,6 +208,15 @@ struct DeviceProofTests {
         #expect(Self.refusal(Self.checkTerminal(transplanted)) == .badSignature)
         let terminalSignature = Self.sign(DeviceProof.signedBytes(stream: 3, seq: 1, kind: .input, payload: body, on: Self.conn))
         #expect(Self.refusal(Self.check(DeviceProof.textFrame(body: body, signature: terminalSignature))) == .badSignature)
+        // Each kind's own label: the same parts signed under the other kind's label don't check.
+        let frameLabel = Array("vibeswitcher-frame-v1\n".utf8), termLabel = Array("vibeswitcher-term-v1\n".utf8)
+        let bound = Array("\(Self.localhost)\n\(Self.conn.connText)\n".utf8)
+        let terminalParts = bound + [0, 0, 0, 3] + [0, 0, 0, 0, 0, 0, 0, 1] + [1] + Array("ls\r".utf8)
+        #expect(Self.checkTerminal(DeviceProof.terminalFrame(stream: 3, seq: 1, kind: .input, payload: Array("ls\r".utf8), signature: Self.sign(termLabel + terminalParts)))
+                == .success(.init(stream: 3, seq: 1, kind: .input, payload: Array("ls\r".utf8))))
+        #expect(Self.refusal(Self.checkTerminal(DeviceProof.terminalFrame(stream: 3, seq: 1, kind: .input, payload: Array("ls\r".utf8), signature: Self.sign(frameLabel + terminalParts)))) == .badSignature)
+        #expect(Self.check(DeviceProof.textFrame(body: body, signature: Self.sign(frameLabel + bound + body))) == .success(.init(seq: 1, body: body)))
+        #expect(Self.refusal(Self.check(DeviceProof.textFrame(body: body, signature: Self.sign(termLabel + bound + body)))) == .badSignature)
         // The old unsigned terminal types aren't type 6.
         for type: UInt8 in [1, 3, 0, 7] {
             var old = input
