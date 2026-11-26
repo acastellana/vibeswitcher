@@ -681,6 +681,9 @@ struct MacSealFixRoundTests {
         let planted = ConfigSeal.encode(try #require(ConfigSeal.keyHashes(bin)))
         let said = ConfigSeal.changedKeys(from: update, to: planted) ?? ""
         #expect(said.contains("git added") && !said.contains("claude"), "\(said)")
+        // A folder padded past the cap names nothing (no key each in the vault's record); the hash still reads it all.
+        let many = (0...LinuxSealList.maxListingKeys).map { (top: "e\($0)", line: "f \($0)") }
+        #expect(LinuxSealList.listingKeys(many).isEmpty && LinuxSealList.listingKeys(Array(many.dropLast())).count == LinuxSealList.maxListingKeys)
         // One walk for both: the hash `hashes` keeps is the fingerprint's.
         #expect(ConfigSeal.hashes(of: [bin])[ConfigSeal.keyPrefix + bin.name] == ConfigSeal.fingerprint(bin))
     }

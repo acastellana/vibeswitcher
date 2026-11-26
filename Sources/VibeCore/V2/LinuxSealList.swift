@@ -206,13 +206,19 @@ public enum LinuxSealList {
     /// The per-entry hashes of a listing, for the card (`ConfigSeal.keyHashes`; the review's R8): each top-level entry
     /// by its name, its lines and those of everything under it hashed as one (16 hex digits), and the folder's own line
     /// as "."; so a card says "git added" or "claude changed, 2.1.333 added", one key per top-level entry whatever the
-    /// tree's size. `parts`: `listingParts`', the lines the hash (`listingHash`) is of.
+    /// tree's size. `parts`: `listingParts`', the lines the hash (`listingHash`) is of. Past `maxListingKeys` top-level
+    /// entries, none (the card names nothing, as before; the hash is whole either way), so a folder padded with entries
+    /// doesn't grow the vault's record by one key each.
     static func listingKeys(_ parts: [(top: String, line: String)]) -> [String: String] {
         var grouped: [String: SHA256] = [:]
         var order: [String] = []
         for part in parts {
             let key = part.top.isEmpty ? "." : part.top
-            if grouped[key] == nil { order.append(key); grouped[key] = SHA256() }
+            if grouped[key] == nil {
+                guard order.count < maxListingKeys else { return [:] }
+                order.append(key)
+                grouped[key] = SHA256()
+            }
             grouped[key]?.update(data: Data((part.line + "\n").utf8))
         }
         var keys: [String: String] = [:]
@@ -222,6 +228,9 @@ public enum LinuxSealList {
         }
         return keys
     }
+
+    /// The most top-level entries a listing's card names (`listingKeys`): Homebrew's `bin`, the largest row here, has 1,213.
+    static let maxListingKeys = 4096
 
     /// `listingLines`' lines, each with the top-level entry it's under ("" for the folder's own line); nil when nothing
     /// is at `path`.
