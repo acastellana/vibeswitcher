@@ -66,13 +66,14 @@ struct ConfigSealTwinTests: LeadTeamFixture {
     /// `~/.zlogin`, in an interactive (login) shell of the scratch home.
     @Test func zshRunsACompiledTwinInPlaceOfItsStartupFile() throws {
         let marker = temp.url("marker").path
+        try FileManager.default.createDirectory(atPath: marker, withIntermediateDirectories: true)
         try write("true\n", home + "/.zshrc")
         try age(home + "/.zshrc")
-        try compileTwin(of: ".zshrc", "print -r zshrc > '\(marker)-zshrc'\n")
-        try compileTwin(of: ".zlogin", "print -r zlogin > '\(marker)-zlogin'\n")
+        try compileTwin(of: ".zshrc", "print -r zshrc > '\(marker)/zshrc'\n")
+        try compileTwin(of: ".zlogin", "print -r zlogin > '\(marker)/zlogin'\n")
         try run(["/bin/zsh", "-l", "-i", "-c", "true"])
-        #expect(FileManager.default.fileExists(atPath: marker + "-zshrc"))
-        #expect(FileManager.default.fileExists(atPath: marker + "-zlogin"))
+        #expect(FileManager.default.fileExists(atPath: marker + "/zshrc"))
+        #expect(FileManager.default.fileExists(atPath: marker + "/zlogin"))
     }
 
     /// A twin written beside a sealed startup file holds a change, named in plain words, until the app accepts it.
