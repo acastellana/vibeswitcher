@@ -51,6 +51,14 @@ if isMacNode, let startRefusal { notStarted(startRefusal) }
 // renders it, for the helpers that take the node's values (its folders, its server child).
 let checkedStart = isMacNode ? HostImages.takeCheckedMacNode() : nil
 let nodeArguments = checkedStart.map { Array(CommandLine.arguments.prefix(1)) + $0.commandLine.rendered } ?? arguments
+// A scratch host shaped as a checked node for its sessions' tests (`--test-checked-shape HOME`, V2/CheckedSessions.swift):
+// reset as one is, HOME the given scratch home; refused for the user's host, a node and the node's lock.
+var testShapeHome: String?
+switch CheckedSessions.takeTestShape(arguments: arguments, isMacNode: isMacNode, lock: value(after: "--lock"), usersLock: VibePaths.hostLock.path) {
+case .failure(let why)?: notStarted(why.description)
+case .success(let home)?: testShapeHome = home
+case nil: break
+}
 
 VibePaths.ensurePrivateDirectories()
 let environment = ProcessInfo.processInfo.environment

@@ -35,7 +35,8 @@ struct MacCheckedReCheckTests {
                           "Sources/VibeHost/V2/TestAppPrincipal.swift", "Sources/VibeHost/V2/VaultFirstLook.swift", "Sources/VibeHost/V2/ProjectAllowList.swift",
                           "Sources/VibeHost/HostHandover.swift", "Sources/VibeHost/V2/MacHandoverKeeper.swift", "Sources/VibeHost/V2/MacHandoverSwitch.swift",
                           "Sources/VibeHost/HostStart.swift", "Sources/VibeHost/V2/EgressProxy.swift", "Sources/VibeHost/PTYSpawn.swift",
-                          "Sources/VibeHost/SessionParser.swift", "Sources/VibeCore/LeadVaultAppProof.swift"]
+                          "Sources/VibeHost/SessionParser.swift", "Sources/VibeCore/LeadVaultAppProof.swift",
+                          "Sources/VibeHost/V2/CheckedSessions.swift"]
 
     /// Every flag those sources know, classified. `grammar`: a checked node's own; `dispatch`: a mode `main` dispatches
     /// before the parser, a separate program that takes no node state; every other: refused for a checked node.
@@ -49,7 +50,7 @@ struct MacCheckedReCheckTests {
         "--handover-test-traced", "--hold-first-look", "--host-connector", "--host-pid", "--host-socket", "--housekeeping", "--idle-exit",
         "--image-path", "--install-root", "--launcher-test-hold", "--log", "--parser-stall-limit", "--parser-test-hooks", "--root",
         "--scrollback", "--server-arg", "--server-test-replace-hold", "--socket", "--lock", "--test-app-connector", "--test-app-pid", "--test-inotify-census",
-        "--test-no-inotify", "--test-stays-dumpable", "--test-user-seal-life"]
+        "--test-no-inotify", "--test-stays-dumpable", "--test-user-seal-life", "--test-checked-shape"]
 
     /// The flags in `scanned`, and `HostHardening.testFlags`'s.
     static func flagsInTheSources() throws -> Set<String> {

@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import VibeCore
+@testable import VibeHost
 @testable import VibeNode
 
 /// The Mac's LaunchAgent as data (`NodeAgent`, the node on the Mac's step 5), on both systems: its property list from
@@ -21,8 +22,9 @@ struct NodeAgentTests {
         #expect(read["KeepAlive"] as? Bool == false && read["RunAtLoad"] as? Bool == false)
         #expect(read["LimitLoadToSessionType"] as? String == "Aqua" && read["ProcessType"] as? String == "Interactive")
         #expect(read["StandardErrorPath"] as? String == Self.root + "/node.log")
-        let environment = try #require(read["EnvironmentVariables"] as? [String: String])
-        #expect(environment["HOME"] == "/Users/u" && environment["PATH"]?.hasPrefix("/usr/bin:/bin:") == true)
+        // The one variable that acts: the Swift runtime reads it at load, before the checked start's reset (which rebuilds
+        // HOME and PATH itself).
+        #expect(read["EnvironmentVariables"] as? [String: String] == ["SWIFT_BACKTRACE": "enable=no"])
         #expect(NodeAgent.check(data, inputs: Self.inputs, nodeRoot: Self.root, atLogin: false) == nil)
         // At login: RunAtLoad, and the file for one isn't the other's.
         let atLogin = try NodeAgent.plist(Self.inputs, nodeRoot: Self.root, atLogin: true).get()
@@ -79,23 +81,44 @@ struct NodeAgentTests {
             \tpid = 4242
             }
             """
-        #expect(NodeAgent.printed(output) == .init(pid: 4242, program: "/Users/u/.vibeswitcher/v2/node/builds/\(Self.commit)/bin/vibeswitcher-host"))
+        #expect(NodeAgent.printed(output) == .init(pid: 4242, program: "/Users/u/.vibeswitcher/v2/node/builds/\(Self.commit)/bin/vibeswitcher-host",
+                                                   state: "running", path: "/Users/u/Library/LaunchAgents/dev.vibeswitcher.node.plist"))
         #expect(NodeAgent.printed("gui/501/dev.vibeswitcher.node = {\n\tstate = not running\n}").pid == nil)
     }
 
-    /// What `vibeswitcher agent-plist` prints for the Mac's install: the build's agent with the account's folders, its
-    /// root the node's, no start at login; refused when the folders aren't there, or for a commit the unit can't hold.
-    @Test func theInstallsAgentIsTheInstalledBuildsWithTheAccountsFolders() throws {
-        let tools: (String) -> Result<(swiftBin: String, nodeBin: String), StartRefusal> = { _ in .success((Self.inputs.swiftBin, Self.inputs.nodeBin)) }
-        let data = try NodeAgent.installed(prefix: Self.inputs.prefix, commit: Self.commit, home: "/Users/u", folders: tools).get()
+    /// What `vibeswitcher agent-plist` prints for the Mac's install: the build's agent, its root the node's, no start at
+    /// login; refused for a commit the unit can't hold.
+    @Test func theInstallsAgentIsTheInstalledBuilds() throws {
+        let data = try NodeAgent.installed(prefix: Self.inputs.prefix, commit: Self.commit, home: "/Users/u").get()
         let root = NodeFolders.nodeRoot(accountHome: "/Users/u")
         #expect(NodeAgent.check(data, inputs: Self.inputs, nodeRoot: root, atLogin: false) == nil)
-        let none: (String) -> Result<(swiftBin: String, nodeBin: String), StartRefusal> = { _ in .failure(StartRefusal("no swift folder")) }
-        if case .failure(let refusal) = NodeAgent.installed(prefix: Self.inputs.prefix, commit: Self.commit, home: "/Users/u", folders: none) {
-            #expect(refusal.text == "no swift folder")
-        } else { Issue.record("made with no folders") }
-        if case .success = NodeAgent.installed(prefix: Self.inputs.prefix, commit: "current", home: "/Users/u", folders: tools) {
+        if case .success = NodeAgent.installed(prefix: Self.inputs.prefix, commit: "current", home: "/Users/u") {
             Issue.record("made for a commit that isn't one")
         }
+    }
+
+    /// The plist's program and arguments are exactly a checked node's command line: the host of the build, then what
+    /// `HostImages.CheckedCommandLine` parses into that build's folder and server and renders back the same (the design's
+    /// "The LaunchAgent", its table). The real plist runs only as data here: a scratch host isn't a checked node.
+    @Test func theProgramArgumentsAreACheckedNodesCommandLine() throws {
+        let job = try NodeAgent.Job.node(prefix: Self.inputs.prefix, commit: Self.commit, home: "/Users/u", dataRoot: Self.root, atLogin: false).get()
+        let folder = Self.inputs.prefix + "/" + Self.commit
+        #expect(job.programArguments.first == folder + "/bin/vibeswitcher-host")
+        let line = try HostImages.CheckedCommandLine.parse(job.programArguments).get()
+        #expect(line == HostImages.CheckedCommandLine(nodeRoot: folder, server: folder + "/bin/vibeswitcher-server", keeper: nil))
+        #expect(Array(job.programArguments.dropFirst()) == line.rendered)
+        #expect(job.label == NodeAgent.label && job.environment == ["SWIFT_BACKTRACE": "enable=no"] && job.standardErrorPath == Self.root + "/node.log")
+    }
+
+    /// What `launchctl print` says of a job, as this Mac measured it (the design's "The LaunchAgent", measured first):
+    /// before a run, running, and after its process was killed or exited.
+    @Test func printsStateRunsAndLastExit() {
+        let before = "gui/501/x = {\n\tstate = not running\n\truns = 0\n\tlast exit code = (never exited)\n\tpath = /p/x.plist\n}"
+        #expect(NodeAgent.printed(before) == .init(pid: nil, program: nil, state: "not running", runs: 0, lastExit: nil, path: "/p/x.plist"))
+        let running = "gui/501/x = {\n\tstate = running\n\tprogram = /bin/sh\n\truns = 1\n\tpid = 52708\n\t\tstate = active\n}"
+        #expect(NodeAgent.printed(running) == .init(pid: 52708, program: "/bin/sh", state: "running", runs: 1))
+        let killed = "gui/501/x = {\n\tstate = not running\n\truns = 1\n\tlast terminating signal = Killed: 9\n}"
+        #expect(NodeAgent.printed(killed).lastExit == "signal Killed: 9")
+        #expect(NodeAgent.printed("x = {\n\tlast exit code = 1\n}").lastExit == "exit code 1")
     }
 }
