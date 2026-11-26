@@ -565,8 +565,8 @@ No `Sockets` (the host holds the web port, item 9), no `WatchPaths`, `KeepAlive`
 `UserName` or `Program`: any key start doesn't write is a refusal (`NodeAgent.check`).
 
 **Who writes it, and a changed or planted one.** `start` writes it when there is none: the bytes made for this build
-into a new file in the plist's folder (`O_EXCL`, the user's, `0644` as LaunchAgents' are) renamed over nothing, then
-read back and checked. When there is one, `start` reads it (`O_NOFOLLOW`, a regular file, at most 64 KiB) and it must
+as a new file at the plist's path (`open` with `O_EXCL` and `O_NOFOLLOW`, the user's, `0644` as LaunchAgents' are),
+then read back and checked (a write cut short leaves a file the next `start` refuses, naming why). When there is one, `start` reads it (`O_NOFOLLOW`, a regular file, at most 64 KiB) and it must
 be exactly what `start` would write for this build (`NodeAgent.check`: every key and value, nothing added); otherwise
 it refuses, naming the key, and loads nothing, the file left as it is (the install of another build writes its own,
 step 7). Between the check and `bootstrap` the path is read again by launchd: a file swapped in that gap is a program
