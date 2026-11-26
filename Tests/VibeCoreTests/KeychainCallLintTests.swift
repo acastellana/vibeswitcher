@@ -327,11 +327,10 @@ struct KeychainCallLintTests {
         let bin = folder.appendingPathComponent("bin")
         try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
         let log = folder.appendingPathComponent("security.log")
-        try """
+        try installScript("""
             #!/bin/bash
             printf '%s|%s|%s\\n' "$HOME" "$CFFIXED_USER_HOME" "$*" >> '\(log.path)'
-            """.write(to: bin.appendingPathComponent("security"), atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: bin.appendingPathComponent("security").path)
+            """, at: bin.appendingPathComponent("security"))
         // od and tr from /usr/bin, where the real security is: linked here alone, so PATH needs only this and /bin.
         for tool in ["od", "tr"] {
             try FileManager.default.createSymbolicLink(atPath: bin.appendingPathComponent(tool).path, withDestinationPath: "/usr/bin/" + tool)
