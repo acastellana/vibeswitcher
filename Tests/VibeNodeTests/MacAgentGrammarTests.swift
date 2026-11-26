@@ -36,6 +36,12 @@ struct MacAgentGrammarTests {
         #expect(loaded.pid == nil && loaded.state == "not running" && loaded.runs == 0)
         let killed = try placed(MacAgentTests.printed(job, place: place, pid: nil, fixture: PrintFixtures.killed), job, path).get()
         #expect(killed.pid == nil && killed.lastExit == "signal Killed: 9" && killed.runs == 1)
+        // The checked start's own refusal (exit 78) prints with its name (measured: `78: EX_CONFIG`); 1 bare.
+        for line in ["last exit code = 78: EX_CONFIG", "last exit code = 1", "last terminating signal = Terminated: 15"] {
+            let text = MacAgentTests.printed(job, place: place, pid: nil, fixture: PrintFixtures.killed)
+                .replacingOccurrences(of: "last terminating signal = Killed: 9", with: line)
+            #expect((try? placed(text, job, path).get()) != nil, "\(line) refused")
+        }
         var atLogin = job
         atLogin.atLogin = true
         #expect((try? placed(MacAgentTests.printed(atLogin, place: place, pid: 4242), atLogin, path).get()) != nil)
@@ -166,6 +172,25 @@ struct MacAgentGrammarTests {
         for (key, value) in unshown {
             if case .failure(let why) = try printOf(key, value) { Issue.record("\(key): refused (\(why.description)), measured as printing nothing") }
         }
+    }
+
+    /// A loaded job of the label from the earlier installer's plist (with `HOME` and `PATH`) at the agent's path:
+    /// start and stop refuse it, leave it loaded, and say what to do. Red before: the refusal gave no way forward.
+    @Test(.enabled(if: Platform.CodeIdentity.isAvailable, "the Mac's launchd"))
+    func aLoadedJobFromTheEarlierInstallerIsToldWhatToDo() async throws {
+        let agent = try ScratchAgent(scratch)
+        defer { agent.tearDown() }
+        var values = NodeAgent.dictionary(agent.job)
+        values["EnvironmentVariables"] = agent.job.environment.merging(["HOME": agent.dir + "/home", "PATH": "/usr/bin:/bin:/x/swift/bin"]) { $1 }
+        try FileManager.default.createDirectory(atPath: agent.place.plistFolder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o755])
+        try PropertyListSerialization.data(fromPropertyList: values, format: .xml, options: 0).write(to: URL(fileURLWithPath: agent.place.plistPath))
+        #expect(agent.launchctl(["bootstrap", agent.place.domain, agent.place.plistPath])?.status == 0)
+        for (what, result) in [("start", await offPool { agent.agent.start(agent.job, build: agent.build, folder: agent.folder) }),
+                               ("stop", await offPool { agent.agent.stop() })] {
+            guard case .failure(let why) = result else { Issue.record("\(what) took it"); continue }
+            #expect(why.text.contains("launchctl bootout \(agent.place.target)") && why.text.contains("vibeswitcher start"), "\(what): \(why.text)")
+        }
+        #expect(agent.printed() != nil, "it wasn't left loaded")
     }
 
     // MARK: Notes 6 and 7

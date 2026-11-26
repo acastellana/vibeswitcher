@@ -243,6 +243,7 @@ public struct MacAgent {
     /// nothing is stopped); with none, what ends said and the typed code asked, then the bootout; then the wait until no
     /// job, none of those processes and no socket is left, or what is left named.
     public func stop() -> Result<String, StartRefusal> {
+        if notLoaded() { return .failure(StartRefusal("the node isn't running: no job labelled \(place.label) is loaded", exitCode: 69)) }
         let builds: [NodePins.Build]
         switch steps.pins() {
         case .failure(let why): return .failure(StartRefusal("the node's record can't be read: \(why.description); nothing was stopped", exitCode: 1))
@@ -323,6 +324,7 @@ public struct MacAgent {
     /// `status`, from the host itself: not loaded or not running (69, with launchd's last exit), a job of the label that
     /// isn't the node's (77), or the job's host checked as `node` checks it.
     public func status() -> Result<String, StartRefusal> {
+        if notLoaded() { return .failure(StartRefusal("the node isn't running: no job labelled \(place.label) is loaded", exitCode: 69)) }
         let builds: [NodePins.Build]
         switch steps.pins() {
         case .failure(let why): return .failure(StartRefusal("the node's record can't be read: \(why.description)", exitCode: 1))
@@ -497,7 +499,10 @@ public struct MacAgent {
         guard let ran = steps.launchctl(["print", place.target]) else { return .notOurs("launchctl print couldn't run") }
         if ran.status == 113 { return .notLoaded }
         guard ran.status == 0 else { return .notOurs("launchctl print exited \(ran.status)") }
-        guard !candidates.isEmpty else { return .notOurs("the agent's plist isn't the one start writes for any build the node's record pins") }
+        guard !candidates.isEmpty else {
+            return .notOurs("the agent's plist isn't the one start writes for any build the node's record pins (if it is an earlier install's or "
+                            + "another build's: `launchctl bootout \(place.target)`, remove \(ConfigSeal.inert(place.plistPath, limit: .max)), and run `vibeswitcher start` again)")
+        }
         let path = Self.canonicalPlistPath(place)
         var first: String?
         for job in candidates {

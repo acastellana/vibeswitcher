@@ -423,7 +423,14 @@ extension NodeAgent {
             }
         }
         // One last-exit line.
-        if let code = value("last exit code", { $0 == "(never exited)" || digits($0) }) {
+        // `(never exited)`, a number, or a number and its name (`78: EX_CONFIG`, measured).
+        func exitCode(_ text: String) -> Bool {
+            if text == "(never exited)" || digits(text) { return true }
+            let parts = text.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
+            return parts.count == 2 && digits(String(parts[0])) && parts[1].hasPrefix(" ") && parts[1].count > 1 && parts[1].count <= 40
+                && parts[1].dropFirst().allSatisfy { $0 == "_" || ($0.isASCII && ($0.isUppercase || $0.isNumber)) }
+        }
+        if let code = value("last exit code", exitCode) {
             found.lastExit = code == "(never exited)" ? nil : "exit code \(code)"
         } else if let signal = value("last terminating signal", { !$0.isEmpty && $0.count <= 80 }) {
             found.lastExit = "signal \(signal)"
