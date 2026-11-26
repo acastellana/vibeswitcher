@@ -32,6 +32,8 @@ struct KeychainCallLintTests {
          "a line BriefingKey.parse is given, and refuses: nothing runs it"),
         ("Tests/VibeCoreTests/AppUpdateTests.swift", "== \"security unlock-keychain '\\(keychain.path)' && scripts/build-app.sh --install\"",
          "the command AppUpdate hands the user to run in a real terminal, compared as text: nothing runs it"),
+        ("scripts/install-node-mac.sh", "token=$(/usr/bin/security find-generic-password -s gh:github.com -w 2> /dev/null)",
+         "the Mac node's installer, run by the user in their own shell at the keyboard, reads gh's own item; never run by a test, a team session or a script the team runs (the CI dry run passes --test-origin and --test-ci-answer, which skip it)"),
         // scripts/test-signing.sh, the signing scripts' own check: each line, with why it can't ask.
         ("scripts/test-signing.sh", "CFFIXED_USER_HOME=\"$work/home\" security delete-keychain \"$kc\"",
          "test-signing.sh --build, run by hand on a scratch HOME (`run` sets HOME and CFFIXED_USER_HOME): deletes its own scratch keychains by path"),
