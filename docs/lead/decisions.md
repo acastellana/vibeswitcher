@@ -483,3 +483,7 @@ The user chose 'Not now' while this is one Mac and their own sessions. The prote
 
 The user asked for the list of what is missing for v2 and then said to complete it. Most of it needs no decision from them, and the memory of their preference is to carry agreed directions through without per-step approvals.
 
+## 2026-11-26 18:49:08 Standing instruction from the user (2026-11-26 evening): proceed with everything on the v2 completion list until it is finished, without checking in per step; and whenever something needs the user to run a command, give it cleanly in the chat: the exact command, alone in a code block, with one line saying what it does and what to expect. Still the user's: pushes, anything with sudo or a dialog, the keyboard measurement session, the real-device look, the signing and hooks decisions, and the Mac node's switch-on.
+
+The user's words: "I want you to proceed with all of this until we're finished. And I want you to tell me if there's any command that you need me to run, just put it here very cleanly." Matches their standing preference for autonomy once a direction is agreed.
+

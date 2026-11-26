@@ -4804,3 +4804,16 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-26 18:22 Automatically (auto_advance): Started the audit of a-vault-that-didn at 391c119a (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
 - 2026-11-26 18:22 Automatically (auto_advance): Started the audit of the-command-guard-fails at f840ad64 (Its review is audit).
 - 2026-11-26 18:27 Audit of a-vault-that-didn: complete, clean, round 1: 2 Nit open
+- 2026-11-26 18:33 Audit of the-command-guard-fails: incomplete, clean, round 1: 2 Important open, 1 Nit open
+- 2026-11-26 18:33 Automatically (auto_advance): Sent the-command-guard-fails's worker the open Important findings the-command-guard-fails:F1, the-command-guard-fails:F2 from its audit at f840ad64.
+- 2026-11-26 18:46 The worker on the-command-guard-fails answered findings: the-command-guard-fails:F1 fixed at 5e02c1f0: Fixed in 5e02c1f0. The scanner keeps a `[[ … ]]` test as one command once `[[` is the command's own first word (after keywords). Up to `]]`, its `&&`, `||` and line breaks separate operands instead of ending the command, so no operand is read as a program. All seven of the audit's lines are in RefusedGitProgramNameTests.everyday and pass; without the fix those tests fail with 44 issues. `[[` as an argument (`echo [[ && /usr/bin/gi? push`) and whateve…
+- 2026-11-26 18:46 Started a worker on v2-device-keys-slice-3
+- 2026-11-26 18:46 Started a worker on v2-on-the-mac-7
+- 2026-11-26 18:46 Planned review-v2-s-new: Review v2's New project kind (branch v2-project-new: `project.new`, it creates files for the user) as an independent security reviewer: report only
+- 2026-11-26 18:46 Started a worker on review-v2-s-new
+- 2026-11-26 18:47 Automatically (auto_advance): Started the audit of the-command-guard-fails at 5e02c1f0 (Its review is audit).
+- 2026-11-26 18:47 Sent the-command-guard-fails's audit contract v3 (it had v2)
+- 2026-11-26 18:47 Sent the-command-guard-fails's worker contract v3 (it had v2)
+- 2026-11-26 18:47 Pipeline held: a-vault-that-didn ready to merge with none landing; cause: a merge in progress
+- 2026-11-26 18:49 Planned v2-on-the-mac-8: v2 on the Mac: the keyboard session as one clean runbook (the measurement scripts read, checked safe to run at the user's keyboard, and written as exact commands in order)
+- 2026-11-26 18:50 Merged a-vault-that-didn: A vault that didn't open keeps its old sealed file until the user has answered (no overwrite under the current key before the alert) (build dc707f3966c1)
