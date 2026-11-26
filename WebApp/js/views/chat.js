@@ -24,11 +24,11 @@
 import * as kit from '../kit.js';
 import { h, keyed, setText, setClass, framed } from '../dom.js';
 import { agentMark, statusMark, setMark, icon } from '../marks.js';
-import { since, short, clock, plural, tilde, stateOf, AGENTS, STATES, KEY } from '../words.js';
+import { since, short, clock, plural, tilde, stateOf, dayWords, AGENTS, STATES, KEY } from '../words.js';
 import { markdownNodes, diffView, codeBlock } from '../text.js';
 import { copyButton } from '../copying.js';
 import { runnable } from '../runnable.js';
-import { summaryOf, newSince, sinceSummary, chatMarkdown, exportName, findIn, fold, openingPlace } from '../chatops.js';
+import { summaryOf, newSince, sinceSummary, chatMarkdown, exportName, findIn, fold, openingPlace, withDays } from '../chatops.js';
 import { imageLoader } from '../images.js';
 import { questionStack, askCard } from './cards.js';
 import { draftBox, promptCard, queuedStrip, drivable } from './drive.js';
@@ -54,7 +54,9 @@ const OVERSCAN = 1.5;
 // Rows drawn at least, from the end, when the chat opens.
 const FIRST_ROWS = 30;
 // A row's height until it is measured, by type.
-const ESTIMATE = { prompt: 62, reply: 96, tools: 30, team: 70, ask: 160, allDone: 140 };
+const ESTIMATE = { prompt: 62, reply: 96, tools: 30, team: 70, ask: 160, allDone: 140, day: 48 };
+// The kinds of item drawn as a row of their own: a day line goes before one of these only (`withDays`).
+const DRAWN = new Set(['prompt', 'reply', 'tools', 'team', 'ask', 'allDone']);
 
 // The last item seen at each chat's end, by session id, in this browser: the newest `SEEN_KEPT` sessions.
 const SEEN = 'vibeswitcher.seen';
@@ -352,6 +354,12 @@ function makeRow(view, first) {
       },
     };
   }
+  // A day line before the first row of each day after the first (D23): drawn, measured and paged as a row of its own.
+  if (first.type === 'day') {
+    const words = h('span');
+    const el = kit.dayLine({ tag: 'div', class: 'chat-row day-row' }, words);
+    return { el, update(item) { setText(words, dayWords(item.at)); } };
+  }
   // A type this client doesn't know yet (rule 3): its row takes no room.
   return { el: h('div', { class: 'chat-row unknown', hidden: true }), update() {} };
 }
@@ -514,6 +522,9 @@ export function chatView(app) {
 
   const chat = () => store.state.chats.get(view.session);
   const items = () => chat()?.items || [];
+  // What the list draws: the items with their day lines. `items()` stays what the chat holds (copied, exported,
+  // marked as seen); every index into the drawn range is into this.
+  const rowsOf = () => withDays(items(), (item) => DRAWN.has(item.type));
   const atEnd = () => scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < NEAR;
   const heightOf = (item) => heights.get(keyOf(item)) ?? ESTIMATE[item.type] ?? 60;
   const sum = (list, from, to) => { let total = 0; for (let i = from; i < to; i++) total += heightOf(list[i]); return total; };
@@ -528,7 +539,7 @@ export function chatView(app) {
 
   // The view at the end: the last rows drawn, enough to fill it and more, and the scroll at the bottom.
   function pin() {
-    const list = items();
+    const list = rowsOf();
     const want = Math.max(scroller.clientHeight * (1 + OVERSCAN), 1);
     let from = list.length;
     let filled = 0;
@@ -573,7 +584,7 @@ export function chatView(app) {
 
   // Each drawn row's height, with the gap above the next: the spacers then stand in for them exactly.
   function measure() {
-    const list = items();
+    const list = rowsOf();
     for (let i = start; i < end; i++) {
       const row = rows.get(keyOf(list[i]));
       if (!row || row.el.hidden) continue;
@@ -613,7 +624,7 @@ export function chatView(app) {
 
   // After a scroll: rows drawn where you look, those far away let go, and older items asked for near the top.
   function follow() {
-    const list = items();
+    const list = rowsOf();
     if (!list.length || !chat()?.loaded) return;
     const [from, to] = wanted(list);
     if (from < start || to > end || from - start > 40 || end - to > 40) {
@@ -632,7 +643,7 @@ export function chatView(app) {
     const loaded = !!held?.loaded;
     skeleton.hidden = loaded || !following;
     later.hidden = following;
-    const list = items();
+    const list = rowsOf();
     empty.hidden = !following || !loaded || list.length > 0 || !!stack;
     // What follows the rows (a session's question, a lead's cards, a plugin's) waits for the rows: drawn before them it
     // would jump down as they arrive (D14, 213 px measured); the skeleton holds the place meanwhile.
@@ -641,7 +652,7 @@ export function chatView(app) {
     stackSlot.hidden = !placed;
     pluginSlot.hidden = !placed;
     asking.el.classList.toggle('waiting-rows', !placed);
-    if (loaded && marking) noteLooked(list);
+    if (loaded && marking) noteLooked(items());
     if (loaded) {
       if (structural) {
         // At the end, `toEnd` below draws the last rows.
@@ -677,10 +688,10 @@ export function chatView(app) {
         latest.hidden = false;
         setText(latestCount, '');
       }
-      noteLooked(list);
+      noteLooked(items());
     } else if (loaded && pinned) {
       toEnd(false);
-      noteLooked(list);
+      noteLooked(items());
     }
     else if (unseen > 0 || fresh > shownQuestions) {
       latest.hidden = false;
@@ -820,9 +831,13 @@ export function chatView(app) {
       // What you sent yourself always brings the view to it.
       if (change.pending) jump = true;
       if (change.type === 'page') {
-        // Older items came in above: the drawn range moves with its items, and the view doesn't move.
-        start += change.count;
-        end += change.count;
+        // Older items came in above, with the day lines between them: the drawn range moves with its rows (its first
+        // row's place now), and the view doesn't move.
+        const first = rows.keys().next().value;
+        const at = first === undefined ? -1 : rowsOf().findIndex((row) => keyOf(row) === first);
+        const shift = at >= 0 ? at - start : change.count;
+        start += shift;
+        end += shift;
       }
     }
     schedule();
@@ -1163,7 +1178,7 @@ export function chatView(app) {
     input.focus({ preventScroll: true });
   }
   function search() {
-    const list = items();
+    const list = rowsOf();
     found = findIn(list, findInput.value);
     // From the newest match: what you look for is most often what just happened.
     foundAt = found.length ? found.length - 1 : -1;
@@ -1179,7 +1194,7 @@ export function chatView(app) {
     const more = chat()?.more ? t('chEarlierNotLoaded') : '';
     setText(findCount, !query ? '' : found.length ? t('chOf', { a: foundAt + 1, b: found.length }) + more : t('chNoMatches') + more);
     if (foundAt < 0) return markFound(null);
-    const list = items();
+    const list = rowsOf();
     const index = found[foundAt];
     const item = list[index];
     // A run of tools opens, so what matched in it shows.

@@ -181,15 +181,6 @@ export function firstProject(projects) {
   return [...projects].sort((a, b) => (b.waiting - a.waiting) || (b.live - a.live) || (active(b) - active(a)))[0].project;
 }
 
-// The day a line belongs to: 'today', 'yesterday' or the date in the reader's words.
-export function dayOf(iso, now = Date.now(), locale = undefined) {
-  const at = new Date(iso);
-  const today = new Date(now);
-  if (at.toDateString() === today.toDateString()) return 'today';
-  if (at.toDateString() === new Date(now - 86400000).toDateString()) return 'yesterday';
-  return at.toLocaleDateString(locale, { weekday: 'long', day: 'numeric', month: 'short' });
-}
-
 // Everything that waits on the user, place by place in the left column's order: each project with something waiting,
 // each of the user's own sessions that needs them, and the node's cards no listed project holds (a held config of the
 // home folder: This node). { kind: 'project' | 'session' | 'node', id, count }. `own`: whether a session is the user's own.

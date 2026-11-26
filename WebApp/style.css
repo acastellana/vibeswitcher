@@ -211,7 +211,9 @@
    Tile         .tile: the number on top (.tile-value), what it counts (.tile-label), a note (.tile-note).
    Title        .section-title: small, strong, quiet, sentence case.
    Empty        .empty: one line where the rows would be; .empty.page, a page's or a pane's, centred: its icon, its
-                title, a line, its button. */
+                title, a line, its button.
+   Day line     .day-line: the day the lines under it were said, centred between two hairlines, small and quiet. A
+                session's chat and the lead's conversation. */
 
 .button { display: inline-flex; align-items: center; gap: var(--s-3); height: var(--ctl-m); padding: 0 var(--s-5); border-radius: var(--r-2); background: var(--accent); color: var(--on-accent); font-weight: var(--w-medium); white-space: nowrap; transition: opacity var(--dur-1) var(--ease-out); }
 .button:disabled { background: var(--fill-2); color: var(--ink-3); cursor: default; opacity: 1; }
@@ -287,6 +289,10 @@ textarea.field { padding: var(--s-3) var(--s-4); line-height: var(--lh-body); re
 .empty.page > .icon { color: var(--ink-3); }
 .empty.page > :is(h1, h2) { color: var(--ink); font-size: var(--t-title); font-weight: var(--w-strong); line-height: var(--lh-title); }
 .empty.page > .button { margin-top: var(--s-4); }
+
+.day-line { display: flex; align-items: center; gap: var(--s-4); color: var(--ink-3); font-size: var(--t-caption); line-height: var(--lh-caption); }
+.day-line::before, .day-line::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+.day-line-text { flex: none; }
 
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
@@ -489,6 +495,8 @@ small { font-size: var(--t-caption); }
 .new-mark-summary { color: var(--ink-3); font-size: var(--t-caption); font-weight: var(--w-regular); }
 .new-mark-summary:empty { display: none; }
 .new-mark + .chat-row { margin-top: var(--s-4); }
+/* A day line (D23) sits nearer the row it heads than the one above it. */
+.chat-row.day-row + .chat-row { margin-top: var(--s-4); }
 
 .chat-row.prompt { display: flex; flex-direction: column; align-items: flex-end; padding-left: var(--s-9); }
 .bubble { max-width: 100%; padding: var(--s-4) var(--s-5); border-radius: var(--r-4); background: var(--accent-fill); font-size: var(--t-read); line-height: var(--lh-read); white-space: pre-wrap; overflow-wrap: anywhere; transition: opacity var(--dur-1) var(--ease-out); }
@@ -1492,6 +1500,7 @@ kbd { padding: 1px var(--s-3); border-radius: var(--r-1); box-shadow: var(--e-1-
 .talk { padding: var(--s-6) var(--s-7) var(--s-7); }
 .col { display: flex; flex-direction: column; justify-content: flex-end; gap: var(--s-3); max-width: 720px; min-height: 100%; margin: 0 auto; }
 .project-view .col:has(.road-row, .road-band, .road-intro, .goal-row) { justify-content: flex-start; }
+.col > .day-line { margin-top: var(--s-4); }
 .day { display: flex; align-items: center; gap: var(--s-4); margin-top: var(--s-4); color: var(--ink-3); font-size: var(--t-caption); }
 .day::after { content: ""; flex: 1; height: 1px; background: var(--line); }
 .line { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: var(--s-3); align-items: start; padding: var(--s-2) 0; font-size: var(--t-read); line-height: var(--lh-read); }
@@ -1818,9 +1827,9 @@ kbd { padding: 1px var(--s-3); border-radius: var(--r-1); box-shadow: var(--e-1-
   .app.keyboard .project-view :is(.team-strip, .dial-fold, .centre-head > .segmented) { display: none; }
   /* The load's skeleton in the phone's shape: the header's two rows within the width, the gutters a phone's. */
   :is(.skeleton-head, .skeleton-strip, .skeleton-composer) { padding-left: var(--s-5); padding-right: var(--s-5); }
-  /* Its rows the real header's: a fingertip, then the switch in its track (2 px round it), so the content arrives
-     without a jump (109 px at 390). */
-  .skeleton-head { display: grid; grid-template-rows: var(--ctl-touch) calc(var(--ctl-touch) + var(--s-1) * 2); gap: var(--s-2); height: auto; padding-top: calc(var(--s-2) + env(safe-area-inset-top)); padding-bottom: var(--s-4); }
+  /* Its rows the real header's, so the content arrives without a jump. With a mouse: the icon buttons' row, then the
+     dial's fold, a fingertip at every pointer (91 px at 700). */
+  .skeleton-head { display: grid; grid-template-rows: var(--ctl-m) var(--ctl-touch); gap: var(--s-2); height: auto; padding-top: calc(var(--s-2) + env(safe-area-inset-top)); padding-bottom: var(--s-4); }
   .frame-skeleton .bone:is(.skeleton-switch, .skeleton-dial) { height: var(--ctl-touch); }
   .skeleton-head > .skeleton-row { display: flex; }
   .skeleton-lines { padding: var(--s-6) var(--s-5); }
@@ -1828,6 +1837,12 @@ kbd { padding: 1px var(--s-3); border-radius: var(--r-1); box-shadow: var(--e-1-
   .frame-skeleton .bone.skeleton-switch { width: 30%; }
   .frame-skeleton .bone.skeleton-dial { width: 100%; }
   .skeleton-strip .bone { width: 64px; }
+}
+
+/* A phone's touch screen: the loading header's rows a fingertip, then the switch in its track (2 px round it), as the
+   real header's are there (109 px at 390). */
+@media (max-width: 760px) and (hover: none) and (pointer: coarse) {
+  .skeleton-head { grid-template-rows: var(--ctl-touch) calc(var(--ctl-touch) + var(--s-1) * 2); }
 }
 
 /* Acting from the page: a request's button, what the node said under it, and whether this page acts */

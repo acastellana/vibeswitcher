@@ -256,8 +256,16 @@ struct WebAssetsTests {
         #expect(!EmbeddedAssets.files.isEmpty)
         for file in EmbeddedAssets.files {
             let onDisk = try Data(contentsOf: packageFolder.appendingPathComponent("WebApp").appendingPathComponent(file.path))
-            #expect(file.body == onDisk, "\(file.path)")
-            #expect(file.sha256 == SHA256.hash(data: onDisk).map { String(format: "%02x", $0) }.joined(), "\(file.path)")
+            // The page's own scripts and style sheet lose their comments (the generator's header), each line kept;
+            // every other file is the tree's byte for byte. The hash is always the served bytes'.
+            let stripped = !file.path.hasPrefix(WebAssets.vendorFolder) && [".js", ".mjs", ".css"].contains { file.path.hasSuffix($0) }
+            if stripped {
+                #expect(file.body.count <= onDisk.count, "\(file.path)")
+                #expect(file.body.filter { $0 == 0x0A }.count == onDisk.filter { $0 == 0x0A }.count, "\(file.path): a line keeps its number")
+            } else {
+                #expect(file.body == onDisk, "\(file.path)")
+            }
+            #expect(file.sha256 == SHA256.hash(data: file.body).map { String(format: "%02x", $0) }.joined(), "\(file.path)")
         }
         #expect(EmbeddedAssets.files.map(\.path) == EmbeddedAssets.files.map(\.path).sorted())
         #expect(EmbeddedAssets.files.contains { $0.path == "index.html" })
