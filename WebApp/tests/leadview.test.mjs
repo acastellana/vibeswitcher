@@ -151,6 +151,10 @@ test('D10: the centre is one scroll at every width: the conversation, then what 
   assert.equal(under('', '.project-view .centre-scroll > .talk').overflow, 'visible');
   assert.equal(under('', '.project-view .centre-scroll > .wait-box').overflow, 'visible');
   assert.equal(under('', '.project-view .centre-scroll > .wait-box')['max-height'], 'none');
+  // At “What waits on me” the conversation is gone, not an empty pane taking half of the scroll above the cards.
+  const asks = RULES.filter((rule) => rule.media === '' && /\.talk\b/.test(rule.selector) && /display:/.test(rule.body));
+  assert.equal(asks.at(-1).selector, '.project-view.show-asks .centre-scroll > .talk', 'the last word on the pane’s display');
+  assert.equal(declarations(asks.at(-1).body).display, 'none');
   for (const selector of ['.talk', '.wait-box']) {
     for (const rule of RULES.filter((one) => one.media === '' && listed(one).includes(selector))) {
       assert.ok(!/overflow-y|max-height/.test(rule.body), `${selector} has no scroll of its own: ${rule.body}`);

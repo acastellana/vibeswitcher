@@ -381,7 +381,9 @@ small { font-size: var(--t-caption); }
 .frame-skeleton .bone.skeleton-title { width: 280px; height: 14px; }
 .frame-skeleton .bone.skeleton-switch { width: 150px; height: var(--ctl-m); border-radius: var(--r-2); }
 .frame-skeleton .bone.skeleton-dial { width: 150px; height: var(--ctl-m); margin-left: auto; border-radius: var(--r-pill); }
-.skeleton-strip { flex: none; display: flex; align-items: center; gap: 14px; min-height: var(--ctl-m); padding: 0 24px; border-bottom: 1px solid var(--line); }
+.skeleton-strip { flex: none; display: flex; align-items: center; gap: 14px; padding: 8px 24px; border-bottom: 1px solid var(--line); font-size: var(--t-caption); line-height: var(--lh-caption); }
+/* The strip's line, as the team strip's words make it: the skeleton is the strip's height, so nothing moves under it. */
+.skeleton-strip::before { content: "\200b"; width: 0; }
 .skeleton-strip .bone { flex: none; width: 76px; }
 .skeleton-lines { flex: 1; display: grid; align-content: start; gap: 20px; padding: 24px; overflow: hidden; }
 .skeleton-line { display: grid; grid-template-columns: 16px minmax(0, 1fr); align-items: center; gap: 12px; max-width: 720px; }
@@ -1519,6 +1521,7 @@ kbd { padding: 1px 6px; border-radius: var(--r-1); box-shadow: var(--e-1-in); co
 .project-view .centre-scroll .col { flex: 1 0 auto; width: 100%; min-height: 0; }
 .project-view .centre-scroll > .wait-box { flex: none; max-height: none; overflow: visible; }
 .project-view.show-asks .centre-scroll > .wait-box { flex: 1 0 auto; }
+.project-view.show-asks .centre-scroll > .talk { display: none; }
 
 /* A task: five steps in its colour, and its details in place */
 .steps { display: flex; gap: 3px; width: 62px; margin-top: 6px; }
