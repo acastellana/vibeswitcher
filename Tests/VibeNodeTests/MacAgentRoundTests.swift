@@ -336,12 +336,15 @@ struct MacAgentRoundTests {
         let place = NodeAgent.Place(label: "dev.vibeswitcher.node.test-fn", plistFolder: dir + "/la", dataRoot: dir + "/node",
                                     lock: dir + "/node/host.lock", uid: getuid(), launchctl: "/bin/launchctl")
         let gone = Locked(false)
+        let job = try Self.standIn(place)
         let real = MacAgent.Steps.system(place: place, pins: { .success(NodePins(uid: getuid(), builds: [])) }, say: { _ in }, confirm: { _ in .success(()) },
-                                         serverStop: { _ in .none("no server answers") }, jobArguments: { _ in nil })
+                                         serverStop: { _ in .none("no server answers") }, job: { _ in job })
         var steps = real
+        steps.arguments = { _ in job.programArguments }
+        steps.executable = { _ in job.programArguments[0] }
         steps.launchctl = { words in
             switch words.first {
-            case "print": return gone.value ? MacAgent.Ran(status: 113, output: "") : MacAgent.Ran(status: 0, output: "x = {\n\tstate = running\n\tpid = \(host)\n}")
+            case "print": return gone.value ? MacAgent.Ran(status: 113, output: "") : MacAgent.Ran(status: 0, output: MacAgentTests.printed(job, place: place, pid: host))
             case "bootout":
                 // launchd's bootout: SIGTERM to the job's group, then SIGKILL (the stand-in ignores TERM).
                 kill(-host, SIGKILL); var s: Int32 = 0; waitpid(host, &s, 0); gone.value = true
@@ -351,7 +354,6 @@ struct MacAgentRoundTests {
         }
         steps.see = { _, pid, _ in .host(MacAgent.Host(commit: "c", pid: pid, startedAt: nil)) }
         steps.pins = { .success(NodePins(uid: getuid(), builds: [NodePins.Build(commit: "c", host: Data(), server: Data(), cli: Data())])) }
-        steps.jobArguments = { _ in Platform.Processes.arguments(host) }
         steps.patience = 3
         let stopped = await offPool { MacAgent(place: place, steps: steps).stop() }
         print("ROUND stop, a child in its own session ignoring the signals: \(stopped)")
@@ -377,11 +379,14 @@ struct MacAgentRoundTests {
         let place = NodeAgent.Place(label: "dev.vibeswitcher.node.test-fn", plistFolder: dir + "/la", dataRoot: dir + "/node",
                                     lock: dir + "/node/host.lock", uid: getuid(), launchctl: "/bin/launchctl")
         let gone = Locked(false)
+        let job = try Self.standIn(place)
         var steps = MacAgent.Steps.system(place: place, pins: { .success(NodePins(uid: getuid(), builds: [NodePins.Build(commit: "c", host: Data(), server: Data(), cli: Data())])) },
-                                          say: { _ in }, confirm: { _ in .success(()) }, serverStop: { _ in .none("no server answers") }, jobArguments: { _ in Platform.Processes.arguments(host) })
+                                          say: { _ in }, confirm: { _ in .success(()) }, serverStop: { _ in .none("no server answers") }, job: { _ in job })
+        steps.arguments = { _ in job.programArguments }
+        steps.executable = { _ in job.programArguments[0] }
         steps.launchctl = { words in
             switch words.first {
-            case "print": return gone.value ? MacAgent.Ran(status: 113, output: "") : MacAgent.Ran(status: 0, output: "x = {\n\tstate = running\n\tpid = \(host)\n}")
+            case "print": return gone.value ? MacAgent.Ran(status: 113, output: "") : MacAgent.Ran(status: 0, output: MacAgentTests.printed(job, place: place, pid: host))
             case "bootout": kill(-host, SIGKILL); var s: Int32 = 0; waitpid(host, &s, 0); gone.value = true; return MacAgent.Ran(status: 0, output: "")
             default: return MacAgent.Ran(status: 0, output: "")
             }
@@ -402,17 +407,19 @@ struct MacAgentRoundTests {
         func stale() throws { let fd = try UnixSocket.listen(path: place.socket); Sys.close(fd) }
         func run(lockFree: Bool) async -> Result<String, StartRefusal> {
             let gone = Locked(false)
+            let job = (try? Self.standIn(place)) ?? NodeAgent.Job(label: place.label, programArguments: ["/bin/sleep"], environment: [:], standardErrorPath: place.log, atLogin: false)
             var steps = MacAgent.Steps.system(place: place, pins: { .success(NodePins(uid: getuid(), builds: [NodePins.Build(commit: "c", host: Data(), server: Data(), cli: Data())])) },
-                                              say: { _ in }, confirm: { _ in .success(()) }, serverStop: { _ in .none("no server answers") }, jobArguments: { _ in ["x"] })
+                                              say: { _ in }, confirm: { _ in .success(()) }, serverStop: { _ in .none("no server answers") }, job: { _ in job })
+            steps.executable = { _ in job.programArguments[0] }
             steps.launchctl = { words in
                 switch words.first {
-                case "print": return gone.value ? MacAgent.Ran(status: 113, output: "") : MacAgent.Ran(status: 0, output: "x = {\n\tstate = running\n\tpid = 999999\n}")
+                case "print": return gone.value ? MacAgent.Ran(status: 113, output: "") : MacAgent.Ran(status: 0, output: MacAgentTests.printed(job, place: place, pid: 999999))
                 case "bootout": gone.value = true; return MacAgent.Ran(status: 0, output: "")
                 default: return MacAgent.Ran(status: 0, output: "")
                 }
             }
             steps.see = { _, pid, _ in .host(MacAgent.Host(commit: "c", pid: pid, startedAt: nil)) }
-            steps.arguments = { _ in ["x"] }
+            steps.arguments = { _ in job.programArguments }
             steps.lockFree = { _ in lockFree }
             steps.patience = 2
             return await offPool { MacAgent(place: place, steps: steps).stop() }
@@ -597,8 +604,7 @@ struct MacAgentRoundTests {
         let job = NodeAgent.Job(label: place.label, programArguments: ["/bin/sleep"], environment: [:], standardErrorPath: place.log, atLogin: false)
         try NodeAgent.plist(job).get().write(to: URL(fileURLWithPath: place.plistPath))
         let counts = Locked((confirms: 0, bootouts: 0, stops: 0, gone: false))
-        let running = "x = {\n\tstate = running\n\tpid = 4242\n\tpath = \(place.plistPath)\n\targuments = {\n\t\t/bin/sleep\n\t}\n\tstderr path = \(place.log)\n\tstdout path = /dev/null\n"
-            + "\tenvironment = {\n\t\tOSLogRateLimit => 64\n\t\tXPC_SERVICE_NAME => \(place.label)\n\t}\n\tproperties = inferred program\n}"
+        let running = MacAgentTests.printed(job, place: place, pid: 4242)
         var steps = MacAgent.Steps(launchctl: { words in
                                        switch words.first {
                                        case "print": return counts.value.gone ? MacAgent.Ran(status: 113, output: "") : MacAgent.Ran(status: 0, output: running)
@@ -611,7 +617,7 @@ struct MacAgentRoundTests {
                                    confirm: { _ in counts.value.confirms += 1; return .success(()) },
                                    serverStop: { _ in counts.value.stops += 1; return server ?? .none("no server answers") },
                                    children: { _ in [] }, alive: { _ in false }, lockFree: { _ in true }, patience: 2,
-                                   arguments: { _ in ["/bin/sleep"] }, jobArguments: { _ in ["/bin/sleep"] },
+                                   arguments: { _ in ["/bin/sleep"] }, job: { _ in job },
                                    liveSessions: { server == nil ? nil : 3 })
         steps.executable = { _ in "/bin/sleep" }
         let stopped = MacAgent(place: place, steps: steps).stop()
@@ -652,6 +658,15 @@ struct MacAgentRoundTests {
     }
 
     // MARK: Helpers
+
+    /// A stand-in job for `place` (its program `/bin/sleep`, which exists), its plist written at the agent's path as
+    /// start writes it, so a job of it is the agent's.
+    static func standIn(_ place: NodeAgent.Place) throws -> NodeAgent.Job {
+        let job = NodeAgent.Job(label: place.label, programArguments: ["/bin/sleep"], environment: [:], standardErrorPath: place.log, atLogin: false)
+        try FileManager.default.createDirectory(atPath: place.plistFolder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o755])
+        if !FileManager.default.fileExists(atPath: place.plistPath) { try NodeAgent.plist(job).get().write(to: URL(fileURLWithPath: place.plistPath)) }
+        return job
+    }
 
     /// A plist in XML with its keys in `pairs`' order (PropertyListSerialization sorts them).
     static func xml(_ pairs: [(key: String, value: Any)]) -> Data {

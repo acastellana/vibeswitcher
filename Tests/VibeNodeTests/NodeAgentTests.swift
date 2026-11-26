@@ -86,8 +86,11 @@ struct NodeAgentTests {
             \tpid = 4242
             }
             """
-        #expect(NodeAgent.printed(output) == .init(pid: 4242, program: "/Users/u/.vibeswitcher/v2/node/builds/\(Self.commit)/bin/vibeswitcher-host",
-                                                   state: "running", path: "/Users/u/Library/LaunchAgents/dev.vibeswitcher.node.plist"))
+        let read = NodeAgent.printed(output)
+        #expect(read.pid == 4242 && read.program == "/Users/u/.vibeswitcher/v2/node/builds/\(Self.commit)/bin/vibeswitcher-host")
+        #expect(read.state == "running" && read.path == "/Users/u/Library/LaunchAgents/dev.vibeswitcher.node.plist")
+        // The job's own environment block (no `NAME => VALUE` line in this one), never a nested block's lines.
+        #expect(read.environment == [:])
         #expect(NodeAgent.printed("gui/501/dev.vibeswitcher.node = {\n\tstate = not running\n}").pid == nil)
     }
 
@@ -125,5 +128,13 @@ struct NodeAgentTests {
         let killed = "gui/501/x = {\n\tstate = not running\n\truns = 1\n\tlast terminating signal = Killed: 9\n}"
         #expect(NodeAgent.printed(killed).lastExit == "signal Killed: 9")
         #expect(NodeAgent.printed("x = {\n\tlast exit code = 1\n}").lastExit == "exit code 1")
+        // The blocks and lines the review's round reads (measured, macOS 27.2).
+        let full = "x = {\n\tpath = /p/x.plist\n\targuments = {\n\t\t/bin/sleep\n\t\t30\n\t}\n\n\tstdout path = /dev/null\n\tstderr path = /p/e\n"
+            + "\tinherited environment = {\n\t\tSSH_AUTH_SOCK => /s\n\t}\n\n\tdefault environment = {\n\t\tPATH => /usr/bin\n\t}\n\n"
+            + "\tenvironment = {\n\t\tOSLogRateLimit => 64\n\t\tPLANTED => a => b\n\t}\n\n\tproperties = keepalive | inferred program\n}"
+        let read = NodeAgent.printed(full)
+        #expect(read.arguments == ["/bin/sleep", "30"])
+        #expect(read.environment == ["OSLogRateLimit": "64", "PLANTED": "a => b"])
+        #expect(read.stdoutPath == "/dev/null" && read.stderrPath == "/p/e" && read.properties == "keepalive | inferred program")
     }
 }

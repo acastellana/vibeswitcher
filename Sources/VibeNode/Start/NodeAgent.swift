@@ -232,6 +232,16 @@ public enum NodeAgent {
         public var lastExit: String?
         /// `path = …`: the property list launchd loaded it from.
         public var path: String?
+        /// `arguments = { … }`: the program's arguments as launchd holds them.
+        public var arguments: [String]?
+        /// `environment = { NAME => VALUE … }`: the plist's `EnvironmentVariables` and launchd's own (not the inherited
+        /// or default blocks).
+        public var environment: [String: String]?
+        /// `stdout path = …`, `stderr path = …`.
+        public var stdoutPath: String?
+        public var stderrPath: String?
+        /// `properties = …`: launchd's flags for the job (`runatload`, `keepalive`, `inferred program`; measured on 27.2).
+        public var properties: String?
 
         public init(pid: pid_t? = nil, program: String? = nil, state: String? = nil, runs: Int? = nil, lastExit: String? = nil, path: String? = nil) {
             self.pid = pid
@@ -245,7 +255,28 @@ public enum NodeAgent {
 
     public static func printed(_ output: String) -> Printed {
         var found = Printed()
+        // The job's own blocks (one tab in, their lines two tabs in, up to the block's `}` one tab in).
+        var block: String?
+        var arguments: [String] = [], environment: [String: String] = [:]
         for line in output.split(separator: "\n", omittingEmptySubsequences: false) {
+            if let open = block {
+                if line == "\t}" {
+                    if open == "arguments" { found.arguments = arguments }
+                    if open == "environment" { found.environment = environment }
+                    block = nil
+                } else if line.hasPrefix("\t\t"), !line.hasPrefix("\t\t\t") {
+                    let item = String(line.dropFirst(2))
+                    if open == "arguments" { arguments.append(item) }
+                    if open == "environment", let arrow = item.range(of: " => ") {
+                        environment[String(item[..<arrow.lowerBound])] = String(item[arrow.upperBound...])
+                    }
+                }
+                continue
+            }
+            if line == "\targuments = {" || line == "\tenvironment = {" {
+                block = String(line.dropFirst().dropLast(4))
+                continue
+            }
             // The job's own properties sit one tab in; a nested block's (`environment = {`, `endpoints = {`) deeper.
             guard line.hasPrefix("\t"), !line.hasPrefix("\t\t") else { continue }
             let parts = line.dropFirst().split(separator: "=", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
@@ -258,6 +289,9 @@ public enum NodeAgent {
             case "last exit code": found.lastExit = parts[1] == "(never exited)" ? nil : "exit code \(parts[1])"
             case "last terminating signal": found.lastExit = "signal \(parts[1])"
             case "path": found.path = parts[1]
+            case "stdout path": found.stdoutPath = parts[1]
+            case "stderr path": found.stderrPath = parts[1]
+            case "properties": found.properties = parts[1]
             default: break
             }
         }

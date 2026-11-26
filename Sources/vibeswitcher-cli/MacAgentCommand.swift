@@ -11,9 +11,11 @@ import VibeNode
 /// or stopped here (its harness's, 69, as on Linux).
 enum MacAgentCommand {
     /// The user's node's place, or nil where there is no launchctl.
-    /// The command line the user's node's job runs for a build: a checked node's (`NodeUnit.execStart`).
-    static func jobArguments(_ build: NodePins.Build) -> [String]? {
-        NodeUnit.execStart(prefix: NodeFolders.defaultPrefix(accountHome: VibePaths.accountHome), commit: build.commit)
+    /// The user's node's job for a build (`NodeAgent.Job.node`: a checked node's command line), as `start` writes it.
+    static func job(_ build: NodePins.Build) -> NodeAgent.Job? {
+        let home = VibePaths.accountHome
+        return try? NodeAgent.Job.node(prefix: NodeFolders.defaultPrefix(accountHome: home), commit: build.commit, home: home,
+                                       dataRoot: NodeFolders.nodeRoot(accountHome: home), atLogin: false).get()
     }
 
     static func place() -> NodeAgent.Place? {
@@ -38,15 +40,16 @@ enum MacAgentCommand {
         case .success(let made): job = made
         }
         let agent = MacAgent(place: place, steps: .system(place: place, pins: { pins }, say: { Say.out($0) },
-                                                          confirm: { _ in .success(()) }, serverStop: { _ in .none("no server is asked") }, jobArguments: jobArguments))
+                                                          confirm: { _ in .success(()) }, serverStop: { _ in .none("no server is asked") }, job: MacAgentCommand.job))
         switch agent.start(job, build: own.build, folder: own.folder) {
         case .success: return 0
         case .failure(let why): return said(why)
         }
     }
 
-    /// `stop`: what ends said and the typed code asked (`TypedWord`), the server's own stop when it answers (it ends the
-    /// leads and every session), then the job booted out and waited for.
+    /// `stop`: with a server that answers, its own stop asked once, under its rule (`TypedWord.said(approval:)`: the typed
+    /// code, or the Mac's dialog), its answer kept (refused or unreadable: nothing is stopped); with none, what ends and
+    /// how said and the typed code asked, then the bootout; then the job unloaded and waited for.
     static func stop(context: NodeContext) -> Int32 {
         guard let place = place() else { return Say.unbuilt("this system has no launchctl") }
         let action = UUID().uuidString.lowercased()
@@ -57,12 +60,20 @@ enum MacAgentCommand {
                                               connection.typed = typed
                                               return outcome == .typed ? .success(()) : .failure(StartRefusal(outcome.refusal))
                                           },
-                                          serverStop: { _ in
+                                          serverStop: { what in
                                               guard let client = connection.client else { return .none("no server answered") }
-                                              _ = StopCommand.throughServer(context, client, action: action, typed: connection.typed)
-                                              return .stopped
+                                              switch TypedWord.said(approval: client.approvalRule, action: action, what: what) {
+                                              case .failure(let not): return .refused(StartRefusal(not.refusal))
+                                              case .success(let typed):
+                                                  // Within the server's stop's own bound (`Requests.stopWait + 30`); an answer
+                                                  // that can't be read is a refusal (`throughServer`).
+                                                  switch StopCommand.throughServer(context, client, action: action, typed: typed) {
+                                                  case .success: return .stopped
+                                                  case .failure(let why): return .refused(why)
+                                                  }
+                                              }
                                           },
-                                          jobArguments: jobArguments,
+                                          job: MacAgentCommand.job,
                                           // The server's count (`host.liveSessions`), asked before the confirmation; its
                                           // connection kept for its stop.
                                           liveSessions: {
@@ -77,10 +88,11 @@ enum MacAgentCommand {
 
     /// `status`'s first line, from the host itself: nil when the node runs (the server's status follows), else the exit
     /// code once said.
-    static func status() -> Int32? {
+    static func status(json: Bool) -> Int32? {
         guard let place = place() else { return Say.unbuilt("this system has no launchctl") }
-        let agent = MacAgent(place: place, steps: .system(place: place, pins: { NodePins.read() }, say: { Say.out($0) },
-                                                          confirm: { _ in .success(()) }, serverStop: { _ in .none("no server is asked") }, jobArguments: jobArguments))
+        // With --json the line goes to stderr, so stdout stays the server's JSON.
+        let agent = MacAgent(place: place, steps: .system(place: place, pins: { NodePins.read() }, say: { json ? Say.err($0) : Say.out($0) },
+                                                          confirm: { _ in .success(()) }, serverStop: { _ in .none("no server is asked") }, job: MacAgentCommand.job))
         switch agent.status() {
         case .success: return nil
         case .failure(let why): return said(why)

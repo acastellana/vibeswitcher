@@ -220,9 +220,12 @@ struct MacAgentTests {
         init(_ dir: String) {
             place = NodeAgent.Place(label: "dev.vibeswitcher.node.test-fn", plistFolder: dir + "/la", dataRoot: dir + "/node",
                                     lock: dir + "/node/host.lock", uid: getuid(), launchctl: "/bin/launchctl")
+            // start's own plist at the agent's path, as a job of it loaded from there would have.
+            try? FileManager.default.createDirectory(atPath: place.plistFolder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o755])
+            try? NodeAgent.plist(job).get().write(to: URL(fileURLWithPath: place.plistPath))
         }
 
-        var job: NodeAgent.Job { NodeAgent.Job(label: place.label, programArguments: ["/x/bin/vibeswitcher-host", "--node"], environment: [:],
+        var job: NodeAgent.Job { NodeAgent.Job(label: place.label, programArguments: ["/bin/sleep", "--node"], environment: [:],
                                                standardErrorPath: place.log, atLogin: false) }
 
         /// The agent, `launchctl` recording into `log` (print answering `printed`, bootstrap `bootstrap`).
@@ -240,9 +243,11 @@ struct MacAgentTests {
                                        say: { log.say($0) }, confirm: { log.say($0); return .failure(StartRefusal("not typed")) },
                                        serverStop: { what in log.say(what); return sessions == nil ? .none("no server answers") : .refused(StartRefusal("not typed")) },
                                        children: { _ in [] }, alive: { _ in false }, lockFree: { _ in true }, patience: 2,
-                                       arguments: { _ in arguments ?? job.programArguments }, jobArguments: { $0 == row ? job.programArguments : nil },
+                                       arguments: { _ in arguments ?? job.programArguments }, job: { $0 == row ? job : nil },
                                        liveSessions: { sessions })
-            return MacAgent(place: place, steps: steps)
+            var stepped = steps
+            stepped.executable = { _ in job.programArguments[0] }
+            return MacAgent(place: place, steps: stepped)
         }
     }
 
@@ -291,7 +296,7 @@ struct MacAgentTests {
     /// refuses and unloads it, `status` and `stop` refuse it; after a switch the keeper's two flags may follow.
     @Test func theJobsProcessMustRunTheJobsCommandLine() throws {
         let stand = Stand(try scratch.shortFolder("vsmc").path)
-        let running = "gui/501/x = {\n\tstate = running\n\tpid = 4242\n\tpath = \(stand.place.plistPath)\n}"
+        let running = MacAgentTests.printed(stand.job, place: stand.place, pid: 4242)
         let swapped = ["/x/bin/vibeswitcher-host", "--socket", stand.place.socket, "--lock", "/elsewhere/h.lock"]
         let log = Recorder()
         // The job appears once start has loaded it.
@@ -311,16 +316,31 @@ struct MacAgentTests {
     }
 
     /// `stop` says how many sessions end from the server's count (the blind check's finding 1: the host's welcome
-    /// lists none of them to the command line), or "every session it runs" with no server.
+    /// lists none of them to the command line), or, with no server, how they end (the bootout, the hangup).
     @Test func stopSaysTheServersSessionCount() throws {
         let stand = Stand(try scratch.shortFolder("vsms").path)
-        let running = "gui/501/x = {\n\tstate = running\n\tpid = 4242\n\tpath = \(stand.place.plistPath)\n}"
+        let running = MacAgentTests.printed(stand.job, place: stand.place, pid: 4242)
         let counted = Recorder()
         _ = stand.agent(log: counted, printed: { running }, sessions: 5).stop()
         #expect(counted.lines.contains { $0.contains("its 5 sessions") }, "\(counted.lines)")
         let none = Recorder()
         _ = stand.agent(log: none, printed: { running }).stop()
-        #expect(none.lines.contains { $0.contains("every session it runs") }, "\(none.lines)")
+        #expect(none.lines.contains { $0.contains("by launchd's bootout") && $0.contains("hangup") }, "\(none.lines)")
+    }
+}
+
+extension MacAgentTests {
+    /// `launchctl print`'s text for a running job of `job` loaded from `place`'s plist, as macOS 27.2 prints it (the
+    /// design's "The review's round", measured): its path, arguments, output paths, environment block with launchd's two
+    /// variables, pid and properties.
+    static func printed(_ job: NodeAgent.Job, place: NodeAgent.Place, pid: pid_t) -> String {
+        let arguments = job.programArguments.map { "\t\t\($0)\n" }.joined()
+        let environment = job.environment.merging(MacAgent.launchdVariables(label: job.label)) { $1 }.sorted { $0.key < $1.key }
+            .map { "\t\t\($0.key) => \($0.value)\n" }.joined()
+        return "\(place.target) = {\n\tactive count = 1\n\tpath = \(place.plistPath)\n\ttype = LaunchAgent\n\tstate = running\n\n\tprogram = \(job.programArguments[0])\n"
+            + "\targuments = {\n\(arguments)\t}\n\n\tstdout path = /dev/null\n\tstderr path = \(job.standardErrorPath)\n"
+            + "\tinherited environment = {\n\t\tSSH_AUTH_SOCK => /var/run/x/Listeners\n\t}\n\n\tenvironment = {\n\(environment)\t}\n\n"
+            + "\truns = 1\n\tpid = \(pid)\n\tproperties = \(job.atLogin ? "runatload | inferred program" : "inferred program")\n}\n"
     }
 }
 
@@ -369,10 +389,10 @@ final class ScratchAgent: @unchecked Sendable {
                             environment: ["HOME": dir + "/home", "CFFIXED_USER_HOME": dir + "/home", "VIBESWITCHER_HOME": data,
                                           "TMPDIR": dir + "/t/", "SHELL": "/bin/sh", "PATH": "/usr/bin:/bin"],
                             standardErrorPath: place.log, atLogin: false)
-        let arguments = job.programArguments
+        let theJob = job
         agent = MacAgent(place: place, steps: MacAgent.Steps.system(place: place, pins: { .success(pins) }, say: { _ in },
                                                                      confirm: { _ in .success(()) }, serverStop: { _ in .none("no server answers") },
-                                                                     jobArguments: { $0 == build ? arguments : nil }))
+                                                                     job: { $0 == build ? theJob : nil }))
     }
 
     static func run(_ program: String, _ arguments: [String]) throws {
