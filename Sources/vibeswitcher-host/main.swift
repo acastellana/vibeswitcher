@@ -10,17 +10,22 @@ import VibeHost
 PTYSpawn.execIfLaunched(CommandLine.arguments)
 // As a session's parser (see `SessionParser`): its headless terminal, fed by the host.
 SessionParser.runIfAsked(CommandLine.arguments)
-// As the probe of a handover (see `HostHandover`): only whether this build can take over.
-HostHandover.probeIfAsked(CommandLine.arguments) { VaultStorage.keychainKey() }
-
-signal(SIGPIPE, SIG_IGN)
-signal(SIGHUP, SIG_IGN)
 
 let arguments = CommandLine.arguments
 func value(after flag: String) -> String? {
     guard let index = arguments.firstIndex(of: flag), arguments.indices.contains(index + 1) else { return nil }
     return arguments[index + 1]
 }
+let lockPath = value(after: "--lock") ?? VibePaths.hostLock.path
+// The user's host, not a scratch host on its own lock (which runs beside it, and leaves its files alone).
+let ownsLaunchers = lockPath == VibePaths.hostLock.path
+
+// As the probe of a handover (see `HostHandover`): only whether this build can take over, and for the user's host
+// whether it gets the same vault key.
+HostHandover.probeIfAsked(arguments) { ownsLaunchers ? VaultStorage.keychainKey() : nil }
+
+signal(SIGPIPE, SIG_IGN)
+signal(SIGHUP, SIG_IGN)
 
 VibePaths.ensurePrivateDirectories()
 let environment = ProcessInfo.processInfo.environment
@@ -30,9 +35,6 @@ let inherited = ["HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "PATH", "LANG", "
 let shell = environment["SHELL"].flatMap { $0.isEmpty ? nil : $0 } ?? "/bin/zsh"
 let executable = Bundle.main.executablePath ?? arguments[0]
 let build = HostBuild.id(ofExecutableAt: executable)
-let lockPath = value(after: "--lock") ?? VibePaths.hostLock.path
-// The user's host, not a scratch host on its own lock (which runs beside it, and leaves its files alone).
-let ownsLaunchers = lockPath == VibePaths.hostLock.path
 // Sessions are started through a launcher (see `PTYSpawn`). Not the app's copy: an update replaces that file while
 // this host keeps running, and this host must keep starting its own build. A private copy, named by build.
 let launchers = VibePaths.root.appendingPathComponent("host", isDirectory: true)
