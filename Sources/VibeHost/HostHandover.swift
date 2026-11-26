@@ -270,6 +270,12 @@ public enum HostHandover {
             HKDF<SHA256>.deriveKey(inputKeyMaterial: vaultKey, info: Data("dev.vibeswitcher.host-handover".utf8), outputByteCount: 32)
         }
 
+        /// Names the vault key without giving it away (an HMAC of a fixed text under the proof's key): whether two
+        /// builds get the same one.
+        static func keyID(_ vaultKey: SymmetricKey) -> String {
+            hex(Data(HMAC<SHA256>.authenticationCode(for: Data("vibeswitcher-host handover key id 1".utf8), using: key(from: vaultKey))))
+        }
+
         static func digest(_ secrets: Data?) -> Data { secrets.map { Data(SHA256.hash(data: $0)) } ?? none }
 
         /// The process a proof is for: this one (a test's another).
@@ -324,15 +330,30 @@ public enum HostHandover {
     }
 
     /// `--handover-probe PATH`: whether this build can take over from the state at `path`. Call first thing in `main`.
-    public static func probeIfAsked(_ arguments: [String]) {
+    /// `key`: the vault's key as this build gets it, read only when the probe is asked to check it.
+    public static func probeIfAsked(_ arguments: [String], key: () -> SymmetricKey?) {
         guard let index = arguments.firstIndex(of: "--handover-probe"), arguments.indices.contains(index + 1) else { return }
         do {
-            _ = try read(from: arguments[index + 1])
+            try probeCheck(arguments, statePath: arguments[index + 1], key: key)
             print(probeAnswer)
             exit(0)
         } catch {
             FileHandle.standardError.write(Data("vibeswitcher-host: handover probe: \(error)\n".utf8))
             exit(1)
+        }
+    }
+
+    /// The argument that asks the probe whether this build holds the vault key the user's host does (its `Proof.keyID`).
+    static let probeKeyFlag = "--handover-probe-key"
+
+    /// The probe's checks: the state reads, and (when asked, by the user's host) this build gets the same vault key, so
+    /// it will check the proof the handover carries. A build that would refuse is never executed in the host's place:
+    /// the host carries on, sessions and all.
+    static func probeCheck(_ arguments: [String], statePath: String, key: () -> SymmetricKey?) throws {
+        _ = try read(from: statePath)
+        guard let index = arguments.firstIndex(of: probeKeyFlag) else { return }
+        guard arguments.indices.contains(index + 1), let key = key(), Proof.keyID(key) == arguments[index + 1] else {
+            throw Failure.probe("it doesn't get this host's vault key from the Keychain, so it would refuse the handover")
         }
     }
 
@@ -345,7 +366,9 @@ public enum HostHandover {
 
     /// Runs `executable --handover-probe path` and waits (up to `timeout`) for it to say it can take over. Blocks: not on
     /// the server's queue.
-    static func probe(_ executable: String, statePath: String, timeout: TimeInterval = probeLimit, time: MacTime = .real) throws {
+    /// `keyID`: the vault key's `Proof.keyID`, which the new build must get too (the user's host's); nil asks nothing.
+    static func probe(_ executable: String, statePath: String, keyID: String? = nil, timeout: TimeInterval = probeLimit,
+                      time: MacTime = .real) throws {
         var pipe: [Int32] = [-1, -1]
         guard Darwin.pipe(&pipe) == 0 else { throw Failure.probe("no pipe") }
         defer { Darwin.close(pipe[0]) }
@@ -363,7 +386,7 @@ public enum HostHandover {
         posix_spawn_file_actions_addopen(&actions, 0, "/dev/null", O_RDONLY, 0)
         posix_spawn_file_actions_adddup2(&actions, pipe[1], 1)
         posix_spawn_file_actions_addinherit_np(&actions, 2)
-        let words = [executable, "--handover-probe", statePath]
+        let words = [executable, "--handover-probe", statePath] + (keyID.map { [probeKeyFlag, $0] } ?? [])
         let argv: [UnsafeMutablePointer<CChar>?] = words.map { strdup($0) } + [nil]
         defer { argv.forEach { free($0) } }
         var pid: pid_t = 0

@@ -93,6 +93,9 @@ public final class HostServer {
     /// The vault's Keychain key, held by the user's host: each handover carries a proof under it that this host made it
     /// (`HostHandover.Proof`), without which the user's host refuses it. Nil: none (a scratch or keyless host).
     public var handoverKey: SymmetricKey?
+    /// The user's host: without `handoverKey` it hands over to no build, which would refuse it and go back to this
+    /// build's copy, which would refuse it too (and quit, its sessions with it). Refused here, it carries on.
+    public var handoverNeedsKey = false
 
     private let config: Config
     private let log: HostLog
@@ -745,6 +748,10 @@ public final class HostServer {
         guard FileManager.default.isExecutableFile(atPath: executable) else {
             return reply(.error("Couldn't hand over: \(HostHandover.Failure.notExecutable(executable))."))
         }
+        guard !handoverNeedsKey || handoverKey != nil else {
+            log.note("handover refused: this host has no vault key to prove it with")
+            return reply(.error("Couldn't hand over: this host has no vault key from the Keychain to prove the handover with."))
+        }
         handingOver = true
         let path = config.handoverPath
         let fail: (Error) -> Void = { [weak self] error in
@@ -759,9 +766,10 @@ public final class HostServer {
             return fail(error)
         }
         log("handing over to \(executable)")
+        let key = handoverKey
         DispatchQueue.global().async { [weak self] in
             do {
-                try HostHandover.probe(executable, statePath: path)
+                try HostHandover.probe(executable, statePath: path, keyID: key.map(HostHandover.Proof.keyID))
             } catch {
                 self?.queue.async { fail(error) }
                 return

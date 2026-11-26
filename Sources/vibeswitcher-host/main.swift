@@ -11,7 +11,7 @@ PTYSpawn.execIfLaunched(CommandLine.arguments)
 // As a session's parser (see `SessionParser`): its headless terminal, fed by the host.
 SessionParser.runIfAsked(CommandLine.arguments)
 // As the probe of a handover (see `HostHandover`): only whether this build can take over.
-HostHandover.probeIfAsked(CommandLine.arguments)
+HostHandover.probeIfAsked(CommandLine.arguments) { VaultStorage.keychainKey() }
 
 signal(SIGPIPE, SIG_IGN)
 signal(SIGHUP, SIG_IGN)
@@ -154,6 +154,7 @@ server.onExit = { exit(0) }
 if let vault = config.vault { server.secretsForHandover = { vault.serialized } }
 // The user's host proves to the build it hands over to that the handover is its own (see `HostHandover.receive`).
 server.handoverKey = vaultKey()
+server.handoverNeedsKey = ownsLaunchers
 // A test of the secret channel: these bytes are handed over, and the next build says whether it got them.
 let testSecret = value(after: "--handover-test-secret").map { Data($0.utf8) }
 if let testSecret { server.secretsForHandover = { testSecret } }

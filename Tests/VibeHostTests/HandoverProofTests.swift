@@ -357,3 +357,48 @@ struct HandoverProofTests {
         return pid
     }
 }
+
+/// The sending side: what the user's host does before it hands over, so a build that would refuse is never executed in
+/// its place (refused there, it would go back to this build's copy, which would refuse too and quit, sessions and all).
+struct HandoverSenderTests {
+    let temp = Scratch()
+
+    /// The user's host without its vault key hands over to no build: it says why and carries on. The build is never
+    /// probed nor run.
+    @Test func theUsersHostWithoutItsKeyDoesntHandOver() async throws {
+        let host = try TestHost()
+        host.server.queue.sync { host.server.handoverNeedsKey = true }
+        let folder = temp.url("keyless-sender")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let ran = folder.appendingPathComponent("ran").path
+        let build = folder.appendingPathComponent("build").path
+        FileManager.default.createFile(atPath: build, contents: Data("#!/bin/sh\ntouch '\(ran)'\nexit 1\n".utf8), attributes: [.posixPermissions: 0o755])
+        let client = try TestClient(host)
+        let seq = client.send(.handover(executable: build))
+        #expect(await eventually { client.reply(to: seq) != nil })
+        guard case .error(let message)? = client.reply(to: seq) else { Issue.record("\(String(describing: client.reply(to: seq)))"); return }
+        #expect(message.contains("no vault key"), "\(message)")
+        #expect(!FileManager.default.fileExists(atPath: ran))
+        let again = client.send(.hello(protocolVersion: HostProtocol.version, app: "test"))
+        #expect(await eventually { client.reply(to: again) != nil })
+    }
+
+    /// The probe asked by the user's host checks the new build gets the same vault key (by its id, never the key), and
+    /// reads the Keychain only when asked.
+    @Test func theProbeChecksTheNewBuildGetsTheSameKey() throws {
+        let folder = temp.url("probe-key")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let path = folder.appendingPathComponent("state").path
+        try HostHandover.write(HostHandover.State(fromBuild: 1, startedAt: Date(), lockFD: 3, listenFD: 4, secretFD: nil, sessions: []), to: path)
+        let key = SymmetricKey(size: .bits256)
+        let asked = ["--handover-probe", path, HostHandover.probeKeyFlag, HostHandover.Proof.keyID(key)]
+        var read = false
+        try HostHandover.probeCheck(["--handover-probe", path], statePath: path) { read = true; return nil }
+        #expect(!read)
+        try HostHandover.probeCheck(asked, statePath: path) { key }
+        #expect(throws: HostHandover.Failure.self) { try HostHandover.probeCheck(asked, statePath: path) { SymmetricKey(size: .bits256) } }
+        #expect(throws: HostHandover.Failure.self) { try HostHandover.probeCheck(asked, statePath: path) { nil } }
+        #expect(throws: HostHandover.Failure.self) { try HostHandover.probeCheck(Array(asked.dropLast()), statePath: path) { key } }
+        #expect(HostHandover.Proof.keyID(key) != HostHandover.Proof.hex(key.withUnsafeBytes { Data($0) }))
+    }
+}
