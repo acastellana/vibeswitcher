@@ -273,7 +273,7 @@ const EN = {
   cHold: "Hold",
   cHeld: "Held: the timer is off. The lead proposed ",
   cKeepsWorking: "It keeps working while you think; the answer reaches it at its next step.",
-  cOwnWords: "Or answer in your own words",
+  cOwnWords: "Or in your own words",
   cAnswer: "Answer",
   cDraft: "Draft",
   cToStop: "To stop the timer",

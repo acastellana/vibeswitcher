@@ -262,7 +262,7 @@ export const ES = {
   cHold: "Poner en espera",
   cHeld: "En espera: el temporizador está parado. El líder propuso ",
   cKeepsWorking: "Sigue trabajando mientras lo piensas; la respuesta le llega en su siguiente paso.",
-  cOwnWords: "O responde con tus palabras",
+  cOwnWords: "O con tus palabras",
   cAnswer: "Responder",
   cDraft: "Borrador",
   cToStop: "Para parar el temporizador",

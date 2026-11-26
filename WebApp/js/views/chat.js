@@ -390,7 +390,7 @@ export function chatView(app) {
   // Images into the message: one from this device (as a paste, `session.attach`), or one that is a file on the node,
   // which the page can't read: for that, the line that sends the message with it (`send … --image PATH`).
   const pick = h('input', { class: 'file-pick', type: 'file', accept: 'image/*', multiple: true, hidden: true, 'aria-hidden': 'true' });
-  const attachButton = kit.iconButton({ class: 'composer-attach', title: t('chAddAnImage'), 'aria-label': t('chAddAnImage'),
+  const attachButton = kit.iconButton({ class: 'composer-attach', round: true, title: t('chAddAnImage'), 'aria-label': t('chAddAnImage'),
     'aria-expanded': 'false', 'aria-controls': 'attach-menu' }, icon('plus', 15));
   const fromDevice = h('button', { class: 'attach-choice', type: 'button' }, t('chAnImageFromThisDevice'));
   const fromNode = h('button', { class: 'attach-choice', type: 'button' }, t('chAnImageOnTheNode'));

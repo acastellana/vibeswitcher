@@ -97,11 +97,12 @@ export function projectView(app, { sheet }) {
   // nothing that grows or shrinks moves it; then what needs you and the project's name; the dial at the right end.
   const head = h('header', { class: 'centre-head' }, menuButton, switcher, count, h('div', { class: 'head-words' }, big, name), h('span', { class: 'grow' }), dialFold, dial, teamButton);
   const strip = h('div', { class: 'team-strip' });
-  // On a phone the team strip is one line, whole counts only, that opens to all of them at a touch.
-  const stripFold = h('button', { class: 'strip-fold', type: 'button', 'aria-expanded': 'false', 'aria-label': t('stripAll') }, icon('chevron', 12));
+  // The team strip is one row, whole counts only, that opens to all of them at a click or a touch (Lead and Roadmap
+  // share it, so it is the same height in both).
+  const stripFold = h('button', { class: 'strip-fold', type: 'button', hidden: true, 'aria-expanded': 'false', 'aria-label': t('stripAll') }, icon('chevron', 12));
   let stripOpen = false;
   strip.addEventListener('click', () => {
-    if (!phone() || stripFold.hidden) return;
+    if (stripFold.hidden) return;
     stripOpen = !stripOpen;
     setClass(strip, 'open', stripOpen);
     stripFold.setAttribute('aria-expanded', String(stripOpen));
@@ -207,7 +208,6 @@ export function projectView(app, { sheet }) {
   // layout (not while the keyboard hides it, nor before the view is placed), and again as its width changes.
   function fitStrip() {
     if (stripOpen) { stripFold.hidden = false; return; }
-    if (!phone()) { stripFold.hidden = true; return; }
     if (!strip.clientHeight) return;
     stripFold.hidden = !(strip.scrollHeight > strip.clientHeight + 1);
   }

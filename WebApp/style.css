@@ -116,6 +116,17 @@
   --ctl-l: 36px;
   --ctl-touch: 44px;
 
+  /* Space: every padding, margin, gap and inset, on one scale (the review's section 2). */
+  --s-1: 2px;
+  --s-2: 4px;
+  --s-3: 6px;
+  --s-4: 8px;
+  --s-5: 12px;
+  --s-6: 16px;
+  --s-7: 24px;
+  --s-8: 32px;
+  --s-9: 48px;
+
   /* Corners. */
   --r-1: 4px;
   --r-2: 8px;
@@ -185,7 +196,7 @@
 
    Button       .button: primary (solid accent, the one main action) · .plain (raised, a hairline) · .quiet (the
                 accent's words, no surface until pointed at) · .plain.danger (plain, in the danger colour); sizes
-                .small 24 · 30 · .large 36. .icon-button: an icon alone, 30 or .small 24.
+                .small 24 · 30 · .large 36. .icon-button: an icon alone, 30 or .small 24; .round a disc.
    Switch       .segmented, a track; .segment, each choice in it: chosen (aria-pressed, aria-current, aria-selected)
                 raised on the track. The one form for every pick-one: Lead | Roadmap, the dial, the right column's
                 and the inspector's tabs, Terminal | Chat, the presets, Statistics' period.
@@ -212,6 +223,7 @@
 
 .icon-button { position: relative; display: inline-flex; align-items: center; justify-content: center; width: var(--ctl-m); height: var(--ctl-m); border-radius: var(--r-2); color: var(--ink-2); }
 .icon-button.small { width: var(--ctl-s); height: var(--ctl-s); }
+.icon-button.round { border-radius: var(--r-pill); }
 .icon-button[aria-current] { background: var(--fill-2); color: var(--ink); }
 .icon-button[aria-expanded="true"] { color: var(--ink); }
 
@@ -1399,13 +1411,22 @@ kbd { padding: 1px 6px; border-radius: var(--r-1); box-shadow: var(--e-1-in); co
 .right-tabs { flex: none; padding: 12px 16px 0; }
 .tabs { display: flex; }
 .tabs .segment { flex: 1; text-align: center; }
-.team-strip { flex: none; display: flex; align-items: center; gap: 16px; padding: 8px 24px; border-bottom: 1px solid var(--line); overflow-x: auto; color: var(--ink-2); font-size: var(--t-caption); white-space: nowrap; scrollbar-width: none; }
+.team-strip { flex: none; display: flex; align-items: center; gap: 16px; padding: 8px 24px; border-bottom: 1px solid var(--line); color: var(--ink-2); font-size: var(--t-caption); }
 .team-strip b { color: var(--ink); font-weight: var(--w-strong); }
 .strip-part { display: inline-flex; align-items: center; gap: 6px; }
 .phone-only { display: none; }
-/* The team strip wraps to a second line where it doesn't fit (1024, a phone), never cut or scrolled out of sight. */
-.team-strip { flex-wrap: wrap; row-gap: 4px; overflow-x: visible; white-space: normal; }
+/* The team strip is one row in Lead and Roadmap alike, at any width: a count that doesn't fit (1024 with the right
+   column, a phone) goes whole to a row hidden under it, never cut or scrolled out of sight, and the fold at the row's
+   end opens the strip to all of them (views/project.js measures it). */
+.team-strip {
+  position: relative; flex-wrap: wrap; align-content: flex-start; row-gap: 0; max-height: calc(var(--ctl-s) + var(--s-2) * 2 + 1px);
+  padding-top: var(--s-2); padding-bottom: var(--s-2); padding-right: calc(var(--ctl-s) + var(--s-5) * 2); overflow: hidden; white-space: normal;
+}
 .team-strip > * { white-space: nowrap; }
+.team-strip > :not(.strip-fold) { display: inline-flex; align-items: center; height: var(--ctl-s); }
+.team-strip.open { max-height: none; }
+.team-strip:has(> .strip-fold:not([hidden])) { cursor: pointer; }
+.strip-fold:not([hidden]) { position: absolute; top: var(--s-2); right: var(--s-5); display: inline-flex; align-items: center; justify-content: center; width: var(--ctl-s); height: var(--ctl-s); color: var(--ink-2); }
 /* A phone's own parts of the header and the strip (the 760 px block at the columns' end shows them): hidden wider. */
 .head-count, .dial-fold, .strip-fold { display: none; }
 /* The lead view's header (D11): one row at the left and right columns' header height, in Lead and Roadmap alike, the
@@ -1766,7 +1787,10 @@ kbd { padding: 1px 6px; border-radius: var(--r-1); box-shadow: var(--e-1-in); co
   .app.keyboard .project-view :is(.team-strip, .dial-fold, .centre-head > .segmented) { display: none; }
   /* The load's skeleton in the phone's shape: the header's two rows within the width, the gutters a phone's. */
   :is(.skeleton-head, .skeleton-strip, .skeleton-composer) { padding-left: 14px; padding-right: 14px; }
-  .skeleton-head { display: grid; gap: 8px; height: auto; padding-top: calc(8px + env(safe-area-inset-top)); padding-bottom: 8px; }
+  /* Its rows the real header's: a fingertip, then the switch in its track (2 px round it), so the content arrives
+     without a jump (109 px at 390). */
+  .skeleton-head { display: grid; grid-template-rows: var(--ctl-touch) calc(var(--ctl-touch) + var(--s-1) * 2); gap: var(--s-2); height: auto; padding-top: calc(var(--s-2) + env(safe-area-inset-top)); padding-bottom: var(--s-4); }
+  .frame-skeleton .bone:is(.skeleton-switch, .skeleton-dial) { height: var(--ctl-touch); }
   .skeleton-head > .skeleton-row { display: flex; }
   .skeleton-lines { padding: 16px 14px; }
   .frame-skeleton .bone.skeleton-title { width: 50%; }
