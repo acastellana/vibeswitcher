@@ -4633,3 +4633,5 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-26 01:12 Kept v2-web-design-system-2 unmerged: By design nothing of it merges into main: its 4 commits are on the local branch v2-web-components in its clone (.vibeswitcher/v2-comp), on top of v2-web-design; the next design steps build on it and it is pushed as a branch for v2 at the user's say. No merge and no cleanup until then.
 - 2026-11-26 01:12 Planned v2-web-the-page: v2 web: the page frame stops moving and loads calmly (D5, D6, D17, D21, D24, D29; the review's group D; in a clone)
 - 2026-11-26 01:13 Planned v2-web-new-session: v2 web: New session, New project, This node and the inspector at the bar (D12, D16, D18, D25; the review's group F; in a clone)
+- 2026-11-26 01:13 Started a worker on v2-web-the-page
+- 2026-11-26 01:13 Started a worker on v2-web-new-session
