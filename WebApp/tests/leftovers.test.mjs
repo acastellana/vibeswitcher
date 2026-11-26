@@ -50,17 +50,20 @@ function under(media, selector) {
   for (const rule of rules()) if (rule.media === media && listed(rule).includes(selector)) Object.assign(out, declarations(rule.body));
   return out;
 }
-// What a selector gets on a phone: the rules outside any @media, then the phone's (a later shorthand replaces the
-// longhands before it).
-function onPhone(selector) {
+// What a selector gets on a phone: the rules outside any @media, then the phone's, then with `touch` a phone's touch
+// screen's (a later shorthand replaces the longhands before it).
+function onPhone(selector, { touch = false } = {}) {
   const out = under('', selector);
-  for (const [property, value] of Object.entries(under(PHONE, selector))) {
-    for (const longhand of Object.keys(out)) if (longhand.startsWith(`${property}-`)) delete out[longhand];
-    out[property] = value;
+  for (const media of touch ? [PHONE, PHONE_TOUCH] : [PHONE]) {
+    for (const [property, value] of Object.entries(under(media, selector))) {
+      for (const longhand of Object.keys(out)) if (longhand.startsWith(`${property}-`)) delete out[longhand];
+      out[property] = value;
+    }
   }
   return out;
 }
 const PHONE = '(max-width: 760px)';
+const PHONE_TOUCH = '(max-width: 760px) and (hover: none) and (pointer: coarse)';
 const TOUCH = '(hover: none) and (pointer: coarse)';
 const ROOT = under('', ':root');
 // A length in px: tokens substituted, env() as 0, calc's arithmetic done.
@@ -158,12 +161,33 @@ test('leftover 2: a phone’s loading header is the real header’s height (109 
   assert.equal(under(TOUCH, '.segment')['min-height'], 'var(--ctl-touch)', 'a segment is a fingertip on a touch screen');
   const realHeight = padding(real).top + rows[0] + gap(real) + rows[1] + padding(real).bottom + 1;
   assert.equal(realHeight, 109);
-  const skeleton = onPhone('.skeleton-head');
+  assert.equal(skeletonHeight({ touch: true }), realHeight, 'nothing moves as the content comes');
+});
+
+// The loading header's height as style.css draws it on a phone, with a mouse or on a touch screen; its bones fit.
+function skeletonHeight({ touch }) {
+  const skeleton = onPhone('.skeleton-head', { touch });
   const skeletonRows = skeleton['grid-template-rows'] ? sides(skeleton['grid-template-rows']) : null;
-  const row = px(onPhone('.skeleton-head > .skeleton-row')['min-height'] || under('', '.skeleton-row')['min-height']);
+  const row = px(onPhone('.skeleton-head > .skeleton-row', { touch })['min-height'] || under('', '.skeleton-row')['min-height']);
   const [first, second] = skeletonRows ? [skeletonRows.top, skeletonRows.right] : [row, row];
-  assert.equal(padding(skeleton).top + first + gap(skeleton) + second + padding(skeleton).bottom + 1, realHeight, 'nothing moves as the content comes');
+  const bone = px(onPhone('.frame-skeleton .bone:is(.skeleton-switch, .skeleton-dial)', { touch }).height);
   assert.ok(row <= Math.min(first, second), 'each row holds its bones');
+  assert.ok(bone <= second, 'the switch and the dial fit their row');
+  return padding(skeleton).top + first + gap(skeleton) + second + padding(skeleton).bottom + 1;
+}
+
+test('a phone’s width with a mouse: the loading header is the real header’s height too (91 px at 700: rows of 30 and 44)', () => {
+  // With a mouse, nothing is a fingertip but the dial's fold: the first row the icon buttons' (30), the second the
+  // fold's 44, which is taller than the switch in its track (24 and 3 px either side). Measured in Chrome at 700 px.
+  const real = onPhone('.project-view .centre-head');
+  const switcher = onPhone('.project-view .centre-head > .segmented:not(.dial)');
+  const segment = px(under('', '.segment')['min-height']);
+  const fold = px(onPhone('.project-view .centre-head.dial-folded > .dial-fold:not([hidden])')['min-height']);
+  const rows = [px(under('', '.icon-button').height), Math.max(segment + padding(switcher).top + padding(switcher).bottom, fold)];
+  assert.deepEqual(rows, [30, 44]);
+  const realHeight = padding(real).top + rows[0] + gap(real) + rows[1] + padding(real).bottom + 1;
+  assert.equal(realHeight, 91);
+  assert.equal(skeletonHeight({ touch: false }), realHeight, 'nothing moves as the content comes, with a mouse as with a finger');
 });
 
 test('leftover 3: the composer’s + is round again, 36 px (44 on a touch screen), as before the join', () => {
