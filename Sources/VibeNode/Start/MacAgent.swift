@@ -190,8 +190,20 @@ public struct MacAgent {
         case .success(let checked): held = checked
         }
         defer { Sys.close(held.fd) }
-        // A bootstrap that fails loaded nothing of this start's: what is there (another start's job, a login's) is left alone.
-        guard let bootstrapped = steps.launchctl(["bootstrap", place.domain, place.plistPath]), bootstrapped.status == 0 else {
+        // A bootstrap that failed with an answer loaded nothing of this start's: what is there (another start's job, a
+        // login's) is left alone. One that didn't finish (no answer within its limit, or ended by a signal) may have loaded
+        // start's own job: judged, and booted out when it is start's (the final re-check's note E).
+        let bootstrapped = steps.launchctl(["bootstrap", place.domain, place.plistPath])
+        guard let bootstrapped, bootstrapped.status == 0 else {
+            if bootstrapped == nil || (bootstrapped?.status ?? 0) >= 128 {
+                let what: String
+                switch judge([job], held: held.fd) {
+                case .notLoaded: what = "nothing of it is loaded"
+                case .ours: what = unloaded(bootout())
+                case .notOurs(let why): what = "a job of the label that isn't start's is loaded (\(why)): it was left as it is"
+                }
+                return .failure(StartRefusal("launchctl bootstrap \(place.domain) \(ConfigSeal.inert(place.plistPath, limit: .max)) didn't finish: \(what)", exitCode: 1))
+            }
             return .failure(StartRefusal("launchctl bootstrap \(place.domain) \(ConfigSeal.inert(place.plistPath, limit: .max)) failed (a job of the label may have been loaded meanwhile): nothing of it was touched", exitCode: 1))
         }
         if !job.atLogin, steps.launchctl(["kickstart", place.target])?.status != 0 {
