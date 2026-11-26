@@ -30,9 +30,11 @@ export function button(role, { size = 'm', tag = 'button', class: extra = '', ..
   return h(tag, { ...(tag === 'button' ? { type: 'button' } : {}), ...props, class: buttonClass(role, size, extra) }, ...children);
 }
 
-// A button that is only its icon (its words in aria-label and the tooltip): 30 px, or 24 with `size: 's'`.
+// A button that is only its icon (its words in aria-label and the tooltip): 30 px, or 24 with `size: 's'`. With no
+// title of its own, its tooltip is its name, so a pointer finds what a screen reader hears (D25).
 export function iconButton({ size = 'm', tag = 'button', class: extra = '', ...props } = {}, ...children) {
-  return h(tag, { ...(tag === 'button' ? { type: 'button' } : {}), ...props, class: join(`icon-button${sized(size)}`, extra) }, ...children);
+  const title = props.title ?? props['aria-label'];
+  return h(tag, { ...(tag === 'button' ? { type: 'button' } : {}), ...props, ...(title ? { title } : {}), class: join(`icon-button${sized(size)}`, extra) }, ...children);
 }
 
 // A pick-one switch: its track, then each choice in it (a button that says it is chosen with aria-pressed, or a

@@ -184,6 +184,7 @@ export function sessionView(app) {
       toggleShows = other;
       paneToggle.replaceChildren(icon(other, 16));
       paneToggle.setAttribute('aria-label', other === 'terminal' ? t('seTerminal') : t('seChat'));
+      paneToggle.title = paneToggle.getAttribute('aria-label');
     }
     tabs.forEach((tab, index) => tab.setAttribute('aria-pressed', String(PANES[index].id === pane)));
     strip.el.hidden = !hasBoard;

@@ -307,7 +307,10 @@ small { font-size: var(--t-caption); }
 .agent-codex .agent-badge { fill: var(--codex); }
 .agent .glyph { fill: none; stroke: var(--on-badge); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .agent .glyph-fill { fill: var(--on-badge); }
-.icon { fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
+.icon { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+/* One weight for every icon at each of its sizes (D25): the line is 1.5 px on the screen, not 1.5 sixteenths of the
+   icon, and a rule elsewhere that thickens an icon's svg doesn't reach its path. */
+.icon > path { vector-effect: non-scaling-stroke; stroke-width: 1.5px; }
 .dot { flex: none; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
 
 .session-mark { position: relative; flex: none; width: 20px; height: 20px; }
