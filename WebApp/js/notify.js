@@ -201,15 +201,15 @@ export function notifications(app, env = {}) {
   }
 
   // The toggle on This node.
-  const box = kit.checkbox({ class: 'notify-toggle', onchange: () => turn(box.checked) });
+  const box = kit.toggle({ class: 'notify-toggle', onchange: () => turn(box.checked) });
   const said = h('span', { class: 'notify-said' });
   // The sound's toggle beside it.
-  const ring = kit.checkbox({ class: 'sound-toggle', onchange: () => sound(ring.checked) });
+  const ring = kit.toggle({ class: 'sound-toggle', onchange: () => sound(ring.checked) });
   // Each kind's choice (the Mac's Settings › Notifications): something needs me; a session finishes.
   const kindBoxes = {
-    needs: kit.checkbox({ class: 'notify-kind', onchange: () => choose('needs', kindBoxes.needs.checked) }),
-    done: kit.checkbox({ class: 'notify-kind', onchange: () => choose('done', kindBoxes.done.checked) }),
-    reminders: kit.checkbox({ class: 'notify-kind', onchange: () => choose('reminders', kindBoxes.reminders.checked) }),
+    needs: kit.toggle({ class: 'notify-kind', onchange: () => choose('needs', kindBoxes.needs.checked) }),
+    done: kit.toggle({ class: 'notify-kind', onchange: () => choose('done', kindBoxes.done.checked) }),
+    reminders: kit.toggle({ class: 'notify-kind', onchange: () => choose('reminders', kindBoxes.reminders.checked) }),
   };
   const el = h('section', { class: 'node-group notify' }, kit.sectionTitle('h2', {}, t('ntNotifications')),
     h('label', { class: 'notify-line' }, box, t('ntTellMeWhenSomethingHappens')), said,

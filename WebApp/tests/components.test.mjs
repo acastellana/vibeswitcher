@@ -132,10 +132,8 @@ test('kit.js gives each role and size its class, and refuses a role it doesn’t
 
 // ---- The views use them ----
 
-// Every view's source: app.js and js/ but for the kit itself and what builds no view. The chat (js/views/chat.js) is
-// another task's this round: its buttons, field and empty line take the components' classes by alias meanwhile
-// (.icon-button, .link, .pane-empty), listed for the join.
-const SKIP = new Set(['js/kit.js', 'js/dom.js', 'js/views/chat.js']);
+// Every view's source: app.js and js/ but for the kit itself and what builds no view.
+const SKIP = new Set(['js/kit.js', 'js/dom.js']);
 const FILES = ['app.js', ...readdirSync(join(root, 'js'), { recursive: true }).filter((name) => name.endsWith('.js')).map((name) => join('js', name))]
   .filter((file) => !SKIP.has(file));
 const lines = (file) => readFileSync(join(root, file), 'utf8').split('\n').map((text, index) => ({ file, line: index + 1, text })).filter((one) => !one.text.trim().startsWith('//'));
@@ -146,8 +144,9 @@ const SOURCE = FILES.flatMap(lines);
 const ROWS = new Set(['option', 'copy-button', 'card-question', 'goal-title', 'road-band', 'summary-brief', 'send-way', 'strip-team', 'fold', 'dial-fold',
   'strip-fold', 'chat-image-button', 'attach-choice', 'attached-remove', 'code-run', 'latest', 'send']);
 // Fields of their own: the palette's (its big row), a search field's words inside its frame (the frame is the field),
-// a colour well, and the lead's message box (one of the two message boxes, the review's U9, not this task's).
-const OWN_FIELDS = new Set(['palette-input', 'tc-search', 'look-colour', 'say']);
+// a colour well, the one message box's own (views/composer.js, the review's U9: the lead's and a session's), and a
+// file picker that is never drawn (the chat's + opens it).
+const OWN_FIELDS = new Set(['palette-input', 'tc-search', 'look-colour', 'composer-input', 'file-pick']);
 // What the components replaced: a view naming one of these draws the old way.
 const OLD = ['section-title', 'col-title', 'tc-group', 'setting-section-title', 'group-head', 'switch', 'switch-link', 'segmented', 'segment', 'confirm-clear',
   'tile', 'stat-figure', 'stat-label', 'stat-value', 'score-tile', 'score-value', 'stat-badge', 'setting-mark', 'tc-meta', 'badge', 'tone-text-mono',

@@ -267,8 +267,8 @@ textarea.field { padding: 6px 10px; line-height: var(--lh-body); resize: vertica
 
 .section-title { margin-bottom: 8px; color: var(--ink-3); font-size: var(--t-caption); font-weight: var(--w-strong); }
 
-.empty, .pane-empty { color: var(--ink-2); font-size: var(--t-caption); line-height: var(--lh-caption); }
-.empty.page, .pane-empty { display: grid; justify-items: center; gap: 8px; font-size: var(--t-body); line-height: var(--lh-body); text-align: center; }
+.empty { color: var(--ink-2); font-size: var(--t-caption); line-height: var(--lh-caption); }
+.empty.page { display: grid; justify-items: center; gap: 8px; font-size: var(--t-body); line-height: var(--lh-body); text-align: center; }
 .empty.page > .icon { color: var(--ink-3); }
 .empty.page > :is(h1, h2) { color: var(--ink); font-size: var(--t-title); font-weight: var(--w-strong); line-height: var(--lh-title); }
 .empty.page > .button { margin-top: 8px; }
@@ -553,7 +553,7 @@ small { font-size: var(--t-caption); }
 
 /* Find in the chat: a bar over it; the row found marked, its words highlighted where the browser can. */
 .chat-find { flex: none; display: flex; align-items: center; gap: 6px; padding: 6px 12px; border-bottom: 1px solid var(--line); background: var(--raised); color: var(--ink-3); }
-.find-input { flex: 1; min-width: 0; min-height: var(--ctl-m); padding: 4px 8px; border-radius: var(--r-2); background: var(--fill); color: var(--ink); font: inherit; font-size: var(--t-caption); border: 0; }
+.find-input { flex: 1; }
 .find-count { flex: none; font-size: var(--t-caption); font-variant-numeric: tabular-nums; }
 .chat-row.found { border-radius: var(--r-3); box-shadow: 0 0 0 2px var(--accent-fill), 0 0 0 4px var(--accent-fill); } /* a mark drawn with a shadow (a ring, a stroke, an edge), not an elevation */
 ::highlight(chat-find) { background: var(--highlight); color: inherit; }
@@ -586,7 +586,6 @@ small { font-size: var(--t-caption); }
 .composer-input::placeholder, .answer-input::placeholder { color: var(--ink-3); text-overflow: ellipsis; }
 .send { flex: none; display: inline-flex; align-items: center; justify-content: center; width: var(--ctl-l); height: var(--ctl-l); border-radius: 50%; background: var(--accent); color: var(--on-accent); transition: background-color var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out); }
 .send:disabled { background: var(--fill-2); color: var(--ink-3); cursor: default; }
-.send .icon { stroke-width: 1.8; }
 .composer-hint { flex: none; padding: 10px 24px 18px; color: var(--ink-3); font-size: var(--t-caption); text-align: center; }
 
 /* The chat's writing drawn (js/text.js, D7): headings on the type scale and never past the reading size and two steps
@@ -729,7 +728,7 @@ textarea.answer-input { max-height: 200px; line-height: var(--lh-body); resize: 
 
 .card.closed { padding: 9px 14px; background: var(--fill); box-shadow: none; }
 .card-closed { display: flex; align-items: flex-start; gap: 9px; min-width: 0; }
-.card-closed > .icon { margin-top: 3px; color: var(--done); stroke-width: 1.8; }
+.card-closed > .icon { margin-top: 3px; color: var(--done); }
 .card-closed > div { min-width: 0; }
 .card-about { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); font-size: var(--t-caption); }
 
@@ -743,7 +742,7 @@ textarea.answer-input { max-height: 200px; line-height: var(--lh-body); resize: 
 
 /* A draft on the node's page: the pick marked, then the answer as it will be sent and the line that sends it. */
 .option.chosen { background: var(--accent-fill); box-shadow: inset 0 0 0 1.5px var(--accent); } /* a mark drawn with a shadow (a ring, a stroke, an edge), not an elevation */
-.option.chosen > .icon { flex: none; color: var(--accent); stroke-width: 2; }
+.option.chosen > .icon { flex: none; color: var(--accent); }
 .option[aria-pressed] { transition: background-color var(--dur-1) var(--ease-out), box-shadow var(--dur-1) var(--ease-out); }
 .confirm { display: grid; gap: 7px; padding: 10px 12px 11px; border-radius: var(--r-3); background: var(--fill); animation: enter var(--dur-2) var(--ease-out); }
 .confirm-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
@@ -1077,7 +1076,7 @@ kbd { padding: 1px 6px; border-radius: var(--r-1); box-shadow: var(--e-1-in); co
   .session .head .segmented { display: none; }
   .session:not(.no-terminal) .pane-toggle { display: inline-flex; }
   .session .end-button { padding: 0; background: none; box-shadow: none; color: var(--ink-2); }
-  .session .end-button > .icon { display: block; stroke-width: 2.6; }
+  .session .end-button > .icon { display: block; }
   .session .end-button > .end-words { display: none; }
   .composer-draft.queued:not(.open) { display: flex; align-items: baseline; gap: 8px; cursor: pointer; }
   .composer-draft.queued:not(.open) > .confirm-label { flex: 0 1 auto; max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1258,7 +1257,7 @@ kbd { padding: 1px 6px; border-radius: var(--r-1); box-shadow: var(--e-1-in); co
 .all-done-tasks li.merged { font-weight: var(--w-medium); }
 
 /* The composer's + (views/chat.js): an image from this device, or the line that sends one on the node. */
-.composer-attach { flex: none; width: var(--ctl-l); height: var(--ctl-l); border-radius: 50%; }
+.composer-attach { flex: none; width: var(--ctl-l); height: var(--ctl-l); }
 .attach-menu { display: flex; flex-direction: column; align-self: flex-start; gap: 2px; width: min(320px, calc(100% - 48px)); margin: 0 0 4px max(24px, calc((100% - 800px) / 2 + 24px)); padding: 4px; border-radius: var(--r-3); background: var(--raised); box-shadow: var(--e-2); }
 .attach-choice { padding: 7px 10px; border-radius: var(--r-2); text-align: left; font-size: var(--t-caption); }
 .attach-choice:focus-visible { background: var(--fill); }
@@ -1453,9 +1452,6 @@ kbd { padding: 1px 6px; border-radius: var(--r-1); box-shadow: var(--e-1-in); co
 .note .confirm-note { max-width: 560px; text-align: right; }
 .composer-lead { flex: none; display: flex; align-items: center; gap: 12px; padding: 12px 24px calc(12px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); }
 .to { color: var(--ink-2); font-size: var(--t-caption); white-space: nowrap; }
-.say { flex: 1; min-width: 0; height: var(--ctl-l); padding: 0 16px; border: 0; border-radius: var(--r-pill); background: var(--raised); box-shadow: var(--e-1-in); outline: none; }
-.say:focus-visible { box-shadow: var(--e-focus-in); }
-.say:disabled { background: var(--fill); }
 .composer-lead .button { flex: none; }
 /* One Send, and a menu of the ways the session's agent takes a message (views/sendmenu.js). */
 .send-menu { position: relative; flex: none; display: inline-flex; gap: 2px; }
@@ -1936,7 +1932,7 @@ main.centre-wrap[tabindex="-1"]:focus { outline: none; }
   /* Solid: the accent a step toward the ink. */
   :is(.button:not(.quiet):not(.plain):not(.confirming), .send):not(:disabled):hover { background-color: var(--accent-hover); }
   /* Fields: a firmer edge. */
-  :is(.field, .say, .setting-search, .find-input, .look-colour, .check):not(:focus):not(:focus-within):not(:disabled):not(:active):hover,
+  :is(.field, .setting-search, .look-colour, .check):not(:focus):not(:focus-within):not(:disabled):not(:active):hover,
   .tc-find:not(:focus-within):not(:active):hover { box-shadow: var(--e-hover-in); }
   .composer-input:not(:focus):not(:active):hover, .chat-image-button:hover { box-shadow: var(--e-hover); }
 }
@@ -1957,7 +1953,7 @@ main.centre-wrap[tabindex="-1"]:focus { outline: none; }
 .button.confirming:not(:disabled):active { background-color: var(--needs-you); transform: scale(0.97); }
 :is(.button.quiet, .button.plain):not(:disabled):active { transform: scale(0.97); }
 /* A field pressed: its ring at once. */
-:is(.field, .say, .setting-search, .find-input):not(:disabled):active,
+:is(.field, .setting-search):not(:disabled):active,
 .tc-find:active, .composer-input:not(:focus):active { box-shadow: var(--e-focus-in); }
 
 /* Busy: the node hasn't answered yet. Its own look (not the disabled grey), a slow pulse, the wait cursor; with

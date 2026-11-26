@@ -295,8 +295,8 @@ test('states: no selector puts a space before a pseudo-class after a parenthesis
 const SIZED = {
   '.button': 'm', '.button.small': 's', '.button.large': 'l', '.icon-button': 'm', '.icon-button.small': 's', '.row-action': 's', '.task-more': 's', '.segment': 's',
   '.copy-button': 's', '.code-run': 's', '.confirm-clear': 's', '.summary-brief': 's', '.offer button': 's', '.latest': 's', '.look-colour': 's',
-  '.send': 'l', '.composer-attach': 'l', '.composer-input': 'l', '.say': 'l',
-  '.field': 'm', '.setting-search': 'm', '.find-input': 'm', '.tc-find': 'm',
+  '.send': 'l', '.composer-attach': 'l', '.composer-input': 'l',
+  '.field': 'm', '.setting-search': 'm', '.tc-find': 'm',
 };
 const TOUCH = '(hover: none) and (pointer: coarse)';
 

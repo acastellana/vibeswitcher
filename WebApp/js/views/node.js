@@ -299,7 +299,7 @@ export function nodeView(app) {
     const top = usage?.limits?.length ? Math.max(...usage.limits.map((limit) => limit.percent)) : null;
     return [
       approving ? { key: 'approve', title: t('acApproveTitle'), meta: approveActs.count ? String(approveActs.count) : '', tone: 'asked', metaTone: 'asked', el: approveActs.el } : null,
-      notices.length ? { key: 'notices', title: t('noNotices'), meta: String(notices.length), metaTone: 'working', el: h('section', { class: 'node-group' }, kit.sectionTitle('h2', {}, plural(notices.length, t('noNotice'))),
+      notices.length ? { key: 'notices', title: t('noNotices'), meta: String(notices.length), metaTone: '', el: h('section', { class: 'node-group' }, kit.sectionTitle('h2', {}, plural(notices.length, t('noNotice'))),
         h('ul', { class: 'notices' }, notices.map((notice) => h('li', null, icon('warning', 14), h('span', null, notice))))) } : null,
       // Acting from a page (`web_acts`): whether this page acts for you and since when, and the switch.
       node.web?.acts ? { key: 'acting', title: t('acGroupTitle'), meta: store.acts() ? t('noOn') : t('noOff'), el: group(t('acGroupTitle'), actsLine(app), passkeysPart(node.web.acts)) } : null,
@@ -314,7 +314,7 @@ export function nodeView(app) {
           (notes?.replacedPaths || []).map((path) => row(t('noTookBackItsPath'), h('span', { class: 'node-path', title: path }, elided(tilde(path, home))))))) },
       usage ? { key: 'usage', title: t('noAccountUsage'), meta: top === null ? '' : `${top}%`, metaTone: usage.limits.some((limit) => limit.holds) ? 'asked' : '', el: usageGroup(node.usage) } : null,
       // Boost (the node's `boost`): on or off, why, and the limits it raises to.
-      node.boost ? { key: 'boost', title: t('noBoost'), meta: node.boost.on ? t('noOn') : t('noOff'), metaTone: node.boost.on ? 'working' : '', el: group(t('noBoost'),
+      node.boost ? { key: 'boost', title: t('noBoost'), meta: node.boost.on ? t('noOn') : t('noOff'), metaTone: '', el: group(t('noBoost'),
         h('dl', { class: 'facts-list' },
           row(t('noState'), h('span', { class: node.boost.on ? 'dot tone-working' : 'dot', 'aria-hidden': 'true' }), node.boost.on ? t('noBoostOnWhy', { why: nodeWords(node.boost.why) }) : t('noBoostOffWhy', { why: nodeWords(node.boost.why) })),
           row(t('noMode'), { on: t('noOn'), off: t('noOff'), automatic: t('noAutomatic') }[node.boost.mode] || node.boost.mode),

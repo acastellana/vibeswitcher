@@ -21,6 +21,7 @@
 //   chat's end, with what came since; worked out when the chat opens, kept until another opens. What you saw is this
 //   browser's (`SEEN`), by session.
 
+import * as kit from '../kit.js';
 import { h, keyed, setText, setClass, framed } from '../dom.js';
 import { agentMark, statusMark, setMark, icon } from '../marks.js';
 import { since, short, clock, plural, tilde, stateOf, AGENTS, STATES, KEY } from '../words.js';
@@ -84,7 +85,7 @@ function outputView(output, failed, truncated) {
   const pre = h('pre', { class: failed ? 'output failed' : 'output', tabindex: 0 }, lines.length > 14 ? lines.slice(0, 12).join('\n') : output);
   const parts = [h('div', { class: 'output-box' }, h('div', { class: 'block-actions' }, copyButton(() => output, t('txCopyOutput'))), pre)];
   if (lines.length > 14) {
-    const more = h('button', { class: 'link', type: 'button', onclick: () => { pre.textContent = output; more.remove(); } }, t('chShowAll', { n: lines.length }));
+    const more = kit.button('quiet', { size: 's', onclick: () => { pre.textContent = output; more.remove(); } }, t('chShowAll', { n: lines.length }));
     parts.push(more);
   }
   if (truncated) parts.push(h('div', { class: 'path' }, t('chTheOutputWasCutShort')));
@@ -130,7 +131,7 @@ function rowActions(...buttons) {
   return h('div', { class: 'row-actions' }, buttons);
 }
 function rowButton(label, glyph, onclick) {
-  return h('button', { class: 'icon-button row-action', type: 'button', title: label, 'aria-label': label, onclick }, icon(glyph, 12));
+  return kit.iconButton({ size: 's', class: 'row-action', title: label, 'aria-label': label, onclick }, icon(glyph, 12));
 }
 
 // A shell code block's Run (the app's `RunButton`): the command as the message that runs it in the agent's shell
@@ -368,10 +369,10 @@ export function chatView(app) {
     h('span', { class: 'bone right' }), h('span', { class: 'bone wide' }), h('span', { class: 'bone' }), h('span', { class: 'bone short' }));
   // An empty chat says what to do (the words under it only where the box is there to write in).
   const emptyWhat = h('span', { class: 'pane-empty-what' }, t('cmEmptyWhat'));
-  const empty = h('p', { class: 'pane-empty', hidden: true }, t('chNoConversationForThisSession'), ' ', emptyWhat);
+  const empty = kit.empty({ tag: 'p', size: 'page', class: 'pane-empty', hidden: true }, t('chNoConversationForThisSession'), ' ', emptyWhat);
   // A node whose page can't follow a chat (`chat.page` isn't among what this connection may send): said once, calmly,
   // in the conversation's place. A lead's questions still follow below it.
-  const later = h('p', { class: 'pane-empty', hidden: true }, t('chThisNodeDoesnTSend'));
+  const later = kit.empty({ tag: 'p', size: 'page', class: 'pane-empty', hidden: true }, t('chThisNodeDoesnTSend'));
   const stackSlot = h('div');
   // This session's plugin cards (js/plugincard.js): its shell requests among them.
   const pluginSlot = h('div', { class: 'stack-cards plugin-cards' });
@@ -388,19 +389,19 @@ export function chatView(app) {
 
   // Images into the message: one from this device (as a paste, `session.attach`), or one that is a file on the node,
   // which the page can't read: for that, the line that sends the message with it (`send … --image PATH`).
-  const pick = h('input', { type: 'file', accept: 'image/*', multiple: true, hidden: true, 'aria-hidden': 'true' });
-  const attachButton = h('button', { class: 'icon-button composer-attach', type: 'button', title: t('chAddAnImage'), 'aria-label': t('chAddAnImage'),
+  const pick = h('input', { class: 'file-pick', type: 'file', accept: 'image/*', multiple: true, hidden: true, 'aria-hidden': 'true' });
+  const attachButton = kit.iconButton({ class: 'composer-attach', title: t('chAddAnImage'), 'aria-label': t('chAddAnImage'),
     'aria-expanded': 'false', 'aria-controls': 'attach-menu' }, icon('plus', 15));
   const fromDevice = h('button', { class: 'attach-choice', type: 'button' }, t('chAnImageFromThisDevice'));
   const fromNode = h('button', { class: 'attach-choice', type: 'button' }, t('chAnImageOnTheNode'));
   const attachMenu = h('div', { class: 'attach-menu', id: 'attach-menu', role: 'group', 'aria-label': t('chAddAnImage'), hidden: true }, fromDevice, fromNode);
-  const nodePath = h('input', { class: 'find-input node-image-path', type: 'text', placeholder: '/path/on/the/node/screenshot.png', 'aria-label': t('chImagePathOnTheNode'),
+  const nodePath = kit.field({ kind: 'code', class: 'node-image-path', type: 'text', placeholder: '/path/on/the/node/screenshot.png', 'aria-label': t('chImagePathOnTheNode'),
     autocomplete: 'off', spellcheck: 'false' });
   const nodeLine = h('div', { class: 'node-image-line' });
   const nodeNote = h('p', { class: 'confirm-note' }, t('chRunItInATerminal'));
   const nodeImage = h('div', { class: 'node-image', hidden: true },
     h('div', { class: 'node-image-head' }, nodePath,
-      h('button', { class: 'icon-button', type: 'button', title: t('chClose'), 'aria-label': t('chClose'), onclick: () => { nodeImage.hidden = true; input.focus(); } }, icon('close', 12))),
+      kit.iconButton({ size: 's', title: t('chClose'), 'aria-label': t('chClose'), onclick: () => { nodeImage.hidden = true; input.focus(); } }, icon('close', 12))),
     nodeLine,
     nodeNote);
   // The one message box (views/composer.js): Enter sends, steers or queues where the page acts (`send`), else leaves
@@ -436,13 +437,13 @@ export function chatView(app) {
   const attachedEl = h('div', { class: 'attached', hidden: true });
   const notice = box.notice;
   // Find in the chat: over it, opened by ⌘F / Ctrl+F (or the palette's Find in Chat) while the chat shows.
-  const findInput = h('input', { class: 'find-input', type: 'search', placeholder: t('chFindInChat'), 'aria-label': t('chFindInChat'),
+  const findInput = kit.field({ kind: 'search', class: 'find-input', type: 'search', placeholder: t('chFindInChat'), 'aria-label': t('chFindInChat'),
     autocomplete: 'off', spellcheck: 'false' });
   const findCount = h('span', { class: 'find-count', role: 'status' });
   const findBar = h('div', { class: 'chat-find', role: 'search', hidden: true }, icon('search', 13), findInput, findCount,
-    h('button', { class: 'icon-button', type: 'button', title: t('chPrevious'), 'aria-label': t('chPreviousMatch'), onclick: () => step(-1) }, icon('send', 12)),
-    h('button', { class: 'icon-button', type: 'button', title: t('chNext'), 'aria-label': t('chNextMatch'), onclick: () => step(1) }, icon('down', 12)),
-    h('button', { class: 'icon-button', type: 'button', title: t('chCloseEsc'), 'aria-label': t('chCloseFind'), onclick: () => closeFind() }, icon('close', 12)));
+    kit.iconButton({ size: 's', title: t('chPrevious'), 'aria-label': t('chPreviousMatch'), onclick: () => step(-1) }, icon('send', 12)),
+    kit.iconButton({ size: 's', title: t('chNext'), 'aria-label': t('chNextMatch'), onclick: () => step(1) }, icon('down', 12)),
+    kit.iconButton({ size: 's', title: t('chCloseEsc'), 'aria-label': t('chCloseFind'), onclick: () => closeFind() }, icon('close', 12)));
   const el = h('div', { class: 'chat' }, findBar, scroller, latest, queuedMessages.el, drafted.el, suggestions, attachedEl, notice, attachMenu, nodeImage, form, hint);
 
   const loader = imageLoader((kind, args) => store.read(kind, args));

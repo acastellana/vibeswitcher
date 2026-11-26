@@ -12,6 +12,7 @@
 // The caller sends (`onSend(way, text)`, returning the request's promise or nothing): only what it sends today, by its
 // own path.
 
+import * as kit from '../kit.js';
 import { h, setText, setClass } from '../dom.js';
 import { icon } from '../marks.js';
 import { t } from '../i18n.js';
@@ -50,22 +51,28 @@ export function keepFor(key, text, storage = globalThis.sessionStorage) {
 }
 
 // Returns { el, input, button, notice, key, value, setMode, setKey, grow, clear, focus, sent, refused }.
-// `className`, `inputClass`: the form's and the box's (the session's `composer`, a card's `answer`); `before` and
+// `className`: the form's (the session's `composer`, a card's `answer`); `field`: a card's box is the kit's field, with
+// this placement class (`answer-input`), else the message box's own `composer-input`; `before` and
 // `after`: what sits either side of the box (the + button, push-to-talk); `button`: a caller's own submit button (a
 // card's Answer), else Send with its word; `menu`: the ways menu's element (views/sendmenu.js), after Send;
 // `beforeKey(event)`: the caller's keys first (`/` and `@` completion), true when it took the key.
 export function composer({
-  className = 'composer', inputClass = 'composer-input', label, placeholder = '', maxLength = null, before = [], after = [],
+  className = 'composer', field = null, label, placeholder = '', maxLength = null, before = [], after = [],
   button = null, menu = null, onSend = () => {}, beforeKey = () => false, onInput = () => {},
   storage = globalThis.sessionStorage, soft = softKeyboard, leave = null,
 }) {
-  const input = h('textarea', {
-    class: inputClass, rows: 1, 'aria-label': label, placeholder, maxlength: maxLength, enterkeyhint: soft() ? 'enter' : 'send',
+  // The session's and the lead's box is the message box's own (U9: borderless in its rounded frame); a card's answer
+  // box is the kit's field, a textarea.
+  const props = {
+    rows: 1, 'aria-label': label, placeholder, maxlength: maxLength, enterkeyhint: soft() ? 'enter' : 'send',
     autocomplete: 'off',
-  });
+  };
+  let input;
+  if (field) input = kit.field({ tag: 'textarea', class: field, ...props });
+  else input = h('textarea', { class: 'composer-input', ...props });
   const word = h('span', { class: 'send-word' }, t('swSend'));
   const send = button || h('button', { class: 'send labelled', type: 'submit', disabled: true }, icon('send', 14), word);
-  const retry = h('button', { class: 'link composer-retry', type: 'button', hidden: true }, t('cmRetry'));
+  const retry = kit.button('quiet', { size: 's', class: 'composer-retry', hidden: true }, t('cmRetry'));
   const noticeText = h('span');
   const notice = h('p', { class: 'composer-notice', role: 'status', hidden: true }, noticeText, retry);
   const el = h('form', { class: className }, before, input, after, send, menu);

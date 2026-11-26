@@ -1298,7 +1298,7 @@ export const ES = {
   owSearch: "Buscar por nombre, carpeta o estado",
   owSearchShort: "Buscar sesiones",
   owNoMatch: "Ninguna sesión tuya coincide con «{query}».",
-  owNoneYet: "Aún no tienes sesiones propias. Arranca una con + arriba: te da la línea para ejecutar en una terminal.",
+  owNoneYet: "Aún no tienes sesiones propias. Arranca una con + arriba.",
   owCount: { one: "1 sesión tuya", other: "{n} sesiones tuyas" },
   // Settings' switches and ranges (D16)
   svWhereKept: "Dónde se guarda",

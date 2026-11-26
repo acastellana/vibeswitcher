@@ -1311,7 +1311,7 @@ const EN = {
   owSearch: "Search by name, folder or state",
   owSearchShort: "Search sessions",
   owNoMatch: "No session of yours matches “{query}”.",
-  owNoneYet: "No sessions of your own yet. Start one with + above: it gives you the line to run in a terminal.",
+  owNoneYet: "No sessions of your own yet. Start one with + above.",
   owCount: { one: "1 session of yours", other: "{n} sessions of yours" },
   // Settings' switches and ranges (D16)
   svWhereKept: "Where it’s kept",

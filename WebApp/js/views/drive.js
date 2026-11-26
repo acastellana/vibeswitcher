@@ -263,7 +263,7 @@ export function promptCard(app) {
         const index = chosen;
         // The one message box (views/composer.js) with this card's Send: Enter answers, Shift+Enter a new line.
         const send = kit.button('primary', { type: 'submit', disabled: !words.trim(), title: t('cmAnswerTitle') }, t('drReplySend'));
-        const box = messageBox({ className: 'answer', inputClass: kit.fieldClass('plain', 'answer-input'), label: t('drYourWordsForThisOption'), placeholder: t('drYourWords'), button: send, storage: null,
+        const box = messageBox({ className: 'answer', field: 'answer-input', label: t('drYourWordsForThisOption'), placeholder: t('drYourWords'), button: send, storage: null,
           onInput: () => { words = box.input.value; send.disabled = !words.trim(); },
           onSend: () => { if (words.trim()) { const text = words.trim(); words = ''; chosen = null; answer(session, index, text); } } });
         box.input.value = words;

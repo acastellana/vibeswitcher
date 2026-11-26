@@ -25,7 +25,7 @@ import { composer as messageBox } from './composer.js';
 // A card's answer box: the one message box (views/composer.js) with the card's own button: Enter answers, Shift+Enter
 // a new line, an input method's Enter never; what was typed kept across the card's redraws by its caller.
 function answerBox({ value, placeholder, button, onSend, onInput, maxLength = null }) {
-  const box = messageBox({ className: 'answer', inputClass: kit.fieldClass('plain', 'answer-input'), label: t('yourAnswer'), placeholder, maxLength, button, onSend, onInput, storage: null });
+  const box = messageBox({ className: 'answer', field: 'answer-input', label: t('yourAnswer'), placeholder, maxLength, button, onSend, onInput, storage: null });
   box.input.value = value;
   box.grow();
   const talk = talkButton(box.input);
