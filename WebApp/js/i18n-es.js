@@ -832,7 +832,7 @@ export const ES = {
   drItsAgentStopsWithEverything: "Su agente se detiene, con todo lo que se ejecuta en su terminal.",
   drEndsThisNodeSShells: "Termina los shells de este nodo en esta carpeta o por debajo que hayan vuelto a su prompt; uno que aún ejecute algo se queda.",
   drStartsItAgainInIts: "La vuelve a arrancar en su misma conversación.",
-  drItsConversationIdWasnT: "No se conocía el id de su conversación: no se puede reanudar.",
+  drItsConversationIdWasnT: "No se puede reanudar: no se guardó su conversación.",
   drResumeNotifications: "Reanudar las notificaciones",
   drProjectFolder: "Carpeta del proyecto",
   drPathPlaceholder: "~/proyectos/mi-app",

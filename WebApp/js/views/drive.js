@@ -355,11 +355,12 @@ export function actionsStrip(app = null) {
     return ['rename', 'pause', ...(endable(session) ? ['end'] : []), ...(session.hosted && session.cwd ? ['shells'] : [])];
   }
 
-  // The line that does it, and with the `act` right a button that does it from here (`kind` with `args`).
-  function line(text, label, note, kind = null, args = null) {
+  // With the `act` right, the button that does it from here (`kind` with `args`), named for what it does (D12); else
+  // the line that does it in a terminal. Never both. What it does, said under it.
+  function line(text, label, note, kind = null, args = null, doing = null) {
     const acts = app && kind && text && actsFor(app, kind);
-    return [acts ? doButton(app, { label: t('acDoIt'), kind, args: () => args, done: () => { opened = false; el.hidden = true; } }).el : null,
-      text ? copyLine(text, label) : null, note ? h('p', { class: 'confirm-note' }, note) : null].filter(Boolean);
+    return [acts ? doButton(app, { label: doing || t('acDoIt'), kind, args: () => args, done: () => { opened = false; el.hidden = true; } }).el : null,
+      text && !acts ? copyLine(text, label) : null, note ? h('p', { class: 'confirm-note' }, note) : null].filter(Boolean);
   }
 
   function body() {
@@ -371,7 +372,7 @@ export function actionsStrip(app = null) {
         const text = renameLine(session, typed);
         slot.replaceChildren(...line(text, t('drTheCommandThatRenamesIt'),
           text ? (typed.trim() ? t('drKeptAcrossAResumeThe') : t('drGivesItItsOwnName'))
-            : typed.trim() ? t('drThatSItsNameNow') : t('drTypeAName'), 'session.rename', { session: session.id, ...(typed.trim() ? { name: typed.trim() } : {}) }));
+            : typed.trim() ? t('drThatSItsNameNow') : t('drTypeAName'), 'session.rename', { session: session.id, ...(typed.trim() ? { name: typed.trim() } : {}) }, t('drRename')));
       };
       input.addEventListener('input', () => { typed = input.value; fill(); });
       fill();
@@ -380,14 +381,14 @@ export function actionsStrip(app = null) {
     if (tab === 'pause') {
       if (session.paused) {
         return line(pauseLine(session, 'off'), t('drTheCommandThatResumesIts'),
-          t('drPausedGreyedOutNeverReminded'), 'session.pause', { session: session.id, for: 'off' });
+          t('drPausedGreyedOutNeverReminded'), 'session.pause', { session: session.id, for: 'off' }, t('drResumeNotifications'));
       }
       const choices = kit.segmented({ class: 'presets', role: 'group', 'aria-label': t('drForHowLong') }, PAUSES.map((one) => kit.segment({
         'aria-pressed': String(one.id === pause), onclick: () => { pause = one.id; draw(true); },
       }, one.label)));
-      return [choices, ...line(pauseLine(session, pause), t('drTheCommandThatPausesIt'), t('drGreyedOutAndNothingReminds'), 'session.pause', { session: session.id, ...pauseArgs(pause) })];
+      return [choices, ...line(pauseLine(session, pause), t('drTheCommandThatPausesIt'), t('drGreyedOutAndNothingReminds'), 'session.pause', { session: session.id, ...pauseArgs(pause) }, t('drPause'))];
     }
-    if (tab === 'end') return line(endLine(session), t('drTheCommandThatEndsIt'), t('drItsAgentStopsWithEverything'), 'session.end', { session: session.id });
+    if (tab === 'end') return line(endLine(session), t('drTheCommandThatEndsIt'), t('drItsAgentStopsWithEverything'), 'session.end', { session: session.id }, t('drEnd'));
     if (tab === 'shells') {
       // Where the page acts and the node lists `shells` and `session.close-shells`: the folder's shells listed first,
       // then Close N finished shells for those the node says are finished (a second click asks first).
@@ -397,8 +398,9 @@ export function actionsStrip(app = null) {
     }
     const ended = endedEntry(node, session.id);
     const resume = resumeLine(ended);
-    return [...line(resume, t('drTheCommandThatResumesIt'), resume ? t('drStartsItAgainInIts') : t('drItsConversationIdWasnT'), 'session.resume', { session: session.id }),
-      ended?.conversation ? copyLine(ended.conversation, t('drItsConversationId')) : null];
+    // Its conversation's id is the terminal's (claude --resume): shown only where the page can't resume it.
+    return [...line(resume, t('drTheCommandThatResumesIt'), resume ? t('drStartsItAgainInIts') : t('drItsConversationIdWasnT'), 'session.resume', { session: session.id }, t('drResume')),
+      ended?.conversation && !(app && actsFor(app, 'session.resume')) ? copyLine(ended.conversation, t('drItsConversationId')) : null];
   }
 
   function draw(force = false) {

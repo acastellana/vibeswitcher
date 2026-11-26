@@ -379,3 +379,30 @@ test('D12: New project, for someone with no projects yet: a folder you have (the
   }
   setLanguage('en');
 });
+
+test('D12: a session’s actions, where the page acts, are one button named for what it does and no line; elsewhere the line', async () => {
+  const { actionsStrip } = await import('../js/views/drive.js');
+  const session = { id: 'local:e91d05a3-4f6a-4c1e-9b7d-2e5a8c0d1f3b', hosted: true, cwd: '/home/dev/projects/example-site', agent: 'claude', status: 'idle', name: '' };
+  for (const code of ['en', 'es']) {
+    setLanguage(code);
+    const app = fakeApp({ kinds: ['session.rename', 'session.pause', 'session.end'], state: { node: { home: '/home/dev', ended: [] } } });
+    const strip = actionsStrip(app);
+    strip.update(session, app.store.state.node);
+    for (const [tab, label, args] of [['pause', t('drPause'), { session: session.id, for: 'indefinitely' }], ['end', t('drEnd'), { session: session.id }]]) {
+      strip.open(tab);
+      assert.doesNotMatch(strip.el.shownText, /vibeswitcher/, `${code} ${tab}: no line where the button does it`);
+      const panel = find(strip.el, byClass('action-panel'));
+      const go = find(panel, (node) => node.tag === 'button' && node.textContent === label && !/segment/.test(node.attrs.class));
+      assert.ok(go, `${code} ${tab}: “${label}”`);
+      go.click();
+      assert.deepEqual(app.sent.at(-1), { kind: `session.${tab}`, args });
+      await flush();
+    }
+    const reads = fakeApp({ acts: false, kinds: ['session.pause'], state: { node: { home: '/home/dev', ended: [] } } });
+    const other = actionsStrip(reads);
+    other.update(session, reads.store.state.node);
+    other.open('pause');
+    assert.match(other.el.shownText, /vibeswitcher pause/);
+  }
+  setLanguage('en');
+});

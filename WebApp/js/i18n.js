@@ -843,7 +843,7 @@ const EN = {
   drItsAgentStopsWithEverything: "Its agent stops, with everything running in its terminal.",
   drEndsThisNodeSShells: "Ends this node’s shells in this folder or below that are back at their prompt; one still running something stays.",
   drStartsItAgainInIts: "Starts it again in its same conversation.",
-  drItsConversationIdWasnT: "Its conversation id wasn’t known: it can’t be resumed.",
+  drItsConversationIdWasnT: "It can’t be resumed: its conversation wasn’t kept.",
   drResumeNotifications: "Resume notifications",
   drProjectFolder: "Project folder",
   drPathPlaceholder: "~/projects/my-app",
