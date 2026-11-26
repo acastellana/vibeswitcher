@@ -67,6 +67,27 @@ export function moment(iso, now = Date.now()) {
   return `${at.toLocaleDateString(lang(), { month: 'short', day: 'numeric' })}, ${clock(iso)}`;
 }
 
+// A moment's day on the reader's calendar as 'YYYY-MM-DD' (they sort as the days do), '' with no valid time.
+export function dayKey(iso) {
+  const at = new Date(iso ?? NaN);
+  if (Number.isNaN(at.getTime())) return '';
+  return [at.getFullYear(), at.getMonth() + 1, at.getDate()].map((n, i) => String(n).padStart(i ? 2 : 4, '0')).join('-');
+}
+
+// The day a moment belongs to, as a day line says it: "Today", "Yesterday", else its weekday and date in the page's
+// language ("Tuesday, Nov 24", "Martes, 24 nov"), with the year when it isn't this one. Calendar days, not 24 hours:
+// the day the clocks change is still one day.
+export function dayWords(iso, now = Date.now()) {
+  const day = dayKey(iso);
+  if (!day) return '';
+  const today = new Date(now);
+  if (day === dayKey(today)) return t('today');
+  if (day === dayKey(new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1, 12))) return t('yesterday');
+  const at = new Date(iso);
+  const words = at.toLocaleDateString(lang(), { weekday: 'long', day: 'numeric', month: 'short', ...(at.getFullYear() === today.getFullYear() ? {} : { year: 'numeric' }) });
+  return words.charAt(0).toLocaleUpperCase(lang()) + words.slice(1);
+}
+
 // "in 8 min", "in 45 s", "now": how long a question's timer has left (the Mac's question card).
 export function until(iso, now = Date.now()) {
   const left = Math.ceil((Date.parse(iso) - now) / 1000);

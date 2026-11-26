@@ -4,7 +4,7 @@
 // An item is the wire's: { id, type: 'prompt' | 'reply' | 'tools' | 'team', at, … }. A chat as the store holds it is
 // { items: [], index: Map(id → position) }.
 
-import { plural } from './words.js';
+import { plural, dayKey } from './words.js';
 import { t } from './i18n.js';
 
 // `ops` applied to `chat` in order, or nothing at all when one of them doesn't fit what the chat holds: a `text` op
@@ -212,4 +212,23 @@ export function openingPlace({ saved = null, markKey = null, keys = [] } = {}) {
     if (index >= 0) return { kind: 'marker', index, offset: 0 };
   }
   return { kind: 'end', index: keys.length - 1, offset: 0 };
+}
+
+// The chat's rows: its items with a day line before the first item of each day after the first one held (D23), as
+// { type: 'day', id: 'day:2026-11-25', at } on the reader's calendar. Days only go forward, so a day's line is drawn
+// once: an item stamped before the one above it (a clock set back) draws none. An item with no time, or one `shown`
+// says draws no row (a kind this client doesn't know), belongs to the day above it, so a line never stands alone.
+// Older items paged in above move the first held day's line to where that day starts; the id keeps it the same row.
+export function withDays(items, shown = () => true) {
+  const rows = [];
+  let last = '';
+  for (const item of items || []) {
+    const day = shown(item) ? dayKey(item.at) : '';
+    if (day && day > last) {
+      if (last) rows.push({ type: 'day', id: 'day:' + day, at: item.at });
+      last = day;
+    }
+    rows.push(item);
+  }
+  return rows;
 }

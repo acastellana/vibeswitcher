@@ -43,6 +43,14 @@ const COMMIT = '4e1c9a7b2d6f8035a1c4e7b9d2f60813a5c7e9b1';
 export function createMock(store, options = {}) {
   const now = () => Date.now();
 const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
+  // How long ago `back` days before today, at hh:mm on the reader's clock was, in seconds: a chat that spans days has
+  // its days where the reader's calendar has them, whatever time it is now.
+  const daysAgo = (back, hours, minutes) => {
+    const at = new Date(now());
+    at.setDate(at.getDate() - back);
+    at.setHours(hours, minutes, 0, 0);
+    return Math.floor((now() - at.getTime()) / 1000);
+  };
   const soon = (seconds) => new Date(now() + seconds * 1000).toISOString();
   let seq = 0;
   let epoch = crypto.randomUUID();
@@ -91,7 +99,7 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
       queued: [{ text: 'And keep the old job name in the logs.', images: 0, at: ago(5), action: 'mock-queued' }] });
     add(WEBHOOKS, { agent: 'codex', cwd: PAYOUTS, status: 'working', since: ago(95), startedAt: ago(400), branch: 'retry-webhooks', title: 'Retry failed bank webhooks', detail: 'Running the retry tests', activity: 'pytest tests/test_webhook_retry.py', activitySince: ago(95) });
     add(DARK, { status: 'done', since: ago(380), startedAt: ago(1900), branch: 'settings-dark-mode', title: 'Add dark mode to the settings page' });
-    add(PREVIEW, { cwd: DOCS, status: 'background', since: ago(720), startedAt: ago(760), title: 'Preview the docs site', detail: '1 shell · 12m: npm run dev' });
+    add(PREVIEW, { cwd: DOCS, status: 'background', since: ago(720), startedAt: ago(daysAgo(2, 10, 12)), title: 'Preview the docs site', detail: '1 shell · 12m: npm run dev' });
     add('local:pts/9', { cwd: DOCS, status: 'idle', since: ago(5400), startedAt: ago(5600), hosted: false, terminal: 'pts/9', pid: 40312, title: 'Tidy the README' });
   }
 
@@ -347,10 +355,17 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
       command('npm test -- settings', 'PASS  tests/settings.test.js\n  ✓ follows the system setting (41 ms)\n  ✓ keeps contrast at 4.5:1 in both (12 ms)', 420),
       reply('The settings page follows the system setting now. Its colours are two variables, redefined under `prefers-color-scheme: dark`; the tests check both and the contrast.', 380),
     ]);
+    // Three days of one chat (the day lines, D23): started two days ago, a fix yesterday, started again today.
     chats.set(PREVIEW, [
-      prompt('Start the docs preview and leave it running.', 760),
+      prompt('Start the docs preview and leave it running.', daysAgo(2, 10, 12)),
+      command('npm run dev', '> docs@1.0.0 dev\n> vite --port 5173\n\n  Local:   http://127.0.0.1:5173/', daysAgo(2, 10, 12) - 20),
+      reply('The preview is running on port 5173 in a background shell. I’ll leave it up.', daysAgo(2, 10, 12) - 40),
+      prompt('On a phone the search box covers the logo. Fix it in the preview.', daysAgo(1, 18, 40)),
+      edit(`${DOCS}/theme/header.css`, [{ old: '.search { position: absolute; left: 0; }', new: '.search { position: static; margin-left: auto; }' }], daysAgo(1, 18, 40) - 60),
+      reply('The search box sits after the logo now, on a phone as well. The preview reloaded by itself.', daysAgo(1, 18, 40) - 90),
+      prompt('It stopped overnight. Start it again and leave it running.', 760),
       command('npm run dev', '> docs@1.0.0 dev\n> vite --port 5173\n\n  Local:   http://127.0.0.1:5173/', 740),
-      reply('The preview is running on port 5173 in a background shell. I’ll leave it up.', 720),
+      reply('The preview is running on port 5173 again, in a background shell. I’ll leave it up.', 720),
     ]);
     chats.set('local:pts/9', [
       prompt('Tidy the README: shorter intro, and the install steps as a list.', 5600),

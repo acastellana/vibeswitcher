@@ -14,10 +14,10 @@
 import * as kit from '../kit.js';
 import { h, s, setText, setClass, framed } from '../dom.js';
 import { icon } from '../marks.js';
-import { clock, moment, tilde, lastPart, taskLine } from '../words.js';
+import { clock, moment, tilde, lastPart, taskLine, dayWords } from '../words.js';
 import { t, listed, lang, nodeWords } from '../i18n.js';
 import { hasDates, dated, timeAxis, axisPoints, landingWords, basisWords } from '../forecast.js';
-import { leadLines, shownLines, dialCounts, waitingCards, waitingCount, withPushLines, cut, shortHashes, dayOf, teamCounts, standing, taskTone, taskStep, waitsOn, goalRows, lineKey } from '../conversation.js';
+import { leadLines, shownLines, dialCounts, waitingCards, waitingCount, withPushLines, cut, shortHashes, teamCounts, standing, taskTone, taskStep, waitsOn, goalRows, lineKey } from '../conversation.js';
 import { projectHref, routeHref } from '../ui.js';
 import { questionStack, pluginCard, copyLine, cardSheet, optionWords } from './cards.js';
 import { heldParts, sinceWord } from './sheet.js';
@@ -53,11 +53,6 @@ export function stripCounts(board) {
     .map((tone) => h('span', { class: 'strip-part' }, h('i', { class: `dot tone-${tone}` }), t(tone, { n: counts[tone] })));
   return parts.length ? parts : [h('span', { class: 'strip-part' }, t('noTasks'))];
 }
-
-const dayWords = (iso) => {
-  const day = dayOf(iso, Date.now(), lang());
-  return day === 'today' ? t('today') : day === 'yesterday' ? t('yesterday') : day;
-};
 
 export function projectView(app, { sheet }) {
   const { store, ui } = app;
@@ -480,7 +475,7 @@ export function projectView(app, { sheet }) {
     let day = null;
     for (const line of shown) {
       const words = dayWords(line.at);
-      if (words !== day) { day = words; children.push(h('p', { class: 'day' }, words)); }
+      if (words !== day) { day = words; children.push(kit.dayLine({}, words)); }
       children.push(...lineEl(line, route));
     }
     // A short conversation leaves the centre bare: the lead's latest statement at its top, quietly, opening its sheet.

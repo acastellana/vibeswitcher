@@ -109,6 +109,12 @@ export function empty({ tag = 'div', size = 'list', class: extra = '', ...props 
   return h(tag, { ...props, class: join('empty', size === 'page' ? 'page' : '', extra) }, ...children);
 }
 
+// A day line: the day the lines under it were said, small and quiet, centred between two hairlines. A session's chat
+// and the lead's conversation draw their days with it.
+export function dayLine({ tag = 'p', class: extra = '', ...props } = {}, ...children) {
+  return h(tag, { ...props, class: join('day', extra) }, h('span', { class: 'day-text' }, ...children));
+}
+
 // What opens in place under its row (a task's details, a goal's tasks, the queue): `motion: 'opening'` unfolds it over
 // the short motion (--dur-2, eased), the rows under it moving down with it instead of jumping; `'closing'` folds it
 // away the same way, then `onclosed()` (the caller draws again without it). Drawn again open, it is simply there.
