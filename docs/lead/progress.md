@@ -4640,3 +4640,4 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-26 01:48 Started a worker on review-v2-s-mac-3
 - 2026-11-26 01:49 Kept v2-web-the-chat unmerged: By design nothing of it merges into main: its 7 commits are on the local branch v2-web-chat in its clone (.vibeswitcher/v2-chat), on top of v2-web-design; to be joined with the components, frame and sections branches and pushed as a branch for v2 at the user's say. No merge and no cleanup until then.
 - 2026-11-26 01:49 Update: v2: el chat, rehecho para leerse y escribirse como una app de primera — **Qué cambió**
+- 2026-11-26 01:57 Kept v2-web-new-session unmerged: By design nothing of it merges into main: its 12 commits are on the local branch v2-web-sections in its clone (.vibeswitcher/v2-sections), on top of v2-web-components; to be joined with the chat and frame branches and pushed as a branch for v2 at the user's say. No merge and no cleanup until then.
