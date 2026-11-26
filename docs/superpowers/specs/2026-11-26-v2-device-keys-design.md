@@ -751,8 +751,11 @@ ID stays for every state change from the command line.*
 Each slice is about 30 minutes to 2 hours, in dependency order. "Here": what this Mac proves by tests (shared code and
 the Mac's arm, in a scratch clone; **"in-process" means VibeNode's in-process tests on this Mac**: the scratch-node
 harness is Linux-only). "Linux, read only": what can only be read here, the Linux-only tests included. **Review**:
-needs its own independent security review before it is offered. "After": a slice it must not run beside, because they
-touch the same function (N3).
+needs its own independent security review before it is offered. "After": the slices it must follow, because it builds
+on them or touches the same function (N3: 2 and 3 share `WebAuthn.swift`, 4 needs both, 8 and 16 share
+`TerminalRelay.swift`, 16 takes a file of its own rather than `WebAccess.swift`, and 19, 20 and 23 share `DeviceRequests.swift`'s
+dispatch). Two slices neither of whose "After" chains reaches the other may run side by side: for example 1, 2 and 5;
+13 beside 6 to 12; 16 beside 9 to 15; 17 beside 15 and 16.
 
 **The gates.** `DeviceKeys.usersNode`, `PhoneAccess.usersNode` and `TerminalTyping.usersNode` live **in VibeCore**
 (`Sources/VibeCore/V2/DeviceGates.swift`), so the server and the host (`HostWebListen.refusal`, `HostWebListeners`)
