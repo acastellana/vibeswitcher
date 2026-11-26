@@ -2,6 +2,7 @@
 // it (the node's WebSocket, or with ?mock an invented node that needs no server), the window's own state, the views
 // and the keyboard.
 
+import * as kit from './js/kit.js';
 import { createStore } from './js/store.js';
 import { connectSocket } from './js/socket.js';
 import { validate } from './wire/validators.js';
@@ -12,7 +13,9 @@ import { t } from './js/i18n.js';
 import { register as registerPasskey } from './js/passkey.js';
 import { copyLine } from './js/views/cards.js';
 import { projectsOf, firstProject } from './js/conversation.js';
-import { leftColumn, ownSession } from './js/views/left.js';
+import { leftColumn, ownSession, framePhase, frameShape } from './js/views/left.js';
+import * as frame from './js/views/frame.js';
+import { shortcut, keyCommands, needingHref, nthHref, stepHref } from './js/keys.js';
 import { projectView } from './js/views/project.js';
 import { rightColumn } from './js/views/right.js';
 import { sideSheet } from './js/views/sheet.js';
@@ -23,13 +26,15 @@ import { settingsView, settingsHref } from './js/views/settings.js';
 import { statsView, statsHref } from './js/views/stats.js';
 import { mailView, mailHref } from './js/views/mail.js';
 import { palette } from './js/views/palette.js';
+import { wantsSearch } from './js/views/twocol.js';
 import { notifications } from './js/notify.js';
 import { recentFolders, newEntries, endable, leadFolders } from './js/actions.js';
 import { briefFoot, speech, speak } from './js/brief.js';
+import { followKeyboard } from './js/viewport.js';
 const params = new URLSearchParams(location.search);
 const store = createStore();
 const ui = createUI();
-const mocked = params.has('mock') || params.has('still') || params.has('empty') || params.has('rows');
+const mocked = params.has('mock') || params.has('still') || params.has('empty') || params.has('rows') || params.has('older') || params.has('toggle');
 // The mock is loaded only for ?mock and its kin: the node's embedded page leaves it out (scripts/webapp-embed.sh), so
 // there it says so; WebApp/serve.sh and a scratch server's folder serve it.
 // Whether this page runs inside a frame (a cross-origin parent can't be read: framed too).
@@ -46,7 +51,9 @@ function ownBuild() {
 }
 const feed = mocked
   ? await import('./js/mock.js').then(
-    ({ createMock }) => createMock(store, { rows: Number(params.get('rows')) || 0, still: params.has('still'), empty: params.has('empty') }),
+    ({ createMock }) => createMock(store, { rows: Number(params.get('rows')) || 0, still: params.has('still'), delay: params.get('delay'), empty: params.has('empty'), older: params.has('older'), toggle: params.has('toggle'), held: params.has('held'), norole: params.has('norole'),
+      rich: params.has('rich'), stream: params.has('stream'),
+      refuse: (params.get('refuse') || '').split(',').filter(Boolean) }),
     (error) => {
       document.body.textContent = 'The mock (?mock) couldn\u2019t be loaded: the node\u2019s own page leaves it out; WebApp/serve.sh serves it.';
       throw error;
@@ -101,7 +108,7 @@ function brief() {
     if (!sheet.shown()) return;
     const result = reply.ok ? reply.result : null;
     let speaking = false;
-    const speakButton = h('button', { class: 'button quiet', type: 'button', onclick: () => {
+    const speakButton = kit.button('plain', { onclick: () => {
       if (speaking) { voice.synth.cancel(); return; }
       speaking = true;
       speakButton.textContent = t('stopSpeaking');
@@ -119,15 +126,20 @@ const left = leftColumn(app, { brief });
 const project = projectView(app, { sheet });
 const right = rightColumn(app);
 const session = sessionView(app);
-const own = ownSessionsView(app);
+// Your own sessions holds the session view in its detail column (beside its list, or alone for a team's session).
+const own = ownSessionsView(app, { session });
 const newProject = newProjectView(app);
 const node = nodeView(app);
 const settings = settingsView(app);
 const stats = statsView(app);
 const mail = mailView(app);
-const offline = h('div', { class: 'offline', role: 'status', hidden: true }, t('apReconnectingToTheNode'));
-// The node doesn't know this page, or dropped it: said once, quietly, with the one thing that fixes it. The rows it
-// had stay readable underneath.
+// The connection dropped after the page had the node's state: a note in the left column's gap (left.notes, below),
+// where nothing moves when it comes or goes; on a phone, where that column is a drawer, a dot on the button that opens
+// it (style.css, `.app.has-note`).
+const offline = h('div', { class: 'note reconnecting', role: 'status', hidden: true },
+  h('span', { class: 'note-words' }, h('strong', null, t('frReconnecting')), ' ', t('frReconnectingSub')));
+// The node dropped this page while its rows were shown: said once, at the top of the centre, with the one thing that
+// fixes it. The rows it had stay readable underneath.
 const unpaired = h('div', { class: 'offline signed-out', role: 'status', hidden: true });
 // A page that just redeemed a pairing code: the words to check against what `vibeswitcher web` shows, until the user
 // confirms it there.
@@ -160,7 +172,7 @@ function drawTabBanner() {
   }
   if (!lost) {
     tabBanner.replaceChildren(h('span', null, h('strong', null, t('tbOlderBuild')), ' ', store.acts() ? t('tbOlderActing') : t('tbOlderReads')),
-      h('button', { class: 'button small', type: 'button', onclick: () => store.reloadNow() }, t('tbReload')));
+      kit.button('primary', { size: 's', onclick: () => store.reloadNow() }, t('tbReload')));
     return;
   }
   const unconfirmed = state.actsLost === 'unconfirmed';
@@ -172,7 +184,7 @@ function drawTabBanner() {
     off ? h('code', null, 'vibeswitcher set web_acts trust') : null,
     off ? h('span', null, t('tbThen')) : null,
     h('code', null, 'vibeswitcher web'),
-    h('button', { class: 'icon-button tab-banner-close', type: 'button', 'aria-label': t('close'), title: t('close'), onclick: () => store.forgetActsLost() }, '×'));
+    kit.iconButton({ class: 'tab-banner-close', 'aria-label': t('close'), title: t('close'), onclick: () => store.forgetActsLost() }, '×'));
 }
 store.subscribe('connection', drawTabBanner);
 
@@ -201,7 +213,7 @@ function drawPasskeyOffer() {
   passkeyOffer.hidden = !offer || expired || !store.can('passkey.registered');
   if (passkeyOffer.hidden) return;
   if (offer.expires) setTimeout(drawPasskeyOffer, Math.max(0, Date.parse(offer.expires) - Date.now()) + 50);
-  const add = h('button', { class: 'button small', type: 'button', disabled: adding?.state === 'adding' || adding?.state === 'added', onclick: () => store.addPasskey(registerPasskey) }, t('pkAdd'));
+  const add = kit.button('primary', { size: 's', disabled: adding?.state === 'adding' || adding?.state === 'added', onclick: () => store.addPasskey(registerPasskey) }, t('pkAdd'));
   const named = store.state.pageWords ? h('span', { class: 'page-words' }, t('pkThisPage'), ' ', h('strong', null, store.state.pageWords)) : null;
   // Added: the 6 characters of this tab's own new key in an element of their own (`.passkey-id`), the words beside.
   if (adding?.state === 'added') {
@@ -222,15 +234,58 @@ const unscroll = () => {
 addEventListener('scroll', unscroll, { passive: true });
 addEventListener('resize', unscroll);
 document.addEventListener('focusin', () => requestAnimationFrame(unscroll));
-// What the centre says before there is anything to show: connecting, or not paired.
-const waitingWords = h('h1', { class: 'big' });
-const waitingSub = h('p');
-const waiting = h('section', { class: 'centre screen status-screen', hidden: true }, h('div', { class: 'empty-state' }, waitingWords, waitingSub));
-const centre = h('main', { class: 'centre-wrap' }, tabBanner, passkeyOffer, project.el, own.el, newProject.el, session.el, node.el, settings.el, stats.el, mail.el, waiting);
+// A touch screen's browser shows a press (style.css's :active) only where the page listens for touches; this listener does
+// nothing else.
+document.addEventListener('touchstart', () => {}, { passive: true });
+// ---- The frame before there is anything to show (the design review of 2026-11-25, D6, D21) ----
+// Until the node's first snapshot the centre and the right column are skeletons in the shape of the view they will
+// show (left.js draws the left column's); a node that doesn't answer for a while, a page that isn't paired and a node
+// with nothing on it each get a page that says what this is, what to do and what happens then.
+const UNREACHABLE_AFTER = 5000;
+let unreachable = false;
+let reachTimer = null;
+app.unreachable = () => unreachable;
+function watchReach() {
+  if (store.state.connection !== 'connecting') {
+    clearTimeout(reachTimer);
+    reachTimer = null;
+    unreachable = false;
+    return;
+  }
+  if (unreachable || reachTimer) return;
+  reachTimer = setTimeout(() => {
+    reachTimer = null;
+    // A node that said hello is answering (its first state may just be large on a slow link): never called out of reach.
+    if (store.state.connection !== 'connecting' || store.state.kinds !== null) return;
+    unreachable = true;
+    route();
+  }, UNREACHABLE_AFTER);
+}
+const { el: centreSkeleton, box: skeletonBox } = frame.centreSkeleton();
+const rightSkeleton = frame.rightSkeleton();
+// A page of the frame's own (views/frame.js): drawn again only when its kind changes.
+const framePage = h('section', { class: 'centre screen frame-page', hidden: true });
+let framePageDrawn = '';
+function drawFramePage(kind) {
+  if (kind === framePageDrawn) return;
+  framePageDrawn = kind;
+  framePage.replaceChildren(frame.framePage(kind, { retry: feed.retryNow ? () => feed.retryNow() : null }));
+}
+// Skip past the left column to what the screen shows: the first stop of the keyboard, shown when it has the focus.
+const centre = h('main', { class: 'centre-wrap', id: 'content', tabindex: '-1' }, unpaired, tabBanner, passkeyOffer, project.el, own.el, newProject.el, node.el, settings.el, stats.el, mail.el, centreSkeleton, framePage);
+const skip = kit.button('plain', { tag: 'a', class: 'skip-link', href: '#content', onclick: (event) => { event.preventDefault(); app.drawer(null); centre.focus(); } }, t('frSkip'));
+// The reconnecting line and the notifications' offer: in the left column's gap, where nothing moves (D5). Where that
+// column is a drawer (900 px and under), a dot on the button that opens it says a note waits there.
+left.notes.append(offline, app.notifications.offer);
 const root = document.getElementById('app');
+function noteDot() { root.classList.toggle('has-note', !offline.hidden || !app.notifications.offer.hidden); }
+app.noteChanged = noteDot;
 const commandPalette = palette(app);
 const scrim = h('div', { class: 'drawer-scrim', onclick: () => app.drawer(null) });
-root.replaceChildren(left.el, centre, right.el, scrim, sheet.scrim, sheet.el, commandPalette.el, offline, unpaired, confirming, passkeyPill, app.notifications.offer);
+root.replaceChildren(skip, left.el, centre, right.el, rightSkeleton, scrim, sheet.scrim, sheet.el, commandPalette.el, confirming, passkeyPill);
+// A phone's keyboard: the page keeps to what is visible above it, the box being typed in in sight (js/viewport.js).
+const phoneWidth = typeof matchMedia === 'function' ? matchMedia('(max-width: 760px)') : { matches: false };
+followKeyboard({ root, phone: () => phoneWidth.matches });
 
 // `#/` opens the project with the most waiting on you, else the most active one, else Your own sessions; it takes
 // the address's place (no history entry), so back doesn't land on it again.
@@ -239,6 +294,8 @@ function settleHome() {
   const connection = store.state.connection;
   if (connection === 'connecting' || connection === 'unpaired' || connection === 'revoked') return false;
   const first = firstProject(projectsOf(store.state));
+  // A node with no project and no session: home says what this is and how to start.
+  if (!first && store.state.sessions.size === 0) return false;
   location.replace(location.pathname + location.search + (first ? projectHref(first) : '#/sessions'));
   return true;
 }
@@ -252,25 +309,32 @@ function route() {
   const name = r.name;
   root.dataset.route = name;
   const connection = store.state.connection;
-  const blank = name === 'home';
-  const shown = { project: project.el, sessions: own.el, new: newProject.el, session: session.el, node: node.el, settings: settings.el, stats: stats.el, mail: mail.el };
-  for (const [key, el] of Object.entries(shown)) el.hidden = key !== name;
-  waiting.hidden = !blank;
-  if (blank) {
-    const off = connection === 'unpaired' || connection === 'revoked';
-    setText(waitingWords, off ? t('unpaired') : t('connecting'));
-    setText(waitingSub, off ? t('unpairedSub') : '');
-  }
+  watchReach();
+  // What the centre shows: the route's view, or the frame's own (a skeleton while loading; the node out of reach; not
+  // paired; a node with nothing on it).
+  const phase = framePhase(store.state, unreachable);
+  const page = frame.framePageKind({ phase, connection, route: r, sessions: store.state.sessions.size });
+  const shown = { project: project.el, sessions: own.el, new: newProject.el, session: own.el, node: node.el, settings: settings.el, stats: stats.el, mail: mail.el };
+  for (const el of new Set(Object.values(shown))) el.hidden = page !== null || el !== shown[name];
+  centreSkeleton.hidden = page !== 'loading';
+  skeletonBox.hidden = name === 'project' && r.view === 'roadmap';
+  framePage.hidden = !page || page === 'loading';
+  if (!framePage.hidden) drawFramePage(page);
+  root.classList.toggle('loading', phase === 'loading');
   // The right column: a project's lead conversation's; a session's inspector takes its place in the session view.
+  // While loading, its skeleton where it will be.
   const known = name === 'project' && (store.state.leads.has(r.id) || store.state.boards.has(r.id));
-  root.classList.toggle('with-right', known && r.view === 'lead');
+  const leadShape = page === 'loading' && (name === 'project' ? r.view === 'lead' : frameShape().home === 'project');
+  root.classList.toggle('with-right', (known && r.view === 'lead' && !page) || leadShape);
   // On a phone a task opens where it is drawn: in the right column, a drawer there.
   app.drawer(narrow.matches && known && r.view === 'lead' && r.task ? 'right' : null);
   // The side sheet belongs to the screen it opened on: a project's line stays open only while the address names it.
   if (!(name === 'project' && r.sheet)) sheet.close();
   left.render();
   if (name === 'project') { project.render(); right.render(); }
-  if (name === 'sessions') own.render();
+  if (name === 'sessions' || name === 'session') own.render();
+  // A session beside the list leaves the inspector less room: a column only on a wider window (ui.js).
+  ui.setBesideList(name === 'session' && !own.alone());
   if (name === 'new') newProject.render();
   const lead = name === 'project' ? store.state.leads.get(r.id) || store.state.boards.get(r.id) : null;
   const one = store.state.sessions.get(r.id);
@@ -280,38 +344,50 @@ function route() {
   app.notifications.refresh?.();
 }
 ui.subscribe((what) => { if (what === 'route') route(); });
-for (const topic of ['sessions', 'leads', 'boards', 'cards', 'connection', 'node']) store.subscribe(topic, () => { if (ui.state.route.name === 'home' || (ui.state.route.name === 'project' && !root.classList.contains('with-right') && ui.state.route.view === 'lead')) route(); else left.render(); });
+for (const topic of ['sessions', 'leads', 'boards', 'cards', 'connection', 'node']) {
+  store.subscribe(topic, () => {
+    // The frame's own pages and skeletons give way as soon as the node says more.
+    const framed = root.classList.contains('loading') || !framePage.hidden || unreachable;
+    if (framed || ui.state.route.name === 'home' || (ui.state.route.name === 'project' && !root.classList.contains('with-right') && ui.state.route.view === 'lead')) route(); else left.render();
+  });
+}
 store.subscribe('sessions', () => { if (ui.state.route.name === 'session') route(); });
+// The screens with a list and a search box: `/` focuses it (views/twocol.js).
+const searchable = () => ({ sessions: own, session: own.alone() ? null : own, node, settings })[ui.state.route.name] || null;
 route();
 
-// On a phone, a screen's back arrow opens the left column, where every place is.
+// On a phone, a screen's back arrow opens the left column, where every place is; but for a session beside Your own
+// sessions' list, whose back is to that list.
 root.addEventListener('click', (event) => {
-  if (narrow.matches && event.target.closest?.('.head .back')) { event.preventDefault(); app.drawer('left'); }
+  if (narrow.matches && event.target.closest?.('.head .back') && !event.target.closest?.('.twocol:not(.alone)')) { event.preventDefault(); app.drawer('left'); }
 });
 
 // Said only while it's true: nothing marks a working connection.
 store.subscribe('connection', () => {
   const connection = store.state.connection;
   offline.hidden = connection !== 'reconnecting';
+  noteDot();
   unpaired.hidden = (connection !== 'unpaired' && connection !== 'revoked') || store.state.sessions.size === 0;
   const phrase = store.state.phrase;
   confirming.hidden = !phrase || connection === 'unpaired' || connection === 'revoked';
   if (!confirming.hidden) confirming.replaceChildren(h('span', null, t('apConfirmInTerminal')), h('strong', { class: 'phrase' }, phrase), h('span', { class: 'sub' }, t('apConfirmSub')));
   if (!unpaired.hidden) {
-    unpaired.replaceChildren(connection === 'revoked' ? t('apThisPageSAccessWas') : t('apThisPageIsnTPaired'),
-      t('apRun'), h('code', null, 'vibeswitcher web'), t('apInATerminalAndOpen'));
+    unpaired.replaceChildren(h('span', null, connection === 'revoked' ? t('frRevokedShort') : t('frUnpairedDo')), copyLine('vibeswitcher web', t('frPairLine')));
   }
 });
 
 // ---- Commands (the palette's, and the keys') ----
 
-// ⌘J: the next project with something waiting on you, after the one shown.
-function nextNeedingYou() {
-  const waiting = projectsOf(store.state).filter((one) => one.waiting > 0);
-  if (!waiting.length) return;
-  const at = waiting.findIndex((one) => ui.state.route.name === 'project' && one.project === ui.state.route.id);
-  ui.go(projectHref(waiting[(at + 1) % waiting.length].project));
+// ⌘J / ⌥J (Alt+J): the next place with something waiting on you (js/keys.js); ⌥F or / the left column's filter (in its
+// drawer on a phone); ⌥1–9 (Ctrl+Shift+1–9) its nth, ⌥] ⌥[ (Alt+↓ ↑) the next or previous in it.
+const goTo = (href) => { if (href) ui.go(href); return !!href; };
+const nextNeedingYou = () => goTo(needingHref(store.state, ui.state.route, ownSession));
+function leftFilter() {
+  if (narrow.matches) app.drawer('left');
+  left.focusFilter();
 }
+const leftNth = (n) => goTo(nthHref(left.order(), n));
+const leftStep = (by) => goTo(stepHref(left.order(), ui.state.route, by));
 
 // The palette's "New … in …" (the Mac's palette): each recent folder's presets as the node lists them, asked once a
 // minute at most while the palette is open (Claude and Shell until the node answers). Running one shows the start
@@ -372,15 +448,17 @@ function sessionCommands(selected) {
 function commands() {
   const selected = ui.state.route.name === 'session' ? store.state.sessions.get(ui.state.route.id) : null;
   const pane = (id, title, key) => ({ title, keys: `${KEY.mod}${KEY.alt}${key}`, icon: id, run: () => ui.setPane(selected.id, id) });
+  const keyed = keyCommands({ mac: MAC, state: store.state, route: ui.state.route, items: left.order(), own: ownSession, go: goTo, filter: leftFilter });
+  const firstNine = keyed.nth;
   return [
-    { title: t('apNextProjectNeedingYou'), keys: `${KEY.mod}J`, icon: 'question', run: nextNeedingYou },
+    ...keyed.entries,
     ...(selected ? [pane('chat', t('apChat'), '2'), pane('terminal', t('apTerminal'), '1')] : []),
     // The inspector's, for a session: the Mac's View › Toggle Inspector, and its Team tab for a lead or its team.
     ...(selected && teamOf(store.state, selected) ? [{ title: t('apTeam'), about: t('apTheTeamSTasksIn'), keys: `${KEY.mod}${KEY.alt}3`, icon: 'team', run: () => ui.showInspector('team') }] : []),
     ...(selected ? [{ title: t('apToggleInspector'), about: t('apTeamOverviewAndActivity'), keys: `${KEY.mod}${KEY.alt}0`, icon: 'inspector', run: () => ui.toggleInspector() }] : []),
     // Each lead's board: its team's tasks, grouped (views/board.js).
     ...projectsOf(store.state).flatMap((one) => [
-      { title: t('apLeadOf', { name: one.name }), about: t('apYouAndItsLead'), icon: 'chat', run: () => ui.go(projectHref(one.project)) },
+      { title: t('apLeadOf', { name: one.name }), about: t('apYouAndItsLead'), keys: firstNine.get(one.project), icon: 'chat', run: () => ui.go(projectHref(one.project)) },
       { title: t('apRoadmapOf', { name: one.name }), about: t('apItsTasksAsTheyMove'), icon: 'team', run: () => ui.go(projectHref(one.project, { view: 'roadmap' })) },
     ]),
     ...sessionCommands(selected),
@@ -396,7 +474,7 @@ function commands() {
     // The node's settings, and each lead's project's (views/settings.js).
     { title: t('apSettings'), about: t('apLimitsBoostTheWorkingPolicy'), icon: 'settings', run: () => ui.go(settingsHref(null)) },
     // This browser's terminal look (Settings › Terminal, views/termlook.js): the Mac's Appearance.
-    { title: t('apTerminalLook'), about: t('apThemeFontSizeCursorAnd'), icon: 'terminal', run: () => ui.go(settingsHref(null)) },
+    { title: t('apTerminalLook'), about: t('apThemeFontSizeCursorAnd'), icon: 'terminal', run: () => ui.go(settingsHref(null, 'terminal')) },
     // The Mac's Statistics window (views/stats.js).
     ...(store.can('stats') ? [{ title: t('apStatistics'), about: t('apLoadUsageMergesQualityAnd'), icon: 'node', run: () => ui.go(statsHref('week')) }] : []),
     // What the projects' leads told each other (views/mail.js).
@@ -421,6 +499,7 @@ addEventListener('keydown', (event) => {
     && !(!MAC && event.ctrlKey && event.altKey && /^Digit[12]$/.test(event.code))) return;
   const mod = MAC ? event.metaKey : event.ctrlKey;
   const digit = /^Digit[1-9]$/.test(event.code) ? Number(event.code.slice(5)) : 0;
+  const keyed = shortcut(event, { mac: MAC });
   if (mod && !event.altKey && event.code === 'KeyK') {
     event.preventDefault();
     ui.setPalette(!ui.state.palette);
@@ -436,9 +515,14 @@ addEventListener('keydown', (event) => {
     event.preventDefault();
     if (digit < 3) ui.setPane(ui.state.route.id, digit === 1 ? 'terminal' : 'chat');
     else if (teamOf(store.state, store.state.sessions.get(ui.state.route.id))) ui.showInspector('team');
-  } else if ((mod || event.altKey) && !event.shiftKey && event.code === 'KeyJ') {
+  } else if (keyed) {
+    // The left column's keys (js/keys.js): never while typing in a field.
+    if (keyed.do === 'nth' ? leftNth(keyed.n) : keyed.do === 'step' ? leftStep(keyed.by) : keyed.do === 'needing' ? (nextNeedingYou(), true) : (leftFilter(), true)) event.preventDefault();
+  } else if (wantsSearch(event)) {
+    // / is the screen's own list search where it has one (Your own sessions, This node, Settings), else the left
+    // column's filter.
     event.preventDefault();
-    nextNeedingYou();
+    if (searchable()) searchable().focusSearch(); else leftFilter();
   } else if (event.key === 'Escape' && root.dataset.drawer) {
     app.drawer(null);
   }

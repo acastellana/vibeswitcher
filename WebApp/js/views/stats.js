@@ -5,6 +5,7 @@
 // working solo. A figure whose source isn't kept reads "Not recorded", one with nothing to count "–" (the node's
 // words). Asked again when the range changes and every `REFRESH` ms while it shows.
 
+import * as kit from '../kit.js';
 import { h, setText, framed } from '../dom.js';
 import { icon } from '../marks.js';
 import { t } from '../i18n.js';
@@ -32,7 +33,7 @@ function sized(className, property, value, title = '') {
 
 // A figure: its label, value and line under it, a usage bar with its pace mark, and its days as small bars.
 function figureView(figure) {
-  const parts = [h('div', { class: 'stat-figure-head' }, h('span', { class: 'stat-label' }, figure.label), h('span', { class: 'stat-value' }, figure.value))];
+  const parts = [];
   if (figure.meter) {
     const bar = h('div', { class: 'stat-meter' + (figure.meter.reached ? ' reached' : ''), role: 'img', 'aria-label': t('stUsedValue', { x: figure.value }) },
       sized('stat-meter-fill', 'width', percent(figure.meter.used)));
@@ -41,7 +42,7 @@ function figureView(figure) {
     }
     parts.push(bar);
   }
-  if (figure.detail) parts.push(h('p', { class: 'stat-detail' }, figure.detail));
+  if (figure.detail) parts.push(h('small', { class: 'tile-note' }, figure.detail));
   const days = figure.trend || [];
   if (days.length > 1) {
     const top = Math.max(1, ...days.map((day) => day.value || 0));
@@ -49,7 +50,7 @@ function figureView(figure) {
       days.map((day) => h('span', { class: 'stat-day' + (day.value === null ? ' none' : ''), title: `${day.label}: ${day.text}` },
         sized('stat-day-bar', 'height', percent(day.value === null ? 0 : (day.value / top) * 1000))))));
   }
-  return h('div', { class: 'stat-figure', title: figure.help || '' }, parts);
+  return kit.tile({ value: figure.value, label: figure.label, help: figure.help, class: 'stat-figure' }, parts);
 }
 
 // A table: its columns' titles (each with its help on hover), and a row a line.
@@ -64,27 +65,27 @@ function table(columns, rows, { help = [], first = '' } = {}) {
 // The whole page for one `stats` result.
 export function statsBody(result) {
   const parts = [];
-  parts.push(h('section', { class: 'node-group' }, h('h2', { class: 'section-title' }, t('stThisNode')),
+  parts.push(h('section', { class: 'node-group' }, kit.sectionTitle('h2', {}, t('stThisNode')),
     h('div', { class: 'stat-figures' }, (result.mac || []).map(figureView))));
   const rows = (result.projects || []).map((row) => ({ name: row.name, note: row.note, cells: row.cells }));
   if (result.total) rows.push({ name: result.total.name, note: result.total.note, cells: result.total.cells, className: 'total' });
-  parts.push(h('section', { class: 'node-group' }, h('h2', { class: 'section-title' }, t('stProjects')),
+  parts.push(h('section', { class: 'node-group' }, kit.sectionTitle('h2', {}, t('stProjects')),
     rows.length ? table(result.columns || [], rows, { first: t('stProject') })
-      : h('p', { class: 'stat-empty' }, t('stNoProjectWithALead'))));
+      : kit.empty({ tag: 'p', class: 'stat-none' }, t('stNoProjectWithALead'))));
   const quality = result.quality;
   if (quality) {
     for (const section of quality.sections || []) {
-      parts.push(h('section', { class: 'node-group' }, h('h2', { class: 'section-title' }, section.title),
+      parts.push(h('section', { class: 'node-group' }, kit.sectionTitle('h2', {}, section.title),
         h('div', { class: 'stat-figures' }, (section.figures || []).map(figureView))));
     }
     if ((quality.breakdown || []).length) {
-      parts.push(h('section', { class: 'node-group' }, h('h2', { class: 'section-title' }, t('stByWhoDidTheWork')),
+      parts.push(h('section', { class: 'node-group' }, kit.sectionTitle('h2', {}, t('stByWhoDidTheWork')),
         table(quality.columns || [], quality.breakdown.map((row) => ({ name: row.name, cells: row.cells, className: row.model ? 'model' : '' })),
           { help: quality.columnHelp || [] }),
         quality.modelsNote ? h('p', { class: 'stat-empty' }, quality.modelsNote) : null));
     }
     if ((quality.trend || []).length) {
-      parts.push(h('section', { class: 'node-group' }, h('h2', { class: 'section-title' }, t('stTheLast8Weeks')),
+      parts.push(h('section', { class: 'node-group' }, kit.sectionTitle('h2', {}, t('stTheLast8Weeks')),
         h('div', { class: 'stat-weeks' }, quality.trend.map((week) => h('div', { class: 'stat-week', title: t('stWeek', { label: week.label, merged: week.merged, rate: week.passRate, cost: week.cost }) },
           h('div', { class: 'stat-week-bars' },
             sized('stat-week-bar pass', 'height', percent(week.passBar ?? 0)),
@@ -95,9 +96,9 @@ export function statsBody(result) {
     const compared = quality.compared;
     if (compared && (compared.groups || []).length) {
       parts.push(h('section', { class: 'node-group' },
-        h('h2', { class: 'section-title', title: compared.method }, compared.title, h('span', { class: 'stat-badge' }, compared.badge)),
+        kit.sectionTitle('h2', { title: compared.method }, compared.title, kit.badge('neutral', compared.badge, { class: 'stat-badge' })),
         h('p', { class: 'stat-empty' }, compared.method),
-        compared.groups.map((group) => h('div', { class: 'stat-compared' }, h('h3', { class: 'setting-section-title' }, group.title),
+        compared.groups.map((group) => h('div', { class: 'stat-compared' }, kit.sectionTitle('h3', { class: 'setting-section-title' }, group.title),
           table(compared.columns || [], group.rows.map((row) => ({ name: row.label, cells: row.cells })), { help: [] })))));
     }
   }
@@ -106,13 +107,13 @@ export function statsBody(result) {
 
 export function statsView(app) {
   const { store, ui } = app;
-  const picker = h('div', { class: 'segmented', role: 'group', 'aria-label': t('stRange') },
-    RANGES.map((range) => h('button', { type: 'button', 'data-range': range.id, onclick: () => ui.go(statsHref(range.id)) }, range.label)));
+  const picker = kit.segmented({ role: 'group', 'aria-label': t('stRange') },
+    RANGES.map((range) => kit.segment({ 'data-range': range.id, onclick: () => ui.go(statsHref(range.id)) }, range.label)));
   const span = h('span', { class: 'head-state' });
   const body = h('div', { class: 'node-column stats-column' });
   const el = h('section', { class: 'node stats', 'aria-label': t('stStatistics') },
     h('header', { class: 'head' },
-      h('a', { class: 'back icon-button', href: '#/node', 'aria-label': t('stThisNode') }, icon('back', 16)),
+      kit.iconButton({ tag: 'a', class: 'back', href: '#/node', 'aria-label': t('stThisNode') }, icon('back', 16)),
       h('div', { class: 'head-text' }, h('div', { class: 'head-line' }, h('h1', { class: 'head-title' }, t('stStatistics')), span)), picker),
     h('div', { class: 'pane node-pane' }, body));
   let results = new Map();
@@ -152,7 +153,7 @@ export function statsView(app) {
     if (now === drawn) return;
     drawn = now;
     if (result) body.replaceChildren(...statsBody(result));
-    else if (failed) body.replaceChildren(h('p', { class: 'stat-empty' }, failed));
+    else if (failed) body.replaceChildren(kit.empty({ tag: 'p', class: 'stat-none' }, failed));
     else body.replaceChildren(h('div', { class: 'inspect-skeleton', 'aria-hidden': 'true' }, h('span', { class: 'bone wide' }), h('span', { class: 'bone' }), h('span', { class: 'bone short' })));
   }
 

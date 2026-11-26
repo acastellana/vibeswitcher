@@ -6,6 +6,14 @@
 //   ?rows=10000   gives one session a long chat, to see the list and the scroll hold up
 //   ?still        sends the snapshot and nothing after it (for screenshots)
 //   ?empty        a node with no sessions
+//   ?older        a node from before a page could answer a session's question or start one: it lists none of
+//                 session.reply, session.new, session.resume and lead (as a node that doesn't take them from a page)
+//   ?toggle       the asking session's question is Claude's auto-mode popup, whose second option is a setting toggled
+//                 with Space: the node refuses it from a page, as it does there
+//   ?rich         "Add dark mode…" holds what an agent writes: a heading, emphasis, a quote, links, nested lists, a
+//                 table, fenced code, a long output and a failed command (each state of the chat, to see and shoot)
+//   ?stream       "Bank webhooks…" streams a long rich reply on load and again each time one ends
+//   ?refuse=send  (with any kind of REFUSALS) the node refuses it: a refused send, beside the box
 
 import { diffOps, summaryOf } from './chatops.js';
 import { taskGroup, taskState } from './words.js';
@@ -75,8 +83,10 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
     // Its own question, as the node reads it off the session's screen (`prompt`, SessionPrompt.value), and a message
     // drafted for it on a page (`draft`, session.draft).
     add(ASKING, { cwd: API, status: 'needs-you', since: ago(20), startedAt: ago(140), title: 'Why does the payout job run twice?', detail: 'Bash: pytest tests/test_payouts.py',
-      prompt: { question: 'Bash command\n  pytest tests/test_payouts.py\nDo you want to proceed?', options: ['Yes', 'Yes, and don’t ask again for this command', 'No, and tell Claude what to do differently (esc)'],
-        descriptions: [null, null, null], text: [], multiSelect: false, at: ago(20) },
+      prompt: options.toggle
+        ? { question: 'Auto mode lets Claude run commands without asking first.', options: ['Continue', 'Also scan shell history'], descriptions: [null, 'on'], text: [], multiSelect: false, at: ago(20) }
+        : { question: 'Bash command\n  pytest tests/test_payouts.py\nDo you want to proceed?', options: ['Yes', 'Yes, and don’t ask again for this command', 'No, and tell Claude what to do differently (esc)'],
+          descriptions: [null, null, null], text: [], multiSelect: false, at: ago(20) },
       draft: { text: 'Once the tests pass, also add one for two regions at once.', images: [], at: ago(8), action: 'mock-draft' },
       queued: [{ text: 'And keep the old job name in the logs.', images: 0, at: ago(5), action: 'mock-queued' }] });
     add(WEBHOOKS, { agent: 'codex', cwd: PAYOUTS, status: 'working', since: ago(95), startedAt: ago(400), branch: 'retry-webhooks', title: 'Retry failed bank webhooks', detail: 'Running the retry tests', activity: 'pytest tests/test_webhook_retry.py', activitySince: ago(95) });
@@ -85,8 +95,11 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
     add('local:pts/9', { cwd: DOCS, status: 'idle', since: ago(5400), startedAt: ago(5600), hosted: false, terminal: 'pts/9', pid: 40312, title: 'Tidy the README' });
   }
 
+  // `?held`: the site's lead has ended (its project quiet), its settings files are held and its base moved, each a
+  // card; `?norole`: its lead runs without its role (a start shows it and offers to replace it).
+  const leadSession = options.held ? id('dead0001') : LEAD;
   const leads = new Map(options.empty ? [] : [[SITE_PROJECT, {
-    project: SITE_PROJECT, root: SITE, session: LEAD, named: null, bound: LEAD, replaced: [], held: 0, reportsWaiting: 0, notice: null,
+    project: SITE_PROJECT, root: SITE, session: leadSession, named: null, bound: options.norole ? null : leadSession, replaced: [], held: 0, reportsWaiting: 0, notice: null,
     starting: false, lastStart: null, lastStartAt: ago(5400), looks: 14, questions: { open: 1, blocking: 1 }, cards: [CARD_LAUNCH],
     // What the user told the lead (by action), and whether it has read it (the node's `delivered`).
     told: [],
@@ -160,6 +173,22 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
     },
   }]]);
 
+  const CARD_HELD = 'local:card:c0f1a2b3-0000-4000-8000-00000000c0f1';
+  const CARD_BASE = 'local:card:ba5e0000-0000-4000-8000-00000000ba5e';
+  if (options.held) {
+    cards.set(CARD_HELD, { id: CARD_HELD, kind: 'config', project: SITE_PROJECT, root: SITE, open: true, closed: null, notice: null, at: ago(1500), blocking: true, seen: 'held-1',
+      config: { baseBranch: 'landing-base', lastAccept: ago(3 * 86400), floor: null,
+        items: [
+          { name: '.claude/settings.json', changedAt: ago(1600), size: 1480, hash: '3b7f0e21a9c4', change: 'hooks.PostToolUse added', outside: true, files: [], sinceAccept: 'changed' },
+          { name: '.vibeswitcher/workflow.md', changedAt: ago(1700), size: 920, hash: '9e1d4c70b2a5', change: 'test_command changed', outside: false, files: [], sinceAccept: 'changed' },
+          { name: '.claude/agents', changedAt: ago(1650), size: null, hash: 'a40c2f9d7e13', change: null, outside: true, files: [{ path: 'reviewer.md', change: 'added', at: 0 }, { path: 'tester.md', change: 'changed', at: 0 }], sinceAccept: 'changed' },
+        ],
+        guarded: [{ key: 'test_command', value: 'npm test -- --runInBand', sinceAccept: 'changed' }, { key: 'merge_policy', value: 'audit', sinceAccept: 'same' }] } });
+    cards.set(CARD_BASE, { id: CARD_BASE, kind: 'base', project: SITE_PROJECT, root: SITE, open: true, closed: null, notice: null, at: ago(1400), blocking: true, seen: 'base-1',
+      base: { branch: 'landing-base', from: '4be1c0d97a3f', fromIs: 'recorded', to: 'e5a90b1c2d34', reason: 'a commit no session of yours was seen making',
+        commits: [{ sha: 'e5a90b1c2d34f', subject: 'Hotfix: the hero image path' }, { sha: '71c3d2e0a9b8f', subject: 'Bump the analytics snippet' }] } });
+  }
+
   // The account's usage (`NodeUsage.value`): the weekly limit past the threshold, the 5-hour well under it.
   const usage = {
     account: 'u…@example.invalid', ignored: false, threshold: 80, fableHeldBack: null,
@@ -193,6 +222,8 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
     ending: [],
     // Pages acting for the user (`web_acts` on) since an hour ago.
     web: { state: 'listening', port: 8765, tokens: 1, connections: 1, acts: { on: true, since: ago(3600), pages: 1 } },
+    // The update watch's last look (`UpdateWatch.value`): up to date six hours ago.
+    update: { checkedAt: ago(6 * 3600), commit: null, aheadBy: null, install: null, problem: null, running: 'f62aef61' },
     // Your sessions that ended lately (`vibeswitcher resume`).
     ended: [
       { session: id('5c1e7a92'), folder: `${HOME}/projects/example-api`, name: 'example-api', conversation: '7a3f0c21-9b4d-4e8a-a1f2-3c5d7e9b0a14', at: ago(1500), exit: { status: 0, cause: 'exited 0', at: ago(1510) } },
@@ -221,6 +252,44 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
   const command = (line, output, at, result) => tool('Bash', line, { type: 'command', command: line }, at, result === undefined ? { output, failed: false, at: ago(at - 2) } : result);
   const read = (path, at) => tool('Read', 'Read ' + path.split('/').pop(), { type: 'read', path }, at);
   const edit = (path, changes, at) => tool('Edit', 'Edit ' + path.split('/').pop(), { type: 'edit', path, changes }, at);
+
+  // What an agent writes in a reply, every construct the chat draws (`?rich`, `?stream`).
+  const RICH = [
+    '## What changed',
+    '',
+    'The settings page follows the system setting now. Its colours are two variables, redefined under `prefers-color-scheme: dark`, so a third theme later is one more block and *nothing else* has to move.',
+    '',
+    'Three things to know before you merge:',
+    '',
+    '1. The toggle in the header is gone: the page follows the system, as [the design](https://example.com/design/tokens) asked.',
+    '2. The contrast test runs in **both** themes and fails under 4.5:1.',
+    '3. The chart colours are _not_ done:',
+    '   - the bar chart is readable',
+    '   - the pie chart is not',
+    '     - its labels sit on the slices',
+    '',
+    '### The tokens',
+    '',
+    '| Token | Light | Dark | Ratio |',
+    '|---|---|---|--:|',
+    '| `--ink` on `--page` | #1d1d1f | #f2f2f4 | 16.1:1 |',
+    '| `--muted` on `--page` | #636366 | #a8a8ad | 5.9:1 |',
+    '| `--accent` on `--page` | #0a5fc8 | #62adff | 6.2:1 |',
+    '',
+    '```css',
+    ':root {',
+    '  color-scheme: light dark;',
+    '  --page: light-dark(#ffffff, #1c1c1e);',
+    '  --a-very-long-custom-property-name-that-runs-past-the-edge-of-the-column: color-mix(in srgb, var(--ink) 12%, transparent);',
+    '}',
+    '```',
+    '',
+    '> Note: the docs at https://example.com/docs/tokens still show the old values; a_b_c.txt and 2*3*4 stay as typed.',
+    '',
+    '---',
+    '',
+    '~~The snapshot needs updating~~ Done. The lint failure above is a hex colour I’ll move into a token next.',
+  ].join('\n');
 
   const RETRY_OLD = 'def deliver(event):\n    response = post(event.url, event.body)\n    if response.status >= 500:\n        log.warning("webhook failed", event.id)\n    return response';
   const RETRY_NEW = 'def deliver(event, attempt=1):\n    response = post(event.url, event.body)\n    if response.status >= 500 and attempt < MAX_ATTEMPTS:\n        queue.later(deliver, event, attempt + 1, delay=backoff(attempt))\n    elif response.status >= 500:\n        log.warning("webhook failed for good", event.id)\n    return response';
@@ -288,6 +357,16 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
       edit(`${DOCS}/README.md`, [{ old: 'To install it you first need to clone it and then run the installer.', new: '1. Clone the repository.\n2. Run `./install.sh`.' }], 5450),
       reply('Shorter intro, and the install steps are a list of two.', 5400),
     ]);
+    if (options.rich) {
+      const items = chats.get(DARK);
+      const long = Array.from({ length: 40 }, (_, i) => `  ✓ contrast of token ${String(i + 1).padStart(2, '0')} at 4.5:1 in light and dark (${3 + (i % 7)} ms)`).join('\n');
+      items.push(
+        prompt('Show me what changed, the *numbers*, and anything you’re **not** sure of.\nKeep it short.', 360),
+        command('npm test -- contrast', `PASS  tests/contrast.test.js\n${long}\n\nTests: 40 passed, 40 total`, 340),
+        command('npm run lint', 'pages/settings.css\n  12:3  error  Unexpected hex colour "#fff" (color-no-hex)\n\n✖ 1 problem (1 error, 0 warnings)', 320, { output: 'pages/settings.css\n  12:3  error  Unexpected hex colour "#fff" (color-no-hex)\n\n✖ 1 problem (1 error, 0 warnings)', failed: true, at: ago(318) }),
+        reply(RICH, 300),
+      );
+    }
     if (options.rows) {
       const long = chats.get(DARK);
       const first = long.shift();
@@ -551,6 +630,127 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
   }
 
   const refused = (message) => ({ ok: false, error: { code: 'refused', message } });
+  const badArgs = (message) => ({ ok: false, error: { code: 'bad-args', message } });
+
+  // The node's shells (a shell session the host started, `Requests.isNodeShell`): two back at their prompt in
+  // example-site and below, one still running a server.
+  let shells = [
+    { session: id('5e11a001'), folder: SITE, terminal: 'pts/31', finished: true },
+    { session: id('5e11a002'), folder: `${SITE}/web`, terminal: 'pts/32', finished: true },
+    { session: id('5e11a003'), folder: SITE, terminal: 'pts/33', finished: false },
+  ];
+
+  // The folders this invented machine has, and which of them are git repositories (notes has no commit yet).
+  const NOTES = `${HOME}/projects/notes`;
+  const REPOSITORIES = [SITE, API, PAYOUTS, DOCS, NOTES];
+  const FOLDERS = [HOME, `${HOME}/projects`, ...REPOSITORIES];
+
+  // A live session the host started, by its whole id or a prefix of 4 or more (the node's `hostedSession`), or the
+  // reply that refuses it in the node's words.
+  function hostedSession(given, kind) {
+    const wanted = String(given || '').trim().toLowerCase();
+    if (!wanted) return { refusal: badArgs(`${kind} needs session`) };
+    const bare = wanted.startsWith('local:') ? wanted.slice(6) : wanted;
+    const own = [...sessions.values()].find((one) => !one.hosted && one.id.toLowerCase() === wanted);
+    if (own) return { refusal: refused(`session ${wanted} runs in a terminal of yours, not in the node’s host: VibeSwitcher only drives the sessions it started`) };
+    const matching = bare.length >= 4 ? [...sessions.values()].filter((one) => one.hosted && one.id.slice(6).startsWith(bare)) : [];
+    if (matching.length > 1) return { refusal: badArgs(`${matching.length} sessions start with ${wanted}: give more of its id`) };
+    if (!matching.length) {
+      const ended = node.ended.some((entry) => entry.session.toLowerCase() === wanted);
+      return { refusal: { ok: false, error: { code: 'gone', message: ended ? `session ${wanted} has ended` : `no live session ${wanted} on this node (\`vibeswitcher status\` lists them)` } } };
+    }
+    return { session: matching[0] };
+  }
+
+  // The launch presets for a folder (`session.presets`): a project's own and its default first, then the built-ins.
+  // Yours (`presets.edit` changes them): each a folder's or every folder's, with the digest it is listed with.
+  let ownPresets = [
+    { name: 'Opus', kind: 'claude', command: 'claude --model opus', env: ['MAX_THINKING_TOKENS'], keepShell: false, project: true, default: true, builtIn: false, digest: 'mock-opus', refused: null },
+  ];
+  let presetEdits = 0;
+  function presetsFor(folder) {
+    const presets = [
+      ...ownPresets,
+      { name: 'Claude', kind: 'claude', command: 'claude', env: [], keepShell: false, project: false, default: false, builtIn: true, digest: 'mock-claude', refused: null },
+      { name: 'Codex', kind: 'codex', command: 'codex', env: [], keepShell: false, project: false, default: false, builtIn: true, digest: 'mock-codex', refused: 'Codex doesn’t run on this node yet' },
+      { name: 'Shell', kind: 'shell', command: '', env: [], keepShell: false, project: false, default: false, builtIn: true, digest: 'mock-shell', refused: null },
+    ];
+    return folder ? presets : presets.filter((one) => !one.project);
+  }
+
+  // A preset added, changed or removed (`presets.edit`, `PresetEdit`): checked as the node checks it, in its words.
+  function editPreset(args) {
+    const op = args.op;
+    if (!['add', 'edit', 'remove'].includes(op)) return badArgs('presets.edit’s op is add, edit or remove');
+    const name = typeof args.name === 'string' ? args.name : '';
+    if (!name) return badArgs('presets.edit needs name');
+    if (args.folder != null && !String(args.folder).startsWith('/')) return badArgs('presets.edit’s folder is an absolute path');
+    if (op !== 'add' && !args.digest) return badArgs(`presets.edit’s ${op} needs the digest of the preset shown`);
+    if (args.kind != null && !['claude', 'shell'].includes(args.kind)) return badArgs('a preset’s kind here is claude or shell');
+    if (args.default && !args.folder) return badArgs('a default is a folder’s: give the folder');
+    if (op === 'remove' && Object.keys(args).some((key) => !['op', 'name', 'folder', 'digest'].includes(key))) return badArgs('a remove takes only the name and folder');
+    const place = args.folder ? `for ${args.folder}` : 'for every folder';
+    const scoped = !!args.folder;
+    const found = ownPresets.find((one) => one.project === scoped && one.name.toLowerCase() === name.toLowerCase());
+    const builtIn = ['claude', 'codex', 'shell'].includes(name.toLowerCase());
+    if (op === 'add') {
+      if (name.startsWith('-') || name.trim() !== name) return refused('a preset’s name doesn’t start with - or a space');
+      if (found || builtIn) return refused(`there is a preset ${name} ${place} already: \`vibeswitcher preset edit\` changes it`);
+      const kind = args.kind || 'claude';
+      ownPresets.push({ name, kind, command: kind === 'shell' ? '' : ['claude', args.args].filter(Boolean).join(' '), env: Object.keys(args.env || {}).sort(),
+        keepShell: !!args.keepShell, project: scoped, default: !!args.default, builtIn: false, digest: `mock-${++presetEdits}`, refused: null });
+      return { ok: true, result: { op, name, folder: args.folder || null, env: Object.keys(args.env || {}).sort(), held: true } };
+    }
+    if (builtIn) return refused(`${name} is a built-in preset, which comes from VibeSwitcher itself and isn’t edited here`);
+    if (!found) return refused(`there is no preset ${name} of yours ${place} (\`vibeswitcher presets\` lists them)`);
+    if (found.digest !== args.digest) return refused(`preset ${name} changed since it was shown (or the node’s server restarted since): nothing changed; run the command again to see it as it is now`);
+    if (op === 'remove') {
+      ownPresets = ownPresets.filter((one) => one !== found);
+      return { ok: true, result: { op, name: found.name, folder: args.folder || null, env: null, held: true } };
+    }
+    const kind = args.kind || found.kind;
+    if (args.args != null && kind === 'shell') return refused('a shell preset takes no arguments');
+    for (const variable of args.unset || []) if (!found.env.includes(variable)) return refused(`preset ${found.name} sets no ${variable}`);
+    Object.assign(found, { name: args.rename || found.name, kind, command: kind === 'shell' ? '' : args.args != null ? ['claude', args.args].filter(Boolean).join(' ') : found.command,
+      env: [...new Set([...found.env.filter((one) => !(args.unset || []).includes(one)), ...Object.keys(args.env || {})])].sort(),
+      keepShell: args.keepShell ?? found.keepShell, default: args.default ?? found.default, digest: `mock-${++presetEdits}` });
+    return { ok: true, result: { op, name: found.name, folder: args.folder || null, env: found.env, held: true } };
+  }
+
+  // A session the host starts in `folder`: listed a moment after the reply that names it, as the host tells the node.
+  const sessionTerminal = (sid) => sessions.get(sid)?.terminal || `pts/${20 + (parseInt(sid.slice(6, 10), 16) % 50)}`;
+  function startSession(folder, agent, title) {
+    const sid = id(Math.random().toString(16).slice(2, 10).padEnd(8, '0'));
+    const terminal = sessionTerminal(sid);
+    later(200, () => {
+      add(sid, { cwd: folder, agent: agent === 'shell' ? 'claude' : agent, status: agent === 'shell' ? 'idle' : 'working', since: new Date().toISOString(),
+        startedAt: new Date().toISOString(), title, terminal, branch: null, project: null, detail: agent === 'shell' ? null : 'Starting', command: agent });
+      emit(put('sessions', sessions, sid));
+    });
+    return sid;
+  }
+
+  // A session's question closed after its answer was typed: it works on (the asking session runs its tests, as the
+  // story had it).
+  function answered(sid) {
+    const items = chats.get(sid) || [];
+    const pending = items.find((item) => item.kind === 'tool' && item.result === null);
+    // The messages `send` held behind the question are typed in once it closes, in their order.
+    const held = sessions.get(sid)?.queued || [];
+    for (const one of held) chatPut(sid, { id: next('m'), kind: 'prompt', text: one.text, at: new Date().toISOString(), action: one.action });
+    emit({ in: 'chat', session: sid }, setSession(sid, { queued: [], prompt: null, status: 'working', since: new Date().toISOString(), detail: sid === ASKING ? 'Running the payout tests' : null,
+      activity: sid === ASKING ? 'pytest tests/test_payouts.py' : null, activitySince: new Date().toISOString() }));
+    if (sid !== ASKING || options.still) return;
+    later(2400, () => {
+      if (!sessions.has(sid)) return;
+      if (pending) {
+        pending.result = { output: '5 passed, 1 failed\n\nFAILED tests/test_payouts.py::test_two_workers_run_once', failed: true, at: new Date().toISOString() };
+        emit(chatPut(sid, pending), setSession(sid, { activity: null, activitySince: null }));
+      }
+      stream(sid, 'One test fails, and it’s the one that names the bug: `test_two_workers_run_once`. Moving the lock above the schedule read next.',
+        () => emit(setSession(sid, { status: 'done', since: new Date().toISOString(), detail: null })));
+    });
+  }
 
   // What a value set from the page made of a setting (`set`): read back in place of the invented one.
   const setValues = new Map();
@@ -617,6 +817,10 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
 
   function handle(message) {
     const args = message.args || {};
+    // A kind it doesn't list is refused as a node refuses it, whatever it could answer (`?older`'s starts).
+    if (!KINDS.includes(message.kind)) return { ok: false, error: { code: 'unknown-kind', message: `this server doesn’t take ${message.kind}` } };
+    // `?refuse=KIND,…`: the node's own refusal of each named kind, so the page's refused state can be seen.
+    if (REFUSE.has(message.kind) && REFUSALS[message.kind]) return refused(REFUSALS[message.kind]);
     if (message.kind === 'answer') {
       // The node's words (`text`, with the card's `seen`); an older page's `answer`.
       args.answer = args.text ?? args.answer;
@@ -675,28 +879,136 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
       emit(put('cards', cards, card.id));
       return { ok: true, result: { card: card.id, held: true } };
     }
-    if (message.kind === 'ask.answer') {
-      const items = chats.get(args.session) || [];
-      const ask = items.find((item) => item.id === args.item);
-      if (!ask || ask.answer) return refused('It isn’t asking that any more.');
-      ask.answer = args.answer;
-      const pending = items.find((item) => item.kind === 'tool' && item.result === null);
-      emit(chatPut(args.session, ask), setSession(args.session, { status: 'working', since: new Date().toISOString(), detail: 'Running the payout tests', activity: 'pytest tests/test_payouts.py', activitySince: new Date().toISOString() }));
-      later(2400, () => {
-        if (pending) {
-          pending.result = { output: '5 passed, 1 failed\n\nFAILED tests/test_payouts.py::test_two_workers_run_once', failed: true, at: new Date().toISOString() };
-          emit(chatPut(args.session, pending), setSession(args.session, { activity: null, activitySince: null }));
-        }
-        stream(args.session, 'One test fails, and it’s the one that names the bug: `test_two_workers_run_once`. Moving the lock above the schedule read next.',
-          () => emit(setSession(args.session, { status: 'done', since: new Date().toISOString(), detail: null })));
+    // A session's own question answered (`session.reply`, as `Requests.replySession`): the question on its screen read
+    // again, refused unless it is the one the page was shown; then the keys typed, and the question closes a moment
+    // after the reply, as the node's next read of the screen finds it gone.
+    if (message.kind === 'session.reply') {
+      if (!Number.isInteger(args.choice) || args.choice < 1) return badArgs('session.reply needs choice, an option’s number from 1');
+      const text = typeof args.text === 'string' && args.text.trim() ? args.text : null;
+      const found = hostedSession(args.session, 'session.reply');
+      if (found.refusal) return found.refusal;
+      const target = found.session;
+      const short = target.id.slice(6, 14);
+      const no = (why) => refused(`session ${short}: ${why}`);
+      const menu = target.prompt;
+      if (!menu) return no('no question is open on its screen');
+      if (args.question != null && args.question !== menu.question) return no('the question on its screen isn’t the one you were shown; it asks now: ' + menu.question);
+      if (args.options != null && JSON.stringify(args.options) !== JSON.stringify(menu.options)) {
+        return no('its options aren’t the ones you were shown; they are now: ' + menu.options.map((option, index) => `${index + 1}. ${option}`).join('; '));
+      }
+      if (menu.multiSelect) return no('its question takes several ticks: answer it in the session’s terminal');
+      const index = args.choice - 1;
+      if (index >= menu.options.length) return no(`its question has ${menu.options.length} options, not ${args.choice}`);
+      if (menu.descriptions?.[index] != null && options.toggle) {
+        return no(`option ${args.choice} is a setting toggled with Space (${menu.options[index]}): set it in the session’s terminal, or choose its Continue`);
+      }
+      const takes = (menu.text || []).includes(index);
+      if (takes && !text) return no(`option ${args.choice} takes your words: give them after the choice`);
+      if (!takes && text) return no(`option ${args.choice} takes no words (${menu.options[index]})`);
+      later(250, () => answered(target.id));
+      return { ok: true, result: { session: target.id, terminal: target.terminal, choice: args.choice, option: menu.options[index], question: menu.question } };
+    }
+    // A session started (`session.new`, as `Requests.newSession`): listed a moment after the reply, as the host tells.
+    if (message.kind === 'session.new') {
+      const folder = args.folder;
+      if (typeof folder !== 'string' || !folder.startsWith('/')) return badArgs('session.new needs folder, an absolute path');
+      const name = args.preset || null;
+      if (name && args.agent != null) return badArgs('session.new takes agent or preset, not both');
+      if (name && !args.digest) return badArgs('session.new with a preset needs its digest, as `session.presets` gave it');
+      const agent = args.agent || 'claude';
+      if (!['claude', 'codex', 'shell'].includes(agent)) return badArgs(`session.new’s agent is claude, codex or shell, not ${agent}`);
+      if (args.model && agent === 'shell') return badArgs('a shell takes no model');
+      if (!FOLDERS.includes(folder.replace(/\/+$/, ''))) return refused(`${folder} isn’t a folder`);
+      let started = { name: agent === 'shell' ? 'Shell' : agent === 'codex' ? 'Codex' : 'Claude', kind: agent };
+      if (name) {
+        const preset = presetsFor(folder).find((one) => one.name === name);
+        if (!preset) return refused(`no preset ${name} for ${folder} (\`vibeswitcher presets ${folder}\` lists them)`);
+        if (preset.refused) return refused(`preset ${name} can’t start here: ${preset.refused}`);
+        if (preset.digest !== args.digest) return refused(`preset ${name} changed since it was shown (or the node’s server restarted since): nothing started; run the command again to see it as it is now`);
+        if (args.model && preset.kind === 'shell') return refused(`preset ${name} starts a shell, which takes no model`);
+        started = preset;
+      }
+      const kind = started.kind;
+      if (kind === 'codex') return refused('no codex for this node');
+      const sid = startSession(folder, kind, null);
+      return { ok: true, result: { session: sid, terminal: sessionTerminal(sid), agent: kind, folder, model: args.model || null, preset: name ? started.name : null } };
+    }
+    // An ended session started again in its conversation (`session.resume`, as `Requests.resumeSession`).
+    if (message.kind === 'session.resume') {
+      const given = String(args.session || '').trim().toLowerCase();
+      if (!given) return badArgs('session.resume needs session');
+      const bare = given.startsWith('local:') ? given.slice(6) : given;
+      const matching = bare.length >= 4 ? node.ended.filter((entry) => entry.session.slice(6).startsWith(bare)) : [];
+      if (matching.length !== 1) {
+        return matching.length ? badArgs(`${matching.length} ended sessions start with ${given}: give more of its id`)
+          : { ok: false, error: { code: 'gone', message: `no ended session ${given} of yours to resume (\`vibeswitcher resume\` lists them)` } };
+      }
+      const entry = matching[0];
+      if (!entry.conversation) return { ok: true, result: { reopened: [], refused: [{ was: entry.session, folder: entry.folder, why: 'its conversation id wasn’t recorded: nothing to resume' }] } };
+      node.ended = node.ended.filter((one) => one !== entry);
+      const sid = startSession(entry.folder, 'claude', entry.name);
+      emit({ in: 'node', id: 'local', value: node });
+      return { ok: true, result: { reopened: [{ was: entry.session, folder: entry.folder, conversation: entry.conversation, session: sid, terminal: sessionTerminal(sid) }], refused: [] } };
+    }
+    // A project's lead started in its folder (`lead`, as `Requests.lead` and `LeadEngine.startLead`): the running one
+    // shown; a folder in no repository, or one with no commit, refused with the engine's words.
+    if (message.kind === 'lead') {
+      const folder = typeof args.folder === 'string' ? args.folder.replace(/\/+$/, '') : '';
+      if (!folder.startsWith('/')) return badArgs('lead needs folder, an absolute path');
+      const known = [...leads.values()].find((lead) => folder === lead.root || folder.startsWith(lead.root + '/'));
+      const running = known && sessions.has(known.session) ? known : null;
+      // A lead that runs without its role (`LeadStart.decide`'s askToReplace): shown, nothing started, unless asked to
+      // replace it.
+      if (running && running.bound !== running.session && !args.replace) {
+        const notes = [`the lead of ${running.root.split('/').pop()} runs (session ${running.session.slice(6, 14)}) without its role, so its tools are off: nothing was started; \`vibeswitcher lead ${running.root} --replace\` starts a new lead, which takes the role, reads its last turns and gets what waited for it`];
+        if (args.goal) notes.push('the goal wasn’t held: a lead without its role gets nothing; give it again with --replace');
+        return { ok: true, result: { happened: 'shown', session: running.session, program: null, notes } };
+      }
+      if (running && running.bound === running.session) {
+        const notes = args.goal ? ['the goal is held for the running lead until it can be delivered'] : [];
+        if (args.takeHead) notes.push('--take-head takes the base branch as it is only when a lead starts: the running lead’s stays as recorded (`vibeswitcher base accept` takes it)');
+        return { ok: true, result: { happened: 'shown', session: running.session, program: null, notes } };
+      }
+      const root = known?.root || REPOSITORIES.find((repo) => folder === repo || folder.startsWith(repo + '/'));
+      if (!root) return refused(`${folder} isn’t in a git repository: a lead needs one (git init, and a first commit; \`vibeswitcher lead FOLDER --init\` makes them)`);
+      if (root === NOTES) return refused(`${root} has no commits yet: workers branch from a commit; make one (git add, git commit), then start the lead`);
+      // A moved base: taken as it is with takeHead (its card settled), else kept checked and said.
+      const moved = [...cards.values()].find((card) => card.kind === 'base' && card.open && card.root === root);
+      const notes = [];
+      if (moved && args.takeHead) {
+        moved.open = false;
+        moved.closed = new Date().toISOString();
+        later(150, () => emit(put('cards', cards, moved.id)));
+      } else if (moved) {
+        notes.push(`${moved.base.branch} moved since the lead last left it (${moved.base.from.slice(0, 8)} to ${moved.base.to.slice(0, 8)}), not through its merges: kept checked, so merges stay refused until \`vibeswitcher base accept\`; \`--take-head\` takes it as it is`);
+      }
+      const sid = id(Math.random().toString(16).slice(2, 10).padEnd(8, '0'));
+      const project = known?.project || `local:project:${Math.random().toString(36).slice(2, 14)}`;
+      later(200, () => {
+        if (running) emit(setSession(running.session, { role: null, lead: null }));
+        add(sid, { cwd: root, role: 'lead', lead: project, status: 'working', since: new Date().toISOString(), startedAt: new Date().toISOString(),
+          title: args.goal || null, detail: 'Reading the project’s records', project });
+        leads.set(project, { ...(known || { named: null, held: 0, reportsWaiting: 0, notice: null, looks: 0, questions: { open: 0, blocking: 0 }, cards: [], told: [], push: null }),
+          project, root, session: sid, bound: sid, replaced: running ? [running.session] : [], starting: false, lastStart: 'started', lastStartAt: new Date().toISOString() });
+        emit(put('sessions', sessions, sid), put('leads', leads, project));
       });
-      return { ok: true, result: {} };
+      return { ok: true, result: { happened: 'started', session: sid, program: `${HOME}/.local/bin/claude`, notes } };
     }
     if (message.kind === 'send') {
       const target = sessions.get(args.session);
       if (!target) return { ok: false, error: { code: 'gone', message: 'That session has ended.' } };
       if (!target.hosted) return refused('It runs in another terminal: it can be read here, not typed into.');
-      emit(chatPut(args.session, { id: next('m'), kind: 'prompt', text: args.text, at: new Date().toISOString(), action: message.action }),
+      // Images by their paths on the node, checked as `SessionSend` checks them: absolute, an image Claude Code reads,
+      // a file there (this machine's are under its folders, and none is called missing).
+      const images = Array.isArray(args.images) ? args.images : [];
+      if (!String(args.text || '').trim() && !images.length) return badArgs('send needs text or images');
+      if (images.length > 10) return badArgs('at most 10 images a message');
+      for (const path of images) {
+        if (!String(path).startsWith('/')) return badArgs(`an image is given by its absolute path, not ${path}`);
+        if (!/\.(png|jpe?g|gif|webp)$/i.test(path)) return badArgs(`${path} isn’t an image Claude Code reads (png, jpg, jpeg, gif, webp)`);
+        if (!path.startsWith(HOME + '/') || /missing/i.test(path)) return refused(`no image file ${path}`);
+      }
+      emit(chatPut(args.session, { id: next('m'), kind: 'prompt', text: [args.text, ...images.map((path) => `[${path.split('/').pop()}]`)].filter(Boolean).join('\n'), at: new Date().toISOString(), action: message.action }),
         setSession(args.session, { status: 'working', since: new Date().toISOString() }));
       later(900, () => stream(args.session, 'On it. (This is the mock node: a real session’s reply would stream in here from its transcript.)', () => {
         if (args.session === LEAD) emit(...refreshLead('done'));
@@ -811,15 +1123,7 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
       if (args.id !== SHOT.id) return { ok: false, error: { code: 'gone', message: 'no such image in that session’s chat' } };
       return { ok: true, result: { mediaType: SHOT.mediaType, bytes: SHOT.bytes, offset: 0, data: SHOT_DATA } };
     }
-    if (message.kind === 'session.presets') {
-      const presets = [
-        { name: 'Opus', kind: 'claude', command: 'claude --model opus', env: ['MAX_THINKING_TOKENS'], keepShell: false, project: true, default: true, builtIn: false, digest: 'mock-opus', refused: null },
-        { name: 'Claude', kind: 'claude', command: 'claude', env: [], keepShell: false, project: false, default: false, builtIn: true, digest: 'mock-claude', refused: null },
-        { name: 'Codex', kind: 'codex', command: 'codex', env: [], keepShell: false, project: false, default: false, builtIn: true, digest: 'mock-codex', refused: 'Codex doesn’t run on this node yet' },
-        { name: 'Shell', kind: 'shell', command: '', env: [], keepShell: false, project: false, default: false, builtIn: true, digest: 'mock-shell', refused: null },
-      ];
-      return { ok: true, result: { presets: args.folder ? presets : presets.slice(1), problems: [] } };
-    }
+    if (message.kind === 'session.presets') return { ok: true, result: { presets: presetsFor(args.folder), problems: [] } };
     if (message.kind === 'brief') {
       return { ok: true, result: { text: options.empty ? 'No project lead is running and no session needs you.'
         : 'In example-site, the sync with main is running and the cleanup of ended folders is being checked. One question waits on you: whether to ship the new hero. One session needs you.',
@@ -831,12 +1135,21 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
         { folder: `${HOME}/projects/notes`, lastUsed: ago(86400), lead: null },
       ] } };
     }
+    // Between leads (`mail`, `Requests.mail`): a project's newest 20 of its 26 messages, every one with `all`; one
+    // project's with its folder.
     if (message.kind === 'mail') {
+      if (args.folder != null && !String(args.folder).startsWith('/')) return badArgs('folder is an absolute path');
+      const older = Array.from({ length: 24 }, (_, index) => ({ at: ago(3600 + index * 1800), from: index % 2 ? 'example-api' : 'example-site', to: index % 2 ? 'example-site' : 'example-api',
+        received: index % 2 === 1, kind: index % 2 ? 'answer' : 'note', text: index % 2 ? `Done: the staging deploy ${24 - index} is green.` : `FYI: landing-base was rebased (${24 - index}).`,
+        outcome: 'delivered', sent: true, detail: 'Delivered.' }));
       const messages = [
         { at: ago(600), from: 'example-api', to: 'example-site', received: true, kind: 'answer', text: '8080, behind the staging proxy.', outcome: 'waiting', sent: true, detail: 'Waiting in its inbox.' },
         { at: ago(900), from: 'example-site', to: 'example-api', received: false, kind: 'question', text: 'Which port does the API listen on in staging?', outcome: 'delivered', sent: true, detail: 'Delivered.' },
+        ...older,
       ];
-      return { ok: true, result: { projects: options.empty ? [] : [{ root: SITE, project: 'example-site', total: messages.length, messages }] } };
+      const shown = args.all === true ? messages : messages.slice(0, 20);
+      const site = { root: SITE, project: 'example-site', total: messages.length, messages: shown };
+      return { ok: true, result: { projects: options.empty ? [] : args.folder && !args.folder.startsWith(SITE) ? [] : [site] } };
     }
     if (message.kind === 'settings') {
       if (args.folder && args.folder !== SITE) return { ok: false, error: { code: 'gone', message: `no lead has worked in ${args.folder} yet: \`vibeswitcher lead ${args.folder}\` starts one` } };
@@ -875,15 +1188,93 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
       later(400, () => feed.restart());
       return { ok: true, result: { sessionsEnded: sessions.size, host: 'stopped' } };
     }
+    if (message.kind === 'presets.edit') return editPreset(args);
+    // A held config or a moved base, read whole (`config.held`, `base.show`; `CardRequests`): the project's card as it is
+    // now, and with `diff` the difference of one held thing; a base that didn't move says so.
+    if (message.kind === 'config.held' || message.kind === 'base.show') {
+      if (typeof args.folder !== 'string' || !args.folder.startsWith('/')) return badArgs(`${message.kind} needs folder, an absolute path`);
+      const kind = message.kind === 'config.held' ? 'config' : 'base';
+      const card = [...cards.values()].find((one) => one.kind === kind && one.open && (args.folder === one.root || args.folder.startsWith(one.root + '/')));
+      if (kind === 'base' && !card) return { ok: true, result: { branch: 'landing-base', unmoved: 'e5a90b1c2d34' } };
+      if (!card) return { ok: false, error: { code: 'gone', message: `nothing is held for ${args.folder}` } };
+      if (args.diff != null) {
+        const item = card.config.items.find((one) => one.name === args.diff);
+        const difference = !item ? `nothing held is named ${args.diff}` : item.name === '.claude/settings.json'
+          ? ['--- accepted', '+++ now', '   "hooks": {', '+    "PostToolUse": [{ "matcher": "Bash", "hooks": [{ "type": "command", "command": "./scripts/after-bash.sh" }] }],', '     "SessionStart": [ … ]']
+          : item.name === '.vibeswitcher/workflow.md' ? ['--- accepted', '+++ now', '-test_command: npm test', '+test_command: npm test -- --runInBand'] : ['+ reviewer.md (added)', '~ tester.md (changed)'];
+        return { ok: true, result: { card: structuredClone(card), difference } };
+      }
+      return { ok: true, result: { card: structuredClone(card) } };
+    }
+    // Accepting the held files, or the move, or keeping the old base (`config.accept`, `base.accept`, `base.keep`): the
+    // card as the page drew it (its `seen`), then settled.
+    if (message.kind === 'config.accept' || message.kind === 'base.accept' || message.kind === 'base.keep') {
+      const card = cards.get(args.card);
+      if (!card || !card.open) return { ok: false, error: { code: 'gone', message: 'no such card' } };
+      if (args.seen !== card.seen) return { ok: false, error: { code: 'changed', message: `card ${card.id} changed since the page drew it: look again` } };
+      card.open = false;
+      card.closed = new Date().toISOString();
+      emit(put('cards', cards, card.id));
+      return { ok: true, result: { card: card.id, settled: message.kind } };
+    }
+    // The node's shells in a folder (`shells`, `Requests.shells`): each with its terminal and whether it is finished.
+    if (message.kind === 'shells') {
+      const folder = typeof args.folder === 'string' ? args.folder.replace(/\/+$/, '') : null;
+      return { ok: true, result: { shells: shells.filter((shell) => !folder || shell.folder === folder || shell.folder.startsWith(folder + '/')).map((shell) => ({ ...shell })) } };
+    }
+    // Those of them still finished ended (`session.close-shells`, `Requests.closeShells`); any other left, and said.
+    if (message.kind === 'session.close-shells') {
+      const wanted = Array.isArray(args.sessions) ? args.sessions.filter((one) => typeof one === 'string') : [];
+      if (!wanted.length) return badArgs('session.close-shells needs sessions, the shells shown');
+      const ending = shells.filter((shell) => wanted.includes(shell.session) && shell.finished);
+      if (!ending.length) return refused('none of them is a finished shell now (back at its prompt): nothing ended');
+      shells = shells.filter((shell) => !ending.includes(shell));
+      return { ok: true, result: { ended: ending.map((shell) => shell.session), left: wanted.filter((one) => !ending.some((shell) => shell.session === one)) } };
+    }
+    // Check for Updates now (`update.check`, `Requests.updateCheck`): the watch looks at once; here it finds a newer
+    // build, its record in the `node` value too.
+    if (message.kind === 'update.check') {
+      node.update = { checkedAt: new Date().toISOString(), commit: '5b8e1d2a9c4f7e3b6a0d1c2e3f4a5b6c7d8e9f01', aheadBy: 3,
+        install: 'curl -fsSL https://example.invalid/install.sh | sh -s -- 5b8e1d2a9c4f', problem: null, running: 'f62aef61' };
+      emit({ in: 'node', id: 'local', value: node });
+      return { ok: true, result: { ...node.update, notice: null } };
+    }
+    // Every page unpaired (`web.revoke`, `Requests.webRevoke`): the loopback's tokens and the tailnet's; this page's
+    // connection is closed a moment later, as the node's is.
+    if (message.kind === 'web.revoke') {
+      const revoked = node.web.tokens;
+      node.web = { ...node.web, tokens: 0, connections: 0 };
+      emit({ in: 'node', id: 'local', value: node });
+      later(1500, () => store.setConnection('revoked'));
+      return { ok: true, result: { revoked, tailnetRevoked: 1 } };
+    }
     return { ok: false, error: { code: 'unknown-kind', message: `This node doesn’t take ${message.kind}.` } };
   }
 
   // What this mock answers, as a node's `hello.kinds` lists them: a page offers a button only for a kind listed, so
   // nothing it shows here is refused as unknown. `chat.page` is the feed's own (`pageChat`).
+  // `?older`: a node that doesn't take a session's reply or a start from a page (STARTS), so the page shows their lines.
+  // `?older` lists none of the buttons' kinds either (BUTTONS: what an acting page sends a node in place of the lines
+  // it showed before, docs/process/v2-no-terminal.md's table B and A5), so their lines can be seen.
+  const STARTS = ['lead', 'session.new', 'session.reply', 'session.resume'];
+  const BUTTONS = ['config.held', 'config.accept', 'base.show', 'base.accept', 'base.keep', 'shells', 'session.close-shells', 'presets.edit', 'update.check', 'web.revoke'];
   const KINDS = ['chat.page',
-    'answer', 'answer.replace', 'tell', 'tell.retract', 'hold', 'ask.answer', 'send', 'session.draft', 'session.draft.clear', 'session.complete',
+    'answer', 'answer.replace', 'tell', 'tell.retract', 'hold', 'send', 'session.draft', 'session.draft.clear', 'session.complete',
     'session.attach', 'session.usage', 'stats', 'session.ports', 'board.task', 'board.image', 'chat.image', 'session.presets', 'brief', 'recent',
-    'mail', 'settings', 'seen', 'push', 'push.decline', 'set', 'stop'];
+    'mail', 'settings', 'seen', 'push', 'push.decline', 'set', 'stop', ...STARTS, ...BUTTONS].filter((kind) => !options.older || (!STARTS.includes(kind) && !BUTTONS.includes(kind)));
+  // The node's own words for refusing each (`?refuse=KIND,…`).
+  const REFUSE = new Set(options.refuse || []);
+  const REFUSALS = {
+    send: 'the session’s terminal didn’t take it: it was busy redrawing; nothing was typed',
+    tell: 'the lead’s mail couldn’t be written: the disk is full',
+    'update.check': 'this server doesn’t check for updates (a scratch node asks GitHub nothing)',
+    'web.revoke': 'the web tokens weren’t dropped: the token file couldn’t be written',
+    'session.close-shells': 'none of them is a finished shell now (back at its prompt): nothing ended',
+    'mail': 'this server keeps no leads',
+    'config.held': 'this server keeps no cards',
+    'base.show': 'this server keeps no cards',
+    'presets.edit': 'presets.json has changes you haven’t accepted: review with `vibeswitcher config held`, then `config accept` (it changed since your accept); nothing changed',
+  };
 
   // ---- The feed's interface (what the WebSocket feed will offer too) ----
 
@@ -892,10 +1283,19 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
   const feed = {
     kinds: KINDS,
     start() {
-      later(options.still ? 0 : 320, () => {
+      // `?delay=MS`: a slow node, its first snapshot that late; `?delay=never`: a node that never answers.
+      if (options.delay === 'never') return;
+      const delay = Number.isFinite(Number(options.delay)) && options.delay !== null && options.delay !== '' ? Math.max(0, Number(options.delay)) : options.still ? 0 : 320;
+      later(delay, () => {
         store.setKinds?.(KINDS);
         store.apply(snapshot());
         if (!options.still && !options.empty) story();
+        // `?stream`: a long reply streaming into "Bank webhooks…", again each time one ends; and a handle for a probe.
+        if (options.stream && !options.empty) {
+          const again = () => later(2500, () => stream(WEBHOOKS, RICH, again));
+          later(1200, () => stream(WEBHOOKS, RICH, again));
+          globalThis.__mockStream = (sid, text) => stream(sid, text);
+        }
       });
     },
     // A snapshot again, after a gap.
@@ -939,6 +1339,8 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
       });
     },
     stop() { for (const timer of timers) clearTimeout(timer); timers.clear(); },
+    // "Try again now": the mock that never answers (`?delay=never`) still doesn't.
+    retryNow() { return true; },
   };
   return feed;
 }

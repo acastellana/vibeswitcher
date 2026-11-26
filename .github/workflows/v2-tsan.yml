@@ -39,10 +39,15 @@ jobs:
           . "$HOME/.local/share/swiftly/env.sh"
           swiftly install --use --assume-yes "$wanted"
           echo "$HOME/.local/share/swiftly/bin" >> "$GITHUB_PATH"
+          # swiftly's `swift` reads its own folder from these, not from HOME: scripts/test.sh runs on a scratch HOME,
+          # and without them a runner whose image lacks this Swift ran no Swift test (v2 linux, platform, 1e377af0).
+          echo "SWIFTLY_HOME_DIR=$HOME/.local/share/swiftly" >> "$GITHUB_ENV"
+          echo "SWIFTLY_BIN_DIR=$HOME/.local/share/swiftly/bin" >> "$GITHUB_ENV"
+          echo "SWIFTLY_TOOLCHAINS_DIR=$HOME/.local/share/swiftly/toolchains" >> "$GITHUB_ENV"
       - name: Versions
         run: |
           swift --version
-          node --version
+          bash scripts/ci/check-versions.sh swift node
       - name: Tests under the thread sanitizer
         run: bash scripts/test.sh --tsan --filter 'VibeNodeTests' 2>&1 | tee test.log
         env:
@@ -83,10 +88,15 @@ jobs:
           . "$HOME/.local/share/swiftly/env.sh"
           swiftly install --use --assume-yes "$wanted"
           echo "$HOME/.local/share/swiftly/bin" >> "$GITHUB_PATH"
+          # swiftly's `swift` reads its own folder from these, not from HOME: scripts/test.sh runs on a scratch HOME,
+          # and without them a runner whose image lacks this Swift ran no Swift test (v2 linux, platform, 1e377af0).
+          echo "SWIFTLY_HOME_DIR=$HOME/.local/share/swiftly" >> "$GITHUB_ENV"
+          echo "SWIFTLY_BIN_DIR=$HOME/.local/share/swiftly/bin" >> "$GITHUB_ENV"
+          echo "SWIFTLY_TOOLCHAINS_DIR=$HOME/.local/share/swiftly/toolchains" >> "$GITHUB_ENV"
       - name: Versions
         run: |
           swift --version
-          node --version
+          bash scripts/ci/check-versions.sh swift node
       - name: Tests under the thread sanitizer
         run: bash scripts/test.sh --tsan --filter 'VibeHostTests' 2>&1 | tee test.log
         env:
@@ -127,10 +137,15 @@ jobs:
           . "$HOME/.local/share/swiftly/env.sh"
           swiftly install --use --assume-yes "$wanted"
           echo "$HOME/.local/share/swiftly/bin" >> "$GITHUB_PATH"
+          # swiftly's `swift` reads its own folder from these, not from HOME: scripts/test.sh runs on a scratch HOME,
+          # and without them a runner whose image lacks this Swift ran no Swift test (v2 linux, platform, 1e377af0).
+          echo "SWIFTLY_HOME_DIR=$HOME/.local/share/swiftly" >> "$GITHUB_ENV"
+          echo "SWIFTLY_BIN_DIR=$HOME/.local/share/swiftly/bin" >> "$GITHUB_ENV"
+          echo "SWIFTLY_TOOLCHAINS_DIR=$HOME/.local/share/swiftly/toolchains" >> "$GITHUB_ENV"
       - name: Versions
         run: |
           swift --version
-          node --version
+          bash scripts/ci/check-versions.sh swift node
       - name: Tests under the thread sanitizer
         run: bash scripts/test.sh --tsan --filter 'VibePlatformTests' 2>&1 | tee test.log
         env:

@@ -12,10 +12,11 @@ export const onTheNode = (hostname) => hostname === '127.0.0.1' || hostname === 
 export function portRow(entry, hostname) {
   const port = Number(entry?.port);
   if (!Number.isInteger(port) || port < 1024 || port > 65535) return null;
-  const who = entry.program ? `${entry.program} (pid ${entry.pid})` : `pid ${entry.pid}`;
+  // The program by its name; its process id only on hover (D18).
+  const who = entry.program || t('dpAProgram');
   const where = entry.address === '0.0.0.0' || entry.address === '::' ? t('dpEvery') : t('dpLocal');
   // The node's address for it, taken only when it is exactly the page on this machine's localhost at that port.
   const named = typeof entry.url === 'string' ? entry.url.match(/^http:\/\/localhost:(\d{4,5})\/$/) : null;
   const url = named && Number(named[1]) === port ? entry.url : null;
-  return { label: `localhost:${port}`, about: `${who} · ${where}`, url: onTheNode(hostname) ? url : null };
+  return { label: `localhost:${port}`, about: `${who} · ${where}`, process: `pid ${entry.pid}`, url: onTheNode(hostname) ? url : null };
 }

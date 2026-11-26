@@ -74,6 +74,14 @@ export function leadLines(board) {
   return lines.filter((line) => Number.isFinite(Date.parse(line.at))).sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
 }
 
+// The lines with the pushes settled from this page among them by time (the waiting block's receipts, `{ id, at, … }`),
+// each `{ key, kind: 'push', at, head, outcome }`, `words(receipt)` its line.
+export function withPushLines(lines, receipts, words) {
+  if (!receipts?.length) return lines;
+  return [...lines, ...receipts.map((one) => ({ key: lineKey('push', one.id), kind: 'push', at: one.at, head: words(one), outcome: one.outcome }))]
+    .sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+}
+
 // The dial's levels: only what waits on the user, decisions and results (the default), everything.
 export function shownLines(lines, level) {
   if (level === 'asks') return [];

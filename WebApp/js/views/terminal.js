@@ -20,6 +20,7 @@
 // size, cursor, colours, scrollback, Option as Meta, the bell (a flash of the pane, or a short tone, at most one a
 // `BELL_GAP` ms). A change shows at once in an open terminal. Watching keeps its own cursor (an underline, still).
 
+import * as kit from '../kit.js';
 import { h, setText } from '../dom.js';
 import { icon } from '../marks.js';
 import { createTerminal, clampSize } from '../terminal.js';
@@ -61,10 +62,10 @@ export function terminalView(app) {
     icon('eye', 13), h('span', null, t('teWatchingToTypeIntoThis')), h('code', null, 'vibeswitcher send'),
     h('span', null, t('teInATerminal')));
   const says = h('p');
-  const showChat = h('button', { class: 'button quiet', type: 'button', onclick: () => ui.setPane(ui.state.route.id, 'chat') }, t('teShowChat'));
-  const retry = h('button', { class: 'button quiet', type: 'button', hidden: true, onclick: () => { const session = shown; control.hide(); show(session); } }, t('teTryAgain'));
+  const showChat = kit.button('plain', { onclick: () => ui.setPane(ui.state.route.id, 'chat') }, t('teShowChat'));
+  const retry = kit.button('plain', { hidden: true, onclick: () => { const session = shown; control.hide(); show(session); } }, t('teTryAgain'));
   const heading = h('h2', null, t('teTerminal'));
-  const placeholder = h('div', { class: 'placeholder' }, icon('terminal', 22), heading, says, showChat, retry);
+  const placeholder = kit.empty({ size: 'page', class: 'placeholder' }, icon('terminal', 22), heading, says, showChat, retry);
   const el = h('div', { class: 'pane terminal-pane' }, screen, note, watching, placeholder);
 
   let term = null;     // the emulator, once made
