@@ -153,3 +153,18 @@ test('C7: an older node, which takes no parts, keeps the card in a terminal; a n
   assert.equal(findAll(view.el, (node) => node.tag === 'pre').length, 0);
   mock.stop();
 });
+
+test('C7: an answer on a long card the node refuses as changed reads it whole again (a change that kept its stub)', async () => {
+  setLanguage('en');
+  const { store, mock } = await mocked();
+  const stub = store.state.cards.get(ID);
+  store.wholeCard(stub);
+  await until(() => store.state.wholeCards.get(ID)?.status === 'loaded');
+  const first = store.state.wholeCards.get(ID);
+  store.connect({ ...mock, request: (message) => (message.kind === 'answer'
+    ? Promise.resolve({ ok: false, error: { code: 'changed', message: 'the card changed since you saw it' } }) : mock.request(message)) });
+  await store.act(ID, 'answer', { text: 'Only the first hundred' });
+  assert.notEqual(store.state.wholeCards.get(ID), first, 'read again');
+  await until(() => store.state.wholeCards.get(ID)?.status === 'loaded');
+  mock.stop();
+});

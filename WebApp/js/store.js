@@ -418,6 +418,10 @@ export function createStore(options = {}) {
       if (!reply.ok) {
         state.acting.set(card, { refused: reply.error?.message || 'The node refused it.', code: reply.error?.code || null });
         emit(new Map([['cards', [{ in: 'cards', id: card, acting: true }]]]));
+        // A long card read whole that the node says changed (its stub may not have: a change of the same length): read
+        // it whole again, so the card shows what the node holds now.
+        const stub = state.cards.get(card);
+        if (reply.error?.code === 'changed' && stub?.tooLarge && state.wholeCards.has(card)) self.wholeCard(stub, { again: true });
       }
       return reply;
     });
@@ -522,7 +526,7 @@ export function createStore(options = {}) {
     return feed.request(message);
   }
 
-  return {
+  const self = {
     state,
     apply,
     subscribe,
@@ -651,6 +655,7 @@ export function createStore(options = {}) {
     setConnection: (connection) => setConnection(connection),
     connect(source) { feed = source; },
   };
+  return self;
 }
 
 // How many times a card that changed while it was read in parts is read again before the page says it keeps changing.
