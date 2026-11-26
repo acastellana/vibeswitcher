@@ -226,7 +226,7 @@ other Windows users' processes as the unlock does.
 
 1. `unlock.begin` `{device?}` → `{challenge}`: 32 random bytes, 120 s, once, for this connection. Passkeys are made
    **discoverable** (`residentKey: 'required'`, amending `passkey.js`'s `'discouraged'`), so a page that lost its
-   storage (Safari clears a site's script storage after 7 days without a visit; to be measured, slice 2) still
+   storage (Safari clears a site's script storage after 7 days without a visit; to be measured on a real phone, owed by slice 2) still
    unlocks as its device: with no `device`, `allowCredentials` is empty, the person picks the passkey, and the server
    finds the device by the assertion's credential id. Losing its storage costs the page its unlock key, its read key
    and its stored list, never its place in the list.
@@ -239,13 +239,118 @@ other Windows users' processes as the unlock does.
    the host checks it too), checks, failing closed on anything else: the challenge is live, this connection's and
    unused; the device is listed, not tombstoned, and **enrolled on this listener's origin and place** (N5: a loopback
    device never unlocks on the serve gate nor a phone on loopback, and a software credential that can assert for any
-   rpId gains nothing); `clientDataJSON` parses as exactly one JSON object whose `type` is `webauthn.get`, `challenge`
-   the recomputed bytes, `origin` exactly this listener's origin, and `crossOrigin` absent or false; `rpIdHash` is
+   rpId gains nothing); `clientDataJSON` passes WebAuthn's limited verification with `type` `webauthn.get`, `challenge`
+   the recomputed bytes, `origin` exactly this listener's origin, and `crossOrigin` absent or false (WebKit omits it on
+   a same-origin ceremony; the exact bytes taken are in [The checks' bytes](#the-checks-bytes)); `rpIdHash` is
    SHA-256 of this listener's rpId; the flags have UP and UV; the signature checks under the device's stored key over
-   `authenticatorData || SHA-256(clientDataJSON)`; a non-zero sign count must exceed the stored one. The vault records
+   `authenticatorData || SHA-256(clientDataJSON)`; when the stored or the new sign count is non-zero, the new one must
+   exceed the stored one. The exact bytes of each check are in [The checks' bytes](#the-checks-bytes). The vault records
    `{device, keyId: SHA-256(spki), spki, origin, since, until: since + 12 h}`, at most 3 live per device (a phone's
    home-screen app and its browser tab keep separate storage), the oldest dropped.
 4. The connection is then the device's, as in the handshake's step 2.
+
+### The checks' bytes
+
+Slices 2 and 3 (`Sources/VibeCore/V2/WebAuthn.swift`: `WebAuthnAssertion.check`, `WebAuthnRegistration.check`) fix
+what the steps above leave open, each the strictest choice that a real browser engine's ceremonies pass. They were
+measured with headless Chrome 158's virtual authenticator (`scripts/e2e/webauthn-vectors.cjs`, the vectors in
+`Tests/VibeCoreTests/WebAuthnVectors.swift`); Safari and iOS are owed a look on real devices (below). Each check fails
+closed on anything it doesn't name, in this order:
+
+1. **The listener** (what the server expects, checked before any byte is read): a loopback listener's origin is exactly
+   `http://localhost` with an optional port, its rpId `localhost`; a tailnet listener's is `https://<rpId>` with an
+   optional port; the rpId lower-case letters, digits and `-` in dot-separated labels of 1 to 63 (253 at most), its last
+   label not all digits (an IP address is no rpId), the port 1 to 65535 without a leading zero and not the scheme's
+   default (`:80` on http, `:443` on https: a browser drops that port from the origin, so no ceremony could match;
+   the review's N1). The challenge is 32 bytes.
+2. **The device's binding (N5), assertions only:** the record's `origin`, `rpId` and `place` equal the listener's, and
+   the assertion's credential id is the record's, 16 to 1023 bytes (WebAuthn Level 3, §4 "Credential ID" and §6.5.1).
+3. **`clientDataJSON`: WebAuthn Level 3's limited verification algorithm** (W3C Recommendation of 25 August 2026,
+   §5.8.1.2, `#clientdatajson-verification`, over §5.8.1.1's serialization). The JSON is never parsed: its bytes must
+   begin exactly with `{"type":T,"challenge":C,"origin":O`, T, C (the issued challenge in unpadded base64url) and O
+   (the listener's origin) built by the node with §5.8.1.1's CCDToString (`"` and `\` escaped by a backslash, U+0000
+   to U+001F as `\u` and four lower-case hex digits, everything else as UTF-8), with no `topOrigin`: a ceremony from a
+   frame (`crossOrigin` true) is refused. **`crossOrigin` absent or false**, and exactly one of these after O:
+   - **absent:** `}` and nothing more, so the whole is exactly `{"type":T,"challenge":C,"origin":O}`. No member at all
+     may follow an absent `crossOrigin` (not `topOrigin`, not Chrome's extra member, not a later
+     `"crossOrigin":true`), and not a byte after the `}`. §5.8.1.1 step 9 reads an absent `crossOrigin` as false;
+   - **false:** `,"crossOrigin":false`, then either `}` and nothing more, or `,"` (the next member's name: §5.8.1.1
+     step 14 writes any further members there) then anything that is valid UTF-8 and ends with `}`.
+
+   **Why absent is taken (the review's I1):** WebKit, so Safari on the Mac and every browser on iOS, omits
+   `crossOrigin` on a same-origin ceremony. Its `buildClientDataJson` (WebKit main,
+   `Source/WebCore/Modules/webauthn/WebAuthenticationUtils.cpp`) sets `type`, `challenge` and `origin` and then
+   `crossOrigin` only `if (scope != WebAuthn::Scope::SameOrigin)`; WTF's JSON object writes members in insertion
+   order, compactly, and doesn't escape `/`. WebKit bug 275357's reporter shows those bytes from a real Safari:
+   `{"type":"webauthn.get","challenge":"...","origin":"http://localhost:5173"}`. Both were read by the independent
+   review of slices 1 to 3, as source and a bug report; no Safari or iPhone ceremony was measured here. The rule that
+   `crossOrigin` must be present (the lead's earlier ruling) would have refused every Safari and iPhone unlock and
+   enrolment.
+
+   The whole is at most 1024 bytes (the four members with a 253-byte name come to about 400; Chrome's extra member to 120 more). **Why a prefix and not a template:** Chrome adds a member after the
+   four to about one ceremony in six (measured: 16 of 107 assertions and 26 of 106 registrations,
+   `"other_keys_can_be_added_here":"do not compare clientDataJSON against a template. See https://goo.gl/yabPex"`), its
+   way of saying not to template, and other engines may add their own (`topOrigin`, for one); a fixed form would lock
+   real users out at a later release. Since only the prefix is compared and nothing is parsed, a later member,
+   repeated or not, overrides nothing checked. Refused: anything that touches the prefix (a member before or between
+   the four, reordered members, whitespace anywhere in it, another escape of the origin, another base64 form of the
+   challenge), `crossOrigin` true, anything after O but the closing `}` when `crossOrigin` is absent, and a tail that
+   isn't one of the shapes above. **A place for the reviewer to attack.**
+4. **`authenticatorData`.** An assertion's is exactly 37 bytes (rpIdHash, flags, sign count: no attested data, no
+   extensions). A registration's is rpIdHash, flags, sign count, AAGUID, the credential id's length and the id (16
+   to 1023 bytes), then the COSE key, and nothing after it. `rpIdHash` is SHA-256 of the listener's rpId. The flags:
+   UP and UV set; AT clear on an assertion and set on a registration; ED clear
+   (the page asks for no extension; **a stated limit to measure:** a browser may ask one itself, as Chromium is
+   expected to ask a security key for `credProtect` when `residentKey` is `required`, and such a registration is
+   refused until a look with a real security key says what it sends; Chrome's virtual authenticator has no
+   `credProtect` and sends no ED); BS only with BE (§6.1.3: "This combination is not allowed"); the reserved bits
+   0x02 and 0x20 ignored (the lead's call: the signature covers them, so refusing them stops no forgery, and the day
+   a later WebAuthn level defines one and an OS starts setting it, refusing them would lock out every unlock on that
+   device); on an assertion, BE
+   equal to the record's (§6.1.3: BE "MUST NOT change"). The AAGUID is returned as claimed, never checked: with
+   attestation `none` it proves nothing.
+5. **The assertion's signature:** ASN.1 DER parsed by the node itself, strictly (a SEQUENCE with a short-form length
+   covering the rest exactly, two INTEGERs of 1 to 33 bytes, positive, minimal, not zero, at most 32 bytes of value),
+   so neither CryptoKit's nor swift-crypto's DER reading decides what is taken; then P-256 ECDSA over
+   `authenticatorData || SHA-256(clientDataJSON)`. Both forms of a signature (s and n − s) verify: nothing relies on
+   one.
+6. **The sign count**, checked after the signature (so a refusal here means a genuine key whose counter didn't
+   advance): when the stored or the new count is non-zero, the new one must exceed the stored one. Both zero passes
+   (authenticators without a counter, Apple's passkeys among them); a counter that goes back to zero after a non-zero
+   one is refused. That rule is ours, stricter than this design's first wording ("a non-zero sign count must exceed
+   the stored one", which let it pass) and, as far as it was read here, than the spec's text (WebAuthn Level 3 §7.2's
+   counter step was not read: the fetch of the spec stopped before it); the lead's call, 2026-11-26.
+7. **The registration's attestation object**, at most 2048 bytes, is exactly the CBOR map `{"fmt": "none",
+   "attStmt": {}, "authData": <bytes>}`: three members in that (CTAP2 canonical) order, `fmt` the text `none` and
+   `attStmt` the empty map (else refused as another attestation), nothing after it. **A packed self-attestation is
+   refused, stated** (the review's N4): WebAuthn L3 §5.1.3 lets a browser pass one through unaltered under attestation
+   `none` (`fmt` `packed`, no `x5c`, an all-zero AAGUID); none of the supported platform authenticators is known to send
+   it, and the refusal is a clear error at enrolment, not a later lockout. The owed look records it if one does. The reader (`WebAuthnCBOR`) takes
+   only unsigned and negative integers, byte and text strings and maps, each head in its shortest form with a definite
+   length; indefinite lengths, the reserved heads, tags, floats, simple values and arrays are refused. It never
+   recurses: the check reads the one fixed shape item by item, so nothing is nested deeper than two maps, and a key
+   repeated, missing, extra or out of order is refused as the wrong item.
+8. **The registration's key:** exactly the COSE EC2 key `{1: 2, 3: -7, -1: 1, -2: x, -3: y}` (kty EC2, alg ES256, crv
+   P-256), x and y byte strings of 32, in that order and nothing else (77 bytes), and its point on the curve. RSA,
+   EdDSA, other curves, other algorithms and any other member are refused; Chrome's RS256 and EdDSA registrations
+   are among the vectors.
+
+**The authenticators supported today** are the platform ones: Touch ID (a Mac's browser), Face ID (an iPhone),
+Windows Hello, and Android's. A registration carrying extensions, so probably a hardware security key under
+Chromium's `credProtect` default, is refused until a real key is measured (the lead's call, 2026-11-26: a security
+key is nobody's path yet, and the refusal is a clear error at enrolment, not a lockout later).
+
+**`crossOrigin` is settled before the look:** absent or false, as step 3 says, from WebKit's source and bug 275357.
+The look on real devices no longer has to decide it, but it still records the real bytes of each ceremony, and if
+they differ from the closed form above (a member after the origin with no `crossOrigin`, another order, an escape),
+the rule changes only by the lead's call, before slice 21.
+
+**Not shown here, owed to the user's devices:** Safari's and iOS's exact `clientDataJSON` bytes (on macOS Safari and
+on iOS, in a tab and as a home-screen app), the attestation object's member order from AuthenticationServices, their
+flags (UV, BE, BS), sign count and AAGUID, whether any sends a packed self-attestation (refused, step 7), Safari's
+passkeys on `http://localhost` (slice 13), and the 7-day storage rule on a phone ("Safari clears a site's script
+storage after 7 days without a visit"), which slice 2 can't measure on this Mac: the slice's report holds the steps
+for that look.
 
 ### What is signed, so a message can't be replayed, reordered, or moved
 
@@ -474,7 +579,8 @@ nothing secret in a URL).
    `SHA-256("vibeswitcher-enrol-v1\n" + origin + "\n" + conn + "\n" + window + "\n" + SPKI(unlock key) + "\n" +
    SPKI(read key))`, and sends `device.enroll` `{window, spki, readSpki, attestationObject, clientDataJSON, name}`.
 2. The server checks the registration as the unlock's assertion (type `webauthn.create`, origin, rpIdHash, UP and UV,
-   the COSE key P-256 and nothing else, attestation format `none`), then **picks a fresh nonce for that enrolment and
+   the COSE key P-256 and nothing else, attestation format `none`; the bytes in [The checks' bytes](#the-checks-bytes)),
+   then **picks a fresh nonce for that enrolment and
    only then derives its words**: three words of `PagePairing.words` from `SHA-256(nonce || credential key || spki)`.
    A worker can't grind keys for chosen words: each try is a knock, and the words are fixed by a nonce that comes
    after the key (24 bits, at most 4 knocks a window). The page shows its words.
@@ -548,7 +654,7 @@ desktop's read key releases only the reads and watching.
 **What ends it early:** the device removed (anyone's), Lock now on the device (`device.lock`), Remove all or
 `vibeswitcher web --revoke`; the page losing its key (on a desktop, its last tab closed or reloaded, since the desktop's
 unlock key is in memory only: the lead's call; the read key keeps the page showing; on a phone, the browser clearing
-its storage, which Safari does after 7 days without a visit: to be measured, slice 2); a host end on Linux (unlocks are
+its storage, which Safari does after 7 days without a visit: to be measured on a real phone, owed by slice 2); a host end on Linux (unlocks are
 never written down); a bad signature or a sequence gap (the connection closes; the unlock stands, since only the key's
 holder can sign).
 
@@ -865,7 +971,7 @@ one-line slice, after the reviews, by the lead. Slices 6, 9, 10, 13 and 14 each 
 | 1 | The frame envelope and P-256 verify: signed bytes, `seq`, `conn`, the binary type 6, fail-closed parsing | `Sources/VibeCore/V2/DeviceProof.swift`, tests | all | none | yes (with 2, 3) | none |
 | 2 | The WebAuthn assertion check: `clientDataJSON` exact, `authenticatorData`, flags, sign count, the enrolled origin and place (N5); vectors recorded from real browsers | `Sources/VibeCore/V2/WebAuthn.swift`, fixtures | all; measures Safari's 7-day storage rule on a phone | none | yes | none |
 | 3 | The registration check: `attestation: 'none'`, a CBOR subset for COSE EC2 P-256 only | `WebAuthn.swift` (its own type), tests | all | none | yes | 2 (same file) |
-| 4 | The vault's devices and unlocks (tombstones are the server's, slice 12, since a vault write can fail): the requests, app-only, the vault verifying proofs with 2 and 3; **the handover format unchanged** (raised in 21) | `Sources/VibeCore/V2/LeadVaultV2.swift` (new requests beside `PageActs`), `Sources/VibeHost/V2/VaultV2Handler.swift`, `Sources/VibeCore/V2/DeviceGates.swift` | all | none | yes | 2, 3 |
+| 4 | The vault's devices and unlocks (tombstones are the server's, slice 12, since a vault write can fail): the requests, app-only, the vault verifying proofs with 2 and 3; **the handover format unchanged** (raised in 21); **the review's notes for this slice after this table** ([Slice 4's notes](#slice-4s-notes-from-the-review-of-2-and-3)) | `Sources/VibeCore/V2/LeadVaultV2.swift` (new requests beside `PageActs`), `Sources/VibeHost/V2/VaultV2Handler.swift`, `Sources/VibeCore/V2/DeviceGates.swift` | all | none | yes | 2, 3 |
 | 5 | The page's key module: unlock key, read key, the envelope through **one ordered sign-and-send queue** (N4), `BroadcastChannel`, the stored list; the phone signing bench | `WebApp/js/devicekey.js`, its node tests (`frames leave in seq order under concurrent signs`) | the module; the bench on a real phone | none | with 1 | none |
 | 6 | The handshake: `challenge` first, `auth` by unlock or read key, locked and reading connections, behind `DeviceKeys.usersNode`; the byte-identical-when-off test | `Sources/VibeNode/Web/WebAccess.swift` (`admit`), `WebSocketConnection.swift` | in-process | none | yes | 1, 4 |
 | 7 | Signed frames in `WebRequestScreen.text` before `Principal.route`, closing on any unsigned or undecodable frame **before** today's fall-through to the hub; `Principal.page` with a device | `WebAccess.swift` (`WebRequestScreen.text`), `Server/Principal.swift` | in-process | none | yes | 6 |
@@ -899,6 +1005,25 @@ fail-closed fix of today's `revoked()` and `dropPages` (a revoke whose vault wri
 14's leaving `accepted` out of what web connections read. So slice 21 is the first that lets anyone act differently
 (the cut-over); 12 and 14 are the first changes a user could notice. Slice 20 lands before 21, so no Linux host end
 after the cut-over loses the devices for good.
+
+### Slice 4's notes, from the review of 2 and 3
+
+Slice 4's contract carries these (the independent review of slices 1 to 3, 2026-11-26):
+
+- **A credential id, and a key, unique across devices (N2).** Under attestation `none` the credential id is whatever
+  the enrolling page says. The vault refuses an enrolment whose credential id or COSE key is already listed on any
+  device, or tombstoned (the server's tombstones, slice 12, are checked too once they exist), and an unlock's lookup by credential id that finds two records fails closed.
+- **Nothing in a registration is authenticated (N3).** Under attestation `none` the registration check is
+  well-formedness only: UV, the authenticator, the origin and what the challenge binds are all only claimed, and the
+  words and the human approval are what vouch. So the vault takes the read key's SPKI (`readSpki`), the credential id
+  and BE from the approved knock record, the same record whose words were approved, never from the registration
+  alone or from a later message.
+- **The vault calls this same check (N5).** It verifies with `WebAuthnAssertion.check` and `WebAuthnRegistration.check`,
+  and never runs a JSON parser on `clientDataJSON`: the prefix-and-tail rule is safe only because nothing parses it
+  (a repeated `origin` in the tail would be read as each parser chooses: Darwin's `JSONSerialization` takes the
+  first, JavaScript's `JSON.parse` the last).
+- **A packed self-attestation is refused (N4)**, as [The checks' bytes](#the-checks-bytes) step 7 says: slice 4 adds
+  no other attestation format.
 
 ## Open to attack
 
