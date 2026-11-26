@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import VibeCore
 import VibeHost
@@ -104,15 +105,24 @@ func goBack(_ statePath: String, _ error: Error) -> Never {
 // The build before handed its sessions over, by executing this one in its place (same process). Read before the
 // server is made: what it kept in memory (`HostServer.secretsForHandover`) can go into this one's config.
 let handoverPath = value(after: "--handover")
+// The vault's Keychain key, for the user's host only, read once and only when first asked.
+var vaultKeyRead: SymmetricKey??
+func vaultKey() -> SymmetricKey? {
+    if let read = vaultKeyRead { return read }
+    let key = ownsLaunchers ? VaultStorage.keychainKey() : nil
+    vaultKeyRead = .some(key)
+    return key
+}
 var restoring: HostHandover.State?
 var restoredSecrets: Data?
 if let handoverPath {
     do {
         // A test of the fallback: as if this build couldn't read the state.
         if arguments.contains("--handover-fail-restore") { throw HostHandover.Failure.unreadable("--handover-fail-restore") }
-        var state = try HostHandover.read(from: handoverPath)
-        restoredSecrets = HostHandover.takeSecrets(from: &state)
-        restoring = state
+        let received = try HostHandover.receive(from: handoverPath, lockPath: lockPath, userHost: ownsLaunchers,
+                                                proof: value(after: "--handover-proof"), logPath: config.logPath, key: vaultKey)
+        restoredSecrets = received.secrets
+        restoring = received.state
     } catch {
         goBack(handoverPath, error)
     }
@@ -126,7 +136,7 @@ config.appExecutable = (restoring != nil ? value(after: "--app-executable") : ni
 // (on its own lock) keeps one in memory only, never touching the user's.
 // After a handover, the vault is the one the build before held in memory (its secrets), not what's on disk.
 let vaultFile = VibePaths.root.appendingPathComponent("lead/vault.sealed")
-config.vault = ownsLaunchers ? VaultStorage(file: vaultFile, key: VaultStorage.keychainKey(), logPath: config.logPath).book(handedOver: restoredSecrets)
+config.vault = ownsLaunchers ? VaultStorage(file: vaultFile, key: vaultKey(), logPath: config.logPath).book(handedOver: restoredSecrets)
     : LeadVault.Book(restoring: restoredSecrets)
 // The app that started this host gives it its key on stdin (see `AppProof`), and says so: taken while the vault
 // holds none, but not by a vault that started over (its file no longer opens under the Keychain key): that one waits

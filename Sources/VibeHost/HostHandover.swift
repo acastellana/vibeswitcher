@@ -1,3 +1,4 @@
+import CryptoKit
 import Darwin
 import Foundation
 import VibeCore
@@ -132,6 +133,22 @@ public enum HostHandover {
         guard let header = try? PropertyListDecoder().decode(Header.self, from: data) else { throw Failure.unreadable("not a state file") }
         guard header.format == format else { throw Failure.wrongFormat(header.format) }
         do { return try PropertyListDecoder().decode(State.self, from: data) } catch { throw Failure.unreadable("\(error)") }
+    }
+
+    /// What a build started with `--handover` takes over: the state, and the secrets the build before handed over.
+    public struct Received {
+        public var state: State
+        public var secrets: Data?
+    }
+
+    /// `--handover PATH`: the state at `path` and the secrets of its channel, for the host on `lockPath`.
+    /// `userHost`: the user's host (on the user's lock), whose vault is sealed under `key()` (read only when asked).
+    /// `proof`: `--handover-proof`'s value. `logPath`: the host's log.
+    public static func receive(from path: String, lockPath: String, userHost: Bool, proof: String?, logPath: String?,
+                               key: () -> SymmetricKey?) throws -> Received {
+        var state = try read(from: path)
+        let secrets = takeSecrets(from: &state)
+        return Received(state: state, secrets: secrets)
     }
 
     /// `--handover-probe PATH`: whether this build can take over from the state at `path`. Call first thing in `main`.
