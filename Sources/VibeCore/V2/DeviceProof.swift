@@ -17,8 +17,8 @@ import Foundation
 ///   one's 4 spare bits zero. Signed: `"vibeswitcher-frame-v1\n" + origin + "\n" + conn + "\n" + body`, conn the
 ///   connection's 32 bytes in unpadded base64url (43 characters, as the server's `challenge` said them).
 /// - **The body** is one JSON object in RFC 8259's grammar with no whitespace outside strings, at most `depthAtMost`
-///   deep, no name twice in any object (names carry no escape, so two names are the same exactly when their bytes
-///   are), valid UTF-8, a `\u` escape of a surrogate only as a high one followed by a low one. It begins
+///   deep, no name twice in any object (names carry no escape, and two are the same when they are equal as Swift
+///   strings: canonically equivalent, as a later `[String: …]` decoder takes them), valid UTF-8, a `\u` escape of a surrogate only as a high one followed by a low one. It begins
 ///   `{"v":1,"seq":N,` with N the frame's sequence number in plain decimal (no sign, no leading zero), 1 to `seqAtMost`.
 /// - **A terminal frame** (binary type 6, input and resize sharing the text frames' one sequence) is
 ///   `[6][stream: 4][seq: 8][sig: 64][type: 1][payload]`, integers big-endian, type 1 (input, at least one byte) or 3
@@ -375,11 +375,12 @@ public enum DeviceProof {
             guard depth <= DeviceProof.depthAtMost else { return .tooDeep }
             at += 1
             if take(UInt8(ascii: "}")) { return nil }
-            var names: Set<ArraySlice<UInt8>> = []
+            var names: Set<String> = []
             while true {
                 let name = string(name: true)
                 if let refusal = name.refusal { return refusal }
-                guard names.insert(name.bytes).inserted else { return .duplicateName }
+                // As String: canonically equivalent names (K and the Kelvin sign) are one key to every Swift decoder.
+                guard names.insert(String(decoding: name.bytes, as: UTF8.self)).inserted else { return .duplicateName }
                 guard take(UInt8(ascii: ":")) else { return .body }
                 if let refusal = value(depth: depth + 1) { return refusal }
                 if take(UInt8(ascii: "}")) { return nil }

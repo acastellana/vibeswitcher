@@ -300,8 +300,8 @@ strictest choice, each one encoding per value):
 - **`conn`** in the signed bytes is the challenge's text, unpadded base64url of its 32 bytes (43 characters); **origin**
   the listener's, printable ASCII without a space.
 - **The body** is one JSON object in RFC 8259's grammar **with no whitespace** outside strings, at most 32 deep (the
-  body's object is 1), **no name twice in any object**, names with no escape (so two names are the same exactly when
-  their bytes are), valid UTF-8, a `\u` escape of a surrogate only as a high one then a low one. It begins
+  body's object is 1), **no name twice in any object**, names with no escape and two the same when canonically
+  equivalent (as a Swift `String` key compares them: `K` and the Kelvin sign are one name), valid UTF-8, a `\u` escape of a surrogate only as a high one then a low one. It begins
   `{"v":1,"seq":N,` with N in plain decimal (no sign, no leading zero): the only place `seq` is read.
 - **`seq`** runs from 1 to 2^53 − 1 (JavaScript's largest exact integer), text and terminal frames counting in the one
   sequence; lower than expected is a repeat, higher a skip.

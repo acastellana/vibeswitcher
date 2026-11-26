@@ -341,6 +341,12 @@ struct DeviceProofTests {
         for (body, refusal) in bodies {
             #expect(Self.refusal(Self.signedBody(body)) == refusal, "\(body)")
         }
+        // Two names a Swift decoder takes as one key (String compares by canonical equivalence) are one name twice:
+        // "K" and the Kelvin sign; "é" composed and decomposed. Else the later decoder would keep either value.
+        for (first, second) in [("K", "\u{212A}"), ("\u{E9}", "e\u{301}")] {
+            #expect(Array(first.utf8) != Array(second.utf8))
+            #expect(Self.refusal(Self.signedBody(#"{"v":1,"seq":1,"args":{""# + first + #"":"a",""# + second + #"":"b"}}"#)) == .duplicateName, "\(second)")
+        }
         // What JSON allows, and the grammar takes: every value form, a paired surrogate, escapes in a value, a name
         // repeated in two different objects.
         for body in [#"{"v":1,"seq":1,"a":[],"b":{},"c":[1,-0,0.5,-1.5e+3,2E-2,true,false,null,"x"],"d":"\"\\\/\b\f\n\r\té😀"}"#,
