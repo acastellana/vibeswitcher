@@ -4635,3 +4635,8 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-26 01:13 Planned v2-web-new-session: v2 web: New session, New project, This node and the inspector at the bar (D12, D16, D18, D25; the review's group F; in a clone)
 - 2026-11-26 01:13 Started a worker on v2-web-the-page
 - 2026-11-26 01:13 Started a worker on v2-web-new-session
+- 2026-11-26 01:47 Kept v2-on-the-mac-5 unmerged: By design nothing of it merges into main: its commits are on the local branch v2-mac-agent in its clone (.vibeswitcher/v2-agent): the checked start plus the web port hold joined and 10 commits for the LaunchAgent; awaiting an independent review (task planned) and then delivery as a branch for v2 at the user's say. No merge and no cleanup until then (decision 2026-11-25 16:27).
+- 2026-11-26 01:48 Planned review-v2-s-mac-3: Review v2's Mac LaunchAgent wiring (branch v2-mac-agent, step 5) as an independent reviewer: report only
+- 2026-11-26 01:48 Started a worker on review-v2-s-mac-3
+- 2026-11-26 01:49 Kept v2-web-the-chat unmerged: By design nothing of it merges into main: its 7 commits are on the local branch v2-web-chat in its clone (.vibeswitcher/v2-chat), on top of v2-web-design; to be joined with the components, frame and sections branches and pushed as a branch for v2 at the user's say. No merge and no cleanup until then.
+- 2026-11-26 01:49 Update: v2: el chat, rehecho para leerse y escribirse como una app de primera — **Qué cambió**
