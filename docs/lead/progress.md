@@ -4744,3 +4744,5 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-26 10:36 Sent turn-this-incident-into-20's worker contract v3 (it had v2)
 - 2026-11-26 10:37 Sent turn-this-incident-into-20's worker contract v4 (it had v3)
 - 2026-11-26 10:39 Automatically (auto_advance): Started the audit of turn-this-incident-into-20 at 8fe5a4a4 (It touches sensitive_paths (AGENTS.md), so it's treated as audit whatever its review says).
+- 2026-11-26 10:45 Audit of turn-this-incident-into-20: incomplete, clean, round 1: 2 Important open, 3 Nit open, 1 Pre-existing open
+- 2026-11-26 10:45 Automatically (auto_advance): Sent turn-this-incident-into-20's worker the open Important findings turn-this-incident-into-20:F1, turn-this-incident-into-20:F2 from its audit at 8fe5a4a4.
