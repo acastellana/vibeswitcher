@@ -76,13 +76,30 @@ The right column is hidden in the Roadmap view.
 **Other screens** (in the centre, same columns): Your own sessions (sessions outside a project, with the session view
 the page has today: chat, terminal, inspector), This node (health, build, plugins), Settings, a worker's chat.
 
+*Note, 2026-11-25:* at the user's request (the left column's three places should have "better UX inside, two columns,
+category and detail, with a search"), Your own sessions, This node and Settings each open as two columns inside the
+centre, one shared component (`WebApp/js/views/twocol.js`, one set of CSS rules): a narrow list (the page's title and
+its buttons at its head, a search box, the rows under their headings) and the chosen row's detail beside it, their
+headers one row as the three columns' are. The right column stays hidden on these screens, as before. Settings lists
+its sections (the node's, each project's, Terminal · this browser) with their counts, and a search keeps the sections
+holding a match with the words marked; This node lists the page's groups (what needs you and the notices first) with a
+count or a one-word state; Your own sessions lists the sessions (need you, working, idle or ended) and shows the
+session view beside the list. A team's session (a lead's, a worker's chat) still shows alone, with no list. The choice
+is in the address (`#/settings/node/<section>`, `#/settings/<project>/<section>`, `#/settings/terminal`,
+`#/node/<group>`, `#/sessions/new`, `#/s/<session>`); the old addresses open their first section or group. `/`
+focuses the search, Esc clears it, ↑ ↓ move in the list. Under 760 px the two fold to one: the list, or the detail with
+a way back to it. Beside the list a session's inspector is a column only from 1500 px of window (a sheet under it), so
+the chat is never squeezed. `#/sessions` shows the start form beside the list rather than opening a session itself:
+opening one marks a finished turn seen.
+
 State colours, one meaning each, used everywhere: asked of you; working; in review or audit; ready or merged; blocked;
 queued. Scrollbars are thin, without buttons. Light and dark. The page's words follow the browser's language (English
 and Spanish first; a string table, no library).
 
 **Deep links.** The address says what is on screen and back/forward walk it:
 `#/p/<project>/lead?show=asks|all&tab=stats|files&task=<slug>&sheet=<item>`, `#/p/<project>/roadmap?open=<goal>,…`,
-`#/sessions`, `#/s/<session>`, `#/node`, `#/settings`. The old `#/s/…`, `#/p/…` addresses keep working.
+`#/sessions`, `#/s/<session>`, `#/node`, `#/settings` (each with its chosen row since 2026-11-25: the note under
+Other screens). The old `#/s/…`, `#/p/…` addresses keep working.
 
 ## Goals (new in the node)
 

@@ -4,7 +4,8 @@
 // stops (its session finishes its turn or ends), one of your own sessions finishes its work (never a worker's or a
 // verifier's: the Mac's "when a session finishes"), or the node's engine froze (a freeze its health digest keeps, told once,
 // never one kept before the page looked). Asked once, by a quiet offer the first time something needs you; then a
-// toggle on This node. A notification is the first line only, as text: the browser shows it as text, and controls,
+// toggle on This node. The offer is a note the frame places where nothing moves when it comes or goes (app.js puts it in
+// the left column's gap: the design review's D5); answered, it says what happened, then goes. A notification is the first line only, as text: the browser shows it as text, and controls,
 // bidirectional and other format characters are taken out first. The title bar counts what needs you: open cards and
 // prompts waiting.
 //
@@ -20,7 +21,8 @@
 // What it decides (`summarize`, `changes`, `wanted`, `firstLine`, `titled`, `sounding`) knows nothing of the page and is tested on
 // its own; `notifications(app)` puts it on the page.
 
-import { h } from './dom.js';
+import * as kit from './kit.js';
+import { h, setText } from './dom.js';
 import { pluginOn, pluginsOn } from './plugincard.js';
 import { t } from './i18n.js';
 
@@ -178,6 +180,7 @@ export function notifications(app, env = {}) {
   const doc = env.document || globalThis.document;
   const supported = typeof Note === 'function';
   const Audio = 'AudioContext' in env ? env.AudioContext : globalThis.AudioContext;
+  const later = env.later || ((fn, ms) => setTimeout(fn, ms));
   let last = null;
   let audio = null;
 
@@ -185,23 +188,30 @@ export function notifications(app, env = {}) {
 
   // The offer, once: shown the first time something needs you while the browser hasn't been asked and you haven't
   // answered; either answer is kept.
-  const offerText = h('span', null, t('ntGetANotificationWhenSomething'));
-  const offer = h('div', { class: 'offline offer', role: 'status', hidden: true }, offerText,
-    h('button', { class: 'offer-yes', type: 'button', onclick: () => turn(true) }, t('ntTurnOn')),
-    h('button', { class: 'offer-no', type: 'button', onclick: () => turn(false) }, t('ntNotNow')));
+  const offerText = h('span', { class: 'note-words' }, t('ntGetANotificationWhenSomething'));
+  const offerAnswers = h('span', { class: 'note-actions' },
+    kit.button('quiet', { size: 's', class: 'offer-yes', onclick: () => turn(true) }, t('ntTurnOn')),
+    kit.button('quiet', { size: 's', class: 'offer-no', onclick: () => turn(false) }, t('ntNotNow')));
+  const offer = h('div', { class: 'note offer', role: 'status', hidden: true }, offerText, offerAnswers);
+  // The offer answered: what happened, in its place, for a few seconds; then it goes.
+  function settled(words) {
+    setText(offerText, words);
+    offerAnswers.hidden = true;
+    later(() => { offer.hidden = true; app.noteChanged?.(); }, 6000);
+  }
 
   // The toggle on This node.
-  const box = h('input', { type: 'checkbox', class: 'notify-toggle', onchange: () => turn(box.checked) });
+  const box = kit.toggle({ class: 'notify-toggle', onchange: () => turn(box.checked) });
   const said = h('span', { class: 'notify-said' });
   // The sound's toggle beside it.
-  const ring = h('input', { type: 'checkbox', class: 'sound-toggle', onchange: () => sound(ring.checked) });
+  const ring = kit.toggle({ class: 'sound-toggle', onchange: () => sound(ring.checked) });
   // Each kind's choice (the Mac's Settings › Notifications): something needs me; a session finishes.
   const kindBoxes = {
-    needs: h('input', { type: 'checkbox', class: 'notify-kind', onchange: () => choose('needs', kindBoxes.needs.checked) }),
-    done: h('input', { type: 'checkbox', class: 'notify-kind', onchange: () => choose('done', kindBoxes.done.checked) }),
-    reminders: h('input', { type: 'checkbox', class: 'notify-kind', onchange: () => choose('reminders', kindBoxes.reminders.checked) }),
+    needs: kit.toggle({ class: 'notify-kind', onchange: () => choose('needs', kindBoxes.needs.checked) }),
+    done: kit.toggle({ class: 'notify-kind', onchange: () => choose('done', kindBoxes.done.checked) }),
+    reminders: kit.toggle({ class: 'notify-kind', onchange: () => choose('reminders', kindBoxes.reminders.checked) }),
   };
-  const el = h('section', { class: 'node-group notify' }, h('h2', { class: 'section-title' }, t('ntNotifications')),
+  const el = h('section', { class: 'node-group notify' }, kit.sectionTitle('h2', {}, t('ntNotifications')),
     h('label', { class: 'notify-line' }, box, t('ntTellMeWhenSomethingHappens')), said,
     h('label', { class: 'notify-line notify-sub' }, kindBoxes.needs, t('ntWhenASessionOrA')),
     h('label', { class: 'notify-line notify-sub' }, kindBoxes.done, t('ntWhenALeadStopsOr')),
@@ -247,13 +257,15 @@ export function notifications(app, env = {}) {
   }
 
   async function turn(on) {
-    offer.hidden = true;
+    const offered = !offer.hidden;
     if (!on || !supported) {
       store(storage, 'off');
+      if (offered) settled(t('frOfferOff'));
       return draw();
     }
     const answer = Note.permission === 'default' ? await Note.requestPermission() : Note.permission;
     store(storage, answer === 'granted' ? 'on' : 'off');
+    if (offered) settled(answer === 'granted' ? t('frOfferOn') : t('frOfferBlocked'));
     draw();
   }
 
@@ -281,7 +293,7 @@ export function notifications(app, env = {}) {
     count(now);
     if (last !== null) {
       const told = changes(last, now);
-      if (told.length && supported && Note.permission === 'default' && stored(storage) === null) offer.hidden = false;
+      if (told.length && supported && Note.permission === 'default' && stored(storage) === null && offer.hidden) { offer.hidden = false; app.noteChanged?.(); }
       const chosen = wanted(told, choices());
       if (enabled()) chosen.forEach(show);
       if (soundOn() && sounding(chosen.filter((note) => !lookingAt(note)))) play();

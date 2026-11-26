@@ -1,120 +1,145 @@
 // Two screens of the centre, from the left column's links (the redesign's "Other screens"):
 // - Your own sessions (#/sessions): the sessions outside every project's team, each opening the session view the page
-//   had (chat, terminal, inspector); starting one (the line that starts it in a terminal, views/drive.js); and the
-//   ones that ended lately, with the line that resumes each.
-// - New project (#/new): the lines that make a project and start its lead, and the recent folders with theirs.
-// Nothing here starts anything: each line is copied and run in a terminal, where the code is typed.
+//   had (chat, terminal, inspector); starting one (views/drive.js's short form: what, where, the model, one Start); and
+//   the ones that ended lately, with Resume.
+// - New project (#/new): a lead in a folder you have (the page starts it) or a brand-new project (its folder made by
+//   the line a terminal runs: no page makes one yet), as one short form.
+// Where the page doesn't act, each form ends in the line to run in a terminal and why.
 
-import { h, setText, framed } from '../dom.js';
+import * as kit from '../kit.js';
+import { h, setClass, setText, framed } from '../dom.js';
 import { sessionMark, icon } from '../marks.js';
 import { STATES, stateOf, since, tilde, lastPart, AGENTS } from '../words.js';
+import { twoColumns, queryWords, holdsAll } from './twocol.js';
 import { t } from '../i18n.js';
-import { actsFor, doButton } from '../acting.js';
-import { sessionHref, projectHref, leadMarks } from '../ui.js';
+import { actsFor } from '../acting.js';
+import { sessionHref, leadMarks } from '../ui.js';
 import { ownSession } from './left.js';
-import { newSessionForm, newLeadForm, newProjectForm } from './drive.js';
-import { copyLine } from './cards.js';
-import { resumeLine, recentProjects, projectLines } from '../actions.js';
+import { newSessionForm, newLeadForm, newProjectForm, resumeOrLine } from './drive.js';
+import { recentProjects, recentFolders } from '../actions.js';
 
 const ENDED_SHOWN = 5;
 
 function screenHead(app, title, sub) {
   return h('header', { class: 'centre-head screen-head' },
-    h('button', { class: 'icon-button phone-only', type: 'button', 'aria-label': t('menu'), onclick: () => app.drawer('left') }, icon('menu', 16)),
+    kit.iconButton({ class: 'phone-only', 'aria-label': t('menu'), onclick: () => app.drawer('left') }, icon('menu', 16)),
     h('div', { class: 'head-words' }, h('h1', { class: 'big' }, title), sub ? h('span', { class: 'pname' }, sub) : null));
 }
 
-export function ownSessionsView(app) {
-  const { store } = app;
-  const list = h('div', { class: 'own-list' });
-  const none = h('p', { class: 'empty-line', hidden: true }, t('ownNone'));
+// The list's three bands, in the order the page shows them: what needs you, what works, the rest (idle, finished,
+// paused, ended). A session's band by its state word.
+const BANDS = [['needs-you', ['needs-you']], ['working', ['working', 'background']], ['rest', ['done', 'idle', 'paused', 'ended', 'unknown']]];
+export const bandOf = (word) => BANDS.find(([, words]) => words.includes(word))[0];
+
+// Your own sessions as the list's rows: in their bands, each with its name, its state and its folder's name, and when
+// its state last moved; with a search, only those whose name, folder or state holds every word.
+export function ownItems(sessions, query, home = null, replaced = () => false) {
+  const words = queryWords(query);
+  const title = { 'needs-you': t('owBandNeedsYou'), working: t('owBandWorking'), rest: t('owBandRest') };
+  const rows = sessions.map((session) => {
+    const word = stateOf(session);
+    const name = session.title || lastPart(session.cwd) || t('owASession');
+    const folder = tilde(session.cwd, home) || t('owNoFolder');
+    return { session, word, name, folder, band: bandOf(word) };
+  }).filter((one) => !words.length || holdsAll([one.name, one.folder, STATES[one.word].label, AGENTS[one.session.agent] || ''].join(' '), words));
+  const items = [];
+  for (const [band] of BANDS) {
+    // Within a band, the one that moved last first.
+    const mine = rows.filter((one) => one.band === band).sort((a, b) => String(b.session.since || '').localeCompare(String(a.session.since || '')));
+    for (const one of mine) {
+      items.push({ key: one.session.id, href: sessionHref(one.session.id), group: title[band], title: one.name,
+        sub: [STATES[one.word].label, replaced(one.session) ? t('owReplaced') : null, lastPart(one.session.cwd) || one.folder].filter(Boolean).join(' · '), subTone: one.word,
+        meta: since(one.session.since), since: one.session.since || null, tone: one.word === 'needs-you' ? 'asked' : '',
+        about: [one.folder, AGENTS[one.session.agent], one.session.hosted ? null : t('owOtherTerminal', { terminal: one.session.terminal })].filter(Boolean).join(' · '),
+        markKey: `${one.word}:${one.session.agent}`, mark: () => { const mark = sessionMark(20); mark.update(one.word, one.session.agent); return mark.el; } });
+    }
+  }
+  return items;
+}
+
+export function ownSessionsView(app, { session = null } = {}) {
+  const { store, ui } = app;
   const folder = () => {
-    const hosted = [...store.state.sessions.values()].filter((session) => session.hosted && session.cwd);
+    const hosted = [...store.state.sessions.values()].filter((one) => one.hosted && one.cwd);
     hosted.sort((a, b) => String(b.startedAt || '').localeCompare(String(a.startedAt || '')));
     return hosted[0]?.cwd || store.state.node?.home || '';
   };
-  const starting = newSessionForm(app, { folder });
+  // The recent folders offered beside the form's folder field: your sessions' and those that ended lately.
+  const recent = () => recentFolders(store.state.sessions.values(), store.state.node?.ended || [], 4);
+  const starting = newSessionForm(app, { folder, recent });
   const endedList = h('div', { class: 'ended-list' });
-  const ended = h('section', { class: 'ended', hidden: true }, h('h2', { class: 'new-title' }, t('owEndedLately')), endedList,
-    h('p', { class: 'confirm-note' }, t('owRunTheLineInA')));
-  const el = h('section', { class: 'centre screen own', 'aria-label': t('ownSessions') },
-    screenHead(app, t('ownSessions'), t('ownSub')),
-    h('div', { class: 'screen-body' }, h('div', { class: 'screen-col' }, list, none, starting.el, ended)));
-  const rows = new Map();
+  const endedNote = h('p', { class: 'confirm-note' }, t('owRunTheLineInA'));
+  const ended = h('section', { class: 'ended', hidden: true }, h('h2', { class: 'new-title' }, t('owEndedLately')), endedList, endedNote);
+  // The list's head: a new session (its form beside the list) and a new project.
+  const newSession = kit.iconButton({ tag: 'a', class: 'tc-new', href: '#/sessions/new', 'aria-label': t('owNewSession'), title: t('owNewSession') }, icon('plus', 16));
+  const newProject = kit.iconButton({ tag: 'a', href: '#/new', 'aria-label': t('newProject'), title: t('newProject') }, icon('team', 16));
+  const columns = twoColumns(app, { label: t('ownSessions'), title: t('ownSessions'), searchLabel: t('owSearch'), placeholder: t('owSearchShort'), listHref: '#/sessions', head: [newSession, newProject] });
+  columns.onSearch(() => render());
+  const startPage = h('div', { class: 'screen-col tc-start' }, h('p', { class: 'tc-lede' }, t('ownSub')), starting.el, ended);
+  const el = columns.el;
   let endedDrawn = '';
-
-  function row(session) {
-    const mark = sessionMark(20);
-    const title = h('span', { class: 'own-title' });
-    const where = h('span', { class: 'own-where' });
-    const state = h('span', { class: 'own-state' });
-    const time = h('time');
-    const tag = h('span', { class: 'lead-tag replaced', hidden: true }, t('owReplaced'));
-    const el = h('a', { class: 'own-row row', href: sessionHref(session.id) }, mark.el, h('span', { class: 'own-words' }, h('span', { class: 'own-line' }, title, tag), where), h('span', { class: 'own-when' }, state, time));
-    return {
-      el,
-      update(next) {
-        const word = stateOf(next);
-        mark.update(word, next.agent);
-        setText(title, next.title || lastPart(next.cwd) || t('owASession'));
-        setText(where, [tilde(next.cwd, store.state.node?.home) || t('owNoFolder'), AGENTS[next.agent], next.hosted ? null : t('owOtherTerminal', { terminal: next.terminal })].filter(Boolean).join(' · '));
-        setText(state, STATES[word].label);
-        state.className = `own-state tone-text-${word}`;
-        if (next.since) time.dataset.since = next.since; else delete time.dataset.since;
-        setText(time, since(next.since));
-        const marks = leadMarks(store.state, next);
-        tag.hidden = !marks.replaced;
-        el.title = marks.replaced ? t('owALeadSessionItsProject') : '';
-      },
-    };
-  }
 
   function render() {
     const state = store.state;
+    const route = ui.state.route;
+    const here = route.name === 'sessions' || route.name === 'session';
+    if (!here) return;
     const mine = [...state.sessions.values()].filter(ownSession);
-    const next = new Map();
-    let cursor = list.firstChild;
-    for (const session of mine) {
-      const r = rows.get(session.id) || row(session);
-      r.update(session);
-      next.set(session.id, r);
-      if (r.el === cursor) cursor = cursor.nextSibling; else list.insertBefore(r.el, cursor);
-    }
-    for (const [id, r] of rows) if (!next.has(id)) r.el.remove();
-    rows.clear();
-    for (const [id, r] of next) rows.set(id, r);
-    none.hidden = mine.length > 0 || state.connection === 'connecting';
+    const shown = route.name === 'session' ? state.sessions.get(route.id) : null;
+    // A team's session (a lead's, a worker's, a verifier's) shows alone, as before: the list is yours only.
+    const alone = !!shown && !ownSession(shown);
+    setClass(el, 'alone', alone);
+    columns.fold(route.name === 'session' || !!route.start);
+    const query = columns.query();
+    const items = ownItems(mine, query, state.node?.home, (one) => leadMarks(state, one).replaced);
+    const connecting = state.connection === 'connecting';
+    columns.setItems(items, route.name === 'session' ? route.id : null, {
+      empty: connecting ? '' : query.trim() ? t('owNoMatch', { query: query.trim() }) : t('owNoneYet') });
+    if (route.name === 'sessions') newSession.setAttribute('aria-current', 'page'); else newSession.removeAttribute('aria-current');
+    if (route.name === 'session' && session) { columns.own(session.el); return; }
     starting.el.hidden = state.connection === 'unpaired' || state.connection === 'revoked';
     starting.update();
     const endedNow = (state.node?.ended || []).slice(0, ENDED_SHOWN);
-    const key = JSON.stringify([endedNow, state.node?.home, store.acts()]);
+    const key = JSON.stringify([endedNow, state.node?.home, store.acts(), store.can('session.resume')]);
     if (key !== endedDrawn) {
       endedDrawn = key;
       ended.hidden = endedNow.length === 0;
+      setText(endedNote, actsFor(app, 'session.resume') ? t('owEndedActs') : t('owRunTheLineInA'));
       endedList.replaceChildren(...endedNow.map((entry) => h('div', { class: 'ended-row' },
         h('div', { class: 'ended-name' }, h('span', null, entry.name || t('owASession')), h('span', { class: 'ended-folder' }, tilde(entry.folder, state.node?.home))),
-        entry.conversation && actsFor(app, 'session.resume') ? doButton(app, { label: t('acResume'), kind: 'session.resume', quiet: true, args: () => ({ session: entry.session }) }).el : null,
-        entry.conversation ? copyLine(resumeLine(entry), t('owTheCommandThatResumesIt')) : h('p', { class: 'confirm-note' }, t('owItsConversationIdWasnT')))));
+        ...(entry.conversation ? resumeOrLine(app, entry, { plain: true }) : [h('p', { class: 'confirm-note' }, t('owItsConversationIdWasnT'))]))));
     }
+    columns.show({ title: t('owNewSession'), sub: mine.length ? t('owCount', { n: mine.length }) : '', body: [startPage] });
   }
 
   const schedule = framed(render);
   for (const topic of ['sessions', 'node', 'connection', 'leads']) store.subscribe(topic, schedule);
-  return { el, render, choose: (where, preset) => starting.choose(where, preset) };
+  ui.subscribe((what) => { if (what === 'route') render(); });
+  return { el, render, focusSearch: () => columns.focusSearch(), columns, alone: () => el.classList.contains('alone'), choose: (where, preset) => starting.choose(where, preset) };
 }
 
 export function newProjectView(app) {
   const { store } = app;
   const project = newProjectForm(app);
   const leading = newLeadForm(app);
-  const recentList = h('div', { class: 'ended-list' });
-  const recent = h('section', { class: 'ended recent', hidden: true }, h('h2', { class: 'new-title' }, t('owRecentFolders')), recentList,
-    h('p', { class: 'confirm-note' }, t('owRunALineInA')));
+  // What to start: a lead in a folder that exists (the default: the page starts it), or a brand-new project (its
+  // folder made by the terminal's line). One form shows at a time.
+  let mode = 'folder';
+  const modes = [['folder', t('owModeFolder')], ['new', t('owModeNew')]].map(([key, label]) => kit.segment({ 'aria-pressed': String(key === mode), onclick: () => choose(key) }, label));
+  const switcher = h('div', { class: 'start-row' }, h('span', { class: 'start-label' }, t('owModeWhat')),
+    h('div', { class: 'start-control' }, kit.segmented({ role: 'group', 'aria-label': t('owModeWhat') }, modes)));
+  function choose(key) {
+    mode = key;
+    modes.forEach((button, index) => button.setAttribute('aria-pressed', String(['folder', 'new'][index] === key)));
+    leading.el.hidden = key !== 'folder';
+    project.el.hidden = key !== 'new';
+  }
+  choose(mode);
   const el = h('section', { class: 'centre screen new', 'aria-label': t('newProject') },
-    screenHead(app, t('newProject')), h('div', { class: 'screen-body' }, h('div', { class: 'screen-col' }, project.el, leading.el, recent)));
+    screenHead(app, t('newProject')), h('div', { class: 'screen-body' }, h('div', { class: 'screen-col' },
+      h('p', { class: 'tc-lede' }, t('owProjectLede')), h('div', { class: 'start-card' }, switcher, leading.el, project.el))));
   let known = null;
   let asked = false;
-  let drawn = '';
 
   function render() {
     const state = store.state;
@@ -122,21 +147,11 @@ export function newProjectView(app) {
       asked = true;
       store.request('recent', {}).then((reply) => { if (reply.ok) { known = reply.result.projects; render(); } else asked = false; });
     }
-    const rows = recentProjects(known, state.sessions.values(), state.node?.ended || [], state.leads.values());
-    const key = JSON.stringify([rows, state.node?.home]);
-    if (key === drawn) return;
-    drawn = key;
-    recent.hidden = rows.length === 0;
-    recentList.replaceChildren(...rows.map((one) => {
-      const lines = projectLines(one);
-      return h('div', { class: 'ended-row' },
-        h('div', { class: 'ended-name' }, h('span', null, lastPart(one.folder) || one.folder), h('span', { class: 'ended-folder' }, tilde(one.folder, state.node?.home))),
-        copyLine(lines.session, t('owStartsIn', { name: lastPart(one.folder) })),
-        lines.lead ? copyLine(lines.lead, t('owTheCommandThatStartsIts')) : h('a', { class: 'link', href: projectHref(one.lead) }, t('owItsLeadRunsOpenIt')));
-    }));
+    // The recent folders, offered beside the folder field: your sessions', those ended lately, the node's recent projects.
+    leading.update(recentProjects(known, state.sessions.values(), state.node?.ended || [], state.leads.values(), 5).map((one) => one.folder));
   }
 
   const schedule = framed(render);
   for (const topic of ['sessions', 'node', 'connection', 'leads']) store.subscribe(topic, schedule);
-  return { el, render, lead: (folder) => leading.choose(folder) };
+  return { el, render, lead: (folder) => { choose('folder'); leading.choose(folder); } };
 }

@@ -59,7 +59,7 @@ const GLYPHS = {
 export function agentMark(agent, size = 20) {
   const kind = AGENTS[agent] ? agent : 'shell';
   const svg = s('svg', { class: `agent agent-${kind}`, viewBox: '0 0 16 16', width: size, height: size, role: 'img', 'aria-label': AGENTS[kind] });
-  svg.append(s('rect', { class: 'badge', width: 16, height: 16, rx: 4.5 }));
+  svg.append(s('rect', { class: 'agent-badge', width: 16, height: 16, rx: 4.5 }));
   if (kind === 'claude') svg.append(s('path', { class: 'glyph-fill', d: GLYPHS.claude }));
   else if (kind === 'codex') svg.append(s('path', { class: 'glyph', d: 'M5.6 5.2L3 8L5.6 10.8M10.4 5.2L13 8L10.4 10.8M9 4.4L7 11.6' }));
   else svg.append(s('path', { class: 'glyph', d: 'M4 5.5L6.6 8L4 10.5M8.4 10.8H12' }));
@@ -99,10 +99,21 @@ const ICONS = {
   // A window with its right column: the inspector's toggle (the Mac's sidebar.right).
   inspector: 'M2.5 3.5H13.5V12.5H2.5ZM10 3.5V12.5',
   menu: 'M2.5 4H13.5M2.5 8H13.5M2.5 12H13.5',
+  // Three dots: more (a phone's Actions…).
+  more: 'M3.5 8H3.6M8 8H8.1M12.5 8H12.6',
 };
 
+// The icons' one grid (the design review's D25): 12 beside a line of text or on a row's small action, 16 on a control
+// or leading a row, 24 for an empty page's picture. Whatever size a view asks for is drawn at the step it is nearest
+// (at most 13 is 12, up to 18 is 16, larger is 24), and every icon's line is the same 1.5 px at each of them
+// (style.css's `.icon > path`: a stroke that doesn't scale with the drawing).
+export const ICON_GRID = [12, 16, 24];
+export const iconSize = (size) => (size <= 13 ? 12 : size <= 18 ? 16 : 24);
+
 export function icon(name, size = 16) {
-  return s('svg', { class: 'icon', viewBox: '0 0 16 16', width: size, height: size, 'aria-hidden': 'true' }, s('path', { d: ICONS[name] }));
+  if (!(name in ICONS)) throw new Error(`no icon ${name}`);
+  const step = iconSize(size);
+  return s('svg', { class: 'icon', viewBox: '0 0 16 16', width: step, height: step, 'aria-hidden': 'true' }, s('path', { d: ICONS[name] }));
 }
 
 // The mark a session's row leads with: its status's shape, with the agent's badge small on its corner (the Mac's

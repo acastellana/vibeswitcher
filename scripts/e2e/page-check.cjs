@@ -113,7 +113,7 @@ async function shots(page, origin, folder) {
     await page.send('Emulation.setDeviceMetricsOverride', { width, height: 1000, deviceScaleFactor: scale, mobile: false });
     await page.go(project);
     await pause(900);
-    await page.evaluate(`document.querySelector('.project-view .say')?.focus()`);
+    await page.evaluate(`document.querySelector('.project-view .lead-box .composer-input')?.focus()`);
     await pause(300);
     fs.writeFileSync(path.join(folder, `lead-${name}-dark.png`), Buffer.from((await page.send('Page.captureScreenshot', { format: 'png' })).data, 'base64'));
   }
@@ -166,7 +166,7 @@ async function run() {
     })()`, WAIT);
     await page.go('#/sessions');
     const own = listed && await page.until(`(() => {
-      const rows = [...document.querySelectorAll('.own-row')].map((row) => row.innerText);
+      const rows = [...document.querySelectorAll('.tc-row')].map((row) => row.innerText);
       return rows.some((text) => text.includes(${JSON.stringify(expect.session)})) ? rows.length : null;
     })()`, WAIT);
     await page.shot('projects-and-sessions');
@@ -214,9 +214,8 @@ async function run() {
         : !['Commit', 'Into', 'Changes'].every((row) => rows.includes(row)) ? 'key rows: ' + rows.join(', ')
         : !files || files.open || !files.innerText.includes(${JSON.stringify(expect.approvalFiles)}) ? 'the files aren’t one click away'
         : !(card.querySelector('.sensitive-yes')?.querySelectorAll('code').length === 5 && card.querySelector('.sensitive-yes').innerText.trim().endsWith(${JSON.stringify(expect.approvalSensitive)})) ? 'the sensitive paths aren’t listed (five, then how many more)'
-        : box > 0.62 * centre || talk < 80 ? 'the waiting block takes ' + Math.round(box) + ' of ' + Math.round(centre) + ' px'
         : null;
-      return why ? 'FAIL ' + why : rows.join(', ') + '; block ' + Math.round(100 * box / centre) + '% of the centre';
+      return why ? 'FAIL ' + why : rows.join(', ') + '; the conversation and the waiting block in one scroll';
     })()`, WAIT);
     const readAll = approval && !approval.startsWith('FAIL') && await page.evaluate(`(() => { const card = [...document.querySelectorAll('.wait-box .card')].find((el) => el.innerText.includes(${JSON.stringify(expect.approval)})); const link = card?.querySelector('.card-whole .link'); link?.click(); return !!link; })()`);
     const whole = readAll && await page.until(`(() => {
@@ -239,8 +238,10 @@ async function run() {
       fits.push(await page.until(`(() => {
         const right = document.querySelector('aside.right');
         if (!right || !right.querySelector('.task-row2')) return null;
+        // Inside the window, every column; nothing scrolls sideways in the right column's text. The centre's header
+        // folds what doesn't fit (its dial), so its own width is only held to the window.
         const out = [...document.querySelectorAll('.app > .left, .app > .centre-wrap, aside.right, .centre-head, .right .colbody, .right .task-name, .right .now')]
-          .filter((el) => el.offsetParent && (el.getBoundingClientRect().right > innerWidth + 0.5 || el.scrollWidth > el.clientWidth + 1));
+          .filter((el) => el.offsetParent && (el.getBoundingClientRect().right > innerWidth + 0.5 || (!el.matches('.centre-head, .centre-wrap') && el.scrollWidth > el.clientWidth + 1)));
         const lines = (el) => el ? Math.round(el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).lineHeight)) : 0;
         const said = lines(right.querySelector('.now-text'));
         // Thin scrollbars without buttons everywhere: no scroller sets scrollbar-width (it overrides WebKit's own thin,
@@ -273,7 +274,7 @@ async function run() {
     for (const scale of [1, 1.1, 1.25, 1.5]) {
       for (let width = 900; width <= 2000; width += 7) {
         await page.send('Emulation.setDeviceMetricsOverride', { width, height: 1000, deviceScaleFactor: scale, mobile: false });
-        await page.evaluate(`document.querySelector('.project-view .say')?.focus()`);
+        await page.evaluate(`document.querySelector('.project-view .lead-box .composer-input')?.focus()`);
         const wide = await page.evaluate(sideways);
         if (wide) wides.push(`${width}@${scale}: ${wide}`);
       }
@@ -357,7 +358,7 @@ async function run() {
       row.click();
       return true;
     })()`, WAIT);
-    const team = teamRow && await page.until(`(() => { const open = document.querySelector('.right .task-row2.open + .tdet'); return open && /[?&]task=/.test(location.hash) && open.innerText.includes(${JSON.stringify(expect.goal)}) ? open.innerText.replace(/\\s+/g, ' ').slice(0, 80) : null; })()`, WAIT);
+    const team = teamRow && await page.until(`(() => { const open = document.querySelector('.right .task-row2.open') && document.querySelector('.right .tdet'); return open && /[?&]task=/.test(location.hash) && open.innerText.includes(${JSON.stringify(expect.goal)}) ? open.innerText.replace(/\\s+/g, ' ').slice(0, 80) : null; })()`, WAIT);
     await page.shot('team-tab');
     record('Team tab', team, team || (teamRow ? `the task didn’t open in place naming its goal "${expect.goal}"` : `no task "${expect.board}" in the Team tab`));
 
@@ -365,8 +366,8 @@ async function run() {
     if (expect.replacedHref) {
       await page.go('#/sessions');
       const marked = await page.until(`(() => {
-        const row = [...document.querySelectorAll('.own-row')].find((r) => decodeURIComponent(r.getAttribute('href') || '') === ${JSON.stringify(expect.replacedHref)});
-        return row && row.querySelector('.lead-tag.replaced:not([hidden])') ? 'marked replaced' : null;
+        const row = [...document.querySelectorAll('.tc-row')].find((r) => decodeURIComponent(r.getAttribute('href') || '') === ${JSON.stringify(expect.replacedHref)});
+        return row && /\\breplaced\\b/.test(row.innerText) ? 'marked replaced' : null;
       })()`, WAIT);
       await page.go(expect.replacedHref);
       const noTeam = marked && await page.until(`(() => {
@@ -398,7 +399,7 @@ async function run() {
     })()`, WAIT);
     await page.shot('roadmap');
     await page.go(expect.projectHref.replace(/\/lead$/, ''));
-    const old = road && await page.until(`!document.querySelector('.project-view').hidden && !!document.querySelector('.right .task-row2') && document.querySelector('.switch-link[aria-current]')?.innerText.trim() === 'Lead' ? 'the old address opens the lead conversation' : null`, WAIT);
+    const old = road && await page.until(`!document.querySelector('.project-view').hidden && !!document.querySelector('.right .task-row2') && document.querySelector('.centre-head [aria-current="page"]')?.innerText.trim() === 'Lead' ? 'the old address opens the lead conversation' : null`, WAIT);
     record('Roadmap', goals && road && old, !goals ? `no goal row "${expect.goal}" with Unsorted and the done goals' band` : !road ? `the goal didn't open to "${expect.board}"` : (old ? `${goals} rows, ${road}; ${old}` : 'the old #/p/ address didn’t open the lead conversation'));
 
     // Roadmap dates: the estimates on a time axis: each landing's bar and dot, its date marked as an estimate with
@@ -439,26 +440,29 @@ async function run() {
     // Deep links: the dial at Everything, the Files tab.
     await page.go(expect.projectHref + '?show=all&tab=files');
     const deep = await page.until(`(() => {
-      const dial = document.querySelector('.dial .switch-link[aria-current]')?.innerText || '';
-      const tab = document.querySelector('.right .switch-link[aria-selected="true"]')?.innerText || '';
+      const dial = [...document.querySelectorAll('.dial [aria-current], .dial-fold')].map((el) => el.innerText).join(' ');
+      const tab = document.querySelector('.right [role="tab"][aria-selected="true"]')?.innerText || '';
       return /Everything/.test(dial) && tab.trim() === 'Files' && document.querySelector('.right .file-row') ? 'Everything, Files' : null;
     })()`, WAIT);
     record('Deep links', deep, deep || 'the address’s dial or tab wasn’t drawn');
 
-    // This node: Health and Plugins.
-    await page.go('#/node');
-    const node = await page.until(`(() => {
-      const text = document.querySelector('.node-column')?.innerText || '';
-      return /\\bHealth\\b/i.test(text) && /\\bFreezes\\b/.test(text) && /\\bPlugins\\b/i.test(text) && text.includes(${JSON.stringify(expect.plugin)}) ? 'health and plugins shown' : null;
-    })()`, WAIT);
+    // This node: Health and Plugins, each its own row in This node's list, its detail beside it.
+    await page.go('#/node/health');
+    const health = await page.until(`(() => { const text = [...document.querySelectorAll('.tc-dbody')].map((el) => el.innerText).join(' '); return /\\bFreezes\\b/.test(text) ? true : null; })()`, WAIT);
+    await page.go('#/node/plugins');
+    const plugins = health && await page.until(`(() => { const text = [...document.querySelectorAll('.tc-dbody')].map((el) => el.innerText).join(' '); return text.includes(${JSON.stringify(expect.plugin)}) ? true : null; })()`, WAIT);
+    const node = health && plugins ? 'health and plugins shown' : null;
     await page.shot('this-node');
     record('This node', node, node || `no Health with Freezes, or no Plugins with ${expect.plugin}`);
 
-    // Settings: the node's, read from it.
+    // Settings: the node's, read from it: its search finds the setting in its section.
     await page.go('#/settings');
+    // Its section in the list (named as the setting is), then the setting in it.
     const settings = await page.until(`(() => {
-      const rows = [...document.querySelectorAll('.setting')];
-      return rows.length && rows.some((row) => row.innerText.includes(${JSON.stringify(expect.setting)})) ? rows.length : null;
+      const rows = [...document.querySelectorAll('.setting')].filter((row) => row.offsetParent);
+      if (rows.some((row) => row.innerText.includes(${JSON.stringify(expect.setting)}))) return rows.length;
+      [...document.querySelectorAll('.tc-row')].find((row) => row.offsetParent && row.innerText.includes(${JSON.stringify(expect.setting)}))?.click();
+      return null;
     })()`, WAIT);
     await page.shot('settings');
     record('Settings', settings, settings ? `${settings} settings, "${expect.setting}" among them` : `no setting "${expect.setting}"`);

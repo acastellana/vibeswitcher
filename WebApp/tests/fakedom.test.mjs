@@ -1,10 +1,14 @@
 // A small stand-in DOM for drawing a view in Node's tests: elements and text nodes, their attributes, classes, data,
 // children and click handlers; enough for js/dom.js's `h` and the views that build with it. Not a browser: no layout,
-// no markup parsing (nothing here parses a string as HTML, as nothing in the page may). Not a test file itself
-// (scripts/test.sh runs *.test.mjs only).
+// no markup parsing (nothing here parses a string as HTML, as nothing in the page may). A Node test file itself, as
+// WebAppLintTests asks of everything in a tests' folder: its own tests, at the end, register only when it runs as its
+// own file, not in each test that imports the stand-in.
 //
 //   const dom = installDom();  …  dom.restore();
 //   find(el, (node) => node.tag === 'button' && node.textContent === 'Push').click();
+
+import { fileURLToPath } from 'node:url';
+import { realpathSync } from 'node:fs';
 
 class FakeClassList {
   constructor(node) { this.node = node; }
@@ -105,4 +109,68 @@ export function installDom() {
   globalThis.requestAnimationFrame = (fn) => { fn(); return 0; };
   globalThis.matchMedia = () => ({ matches: true, addEventListener() {} });
   return { restore() { for (const name of names) { if (before[name] === undefined) delete globalThis[name]; else globalThis[name] = before[name]; } } };
+}
+
+// The stand-in's own tests, run with this file alone (scripts/test.sh runs each *.test.mjs as its own process).
+const ownFile = (() => { try { return realpathSync(process.argv[1] || '') === realpathSync(fileURLToPath(import.meta.url)); } catch { return false; } })();
+if (ownFile) {
+  const { default: test } = await import('node:test');
+  const { default: assert } = await import('node:assert/strict');
+
+  test('the stand-in DOM: nodes, text, attributes, classes and hidden, as js/dom.js uses them', () => {
+    const dom = installDom();
+    const list = document.createElement('ul');
+    const first = document.createElement('li');
+    first.className = 'row';
+    first.classList.add('asked');
+    list.append(first, 'loose text', null);
+    assert.deepEqual(list.childNodes.map((node) => node.tagName), ['LI', '#text', '#text']);
+    assert.equal(list.textContent, 'loose textnull');
+    first.textContent = 'one';
+    assert.equal(list.textContent, 'oneloose textnull');
+    assert.equal(first.className, 'row asked');
+    first.classList.toggle('row');
+    assert.equal(first.classList.contains('row'), false);
+    first.hidden = true;
+    assert.equal(list.shownText, 'loose textnull', 'a hidden node is not read');
+    first.hidden = false;
+    list.replaceChildren(first);
+    assert.equal(list.children.length, 1);
+    const second = document.createElement('li');
+    list.insertBefore(second, first);
+    assert.equal(list.firstChild, second);
+    assert.equal(second.nextSibling, first);
+    second.remove();
+    assert.equal(list.contains(second), false);
+    dom.restore();
+  });
+
+  test('the stand-in DOM: handlers, clicks on what is not disabled, and the finders', () => {
+    const dom = installDom();
+    const box = document.createElement('div');
+    const send = document.createElement('button');
+    send.append('Send');
+    let clicks = 0;
+    send.addEventListener('click', () => { clicks += 1; });
+    box.append(send);
+    find(box, button('Send')).click();
+    send.setAttribute('disabled', '');
+    send.click();
+    assert.equal(clicks, 1, 'a disabled button takes no click');
+    send.classList.add('primary');
+    assert.equal(find(box, byClass('primary')), send);
+    assert.deepEqual(findAll(box, (node) => node.tag === '#text').map((node) => node.text), ['Send']);
+    dom.restore();
+  });
+
+  test('installDom puts back the globals it replaced', () => {
+    const before = globalThis.document;
+    const dom = installDom();
+    assert.notEqual(globalThis.document, before);
+    let ran = false;
+    requestAnimationFrame(() => { ran = true; });
+    assert.equal(ran, true, 'a frame runs at once');
+    dom.restore();
+    assert.equal(globalThis.document, before);
+  });
 }

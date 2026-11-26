@@ -73,6 +73,8 @@ export function railState(rail) {
   if (rail?.state) return { state: rail.state, before: rail.before ?? null };
   const said = String(rail?.sinceAccept || '');
   if (!said) return { state: null, before: null };
+  // A bare word (an older node's, or a test's): its state as said.
+  if (['same', 'changed', 'new'].includes(said)) return { state: said, before: null };
   if (/^the same as/.test(said)) return { state: 'same', before: null };
   if (/^changed since/.test(said)) return { state: 'changed', before: /from “([^”]*)”/.exec(said)?.[1] ?? null };
   if (/^not in your last accept/.test(said)) return { state: 'new', before: null };

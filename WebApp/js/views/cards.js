@@ -9,27 +9,52 @@
 // Keys, with the focus anywhere in a card: 1–9 answer with that option, ↑ ↓ move, ↩ answers with the focused one,
 // H holds the timer. ↑ from an empty message box steps into the last card.
 
+import * as kit from '../kit.js';
 import { h, setText, setClass } from '../dom.js';
 import { icon } from '../marks.js';
 import { since, until, clock } from '../words.js';
 import { pushLines } from '../push.js';
 import { talkButton } from '../dictate.js';
 import { pluginFacts } from '../plugincard.js';
-import { t } from '../i18n.js';
-import { actsFor, refusalWords, doButton, answerArgs, cardArgs } from '../acting.js';
+import { t, lang } from '../i18n.js';
+import { actsFor, refusalWords, doButton, answerArgs } from '../acting.js';
 import { questionHead, shortHashes, lineKey, contextOf } from '../conversation.js';
 import { routeHref } from '../ui.js';
+import { composer as messageBox } from './composer.js';
+
+// A card's answer box: the one message box (views/composer.js) with the card's own button: Enter answers, Shift+Enter
+// a new line, an input method's Enter never; what was typed kept across the card's redraws by its caller.
+function answerBox({ value, placeholder, button, onSend, onInput, maxLength = null }) {
+  const box = messageBox({ className: 'answer', field: 'answer-input', label: t('yourAnswer'), placeholder, maxLength, button, onSend, onInput, storage: null });
+  box.input.value = value;
+  box.grow();
+  const talk = talkButton(box.input);
+  if (talk) box.el.insertBefore(talk, button);
+  return box;
+}
 
 const PRIORITY = { blocking: t('cBlocking'), important: t('cImportant'), whenever: t('cWhenever') };
 
-// The options as buttons, the proposed one marked, and the keys that work across them.
-function optionList(options, { proposed = null, numbered = false, choose }) {
-  const buttons = options.map((option, index) => h('button', { class: 'option', type: 'button', onclick: () => choose(option) },
+// An option as its button says it. An approval's names its whole commit (the node checks the answer against it,
+// `LeadWorkflow.approval(of:)`): the button says what it approves in words with the commit's first 8 characters; the
+// whole option, which is what is sent, on hover, and the whole commit in the Commit row above. Anything else as it is.
+export function optionWords(card, option) {
+  const text = String(option ?? '');
+  if (card?.kind !== 'approval') return text;
+  const approve = /^Approve ([0-9a-f]{40}|[0-9a-f]{64})$/i.exec(text.trim());
+  if (approve) return t(card.approval?.base ? 'ccApproveInto' : 'ccApprove', { short: approve[1].slice(0, 8), base: card.approval?.base || '' });
+  return text.trim() === 'Not yet' ? t('ccNotYet') : text;
+}
+
+// The options as buttons, the proposed one marked, and the keys that work across them. `words`: what a button says
+// for its option (the option itself is what `choose` gets).
+function optionList(options, { proposed = null, numbered = false, choose, words = (option) => option }) {
+  const buttons = options.map((option, index) => h('button', { class: 'option', type: 'button', title: words(option) !== option ? option : null, onclick: () => choose(option) },
     numbered ? h('span', { class: 'option-key', 'aria-hidden': 'true' }, String(index + 1)) : null,
-    h('span', { class: 'option-text' }, option),
+    h('span', { class: 'option-text' }, words(option)),
     option === proposed ? h('span', { class: 'option-note' }, t('cProposed')) : null));
   buttons.forEach((button, index) => { if (options[index] === proposed) button.classList.add('proposed'); });
-  return { el: h('div', { class: 'options' }, buttons), buttons };
+  return { el: h('div', { class: 'options' }, buttons), buttons, values: options };
 }
 
 // The keys every card shares, attached once; `now()` gives the card's buttons and actions as it's drawn at the
@@ -37,7 +62,7 @@ function optionList(options, { proposed = null, numbered = false, choose }) {
 function cardKeys(el, now) {
   el.addEventListener('keydown', (event) => {
     if (event.metaKey || event.ctrlKey || event.altKey) return;
-    const { buttons, choose, hold } = now();
+    const { buttons, values = [], choose, hold } = now();
     const stops = [...el.querySelectorAll('.option, .answer-input')].filter((node) => !node.disabled);
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       const to = stops[stops.indexOf(document.activeElement) + (event.key === 'ArrowDown' ? 1 : -1)];
@@ -47,7 +72,7 @@ function cardKeys(el, now) {
     if (event.target.matches('input, textarea')) return;
     if (/^[1-9]$/.test(event.key) && buttons[Number(event.key) - 1]) {
       event.preventDefault();
-      choose(buttons[Number(event.key) - 1].querySelector('.option-text').textContent);
+      choose(values[Number(event.key) - 1] ?? buttons[Number(event.key) - 1].querySelector('.option-text').textContent);
     } else if ((event.key === 'h' || event.key === 'H') && hold) {
       event.preventDefault();
       hold();
@@ -93,7 +118,7 @@ function confirmBox(card, drafted, clear) {
   return h('div', { class: 'confirm' + (drafted.sending ? ' sending' : ''), role: 'group', 'aria-label': t('cConfirmLabel') },
     h('div', { class: 'confirm-head' },
       h('span', { class: 'confirm-label' }, drafted.sending ? t('cSaving') : t('yourAnswer')),
-      h('button', { class: 'confirm-clear', type: 'button', title: t('cTakeOff'), onclick: clear }, t('clear'))),
+      kit.button('quiet', { size: 's', title: t('cTakeOff'), onclick: clear }, t('clear'))),
     h('p', { class: 'confirm-text' }, drafted.text),
     copyLine(`vibeswitcher answer ${short}`, 'the command that sends it'),
     h('p', { class: 'confirm-note' }, t('cConfirmNote')));
@@ -216,7 +241,7 @@ export function questionCard(app, first, { expand = null } = {}) {
     if (sending) {
       el.classList.add('closed', 'sending');
       el.append(h('div', { class: 'card-closed', role: 'status' }, icon('send', 13), h('div', null,
-        h('p', null, t('cSending', { x: sending.text }), ' · ', h('button', { class: 'link card-undo', type: 'button', onclick: undo }, t('cUndo'))),
+        h('p', null, t('cSending', { x: optionWords(card, sending.text) }), ' · ', kit.button('quiet', { size: 's', class: 'card-undo', onclick: undo }, t('cUndo'))),
         h('p', { class: 'card-about' }, shortHashes(questionHead(question.text))))));
       keys = { buttons: [], hold: null };
       return;
@@ -227,7 +252,7 @@ export function questionCard(app, first, { expand = null } = {}) {
       const state = pendingAnswer ? 'answered' : question.state;
       if (state === 'withdrawn') el.append(closedLine(icon('close', 13), t('cWithdrawn'), question.withdrawReason || 'no reason given'));
       else if (state === 'autoDecided') el.append(closedLine(icon('check', 13), t('cWentAhead'), h('strong', null, question.answer), t('cNoAnswerIn')));
-      else el.append(closedLine(icon('check', 13), t('cYouAnswered'), h('strong', null, pendingAnswer || question.answer || '')));
+      else el.append(closedLine(icon('check', 13), t('cYouAnswered'), h('strong', null, optionWords(card, pendingAnswer || question.answer || ''))));
       if (card.notice) el.append(h('p', { class: 'card-notice' }, card.notice));
       keys = { buttons: [], hold: null };
       return;
@@ -270,7 +295,7 @@ export function questionCard(app, first, { expand = null } = {}) {
     if (counting) {
       el.append(h('div', { class: 'timer' },
         h('span', { class: 'timer-text' }, t('cGoingWith'), h('strong', null, question.proposal), ' ', h('span', { data: { until: question.decideBy } }, until(question.decideBy))),
-        app.store.can('hold') ? h('button', { class: 'button quiet', type: 'button', title: t('cHoldTitle'), onclick: hold }, icon('pause', 12), t('cHold')) : null));
+        app.store.can('hold') ? kit.button('plain', { title: t('cHoldTitle'), onclick: hold }, icon('pause', 12), t('cHold')) : null));
     } else if (held) {
       el.append(h('p', { class: 'timer held' }, t('cHeld'), h('strong', null, question.proposal), t('ccWaitsAnswer')));
     }
@@ -290,15 +315,15 @@ export function questionCard(app, first, { expand = null } = {}) {
       return;
     }
 
-    const list = optionList(question.options, { proposed: question.proposal, choose });
+    const list = optionList(question.options, { proposed: question.proposal, choose, words: (option) => optionWords(card, option) });
     el.append(list.el);
 
     const draft = input?.value || '';
-    input = h('input', { class: 'answer-input', type: 'text', placeholder: question.options.length ? t('cOwnWords') : t('yourAnswer'), 'aria-label': t('yourAnswer'), autocomplete: 'off' });
-    input.value = draft;
-    const send = h('button', { class: 'button', type: 'submit', disabled: !draft.trim() }, t('cAnswer'));
-    input.addEventListener('input', () => { send.disabled = !input.value.trim(); });
-    el.append(h('form', { class: 'answer', onsubmit: (event) => { event.preventDefault(); choose(input.value); } }, input, talkButton(input), send));
+    const send = kit.button('primary', { type: 'submit', disabled: !draft.trim(), title: t('cmAnswerTitle') }, t('cAnswer'));
+    const box = answerBox({ value: draft, placeholder: question.options.length ? t('cOwnWords') : t('yourAnswer'), button: send,
+      onSend: (way, text) => choose(text), onInput: () => { send.disabled = !input.value.trim(); } });
+    input = box.input;
+    el.append(box.el);
 
     if (acting.refused) el.append(h('p', { class: 'card-notice', role: 'alert' }, refusalWords({ code: acting.code, message: acting.refused })));
     else if (card.notice) el.append(h('p', { class: 'card-notice' }, card.notice));
@@ -308,7 +333,7 @@ export function questionCard(app, first, { expand = null } = {}) {
       : t('cKeepsWorking')));
     // The keys, as a tooltip on the options.
     list.el.title = t('cKeysAnswers', { n: Math.max(question.options.length, 1) }) + (counting ? t('cKeysHold') : '');
-    keys = { buttons: list.buttons, hold: counting ? hold : null };
+    keys = { buttons: list.buttons, values: list.values, hold: counting ? hold : null };
   }
 
   // A page that drafts (the node's): the options pick a draft, the box drafts its own words, and the draft shows
@@ -321,7 +346,7 @@ export function questionCard(app, first, { expand = null } = {}) {
     };
     // An option picked: the box's own words, if any, give way to it.
     const choose = (option) => { if (input) input.value = ''; pick(option); };
-    const list = optionList(question.options, { proposed: question.proposal, choose });
+    const list = optionList(question.options, { proposed: question.proposal, choose, words: (option) => optionWords(card, option) });
     list.buttons.forEach((button, index) => {
       const chosen = drafted?.text === question.options[index];
       button.setAttribute('aria-pressed', String(chosen));
@@ -331,15 +356,16 @@ export function questionCard(app, first, { expand = null } = {}) {
 
     const own = drafted && !question.options.includes(drafted.text) ? drafted.text : '';
     const typed = input?.value ?? '';
-    input = h('input', { class: 'answer-input', type: 'text', placeholder: question.options.length ? t('cOwnWords') : t('yourAnswer'), 'aria-label': t('yourAnswer'), autocomplete: 'off', maxlength: 4000 });
-    input.value = typed || own;
     // Acting is on for the node but not in this tab (it isn't paired): a pick isn't a draft for a terminal, it's a choice
     // this tab can't send; the banner at the top says how to make it act.
     const level = app.store.state.node?.web?.acts?.level ?? (app.store.state.node?.web?.acts?.on ? 'trust' : 'off');
     const notYet = level !== 'off';
-    const send = h('button', { class: 'button quiet', type: 'submit', disabled: !input.value.trim() || input.value.trim() === drafted?.text }, t(notYet ? 'cChoose' : 'cDraft'));
-    input.addEventListener('input', () => { send.disabled = !input.value.trim() || input.value.trim() === app.store.draftOf(card.id)?.text; });
-    el.append(h('form', { class: 'answer', onsubmit: (event) => { event.preventDefault(); pick(input.value); } }, input, talkButton(input), send));
+    const start = typed || own;
+    const send = kit.button('plain', { type: 'submit', disabled: !start.trim() || start.trim() === drafted?.text }, t(notYet ? 'cChoose' : 'cDraft'));
+    const box = answerBox({ value: start, placeholder: question.options.length ? t('cOwnWords') : t('yourAnswer'), button: send, maxLength: 4000,
+      onSend: (way, text) => pick(text), onInput: () => { send.disabled = !input.value.trim() || input.value.trim() === app.store.draftOf(card.id)?.text; } });
+    input = box.input;
+    el.append(box.el);
 
     const refused = app.store.state.draftRefused.get(card.id);
     if (refused) el.append(h('p', { class: 'card-notice', role: 'alert' }, refused));
@@ -354,7 +380,7 @@ export function questionCard(app, first, { expand = null } = {}) {
         counting ? h('p', { class: 'card-foot' }, t('cUntilConfirm', { x: question.proposal, time: clock(question.decideBy) })) : null));
     }
     list.el.title = question.options.length > 1 ? t('cKeysPicks', { n: question.options.length }) : t('cKeysMove');
-    keys = { buttons: list.buttons, hold: null };
+    keys = { buttons: list.buttons, values: list.values, hold: null };
   }
 
   // "Read it all": the side sheet with the question's whole text from its markdown (and an approval's facts whole).
@@ -363,7 +389,7 @@ export function questionCard(app, first, { expand = null } = {}) {
     const route = app.ui?.state?.route;
     const key = lineKey('card', app.store.cardKey(card.id));
     if (route?.name === 'project') return h('a', { class: 'link', href: routeHref(route, { sheet: key }) }, t('ccReadAll'));
-    return h('button', { class: 'link', type: 'button', onclick: () => app.sheet?.open(cardSheet(card)) }, t('ccReadAll'));
+    return kit.button('quiet', { size: 's', onclick: () => app.sheet?.open(cardSheet(card)) }, t('ccReadAll'));
   }
 
   // The card is built again only when what it shows changed, so typing into it survives every other delta.
@@ -401,12 +427,17 @@ export function cardSheet(card) {
   };
 }
 
-// The stack under a lead's chat: "2 questions for you", then the cards, open ones first.
 // The push the lead asks for, while it's open: what goes where, from git and the vault, and the two lines that settle
-// it in a terminal. Nothing on the page pushes.
-export function pushCard(lead, app = null) {
+// it in a terminal. Nothing on the page pushes unless the node lets it act (`push`): then Push and Decline are buttons,
+// `onPush`/`onDecline` (the waiting block's, which waits a few seconds first); `said` is the node's refusal, kept on
+// the card; `settle: false` draws it with no buttons (its request is gone).
+export function pushCard(lead, app = null, { onPush = null, onDecline = null, said: refusal = null, notice = null, settle = true } = {}) {
   const said = pushLines(lead.push, lead.root);
   const fact = (name, ...value) => [h('dt', null, name), h('dd', null, value)];
+  const acts = app && actsFor(app, 'push');
+  const button = (label, kind, go, plain) => (go
+    ? kit.button(plain ? 'plain' : 'primary', { onclick: go }, label)
+    : doButton(app, { label, kind, plain, args: () => ({ folder: lead.root, request: lead.push.id }) }).el);
   return h('article', { class: 'card push-card', 'aria-label': t('cPushAsk') },
     h('header', { class: 'card-head' }, h('span', { class: 'priority important' }, t('cPush')), h('span', { class: 'card-asker' }, t('askerLead')),
       h('time', { class: 'asked', data: { ago: lead.push.askedAt } }, t('askedAgo', { d: since(lead.push.askedAt) }))),
@@ -418,14 +449,192 @@ export function pushCard(lead, app = null) {
         fact(t('cTo'), h('code', null, said.url)),
         fact(t('cCommits'), h('ul', { class: 'files' }, said.subjects.map((subject) => h('li', null, h('code', null, subject))),
           said.more ? h('li', null, t('cAndMore', { n: said.more })) : null)))),
-    app && actsFor(app, 'push') ? h('div', { class: 'card-acts' },
-      doButton(app, { label: t('acPush'), kind: 'push', args: () => ({ folder: lead.root, request: lead.push.id }) }).el,
-      actsFor(app, 'push.decline') ? doButton(app, { label: t('acDecline'), kind: 'push.decline', quiet: true, args: () => ({ folder: lead.root, request: lead.push.id }) }).el : null)
+    notice ? h('p', { class: 'card-notice' }, notice) : null,
+    refusal ? h('p', { class: 'card-notice push-refused', role: 'alert' }, refusal) : null,
+    !settle ? null : acts ? h('div', { class: 'card-acts' },
+      button(t('acPush'), 'push', onPush, false),
+      actsFor(app, 'push.decline') ? button(t('acDecline'), 'push.decline', onDecline, true) : null)
       : h('div', { class: 'card-command' },
         h('span', { class: 'card-command-label' }, t('cSettle')),
         copyLine(said.push, 'the command that pushes it'),
         copyLine(said.decline, 'the command that declines it')),
-    h('p', { class: 'card-foot' }, app && actsFor(app, 'push') ? t('acPushNote') : t('cPushNote')));
+    settle ? h('p', { class: 'card-foot' }, acts ? t('acPushNote') : t('cPushNote')) : null);
+}
+
+// The lead's push in the waiting block, settled the way a Blocking answer is: Push (or Decline) shows "Pushing <short>
+// to <target>… · Undo" for UNDO_MS, then sends the same request as ever, the request's id, sha and target taken at the
+// click (dropped, nothing sent, if the lead's request changes while it waits). What came of it: a receipt for the
+// conversation (`receipts()`, this page's), or the node's refusal on the card with the buttons back. `onChange`: drawn
+// again by itself (the wait ran out, the node replied), so whoever holds it may draw too.
+export function pushBlock(app, { onChange = () => {} } = {}) {
+  const el = h('div', { class: 'stack-cards push-slot' });
+  const later = app.later || ((fn, ms) => { const timer = setTimeout(fn, ms); return () => clearTimeout(timer); });
+  let lead = null;
+  let shape = null;
+  // Waiting to go ({ kind, request, root, short, target, cancel }); out (sent, no reply yet); the node's refusal
+  // ({ request, words, lead as it was drawn }); the request ids settled here (not drawn again before the node's delta).
+  let waiting = null;
+  let out = null;
+  let refused = null;
+  let changed = false;
+  const settled = new Set();
+  const receipts = [];
+
+  const live = () => (lead?.push && lead.root && !settled.has(lead.push.id) ? lead : null);
+  const start = (kind) => {
+    const now = live();
+    if (waiting || out || !now) return;
+    waiting = { kind, request: now.push.id, root: now.root, short: now.push.short || String(now.push.commit || '').slice(0, 8), target: now.push.target, drawn: now,
+      cancel: later(go, UNDO_MS) };
+    refused = null;
+    changed = false;
+    draw();
+  };
+  const undo = () => { waiting?.cancel(); waiting = null; draw(); el.querySelector?.('.push-card .button')?.focus?.(); };
+  function go() {
+    const going = waiting;
+    if (!going) return;
+    waiting = null;
+    out = going;
+    draw();
+    onChange();
+    app.store.request(going.kind, { folder: going.root, request: going.request }).then((reply) => {
+      out = null;
+      const result = reply.ok ? reply.result || {} : null;
+      // The node's `ok: false` (git refused, nothing pushed) is a refusal too, in its words.
+      if (reply.ok && result.ok !== false) {
+        settled.add(going.request);
+        receipts.push({ id: going.request, at: new Date().toISOString(), outcome: going.kind === 'push' ? (result.settled === 'upToDate' ? 'upToDate' : 'pushed') : 'declined',
+          short: going.short, target: result.target || going.target });
+      } else {
+        refused = { request: going.request, words: reply.ok ? (result.said || t('acRefused')) : refusalWords(reply.error, t(going.kind === 'push' ? 'acPush' : 'acDecline')), lead: going.drawn };
+      }
+      draw();
+      onChange();
+    });
+  }
+
+  function draw() {
+    const now = live();
+    // The request changed (a newer one, or settled elsewhere) while one waited to go: it doesn't go.
+    if (waiting && (now?.push.id !== waiting.request || now?.root !== waiting.root)) { waiting.cancel(); waiting = null; changed = !!now; }
+    if (refused && now && now.push.id !== refused.request) refused = null;
+    const next = JSON.stringify([now?.push || null, now?.root || null, waiting && [waiting.kind, waiting.request], out && [out.kind, out.request], refused, changed, app.store.acts(), lang()]);
+    if (next === shape) return;
+    shape = next;
+    const going = waiting || out;
+    if (going) {
+      const words = t(going.kind === 'push' ? 'puPushing' : 'puDeclining', { short: going.short, target: going.target });
+      el.replaceChildren(h('article', { class: 'card push-card closed sending', 'aria-label': t('cPushAsk') }, h('div', { class: 'card-closed', role: 'status' }, icon('send', 13), h('div', null,
+        h('p', null, words, waiting ? [' · ', kit.button('quiet', { size: 's', class: 'card-undo', onclick: undo }, t('cUndo'))] : null),
+        h('p', { class: 'card-about' }, t('cPushAsk'))))));
+      return;
+    }
+    const shown = now || refused?.lead || null;
+    el.replaceChildren(...(shown ? [pushCard(shown, app, { onPush: () => start('push'), onDecline: () => start('push.decline'), said: refused?.words || null,
+      notice: changed ? t('puChanged') : null, settle: !!now })] : []));
+  }
+
+  return {
+    el,
+    update(next) { lead = next; draw(); return !!el.firstChild; },
+    shown: () => !!el.firstChild,
+    receipts: () => receipts.slice(),
+  };
+}
+
+// How a card's priority ranks in the waiting block: Blocking first, then Important, then Whenever.
+const RANK = { blocking: 0, important: 1, whenever: 2 };
+export const rankOf = (card) => RANK[card.question?.priority] ?? (card.blocking ? 0 : 1);
+
+// How long an answered card stays in the waiting block, saying it was answered: the conversation is the record.
+export const ANSWERED_SHOWN = 4000;
+
+// The waiting block's cards: Blocking first (oldest first), then Important, then Whenever, then the lead's push. Every
+// Blocking card is shown whole; with several open, the others fold to their question line (one the user opens shows
+// whole), and with none Blocking the first shows whole. `others()`: the project's other cards, drawn by the caller
+// ({ key, at, priority, el }: held config, a base move, a plugin's request), placed among them by their priority.
+// `onChange`: an answered card left (its few seconds over), or the push changed by itself, so whoever holds the stack
+// may draw again.
+export function questionStack(app, project, { onChange = () => {}, now = () => Date.now(), others = () => [] } = {}) {
+  const count = h('h2', { class: 'stack-title' });
+  const order = h('span', { class: 'stack-note' }, t('anyOrder'));
+  const list = h('div', { class: 'stack-cards' });
+  const push = pushBlock(app, { onChange });
+  const el = h('section', { class: 'stack', 'aria-label': t('cQuestionsForYou') }, h('header', { class: 'stack-head' }, count, order), list, push.el);
+  const rows = new Map();
+  // Each card's place: keyed by its first id and ordered by when that card was first asked, so a question the node
+  // posts again after a restart (a new card id, the same question) keeps its row, its place and what was typed in it.
+  const keyOf = (card) => app.store.cardKey(card.id);
+  const firstAt = new Map();
+  // The one the user opened, shown whole among folded ones.
+  let chosen = null;
+  const expand = (card) => { chosen = keyOf(card); update(); };
+  // When each card closed here (answered, decided, withdrawn): shown that long, then gone. One already closed when
+  // first seen is never shown.
+  const closedAt = new Map();
+  let leaving = null;
+  let shownOthers = [];
+
+  function update() {
+    const cards = [...app.store.state.cards.values()].filter((card) => card.project === project && (card.kind === 'question' || card.kind === 'approval'));
+    for (const card of cards) if (!firstAt.has(keyOf(card))) firstAt.set(keyOf(card), Date.parse(card.at));
+    const isOpen = (card) => card.open && app.store.state.acting.get(card.id)?.kind !== 'answer';
+    const open = cards.filter(isOpen);
+    const at = now();
+    for (const card of cards) {
+      const key = keyOf(card);
+      if (isOpen(card)) closedAt.delete(key);
+      else if (!closedAt.has(key)) closedAt.set(key, rows.has(key) ? at : 0);
+    }
+    const stays = (card) => isOpen(card) || at - (closedAt.get(keyOf(card)) || 0) < ANSWERED_SHOWN;
+    cards.splice(0, cards.length, ...cards.filter(stays));
+    // The next answered card to leave: drawn again then, and the holder told.
+    const soonest = Math.min(...cards.filter((card) => !isOpen(card)).map((card) => closedAt.get(keyOf(card)) + ANSWERED_SHOWN));
+    clearTimeout(leaving);
+    if (Number.isFinite(soonest)) leaving = setTimeout(() => { update(); onChange(); }, Math.max(0, soonest - at) + 20);
+    // Open before answered; then by priority; then oldest first. The caller's other cards (always open) among them.
+    const extra = others();
+    const items = [...cards.map((card) => ({ card, open: isOpen(card), rank: rankOf(card), at: firstAt.get(keyOf(card)) })),
+      ...extra.map((other) => ({ other, open: true, rank: RANK[other.priority] ?? 1, at: Date.parse(other.at) || 0 }))];
+    items.sort((a, b) => (b.open - a.open) || (a.rank - b.rank) || (a.at - b.at));
+    const pushShown = push.update(app.store.state.leads.get(project) || null);
+    el.hidden = items.length === 0 && !pushShown;
+    const asking = open.length + extra.length;
+    setText(count, asking ? t('questionsForYou', { n: asking }) + (pushShown ? t('andAPush') : '') : pushShown ? t('pushWaits') : t('cNoQuestions'));
+    setClass(count, 'blocking', open.some((card) => card.blocking));
+    order.hidden = asking < 2;
+    const before = rows.size;
+    const whole = open.some((card) => keyOf(card) === chosen) ? chosen : null;
+    const firstWhole = open.some((card) => rankOf(card) === 0) ? null : items.find((item) => item.card && item.open)?.card;
+    // Built by hand rather than with `keyed`'s slide: a card that closes shrinks in place.
+    const next = new Map();
+    let cursor = list.firstChild;
+    for (const item of items) {
+      let node;
+      if (item.other) node = item.other.el;
+      else {
+        const card = item.card;
+        let row = rows.get(keyOf(card));
+        const fresh = !row;
+        const fold = item.open && open.length > 1 && item.rank !== 0 && keyOf(card) !== whole && card !== firstWhole;
+        if (fresh) row = questionCard(app, card, { expand });
+        row.update(card, fold);
+        next.set(keyOf(card), row);
+        if (fresh && before > 0) row.el.classList.add('enter');
+        node = row.el;
+      }
+      if (node === cursor) cursor = cursor.nextSibling; else list.insertBefore(node, cursor);
+    }
+    for (const [id, row] of rows) if (!next.has(id)) row.el.remove();
+    for (const node of shownOthers) if (!extra.some((other) => other.el === node)) node.remove();
+    shownOthers = extra.map((other) => other.el);
+    rows.clear();
+    for (const [id, row] of next) rows.set(id, row);
+    return asking + (pushShown ? 1 : 0);
+  }
+
+  return { el, update, receipts: push.receipts, focusLast() { const cards = el.querySelectorAll('.card:not(.closed)'); cards[cards.length - 1]?.querySelector('.option, .answer-input')?.focus(); } };
 }
 
 // A feature plugin's card (js/plugincard.js): who asks, the node's facts, what it asks whole, the agent's own words,
@@ -447,88 +656,11 @@ export function pluginCard(card, app = null) {
     // The agent's own words beside it, never among the node's facts.
     f.context ? h('p', { class: 'card-context' }, h('span', { class: 'card-context-label' }, `${f.context.label}: `), f.context.text) : null,
     wait && acting ? h('div', { class: 'card-acts' }, f.actions.map((action) => doButton(app, { label: action.label || action.word, kind: 'answer',
-      args: () => answerArgs(card, action.word), quiet: action.word !== f.actions[0]?.word }).el))
+      args: () => answerArgs(card, action.word), plain: action.word !== f.actions[0]?.word }).el))
       : wait ? h('div', { class: 'card-command' }, h('span', { class: 'card-command-label' }, t('settleInTerminal')),
         f.actions.map((action) => copyLine(action.line, action.says)))
       : h('p', { class: 'card-notice' }, f.outcome || f.state),
     card.notice ? h('p', { class: 'card-notice' }, card.notice) : null);
-}
-
-// How long an answered card stays in the waiting block, saying it was answered: the conversation is the record.
-export const ANSWERED_SHOWN = 4000;
-
-// `onChange`: an answered card left (its few seconds over), so whoever holds the stack may draw again.
-export function questionStack(app, project, { onChange = () => {}, now = () => Date.now() } = {}) {
-  const count = h('h2', { class: 'stack-title' });
-  const order = h('span', { class: 'stack-note' }, t('anyOrder'));
-  const pushSlot = h('div', { class: 'stack-cards' });
-  const list = h('div', { class: 'stack-cards' });
-  const el = h('section', { class: 'stack', 'aria-label': t('cQuestionsForYou') }, h('header', { class: 'stack-head' }, count, order), pushSlot, list);
-  let shownPush = null;
-  const rows = new Map();
-  // Each card's place: keyed by its first id and ordered by when that card was first asked, so a question the node
-  // posts again after a restart (a new card id, the same question) keeps its row, its place and what was typed in it.
-  const keyOf = (card) => app.store.cardKey(card.id);
-  const firstAt = new Map();
-  // With several open, one shows whole (the first, or the one the user opened) and the others their question line.
-  let chosen = null;
-  const expand = (card) => { chosen = keyOf(card); update(); };
-  // When each card closed here (answered, decided, withdrawn): shown that long, then gone. One already closed when
-  // first seen is never shown.
-  const closedAt = new Map();
-  let leaving = null;
-
-  function update() {
-    const cards = [...app.store.state.cards.values()].filter((card) => card.project === project && (card.kind === 'question' || card.kind === 'approval'));
-    for (const card of cards) if (!firstAt.has(keyOf(card))) firstAt.set(keyOf(card), Date.parse(card.at));
-    const isOpen = (card) => card.open && app.store.state.acting.get(card.id)?.kind !== 'answer';
-    const open = cards.filter(isOpen);
-    const at = now();
-    for (const card of cards) {
-      const key = keyOf(card);
-      if (isOpen(card)) closedAt.delete(key);
-      else if (!closedAt.has(key)) closedAt.set(key, rows.has(key) ? at : 0);
-    }
-    const stays = (card) => isOpen(card) || at - (closedAt.get(keyOf(card)) || 0) < ANSWERED_SHOWN;
-    cards.splice(0, cards.length, ...cards.filter(stays));
-    // The next answered card to leave: drawn again then, and the holder told.
-    const soonest = Math.min(...cards.filter((card) => !isOpen(card)).map((card) => closedAt.get(keyOf(card)) + ANSWERED_SHOWN));
-    clearTimeout(leaving);
-    if (Number.isFinite(soonest)) leaving = setTimeout(() => { update(); onChange(); }, Math.max(0, soonest - at) + 20);
-    cards.sort((a, b) => (isOpen(b) - isOpen(a)) || (firstAt.get(keyOf(a)) - firstAt.get(keyOf(b))));
-    const lead = app.store.state.leads.get(project);
-    const push = lead?.push && lead.root ? lead : null;
-    // Drawn again only when the request changed: a newer one replaces it, a settled one leaves.
-    const pushKey = push ? `${push.push.id}:${push.root}:${app.store.acts()}` : null;
-    if (pushKey !== shownPush) {
-      shownPush = pushKey;
-      pushSlot.replaceChildren(...(push ? [pushCard(push, app)] : []));
-    }
-    el.hidden = cards.length === 0 && !push;
-    setText(count, open.length ? t('questionsForYou', { n: open.length }) + (push ? t('andAPush') : '') : push ? t('pushWaits') : t('cNoQuestions'));
-    setClass(count, 'blocking', open.some((card) => card.blocking));
-    order.hidden = open.length < 2;
-    const before = rows.size;
-    const whole = open.some((card) => keyOf(card) === chosen) ? chosen : open[0] ? keyOf(open[0]) : null;
-    // Built by hand rather than with `keyed`'s slide: a card that closes shrinks in place.
-    const next = new Map();
-    let cursor = list.firstChild;
-    for (const card of cards) {
-      let row = rows.get(keyOf(card));
-      const fresh = !row;
-      const fold = isOpen(card) && open.length > 1 && keyOf(card) !== whole;
-      if (fresh) { row = questionCard(app, card, { expand }); row.update(card, fold); } else row.update(card, fold);
-      next.set(keyOf(card), row);
-      if (row.el === cursor) cursor = cursor.nextSibling; else list.insertBefore(row.el, cursor);
-      if (fresh && before > 0) row.el.classList.add('enter');
-    }
-    for (const [id, row] of rows) if (!next.has(id)) row.el.remove();
-    rows.clear();
-    for (const [id, row] of next) rows.set(id, row);
-    return open.length + (push ? 1 : 0);
-  }
-
-  return { el, update, focusLast() { const cards = el.querySelectorAll('.card:not(.closed)'); cards[cards.length - 1]?.querySelector('.option, .answer-input')?.focus(); } };
 }
 
 // An agent's own question on its screen (a permission prompt, a plan to approve), as a row of its chat: the Mac's
@@ -559,6 +691,6 @@ export function askCard(app, session, item, local, asked, redraw) {
     list.el);
   if (local?.refused) el.append(h('p', { class: 'card-notice', role: 'alert' }, local.refused));
   list.el.title = t('cKeysAnswers', { n: item.options.length });
-  cardKeys(el, () => ({ buttons: list.buttons, choose, hold: null }));
+  cardKeys(el, () => ({ buttons: list.buttons, values: list.values, choose, hold: null }));
   return el;
 }

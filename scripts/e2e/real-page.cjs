@@ -55,9 +55,9 @@ async function run() {
     await page.send('Page.navigate', { url });
     const connected = await page.until(`!!document.querySelector('.left') && !document.querySelector('.offline:not([hidden]):not(.confirm-pairing)') && !!sessionStorage.getItem('vibeswitcher.token')`, 20000);
     await page.shot('a3-start');
-    const projects = connected ? await page.evaluate(`[...document.querySelectorAll('.left .project')].map((a) => a.getAttribute('href'))`) : [];
+    const projects = connected ? await page.evaluate(`[...document.querySelectorAll('.left a.project[href]')].map((a) => a.getAttribute('href'))`) : [];
     await page.go('#/sessions');
-    const sessions = connected ? await page.evaluate(`[...document.querySelectorAll('.own-row')].map((a) => a.getAttribute('href'))`) : [];
+    const sessions = connected ? await page.evaluate(`[...document.querySelectorAll('.tc-row[href^="#/s/"]')].map((a) => a.getAttribute('href'))`) : [];
     record('A3 pair', connected ? 'pass' : 'fail', connected ? `paired, ${projects.length} projects and ${sessions.length} of your own sessions listed` : 'no token or still offline after 20 s');
     if (!connected) return;
 
@@ -140,7 +140,7 @@ async function run() {
     // A3 settings; this node with its health; statistics; between leads.
     const views = [
       ['A3 settings', '#/settings', `document.querySelectorAll('.setting').length`],
-      ['Health', '#/node', `(() => { const t = document.querySelector('main, .node-column')?.innerText || ''; return /\\bHEALTH\\b/i.test(t) && /\\bFreezes\\b/.test(t) ? 'shown' : null; })()`],
+      ['Health', '#/node/health', `(() => { const t = [...document.querySelectorAll('.tc-dbody')].map((el) => el.innerText).join(' '); return /\\bFreezes\\b/.test(t) ? 'shown' : null; })()`],
       ['Stats', '#/stats', `(() => { const c = document.querySelector('.stats-column'); return c && c.innerText.trim().length > 20 ? c.innerText.trim().split('\\n')[0].slice(0, 60) : null; })()`],
       ['Mail', '#/mail', `(() => { const t = document.querySelector('main')?.innerText || document.body.innerText; return /between leads/i.test(t) ? 'shown' : null; })()`],
     ];

@@ -5,6 +5,7 @@
 // browser sends your voice to its own speech service to recognise it (Chrome: Google's), which the page can't change.
 // Where the browser has no speech recognition (Firefox) the button isn't there, and This node says so.
 
+import * as kit from './kit.js';
 import { h } from './dom.js';
 import { icon } from './marks.js';
 import { t } from './i18n.js';
@@ -58,7 +59,7 @@ export function talkButton(input, env = {}) {
   const storage = 'storage' in env ? env.storage : globalThis.localStorage;
   const target = env.window || globalThis;
   let listening = null;
-  const button = h('button', { class: 'icon-button talk-button', type: 'button', title: t('diHoldToDictateIntoThis'),
+  const button = kit.iconButton({ class: 'talk-button', title: t('diHoldToDictateIntoThis'),
     'aria-label': t('diHoldToDictate'), 'aria-pressed': 'false' }, icon('mic', 15));
   const show = () => { button.hidden = !dictationOn(storage); };
   show();
@@ -107,9 +108,9 @@ export function talkButton(input, env = {}) {
 export function dictationGroup(env = {}) {
   const storage = 'storage' in env ? env.storage : globalThis.localStorage;
   const supported = Boolean(recognizer(env.window || globalThis));
-  const box = h('input', { type: 'checkbox', class: 'dictation-toggle', disabled: !supported, onchange: () => setDictation(box.checked, storage, env.window || globalThis) });
+  const box = kit.toggle({ class: 'dictation-toggle', disabled: !supported, onchange: () => setDictation(box.checked, storage, env.window || globalThis) });
   box.checked = supported && dictationOn(storage);
-  return h('section', { class: 'node-group dictation' }, h('h2', { class: 'section-title' }, t('diDictation')),
+  return h('section', { class: 'node-group dictation' }, kit.sectionTitle('h2', {}, t('diDictation')),
     h('label', { class: 'notify-line' }, box, t('diHoldTheMicBesideA')),
     h('p', { class: 'node-says' }, supported
       ? t('diYourBrowserTurnsYourVoice')

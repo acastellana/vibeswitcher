@@ -21,10 +21,12 @@
 //   chat's end, with what came since; worked out when the chat opens, kept until another opens. What you saw is this
 //   browser's (`SEEN`), by session.
 
+import * as kit from '../kit.js';
 import { h, keyed, setText, setClass, framed } from '../dom.js';
 import { agentMark, statusMark, setMark, icon } from '../marks.js';
 import { since, short, clock, plural, tilde, stateOf, AGENTS, STATES, KEY } from '../words.js';
-import { markdown, diffView, codeBlock } from '../text.js';
+import { markdownNodes, diffView, codeBlock } from '../text.js';
+import { copyButton } from '../copying.js';
 import { runnable } from '../runnable.js';
 import { summaryOf, newSince, sinceSummary, chatMarkdown, exportName, findIn, fold, openingPlace } from '../chatops.js';
 import { imageLoader } from '../images.js';
@@ -38,7 +40,13 @@ import { talkButton } from '../dictate.js';
 import { pluginCardsOf, pluginsOn } from '../plugincard.js';
 import { pluginCard } from './cards.js';
 import { t } from '../i18n.js';
+import { actsFor, doButton, refusalWords } from '../acting.js';
+import { sendArgs, sentWords, waysFor } from '../sendways.js';
+import { composer, keepFor } from './composer.js';
 
+// How long a session's question waits for the chat's rows before it shows anyway (D14: drawn under rows still coming,
+// it would jump down as they arrive; a chat the node doesn't serve never comes).
+const HOLD_MS = 1500;
 // How close to the end counts as being at the end.
 const NEAR = 48;
 // How far beyond what you see rows are drawn, in viewports, above and below.
@@ -71,13 +79,13 @@ const keyOf = (item) => (item.action ? 'pending:' + item.action : item.id);
 const seconds = (tool) => (tool.result?.at && tool.at ? Math.max(0, (Date.parse(tool.result.at) - Date.parse(tool.at)) / 1000) : 0);
 const TOOL_ICON = { command: 'terminal', edit: 'pencil', write: 'pencil', read: 'file', thought: 'note', todos: 'check', plan: 'note' };
 
-// A tool's output: the first lines, and a button for the rest.
+// A tool's output: the first lines, and a button for the rest; Copy takes all of it, shown or not.
 function outputView(output, failed, truncated) {
   const lines = output.split('\n');
   const pre = h('pre', { class: failed ? 'output failed' : 'output', tabindex: 0 }, lines.length > 14 ? lines.slice(0, 12).join('\n') : output);
-  const parts = [pre];
+  const parts = [h('div', { class: 'output-box' }, h('div', { class: 'block-actions' }, copyButton(() => output, t('txCopyOutput'))), pre)];
   if (lines.length > 14) {
-    const more = h('button', { class: 'link', type: 'button', onclick: () => { pre.textContent = output; more.remove(); } }, t('chShowAll', { n: lines.length }));
+    const more = kit.button('quiet', { size: 's', onclick: () => { pre.textContent = output; more.remove(); } }, t('chShowAll', { n: lines.length }));
     parts.push(more);
   }
   if (truncated) parts.push(h('div', { class: 'path' }, t('chTheOutputWasCutShort')));
@@ -108,8 +116,9 @@ function imageView(view, image) {
         button.setAttribute('aria-expanded', String(wide));
         view.redraw();
       } }, picture);
-    picture.addEventListener('load', () => view.redraw(), { once: true });
-    holder.replaceChildren(button);
+    // Placed only once it has loaded, and the chat drawn again in the same task: a picture laid out at its size before
+    // that would move what is under it for a frame (D14). Its words stand in meanwhile, and stay if it can't be read.
+    picture.addEventListener('load', () => { holder.replaceChildren(button); view.settle(); }, { once: true });
   };
   const known = view.images.known(view.session, image);
   if (known) show(known);
@@ -122,7 +131,7 @@ function rowActions(...buttons) {
   return h('div', { class: 'row-actions' }, buttons);
 }
 function rowButton(label, glyph, onclick) {
-  return h('button', { class: 'icon-button row-action', type: 'button', title: label, 'aria-label': label, onclick }, icon(glyph, 12));
+  return kit.iconButton({ size: 's', class: 'row-action', title: label, 'aria-label': label, onclick }, icon(glyph, 12));
 }
 
 // A shell code block's Run (the app's `RunButton`): the command as the message that runs it in the agent's shell
@@ -139,7 +148,9 @@ function runButton(view, code, language) {
 function toolView(tool, home, view) {
   const took = seconds(tool);
   const detail = tool.detail || {};
-  const head = h('div', { class: 'tool-head' }, icon(TOOL_ICON[detail.type] || 'tool', 13), h('span', { class: 'tool-title' }, tool.title),
+  // A command's or a file's title is code; a thought's, a plan's or a to-do list's is words (D27).
+  const words = !['command', 'edit', 'write', 'read', 'patch'].includes(detail.type);
+  const head = h('div', { class: 'tool-head' }, icon(TOOL_ICON[detail.type] || 'tool', 13), h('span', { class: words ? 'tool-title words' : 'tool-title' }, tool.title),
     took >= 1 ? h('span', { class: 'tool-time' }, short(took)) : null,
     tool.result ? null : h('span', { class: 'running', role: 'status', 'aria-label': t('chRunning') }));
   const body = [];
@@ -156,13 +167,13 @@ function toolView(tool, home, view) {
   } else if (detail.type === 'command' && detail.command !== tool.title) {
     body.push(codeBlock(detail.command));
   } else if (detail.type === 'thought' || detail.type === 'plan') {
-    body.push(h('div', { class: 'prose quiet' }, markdown(detail.text || '')));
+    body.push(h('div', { class: 'prose quiet' }, markdownNodes(detail.text || '', { links: true })));
   } else if (detail.type === 'todos') {
     body.push(h('ul', { class: 'todos' }, (detail.todos || []).map((todo) => h('li', { class: 'todo ' + todo.status }, todo.text))));
   } else if (detail.type === 'patch') {
     body.push(codeBlock(detail.text || ''));
   } else if (detail.type === 'agent') {
-    body.push(h('div', { class: 'prose quiet' }, markdown(detail.prompt || '')));
+    body.push(h('div', { class: 'prose quiet' }, markdownNodes(detail.prompt || '', { links: true })));
   } else if (detail.type === 'questions') {
     for (const question of detail.questions || []) body.push(h('div', { class: 'prose quiet' }, question.question, h('ul', null, (question.options || []).map((option) => h('li', null, option)))));
   } else if (detail.type === 'fields') {
@@ -185,7 +196,9 @@ function patchChildren(el, next) {
 
 function makeRow(view, first) {
   if (first.type === 'prompt') {
-    const text = h('div', { class: 'bubble' });
+    // Your words as you typed them (their lines kept), with the same marks a reply has.
+    const text = h('div', { class: 'bubble prose' });
+    let drawnText = null;
     const images = h('div', { class: 'row-images' });
     const note = h('div', { class: 'row-note' });
     let row = first;
@@ -206,7 +219,10 @@ function makeRow(view, first) {
       el,
       update(item) {
         row = item;
-        setText(text, item.text);
+        if (item.text !== drawnText) {
+          drawnText = item.text;
+          text.replaceChildren(...markdownNodes(item.text || '', { links: true, breaks: true }));
+        }
         text.hidden = !item.text;
         actions.hidden = !item.text || !!item.pending;
         look();
@@ -224,27 +240,37 @@ function makeRow(view, first) {
   }
   if (first.type === 'reply') {
     const body = h('div', { class: 'prose' });
+    // When it was said, quiet: on hover with a pointer, beside it on a touch screen; the whole date as its title (D23).
+    const time = h('time', { class: 'row-note reply-time' });
     let shown = null;
+    let wasStreaming = null;
     const actions = rowActions(rowButton(t('chCopyAsMarkdown'), 'copy', (event) => view.copy(shown || '', event.currentTarget)));
-    const el = h('div', { class: 'chat-row reply' }, actions, agentMark(view.agent(), 18), body);
+    const el = h('div', { class: 'chat-row reply' }, actions, agentMark(view.agent(), 18), h('div', { class: 'reply-body' }, body, time));
     return {
       el,
       update(item) {
         setClass(el, 'streaming', !!item.streaming);
-        if (item.text === shown) return;
+        setText(time, item.streaming ? '' : clock(item.at));
+        if (item.at) time.setAttribute('datetime', item.at);
+        time.title = item.at && !item.streaming ? new Date(item.at).toLocaleString() : '';
+        if (item.text === shown && !!item.streaming === wasStreaming) return;
         const grew = shown !== null && item.text.startsWith(shown);
         shown = item.text;
-        const next = h('div', null, markdown(item.text, { codeAction: (code, language) => runButton(view, code, language) }));
+        wasStreaming = !!item.streaming;
+        // Still arriving, a marker waits for its other half (text.js), so nothing flickers between typed and drawn.
+        const next = h('div', null, markdownNodes(item.text, { links: true, streaming: !!item.streaming, codeAction: (code, language) => runButton(view, code, language) }));
         if (grew) patchChildren(body, next); else body.replaceChildren(...next.childNodes);
       },
     };
   }
   if (first.type === 'tools') {
     const text = h('span', { class: 'fold-text' });
+    // How many failed, alone in the failure's colour: the rest of the line stays quiet (D13).
+    const failedText = h('span', { class: 'fold-failed' });
     const time = h('span', { class: 'fold-time' });
     const running = h('span', { class: 'running', role: 'status', 'aria-label': t('chRunning'), hidden: true });
     const body = h('div', { class: 'fold-body', hidden: true });
-    const toggle = h('button', { class: 'fold', type: 'button', 'aria-expanded': 'false' }, text, running, time, icon('chevron', 10));
+    const toggle = h('button', { class: 'fold', type: 'button', 'aria-expanded': 'false' }, text, failedText, running, time, icon('chevron', 10));
     const el = h('div', { class: 'chat-row tools' }, toggle, body);
     let row = first;
     let drawn = '';
@@ -268,7 +294,8 @@ function makeRow(view, first) {
         row = next;
         const tools = row.tools || [];
         const failed = tools.filter((tool) => tool.result?.failed).length;
-        setText(text, (row.summary || summaryOf(tools)) + (failed ? t('chFailed', { n: failed }) : ''));
+        setText(text, row.summary || summaryOf(tools));
+        setText(failedText, failed ? t('chFailed', { n: failed }) : '');
         setClass(toggle, 'failed', failed > 0);
         running.hidden = tools.every((tool) => tool.result);
         const total = tools.reduce((sum, tool) => sum + seconds(tool), 0);
@@ -340,10 +367,12 @@ export function chatView(app) {
   const live = h('div', { class: 'chat-live' }, liveMark, liveText);
   const skeleton = h('div', { class: 'chat-skeleton', 'aria-hidden': 'true' },
     h('span', { class: 'bone right' }), h('span', { class: 'bone wide' }), h('span', { class: 'bone' }), h('span', { class: 'bone short' }));
-  const empty = h('p', { class: 'pane-empty', hidden: true }, t('chNoConversationForThisSession'));
+  // An empty chat says what to do (the words under it only where the box is there to write in).
+  const emptyWhat = h('span', { class: 'pane-empty-what' }, t('cmEmptyWhat'));
+  const empty = kit.empty({ tag: 'p', size: 'page', class: 'pane-empty', hidden: true }, t('chNoConversationForThisSession'), ' ', emptyWhat);
   // A node whose page can't follow a chat (`chat.page` isn't among what this connection may send): said once, calmly,
   // in the conversation's place. A lead's questions still follow below it.
-  const later = h('p', { class: 'pane-empty', hidden: true }, t('chThisNodeDoesnTSend'));
+  const later = kit.empty({ tag: 'p', size: 'page', class: 'pane-empty', hidden: true }, t('chThisNodeDoesnTSend'));
   const stackSlot = h('div');
   // This session's plugin cards (js/plugincard.js): its shell requests among them.
   const pluginSlot = h('div', { class: 'stack-cards plugin-cards' });
@@ -358,32 +387,43 @@ export function chatView(app) {
   const latestCount = h('span', { class: 'latest-count' });
   const latest = h('button', { class: 'latest', type: 'button', hidden: true, onclick: () => toEnd(true) }, icon('down', 12), t('chLatest'), latestCount);
 
-  const input = h('textarea', { class: 'composer-input', rows: 1, 'aria-label': t('chMessage') });
-  const sendButton = h('button', { class: 'send', type: 'submit', title: t('chSend'), 'aria-label': t('chSend2'), disabled: true }, icon('send', 15));
   // Images into the message: one from this device (as a paste, `session.attach`), or one that is a file on the node,
   // which the page can't read: for that, the line that sends the message with it (`send … --image PATH`).
-  const pick = h('input', { type: 'file', accept: 'image/*', multiple: true, hidden: true, 'aria-hidden': 'true' });
-  const attachButton = h('button', { class: 'icon-button composer-attach', type: 'button', title: t('chAddAnImage'), 'aria-label': t('chAddAnImage'),
+  const pick = h('input', { class: 'file-pick', type: 'file', accept: 'image/*', multiple: true, hidden: true, 'aria-hidden': 'true' });
+  const attachButton = kit.iconButton({ class: 'composer-attach', round: true, title: t('chAddAnImage'), 'aria-label': t('chAddAnImage'),
     'aria-expanded': 'false', 'aria-controls': 'attach-menu' }, icon('plus', 15));
   const fromDevice = h('button', { class: 'attach-choice', type: 'button' }, t('chAnImageFromThisDevice'));
   const fromNode = h('button', { class: 'attach-choice', type: 'button' }, t('chAnImageOnTheNode'));
   const attachMenu = h('div', { class: 'attach-menu', id: 'attach-menu', role: 'group', 'aria-label': t('chAddAnImage'), hidden: true }, fromDevice, fromNode);
-  const nodePath = h('input', { class: 'find-input node-image-path', type: 'text', placeholder: '/path/on/the/node/screenshot.png', 'aria-label': t('chImagePathOnTheNode'),
+  const nodePath = kit.field({ kind: 'code', class: 'node-image-path', type: 'text', placeholder: '/path/on/the/node/screenshot.png', 'aria-label': t('chImagePathOnTheNode'),
     autocomplete: 'off', spellcheck: 'false' });
   const nodeLine = h('div', { class: 'node-image-line' });
+  const nodeNote = h('p', { class: 'confirm-note' }, t('chRunItInATerminal'));
   const nodeImage = h('div', { class: 'node-image', hidden: true },
     h('div', { class: 'node-image-head' }, nodePath,
-      h('button', { class: 'icon-button', type: 'button', title: t('chClose'), 'aria-label': t('chClose'), onclick: () => { nodeImage.hidden = true; input.focus(); } }, icon('close', 12))),
+      kit.iconButton({ title: t('chClose'), 'aria-label': t('chClose'), onclick: () => { nodeImage.hidden = true; input.focus(); } }, icon('close', 12))),
     nodeLine,
-    h('p', { class: 'confirm-note' }, t('chRunItInATerminal')));
+    nodeNote);
+  // The one message box (views/composer.js): Enter sends, steers or queues where the page acts (`send`), else leaves
+  // a draft (`session.draft`); Shift+Enter a new line; what you typed kept per session.
+  const box = composer({
+    label: t('chMessage'), before: [attachButton],
+    beforeKey: (event) => composerKeys(event),
+    onInput: () => lookToken(),
+    onSend: (way, text) => sendFromBox(way, text),
+  });
+  const input = box.input;
+  const sendButton = box.button;
   // Push-to-talk dictation into the box (js/dictate.js): only where the browser recognises speech and you turned it on.
   const talk = talkButton(input);
-  const form = h('form', { class: 'composer' }, attachButton, input, talk, sendButton, pick);
+  const form = box.el;
+  if (talk) form.insertBefore(talk, sendButton);
+  form.append(pick);
   const hint = h('p', { class: 'composer-hint', hidden: true });
   // The message this page left for the session, over the box, with the line that sends it; Edit puts it and its images
   // back in the box.
   const drafted = draftBox(app, { edit: (text, images = []) => {
-    input.value = text;
+    box.value = text;
     attached = images.map((path) => ({ key: path, name: path.split('/').pop(), path, failed: null, thumb: null }));
     drawAttached();
     grow();
@@ -395,15 +435,15 @@ export function chatView(app) {
   const suggestions = h('ul', { class: 'suggestions', role: 'listbox', 'aria-label': t('chCompletions'), hidden: true });
   // The images pasted or dropped into the box (`session.attach`), as small pictures over it.
   const attachedEl = h('div', { class: 'attached', hidden: true });
-  const notice = h('p', { class: 'composer-notice', role: 'status', hidden: true });
+  const notice = box.notice;
   // Find in the chat: over it, opened by ⌘F / Ctrl+F (or the palette's Find in Chat) while the chat shows.
-  const findInput = h('input', { class: 'find-input', type: 'search', placeholder: t('chFindInChat'), 'aria-label': t('chFindInChat'),
+  const findInput = kit.field({ kind: 'search', class: 'find-input', type: 'search', placeholder: t('chFindInChat'), 'aria-label': t('chFindInChat'),
     autocomplete: 'off', spellcheck: 'false' });
   const findCount = h('span', { class: 'find-count', role: 'status' });
   const findBar = h('div', { class: 'chat-find', role: 'search', hidden: true }, icon('search', 13), findInput, findCount,
-    h('button', { class: 'icon-button', type: 'button', title: t('chPrevious'), 'aria-label': t('chPreviousMatch'), onclick: () => step(-1) }, icon('send', 12)),
-    h('button', { class: 'icon-button', type: 'button', title: t('chNext'), 'aria-label': t('chNextMatch'), onclick: () => step(1) }, icon('down', 12)),
-    h('button', { class: 'icon-button', type: 'button', title: t('chCloseEsc'), 'aria-label': t('chCloseFind'), onclick: () => closeFind() }, icon('close', 12)));
+    kit.iconButton({ title: t('chPrevious'), 'aria-label': t('chPreviousMatch'), onclick: () => step(-1) }, icon('send', 12)),
+    kit.iconButton({ title: t('chNext'), 'aria-label': t('chNextMatch'), onclick: () => step(1) }, icon('down', 12)),
+    kit.iconButton({ title: t('chCloseEsc'), 'aria-label': t('chCloseFind'), onclick: () => closeFind() }, icon('close', 12)));
   const el = h('div', { class: 'chat' }, findBar, scroller, latest, queuedMessages.el, drafted.el, suggestions, attachedEl, notice, attachMenu, nodeImage, form, hint);
 
   const loader = imageLoader((kind, args) => store.read(kind, args));
@@ -418,6 +458,7 @@ export function chatView(app) {
     // Its pictures' bytes, asked of the node where it serves them (`chat.image`).
     get images() { return store.can('chat.image') ? loader : null; },
     redraw: () => { structural = true; schedule(); },
+    settle: () => { structural = true; if (view.session) render(); },
     // A row's Copy: the text to the clipboard, and the button says so for a moment.
     copy: (text, button) => copyText(text, button),
     // Edit in Composer (the box holds the text, nothing is sent) and Send Again (a draft, as every message here).
@@ -425,7 +466,7 @@ export function chatView(app) {
     canDraft: () => !form.hidden && drafting(),
     edit: (text) => {
       if (form.hidden) return;
-      input.value = text;
+      box.value = text;
       grow();
       input.focus();
       input.setSelectionRange(text.length, text.length);
@@ -453,6 +494,11 @@ export function chatView(app) {
   let stack = null;
   let stackProject = null;
   let jump = true;
+  // What follows the rows waits for them at most `HOLD_MS` (a chat the node refuses never loads): `app.later` is the
+  // tests' clock.
+  let heldOut = false;
+  let stopHold = null;
+  const afterMs = app.later || ((fn, ms) => { const timer = setTimeout(fn, ms); return () => clearTimeout(timer); });
   let shownQuestions = 0;
   let structural = true;
   // Where each chat was left, by session: its top row's key and how far it was above the view's top (this page only).
@@ -588,6 +634,13 @@ export function chatView(app) {
     later.hidden = following;
     const list = items();
     empty.hidden = !following || !loaded || list.length > 0 || !!stack;
+    // What follows the rows (a session's question, a lead's cards, a plugin's) waits for the rows: drawn before them it
+    // would jump down as they arrive (D14, 213 px measured); the skeleton holds the place meanwhile.
+    // Held a moment at most: a chat the node doesn't serve never loads, and its question must still be answerable.
+    const placed = loaded || !following || heldOut;
+    stackSlot.hidden = !placed;
+    pluginSlot.hidden = !placed;
+    asking.el.classList.toggle('waiting-rows', !placed);
     if (loaded && marking) noteLooked(list);
     if (loaded) {
       if (structural) {
@@ -684,6 +737,7 @@ export function chatView(app) {
     if (!typed) { closeAttach(); nodeImage.hidden = true; }
     hint.hidden = typed;
     asking.update(session);
+    emptyWhat.hidden = !typed;
     drafted.update(session);
     queuedMessages.update(session);
     attachedEl.hidden = !typed || !attached.length;
@@ -695,19 +749,32 @@ export function chatView(app) {
       return;
     }
     const agent = AGENTS[session.agent] || AGENTS.claude;
-    const working = stateOf(session) === 'working';
-    if (drafting()) {
-      // While it works, as the app's ↩ steers and ⌥↩ queues: ↩ leaves a draft that steers it now, ⌥↩ one for after.
-      const steers = working && session.agent === 'claude';
-      // On a phone the words that fit one line; the keys are a keyboard's (the send button's title says what it does).
-      input.placeholder = narrow() ? (steers ? t('chSteerShort', { agent }) : t('chMessageShort', { agent }))
-        : steers ? t('chSteerLong', { agent })
-          : t('chMessageLong', { agent });
-      sendButton.title = steers ? t('chLeaveAsASendNow') : t('chLeaveAsADraft');
-      sendButton.setAttribute('aria-label', steers ? t('chLeaveAsASendNow2') : t('chLeaveAsADraft2'));
+    const way = primaryWay(session);
+    // The button's word says what Enter does: Send, Steer (a working Claude), Queue (behind its open question), or
+    // Draft where the page doesn't act; the placeholder names whom, the title the keys.
+    input.placeholder = way === 'now' ? t('chSteerShort', { agent }) : t('chMessageShort', { agent });
+    if (sends()) {
+      box.setMode(session.prompt ? { word: t('cmQueue'), title: t('cmQueueTitle', { agent }), way }
+        : way === 'now' ? { word: t('cmSteer'), title: t('cmSteerTitle', { agent }), way }
+          : { word: t('swSend'), title: t('cmSendTitle', { agent }), way });
     } else {
-      input.placeholder = working ? (narrow() ? t('chSteerShort', { agent }) : t('chSteerWorks', { agent })) : t('chMessageShort', { agent });
+      box.setMode({ word: t('cmDraft'), title: t('cmDraftTitle'), way });
     }
+    // Where the page drafts, why, once, under the box.
+    hint.hidden = sends() || !drafting();
+    if (!hint.hidden) setText(hint, t('cmDraftsWhy'));
+  }
+  // The page sends for you (`send` where it acts): else Enter leaves a draft.
+  const sends = () => actsFor(app, 'send') && drivable(store.state.sessions.get(view.session));
+  // Enter's way: now for a working Claude (it steers), else at its next step.
+  function primaryWay(session) {
+    const ways = waysFor(session);
+    return stateOf(session) === 'working' && session?.agent === 'claude' && ways.includes('now') ? 'now' : 'step';
+  }
+  // ⌥↩ and ⌘↩ where the agent takes them; else the next step.
+  function wayFor(session, way) {
+    if (way === 'step' || way === 'now' || way === 'after') return waysFor(session).includes(way) ? way : 'step';
+    return primaryWay(session);
   }
   // A phone's width (style.css's own breakpoint): the composer's words kept to one line. Drawn again as it changes.
   const narrowQuery = globalThis.matchMedia?.('(max-width: 760px)');
@@ -762,64 +829,96 @@ export function chatView(app) {
   }
 
   scroller.addEventListener('scroll', scrolled, { passive: true });
+  // On a touch screen a message's actions wait for a tap on it, over its corner; a tap elsewhere puts them away (D15).
+  let touchedRow = null;
+  const putAway = () => { touchedRow?.classList.remove('touched'); touchedRow = null; };
+  rowsEl.addEventListener('click', (event) => {
+    if (!globalThis.matchMedia?.('(hover: none)')?.matches) return;
+    const row = event.target?.closest?.('.chat-row.prompt, .chat-row.reply');
+    if (!row || event.target.closest('a, button, pre, .table, .diff')) return;
+    const again = row === touchedRow;
+    putAway();
+    if (!again) { touchedRow = row; row.classList.add('touched'); }
+  });
+  globalThis.document?.addEventListener?.('pointerdown', (event) => {
+    if (touchedRow && !touchedRow.contains(event.target)) putAway();
+  }, { passive: true });
 
-  function grow() {
-    input.style.height = 'auto';
-    input.style.height = Math.min(input.scrollHeight, 200) + 'px';
-    sendButton.disabled = uploading() || (!input.value.trim() && !attached.some((item) => item.path));
-  }
-  input.addEventListener('input', () => { grow(); lookToken(); });
+  const grow = () => box.grow();
   input.addEventListener('keyup', (event) => { if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) lookToken(); });
   input.addEventListener('click', lookToken);
   input.addEventListener('blur', () => setTimeout(closeSuggestions, 120));
-  // ⌥↩: the next submit is for after the turn.
-  let queueNext = false;
-  input.addEventListener('keydown', (event) => {
-    if (completion && !event.isComposing) {
+  // The box's own keys, before Enter's: `/` and `@` completion takes ↑ ↓ ↩ Tab and Esc while its list shows, and ↑ in
+  // an empty box steps into what waits for an answer. True when taken.
+  function composerKeys(event) {
+    if (event.isComposing || event.keyCode === 229) return false;
+    if (completion) {
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
         event.preventDefault();
         completion.index = (completion.index + (event.key === 'ArrowDown' ? 1 : -1) + completion.items.length) % completion.items.length;
         drawSuggestions();
-        return;
+        return true;
       }
       if ((event.key === 'Enter' && !event.shiftKey) || event.key === 'Tab') {
         event.preventDefault();
         take(completion.index);
-        return;
+        return true;
       }
       if (event.key === 'Escape') {
         event.preventDefault();
         closeSuggestions();
-        return;
+        return true;
       }
     }
-    if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
-      event.preventDefault();
-      queueNext = event.altKey;
-      form.requestSubmit();
-    } else if (event.key === 'ArrowUp' && input.value === '') {
+    if (event.key === 'ArrowUp' && input.value === '') {
       // ↑ from an empty box steps into what's waiting for an answer (the Mac's "↑ ↓ and ↩ with the message box empty").
       const cards = el.querySelectorAll('.card:not(.closed)');
       const target = cards[cards.length - 1]?.querySelector('.option, .answer-input');
-      if (target) { event.preventDefault(); target.focus(); }
+      if (target) { event.preventDefault(); target.focus(); return true; }
     }
-  });
-  form.addEventListener('submit', (event) => {
-    event.preventDefault();
-    const text = input.value.trim();
+    return false;
+  }
+  // Enter, or the button: where the page acts, `send` the way it says (now steers a working Claude, after for after its
+  // turn), the box emptied at once and its words back with Try again if the node refuses; else a draft over the box
+  // (`session.draft`, a send-now one while a Claude works), or, for a feed that types without drafts, `send` as typed.
+  // Sends refused after the box moved to another session, by session: shown when it comes back.
+  const refusals = new Map();
+  function sendFromBox(way, typed) {
+    const text = typed ?? input.value.trim();
     const images = attached.filter((item) => item.path).map((item) => item.path);
-    if (uploading() || (!text && !images.length)) return;
-    input.value = '';
+    if (uploading() || (!text && !images.length)) return null;
+    const id = view.session;
+    const session = store.state.sessions.get(id);
+    const held = attached;
+    box.clear();
     attached = [];
     drawAttached();
     closeSuggestions();
-    grow();
-    // A draft left while a Claude agent works steers it (`now`), unless ⌥↩ asked for after its turn.
-    const session = store.state.sessions.get(view.session);
-    const now = !queueNext && stateOf(session) === 'working' && session?.agent === 'claude';
-    queueNext = false;
-    if (drafting()) store.sessionDraft(view.session, text, images, now); else store.send(view.session, text);
-  });
+    if (sends()) {
+      const chosen = wayFor(session, way);
+      return store.request('send', sendArgs(session, text, chosen, images)).then((reply) => {
+        if (view.session !== id) {
+          // Moved to another session meanwhile: a refusal waits for this one, its words and images back in its box.
+          if (!reply?.ok) {
+            keepFor('session:' + id, text);
+            refusals.set(id, { why: t('cmRefused', { why: refusalWords(reply?.error) }), text, held, way });
+          }
+          return;
+        }
+        if (reply?.ok) {
+          // The node's own words where it says something the chat won't show (held behind a question, sent otherwise).
+          const words = reply.result?.said || reply.result?.queued ? sentWords(chosen, reply.result) : '';
+          say(words);
+          return;
+        }
+        if (!attached.length) { attached = held; drawAttached(); }
+        box.refused(t('cmRefused', { why: refusalWords(reply?.error) }), text, () => sendFromBox(way, input.value.trim()));
+      });
+    }
+    const now = way === 'now' || (way !== 'after' && primaryWay(session) === 'now');
+    if (drafting()) return store.sessionDraft(id, text, images, now);
+    return store.send(id, text);
+  }
 
   // ---- `/` and `@`: what the app's composer completes, asked of the node as you type ----
 
@@ -875,10 +974,11 @@ export function chatView(app) {
 
   let attached = [];         // { key, name, path, failed, thumb }
   const uploading = () => attached.some((item) => !item.path && !item.failed);
+  // Nothing to send: no words and no image the node holds, or an image still on its way.
+  box.setEmpty(() => uploading() || (!input.value.trim() && !attached.some((item) => item.path)));
   const canAttach = () => drafting() && store.can('session.attach') && drivable(store.state.sessions.get(view.session));
   function say(text) {
-    notice.hidden = !text;
-    setText(notice, text || '');
+    box.say(text || '');
   }
   function drawAttached() {
     attachedEl.hidden = !attached.length;
@@ -984,12 +1084,26 @@ export function chatView(app) {
     drawNodeLine();
     nodePath.focus();
   });
-  // The line for the path typed, with what the box holds as its text (several paths: separated by commas).
+  // The line for the path typed, with what the box holds as its text (several paths: separated by commas). Where the
+  // page acts and the node lists `send`, Send sends them from here instead (`send` with `images`, `~/` the node's home;
+  // the node checks each is an image file there), the way the line would (now to a working Claude, else at its next
+  // step), and says what became of it; the box and the path empty once it went.
   function drawNodeLine() {
     if (nodeImage.hidden) return;
     const session = store.state.sessions.get(view.session);
     const paths = nodePath.value.split(',').map((path) => path.trim()).filter(Boolean);
     const now = stateOf(session) === 'working' && session?.agent === 'claude';
+    const acts = !!session && drivable(session) && actsFor(app, 'send');
+    nodeNote.hidden = acts;
+    if (acts && paths.length) {
+      const home = store.state.node?.home;
+      const images = paths.map((path) => (home && (path === '~' || path.startsWith('~/')) ? home + path.slice(1) : path));
+      const way = now ? 'now' : 'step';
+      const send = doButton(app, { label: t('acSend'), kind: 'send', busy: t('chSendingImage'), args: () => sendArgs(session, input.value.trim(), way, images),
+        receipt: (result) => sentWords(way, result), done: () => { box.clear(); nodePath.value = ''; send.button.disabled = true; } });
+      nodeLine.replaceChildren(send.el);
+      return;
+    }
     const line = session ? imageSendLine(session, input.value, paths, now) : null;
     nodeLine.replaceChildren(line ? copyLine(line, 'the command that sends the message with the image') : h('p', { class: 'confirm-note' }, t('chTypeTheImageSPath')));
   }
@@ -1137,10 +1251,18 @@ export function chatView(app) {
       found = [];
       foundAt = -1;
       foundKey = null;
-      // What the box held for the last session stays with it: nothing typed here goes to another.
+      // What the box held for the last session stays with it (kept under its key): nothing typed here goes to another.
+      box.setKey('session:' + id);
       attached = [];
       drawAttached();
       closeSuggestions();
+      const refusal = refusals.get(id);
+      if (refusal) {
+        refusals.delete(id);
+        attached = refusal.held;
+        drawAttached();
+        box.refused(refusal.why, refusal.text, () => sendFromBox(refusal.way, input.value.trim()));
+      }
       closeAttach();
       nodeImage.hidden = true;
       nodePath.value = '';
@@ -1164,6 +1286,9 @@ export function chatView(app) {
       pluginDrawn = '';
       placeStack(store.state.sessions.get(id));
       drawPluginCards();
+      heldOut = false;
+      stopHold?.();
+      stopHold = afterMs(() => { heldOut = true; if (view.session === id) { structural = true; render(); } }, HOLD_MS);
       unsubscribe = store.subscribe('chat:' + id, onChat);
       store.openChat(id);
       render();

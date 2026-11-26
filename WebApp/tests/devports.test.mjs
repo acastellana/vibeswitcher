@@ -6,8 +6,9 @@ import { portRow, onTheNode } from '../js/devports.js';
 const entry = { port: 5173, address: '127.0.0.1', pid: 4711, program: 'node', url: 'http://localhost:5173/' };
 
 test('on the node’s own machine a port opens as http://localhost:PORT/', () => {
-  assert.deepEqual(portRow(entry, '127.0.0.1'), { label: 'localhost:5173', about: 'node (pid 4711) · this machine only', url: 'http://localhost:5173/' });
-  assert.equal(portRow({ ...entry, address: '0.0.0.0' }, 'localhost').about, 'node (pid 4711) · every address');
+  // The program by its name, its process id on hover only (D18).
+  assert.deepEqual(portRow(entry, '127.0.0.1'), { label: 'localhost:5173', about: 'node · this machine only', process: 'pid 4711', url: 'http://localhost:5173/' });
+  assert.equal(portRow({ ...entry, address: '0.0.0.0' }, 'localhost').about, 'node · every address');
 });
 
 test('on the tailnet, or with an address that isn’t exactly the port’s, nothing opens', () => {
