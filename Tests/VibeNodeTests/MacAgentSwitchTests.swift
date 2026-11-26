@@ -197,7 +197,8 @@ struct MacAgentSwitchTests {
     /// A second switch (or a rollback) before its follow-up: launchd's job A's, the plist B's from the first switch's
     /// rewrite, the host switched in place again (back to A, keeper's flags). The command line's server check
     /// (`runningHost(afterASwitch:)`) and `stop` still take the node, or the switch's own checks and its follow-up
-    /// couldn't run; `status` refuses naming the remedy. Without the keeper's flags all three refuse.
+    /// couldn't run; `status` refuses naming the remedy. A host of B without the keeper's flags under A's job (not
+    /// started by it, never switched in place) is refused by all three.
     @Test func aSecondSwitchBeforeItsFollowUpIsStillTheNodeToTheServerCheckAndStop() throws {
         let pair = Pair(try scratch.shortFolder("vsfd").path)
         try pair.write(pair.b)
@@ -208,12 +209,104 @@ struct MacAgentSwitchTests {
         #expect(stopped.text == "not typed", "stop refused the switched host: \(stopped.text)")
         guard case .failure(let status) = switchedBack.status() else { Issue.record("status passed with the plist B's while A runs"); return }
         #expect(status.text.contains("vibeswitcher switch \(pair.a.commit)"), "\(status.text)")
-        let unswitched = pair.agent(log: log, printed: { pair.print(pair.a) }, runs: pair.a, switched: false)
-        if case .success = unswitched.runningHost(afterASwitch: true) { Issue.record("A without the keeper's flags under B's plist taken by the server check") }
-        if case .success = unswitched.status() { Issue.record("status took A without the keeper's flags under B's plist") }
-        guard case .failure(let notStopped) = unswitched.stop() else { Issue.record("stop took A without the keeper's flags"); return }
+        let unswitched = pair.agent(log: log, printed: { pair.print(pair.a) }, runs: pair.b, switched: false)
+        if case .success = unswitched.runningHost(afterASwitch: true) { Issue.record("B without the keeper's flags under A's job taken by the server check") }
+        if case .success = unswitched.status() { Issue.record("status took B without the keeper's flags under A's job") }
+        guard case .failure(let notStopped) = unswitched.stop() else { Issue.record("stop took B without the keeper's flags"); return }
         #expect(notStopped.text.contains("isn't the node's host"), "\(notStopped.text)")
         #expect(log.bootouts == 0)
+    }
+
+    /// The review's N1: the command line's server check says why the node's host isn't known as the node's and what to
+    /// do, not only that the listener's code "can't be told": the plist removed under a running job names the plist and
+    /// `launchctl bootout` (the only way out then: every command judges the plist), no job names `vibeswitcher start`;
+    /// the node's host gives its pid. `ServerCheck` says that line as it is.
+    @Test func theServerCheckSaysWhyTheHostIsntKnownAndWhatToDo() throws {
+        let pair = Pair(try scratch.shortFolder("vsfe").path)
+        try pair.write(pair.a)
+        let log = MacAgentTests.Recorder()
+        #expect(try pair.agent(log: log, printed: { pair.print(pair.a) }, runs: pair.a, switched: false).serverCheckHost().get() == 4242)
+        unlink(pair.place.plistPath)
+        guard case .failure(let removed) = pair.agent(log: log, printed: { pair.print(pair.a) }, runs: pair.a, switched: false).serverCheckHost() else {
+            Issue.record("the server check took a job whose plist is gone"); return
+        }
+        #expect(removed.text.contains("can't be trusted") && removed.text.contains("plist") && removed.text.contains("launchctl bootout") && removed.text.contains("vibeswitcher start"), "\(removed.text)")
+        guard case .failure(let none) = pair.agent(log: log, printed: { nil }, runs: pair.a, switched: false).serverCheckHost() else {
+            Issue.record("the server check took no job"); return
+        }
+        #expect(none.text.contains("isn't running") && none.text.contains("`vibeswitcher start` starts it"), "\(none.text)")
+        let check = ServerLintTests.code(try String(contentsOf: ServerLintTests.repo.appendingPathComponent("Sources/vibeswitcher-cli/ServerCheck.swift"), encoding: .utf8))
+        #expect(check.contains("case .failure(let why): return why.text") && check.contains("agent.serverCheckHost()"), "ServerCheck doesn't say the host's line")
+    }
+
+    /// The review's N2 (a): a host that never switched, running launchd's own job B, whose plist another process
+    /// replaced with A's job. `status` names `vibeswitcher switch B`, and that remedy runs: the server check takes the
+    /// node (so `switch` reaches its server), the follow-up rewrites the plist for B, and `status` passes; `stop` takes
+    /// the host too.
+    @Test func aPlistReplacedUnderTheRunningJobIsPutRightByTheRemedyStatusNames() throws {
+        let pair = Pair(try scratch.shortFolder("vsff").path)
+        try pair.write(pair.a)
+        let log = MacAgentTests.Recorder()
+        let agent = pair.agent(log: log, printed: { pair.print(pair.b) }, runs: pair.b, switched: false)
+        guard case .failure(let status) = agent.status() else { Issue.record("status passed over a replaced plist"); return }
+        #expect(status.text.contains("`vibeswitcher switch \(pair.b.commit)`"), "\(status.text)")
+        #expect((try? agent.runningHost(afterASwitch: true).get())?.commit == pair.b.commit, "the server check refuses, so `switch` can't run")
+        guard case .failure(let stopped) = agent.stop() else { Issue.record("stop went on past its prompt"); return }
+        #expect(stopped.text == "not typed", "stop refused the node: \(stopped.text)")
+        #expect((try? agent.switched(to: pair.b, folder: "/x/" + pair.b.commit).get()) != nil)
+        #expect(pair.onDisk == pair.bytes(pair.b))
+        #expect((try? agent.status().get())?.contains("build \(pair.b.commit)") == true)
+        #expect(log.bootouts == 0)
+    }
+
+    /// The review's N2 (b): a put-back that fails (a link put at the plist after the rename): the refusal names the only
+    /// way out, since every command judges the plist: remove what is there, `launchctl bootout` by hand, then
+    /// `vibeswitcher start`; and that runs: after the two, `start` starts the node from its own plist.
+    @Test func aPutBackThatFailsNamesTheOnlyWayOutAndItWorks() throws {
+        let pair = Pair(try scratch.shortFolder("vsfg").path)
+        try pair.write(pair.a)
+        let elsewhere = pair.place.plistFolder + "/../b.plist"
+        try #require(pair.bytes(pair.b)).write(to: URL(fileURLWithPath: elsewhere))
+        let log = MacAgentTests.Recorder()
+        let agent = pair.agent(log: log, printed: {
+            var named = stat()
+            if lstat(pair.place.plistPath, &named) == 0, named.st_mode & S_IFMT == S_IFREG, pair.onDisk == pair.bytes(pair.b) {
+                unlink(pair.place.plistPath)
+                symlink(elsewhere, pair.place.plistPath)
+            }
+            return pair.print(pair.a)
+        }, runs: pair.b, switched: true)
+        guard case .failure(let why) = agent.switched(to: pair.b, folder: "/x/" + pair.b.commit) else { Issue.record("rewritten through a link"); return }
+        #expect(why.text.contains("couldn't be put back") && why.text.contains("Remove it") && why.text.contains("`launchctl bootout \(pair.place.target)`")
+                && why.text.contains("`vibeswitcher start`") && !why.text.contains("vibeswitcher switch"), "\(why.text)")
+        #expect(log.bootouts == 0)
+        // The way out, as said: remove it, launchd's bootout, start.
+        #expect(unlink(pair.place.plistPath) == 0)
+        let after = MacAgentTests.Recorder()
+        let started = pair.agent(log: after, printed: { after.calls.contains { $0.first == "bootstrap" } ? pair.print(pair.b) : nil }, runs: pair.b, switched: false)
+            .start(pair.job(pair.b), build: pair.b, folder: "/x/" + pair.b.commit)
+        #expect((try? started.get())?.contains(pair.b.commit) == true, "\(started)")
+        #expect(pair.onDisk == pair.bytes(pair.b))
+    }
+
+    /// The review's N3, a change in behaviour: a job of the label loaded and not running from another build than the
+    /// plist's (launchd's A, the plist B) was refused and left loaded before this branch; `start` now unloads it (it is
+    /// placed as a pinned build's job at the agent's own plist, and nothing of it runs), then goes on as from nothing:
+    /// A's command line is refused by the plist, B's starts B.
+    @Test func aStartOverAJobNotRunningOfAnotherBuildUnloadsItFirst() throws {
+        let pair = Pair(try scratch.shortFolder("vsfh").path)
+        try pair.write(pair.b)
+        let stopped = MacAgentTests.printed(pair.job(pair.a), place: pair.place, pid: nil)
+        let old = MacAgentTests.Recorder()
+        guard case .failure(let refused) = pair.agent(log: old, printed: { old.bootouts == 0 ? stopped : nil }, runs: pair.a, switched: false)
+            .start(pair.job(pair.a), build: pair.a, folder: "/x/" + pair.a.commit) else { Issue.record("A's start went on over B's plist"); return }
+        #expect(refused.exitCode == 77 && refused.text.contains("isn't the one start writes for this build") && old.bootouts == 1, "\(refused.text) \(old.calls)")
+        let new = MacAgentTests.Recorder()
+        let started = pair.agent(log: new, printed: {
+            if new.calls.contains(where: { $0.first == "bootstrap" }) { return pair.print(pair.b) }
+            return new.bootouts == 0 ? stopped : nil
+        }, runs: pair.b, switched: false).start(pair.job(pair.b), build: pair.b, folder: "/x/" + pair.b.commit)
+        #expect((try? started.get())?.contains(pair.b.commit) == true && new.bootouts == 1, "\(started) \(new.calls)")
     }
 
     /// `switched` rewrites nothing unless the job's process is the target's host: the host still A (no handover) leaves

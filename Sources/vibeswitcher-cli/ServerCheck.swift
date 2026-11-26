@@ -22,7 +22,14 @@ enum ServerCheck {
         // it says (its hello's rule) is trusted: the server of the build the job runs; the parent, the session and the
         // code all bound to the one audit token the socket gave (`NodeCheck.macListener`).
         let codeIdentity = Platform.CodeIdentity.isAvailable
-        let job = codeIdentity && context.mode == .node ? macJob(context) : nil
+        var job: NodeAgent.Printed?
+        if codeIdentity, context.mode == .node {
+            // The host not known as the node's: said with why and what to do (`MacAgent.serverCheckHost`).
+            switch macJob(context) {
+            case .failure(let why): return why.text
+            case .success(let found): job = found
+            }
+        }
         var codeWhy: String?
         var listener = codeIdentity
             ? NodeCheck.macListener(pid: pid, token: Platform.Sockets.peerToken(fd), code: { token in
@@ -59,15 +66,14 @@ enum ServerCheck {
                                  codeIdentity: codeIdentity)
     }
 
-    /// The Mac's node job's host, as `status` finds it (`MacAgent.runningHost(afterASwitch:)`: between a switch's
-    /// handover and its follow-up the plist still names the build the host was started as): its pid; nil when the node
-    /// doesn't run or its host isn't the node's (row 10: the host known by token and code, never by launchctl's text).
-    static func macJob(_ context: NodeContext) -> NodeAgent.Printed? {
-        guard let place = MacAgentCommand.place() else { return nil }
+    /// The Mac's node job's host, as `status` finds it (`MacAgent.serverCheckHost`: between a switch's handover and its
+    /// follow-up the plist still names the build the host was started as): its pid; the line said when the node doesn't
+    /// run or its host isn't the node's (row 10: the host known by token and code, never by launchctl's text).
+    static func macJob(_ context: NodeContext) -> Result<NodeAgent.Printed, StartRefusal> {
+        guard let place = MacAgentCommand.place() else { return .failure(StartRefusal("this system has no launchctl, so the node's host can't be found", exitCode: 69)) }
         let agent = MacAgent(place: place, steps: .system(place: place, pins: { NodePins.read() }, say: { _ in }, confirm: { _ in .success(()) },
                                                           serverStop: { _ in .none("no server is asked") }, job: MacAgentCommand.job))
-        guard case .success(let host) = agent.runningHost(afterASwitch: true), host.pid > 0 else { return nil }
-        return NodeAgent.Printed(pid: host.pid, program: nil)
+        return agent.serverCheckHost().map { NodeAgent.Printed(pid: $0, program: nil) }
     }
 
     /// `pid`'s POSIX session (`getsid`, which Linux answers for any process); nil when it can't be read.

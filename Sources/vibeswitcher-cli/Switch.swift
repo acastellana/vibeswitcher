@@ -185,7 +185,12 @@ enum SwitchCommand {
         var why = "no server answered"
         while answered == nil {
             switch NodeClient.connect(context, warn: false) {
-            case .failure(.refused(let refusal)): return StartRefusal(refusal, exitCode: 77)
+            case .failure(.refused(let refusal)):
+                // The host handed over already: on the Mac the switch's last step (the plist) is still to do.
+                let finish = Platform.CodeIdentity.isAvailable && !context.isScratch
+                    ? ". The host has handed over to \(ConfigSeal.inert(target, limit: 64)) already; once that is put right, `vibeswitcher switch \(ConfigSeal.inert(target, limit: 64))` again finishes the switch"
+                    : ""
+                return StartRefusal(refusal + finish, exitCode: 77)
             case .failure(let failure): why = failure.message
             case .success(let client):
                 let server = client.hello.server

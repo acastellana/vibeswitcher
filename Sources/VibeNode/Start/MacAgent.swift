@@ -366,6 +366,18 @@ public struct MacAgent {
         }
     }
 
+    /// The command line's server check's look at the node's host (`ServerCheck`): `runningHost(afterASwitch: true)`'s
+    /// pid, or the line the check says, in the user's words: why the host isn't known as the node's, and what to do.
+    public func serverCheckHost() -> Result<pid_t, StartRefusal> {
+        switch runningHost(afterASwitch: true) {
+        case .success(let host) where host.pid > 0: return .success(host.pid)
+        case .success: return .failure(StartRefusal("the node's server can't be trusted: its host's pid can't be read", exitCode: 77))
+        case .failure(let why):
+            let remedy = why.exitCode == 69 ? "; `vibeswitcher start` starts it" : ""
+            return .failure(StartRefusal("the node's server can't be trusted, because its host isn't known as the node's: \(why.text)\(remedy)", exitCode: why.exitCode))
+        }
+    }
+
     /// The switch's follow-up on the Mac (`vibeswitcher switch`, once the host handed over; item 15's owed "a switch must
     /// rewrite the plist"): the agent's plist rewritten for the build `target` (in `folder`) the host now runs, by the
     /// job start writes for it (`Steps.job`: `NodeAgent.Job.node` for the user's node), its `RunAtLoad` kept. In order:
@@ -409,10 +421,13 @@ public struct MacAgent {
         }
         func putBack(_ why: String) -> Result<String, StartRefusal> {
             let back = replacePlist(with: onDisk.job)
+            // What is at the plist's path then isn't a plist start wrote, so no command of this program can tell the job
+            // is the node's (each judges the plist): launchd's own bootout is the only way out, and it ends the sessions.
             return refused("the agent's plist was rewritten for build \(target.commit), but \(why): "
-                           + (back.map { "the old one couldn't be put back (\($0)): `vibeswitcher switch \(target.commit)` again rewrites it" }
-                              ?? "it was put back as build \(onDisk.build.commit)'s")
-                           + "; launchd's job runs on untouched", 77)
+                           + (back.map { "the old one couldn't be put back (\($0)), and what is at \(ConfigSeal.inert(place.plistPath, limit: .max)) now isn't a plist "
+                                + "vibeswitcher wrote, so no vibeswitcher command can tell the running job is the node's. Remove it, then end the job by hand with "
+                                + "`launchctl bootout \(place.target)` (it ends the node's host and its sessions), then run `vibeswitcher start`" }
+                              ?? "it was put back as build \(onDisk.build.commit)'s; launchd's job runs on untouched"), 77)
         }
         let held: HeldPlist
         switch writtenPlist(goal.job) {
@@ -548,8 +563,10 @@ public struct MacAgent {
     /// launchd's job is another build's than the plist's (a switch's rewrite, `switched`), the process must have
     /// switched in place: the keeper's two flags follow its command line. `stale` (a stop's look, and the command line's
     /// server check between a switch's handover and its follow-up) also takes a host whose build isn't the plist's when
-    /// it switched in place (keeper's flags), whatever build launchd's job and the plist are of: a switch, a second one
-    /// or a rollback whose rewrite didn't happen yet. Anything else is refused, the builds named.
+    /// it switched in place (keeper's flags), whatever build launchd's job and the plist are of (a switch, a second one
+    /// or a rollback whose rewrite didn't happen yet), or when it runs launchd's own job (a plist another process
+    /// replaced with another build's), so that `stop` and `vibeswitcher switch`, the remedy `status` names, can run.
+    /// Anything else is refused, the builds named.
     func node(_ pid: pid_t, builds: [NodePins.Build], loaded: Candidate, onDisk: Candidate, stale: Bool = false) -> Result<Host, StartRefusal> {
         switch steps.see(place.socket, pid, builds) {
         case .nothing(let why), .other(let why): return .failure(StartRefusal(why))
@@ -559,6 +576,9 @@ public struct MacAgent {
             let switched: Switched
             if build == onDisk.build {
                 (job, switched) = (onDisk.job, loaded == onDisk ? .may : .must)
+            } else if stale, build == loaded.build {
+                // The host runs launchd's own job (or switched back to it) while the plist names another build's.
+                (job, switched) = (loaded.job, .may)
             } else if stale, var other = steps.job(build) {
                 other.atLogin = onDisk.job.atLogin
                 (job, switched) = (other, .must)
