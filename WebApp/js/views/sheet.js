@@ -2,6 +2,7 @@
 // the right edge, a line's whole text drawn as nodes by text.js (bold, code, lists, tables), never a string as markup.
 // Esc, the close button or a click outside closes it. It says nothing of its own beyond its title and time.
 
+import * as kit from '../kit.js';
 import { h, setText } from '../dom.js';
 import { icon } from '../marks.js';
 import { markdown } from '../text.js';
@@ -57,7 +58,7 @@ export function sideSheet() {
   const when = h('p', { class: 'sheet-when' });
   const body = h('div', { class: 'sheet-body markdown' });
   let onClose = null;
-  const closeButton = h('button', { class: 'icon-button sheet-close', type: 'button', 'aria-label': t('close'), title: t('close'), onclick: () => close() }, icon('close', 16));
+  const closeButton = kit.iconButton({ class: 'sheet-close', 'aria-label': t('close'), title: t('close'), onclick: () => close() }, icon('close', 16));
   const panel = h('aside', { class: 'sheet', role: 'dialog', 'aria-modal': 'false', 'aria-labelledby': 'sheet-title', tabindex: -1, hidden: true },
     closeButton, kicker, title, when, body);
   const scrim = h('div', { class: 'sheet-scrim', hidden: true, onclick: () => close() });
@@ -121,7 +122,7 @@ export function heldParts(card, { root, kicker = '', read = null, kind = 'config
   const item = (one) => {
     const slot = h('div', { class: 'held-diff-slot' });
     const changes = !!(one.change || (one.files || []).length);
-    const show = changes && read ? h('button', { class: 'button quiet small', type: 'button', onclick: () => {
+    const show = changes && read ? kit.button('plain', { size: 's', onclick: () => {
       show.disabled = true;
       show.setAttribute('aria-busy', 'true');
       show.textContent = t('shReading');

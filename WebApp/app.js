@@ -2,6 +2,7 @@
 // it (the node's WebSocket, or with ?mock an invented node that needs no server), the window's own state, the views
 // and the keyboard.
 
+import * as kit from './kit.js';
 import { createStore } from './js/store.js';
 import { connectSocket } from './js/socket.js';
 import { validate } from './wire/validators.js';
@@ -105,7 +106,7 @@ function brief() {
     if (!sheet.shown()) return;
     const result = reply.ok ? reply.result : null;
     let speaking = false;
-    const speakButton = h('button', { class: 'button quiet', type: 'button', onclick: () => {
+    const speakButton = kit.button('plain', { onclick: () => {
       if (speaking) { voice.synth.cancel(); return; }
       speaking = true;
       speakButton.textContent = t('stopSpeaking');
@@ -165,7 +166,7 @@ function drawTabBanner() {
   }
   if (!lost) {
     tabBanner.replaceChildren(h('span', null, h('strong', null, t('tbOlderBuild')), ' ', store.acts() ? t('tbOlderActing') : t('tbOlderReads')),
-      h('button', { class: 'button small', type: 'button', onclick: () => store.reloadNow() }, t('tbReload')));
+      kit.button('primary', { size: 's', onclick: () => store.reloadNow() }, t('tbReload')));
     return;
   }
   const unconfirmed = state.actsLost === 'unconfirmed';
@@ -177,7 +178,7 @@ function drawTabBanner() {
     off ? h('code', null, 'vibeswitcher set web_acts trust') : null,
     off ? h('span', null, t('tbThen')) : null,
     h('code', null, 'vibeswitcher web'),
-    h('button', { class: 'icon-button tab-banner-close', type: 'button', 'aria-label': t('close'), title: t('close'), onclick: () => store.forgetActsLost() }, '×'));
+    kit.iconButton({ class: 'tab-banner-close', 'aria-label': t('close'), title: t('close'), onclick: () => store.forgetActsLost() }, '×'));
 }
 store.subscribe('connection', drawTabBanner);
 
@@ -206,7 +207,7 @@ function drawPasskeyOffer() {
   passkeyOffer.hidden = !offer || expired || !store.can('passkey.registered');
   if (passkeyOffer.hidden) return;
   if (offer.expires) setTimeout(drawPasskeyOffer, Math.max(0, Date.parse(offer.expires) - Date.now()) + 50);
-  const add = h('button', { class: 'button small', type: 'button', disabled: adding?.state === 'adding' || adding?.state === 'added', onclick: () => store.addPasskey(registerPasskey) }, t('pkAdd'));
+  const add = kit.button('primary', { size: 's', disabled: adding?.state === 'adding' || adding?.state === 'added', onclick: () => store.addPasskey(registerPasskey) }, t('pkAdd'));
   const named = store.state.pageWords ? h('span', { class: 'page-words' }, t('pkThisPage'), ' ', h('strong', null, store.state.pageWords)) : null;
   const said = !adding ? t('pkOffer') : adding.state === 'adding' ? t('pkAdding') : adding.state === 'added' ? t('pkAdded', { id: adding.id })
     : adding.state === 'cancelled' ? t('pkCancelled') : adding.state === 'unsupported' ? t('pkUnsupported') : t('pkRefused', { why: adding.why });
@@ -228,7 +229,7 @@ document.addEventListener('touchstart', () => {}, { passive: true });
 // What the centre says before there is anything to show: connecting, or not paired.
 const waitingWords = h('h1', { class: 'big' });
 const waitingSub = h('p');
-const waiting = h('section', { class: 'centre screen status-screen', hidden: true }, h('div', { class: 'empty-state' }, waitingWords, waitingSub));
+const waiting = h('section', { class: 'centre screen status-screen', hidden: true }, kit.empty({ size: 'page', class: 'empty-state' }, waitingWords, waitingSub));
 // The reconnecting line, the page not paired and the notifications' offer: a row of their own at the top of the
 // centre, never over the header's controls.
 const centre = h('main', { class: 'centre-wrap' }, offline, unpaired, app.notifications.offer, tabBanner, passkeyOffer, project.el, own.el, newProject.el, node.el, settings.el, stats.el, mail.el, waiting);

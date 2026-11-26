@@ -3,6 +3,7 @@
 // and Settings; and a summary under them: what needs you, its count a link to the next place that waits, and Brief me.
 // Nothing here moves to another column in any state.
 
+import * as kit from '../kit.js';
 import { h, s, setText, setClass } from '../dom.js';
 import { icon } from '../marks.js';
 import { projectsOf, teamCounts, waitingPlaces, nextPlace } from '../conversation.js';
@@ -69,11 +70,11 @@ export function leftOrder(state, query = '') {
 export function leftColumn(app, { brief }) {
   const { store, ui } = app;
   const list = h('div', { class: 'projects', role: 'list' });
-  const empty = h('p', { class: 'left-empty', hidden: true });
+  const empty = kit.empty({ tag: 'p', class: 'left-empty', hidden: true });
   // The filter's field and rows, over the projects (they stand in for them while it holds words).
-  const filter = h('input', { class: 'left-filter', type: 'search', placeholder: t('lfPlaceholder'), 'aria-label': t('lfLabel'), autocomplete: 'off', spellcheck: 'false', hidden: true });
+  const filter = kit.field({ kind: 'search', class: 'left-filter', type: 'search', placeholder: t('lfPlaceholder'), 'aria-label': t('lfLabel'), autocomplete: 'off', spellcheck: 'false', hidden: true });
   const results = h('div', { class: 'left-results', hidden: true });
-  const filterEmpty = h('p', { class: 'left-empty', hidden: true });
+  const filterEmpty = kit.empty({ tag: 'p', class: 'left-empty', hidden: true });
   const place = (route, iconName, key) => h('a', { class: 'place', href: route, data: { place: key } }, icon(iconName, 16), h('span', null, t(key)));
   const newProject = place('#/new', 'plus', 'newProject');
   const own = place('#/sessions', 'chat', 'ownSessions');
@@ -85,7 +86,7 @@ export function leftColumn(app, { brief }) {
   // The node's notices beside This node, in words ("1 notice"), and Boost while it's on (a bolt that opens Settings).
   const notices = h('span', { class: 'place-count tone-text-working' });
   nodeLink.append(notices);
-  const boost = h('a', { class: 'icon-button boost-mark', href: '#/settings', hidden: true }, icon('bolt', 14));
+  const boost = kit.iconButton({ tag: 'a', class: 'boost-mark', href: '#/settings', hidden: true }, icon('bolt', 14));
   const places = [newProject, own, nodeLink, place('#/settings', 'settings', 'settings')];
   // The summary: what needs you, as a link to the next place that waits (another project, a session of yours, This
   // node); what moves; and Brief me.
@@ -98,9 +99,9 @@ export function leftColumn(app, { brief }) {
   const el = h('nav', { class: 'left', 'aria-label': t('projects') },
     h('div', { class: 'colhead' }, h('a', { class: 'brand', href: '#/' }, 'VibeSwitcher'), h('span', { class: 'grow' }), boost,
       // A phone has no ⌘K: the palette from the drawer's head.
-      h('button', { class: 'icon-button phone-only palette-open', type: 'button', 'aria-label': t('paGoToASessionOr'), title: t('paGoToASessionOr'),
+      kit.iconButton({ class: 'phone-only palette-open', 'aria-label': t('paGoToASessionOr'), title: t('paGoToASessionOr'),
         onclick: () => { app.drawer?.(null); app.ui.setPalette(true); } }, icon('search', 16))),
-    h('div', { class: 'colbody' }, h('h2', { class: 'col-title' }, t('projects')), filter, results, filterEmpty, list, empty, newProject, h('span', { class: 'left-gap' }), ...places.slice(1)),
+    h('div', { class: 'colbody' }, kit.sectionTitle('h2', { class: 'col-title' }, t('projects')), filter, results, filterEmpty, list, empty, newProject, h('span', { class: 'left-gap' }), ...places.slice(1)),
     summary);
   const rows = new Map();
 

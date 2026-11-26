@@ -8,6 +8,7 @@
 // - Which settings a page may not set even when it acts (the node refuses them by voice): they stay terminal lines.
 
 import { h, setText } from './dom.js';
+import { button as kitButton } from './kit.js';
 import { t } from './i18n.js';
 import { dateTime } from './words.js';
 
@@ -49,17 +50,18 @@ export function pageMaySet(key, value) {
 
 // A button that sends `kind` with `args()` (a function, read at the click), disabled while it is out; `done(reply)` on
 // success; the refusal said under it. Returns { el, button, say(text) }. `confirm`: a second click asked first, in
-// place ("Click again to stop the node", with Cancel beside it), for what can't be taken back; `danger`: drawn as
-// what ends something, never as the page's primary button.
+// place ("Click again to stop the node", with Cancel beside it), for what can't be taken back; `plain`: a plain
+// button, not the one main action; `danger`: drawn as what ends something, never as the page's primary button; `size`
+// as kit.js's.
 // `busy`: the button's words while the request is out ("Starting…").
 // `receipt(reply)`: what happened, in words, said beside the button once the node took it.
-export function doButton(app, { label, kind, args, done = () => {}, quiet = false, confirm = null, danger = false, className = '', busy = null, receipt = null }) {
+export function doButton(app, { label, kind, args, done = () => {}, plain = false, confirm = null, danger = false, size = 'm', className = '', busy = null, receipt = null }) {
   const said = h('span', { class: 'act-said', role: 'status' });
   let asking = false;
   let stopAsking = () => {};
-  const button = h('button', { class: (quiet || danger ? 'button quiet ' : 'button ') + (danger ? 'danger ' : '') + className, type: 'button' }, label);
+  const button = kitButton(danger ? 'danger' : plain ? 'plain' : 'primary', { size, class: className }, label);
   const reset = () => { asking = false; stopAsking(); button.textContent = label; button.classList.remove('confirming'); cancel.hidden = true; };
-  const cancel = h('button', { class: 'button quiet', type: 'button', hidden: true, onclick: () => { reset(); button.focus?.(); } }, t('acCancel'));
+  const cancel = kitButton('plain', { size, hidden: true, onclick: () => { reset(); button.focus?.(); } }, t('acCancel'));
   const el = h('span', { class: 'act' }, button, cancel, said);
   const later = app.later || ((fn, ms) => { const timer = setTimeout(fn, ms); return () => clearTimeout(timer); });
   button.addEventListener('click', () => {
@@ -121,10 +123,10 @@ export function actsLine(app, { compact = false } = {}) {
   // Acting is on but this page doesn't act (a reload lost its secret, or its acting ran out): pair it again.
   if (!here) return h(compact ? 'div' : 'p', { class: 'acts-line' + (compact ? ' compact' : '') }, h('span', null, t(compact ? 'acPairAgainShort' : 'acPairAgain', { since })), ' ', h('code', null, 'vibeswitcher web'));
   const words = level === 'confirm' ? t(compact ? 'acConfirmShort' : 'acConfirm', { since }) : t(compact ? 'acThisPageShort' : 'acThisPage', { since });
-  const off = here && app.store.can('set') ? doButton(app, { label: t('acTurnOff'), kind: 'set', quiet: true, className: 'small', args: () => ({ key: 'web_acts', value: 'off' }) }).el : null;
+  const off = here && app.store.can('set') ? doButton(app, { label: t('acTurnOff'), kind: 'set', plain: true, size: 's', args: () => ({ key: 'web_acts', value: 'off' }) }).el : null;
   // From trust a page may lower acting to a passkey per action (never raise it).
   const lower = !compact && here && level === 'trust' && acts.passkeyOrigin && app.store.can('set')
-    ? doButton(app, { label: t('acAskPasskey'), kind: 'set', quiet: true, className: 'small', args: () => ({ key: 'web_acts', value: 'confirm' }) }).el : null;
+    ? doButton(app, { label: t('acAskPasskey'), kind: 'set', plain: true, size: 's', args: () => ({ key: 'web_acts', value: 'confirm' }) }).el : null;
   // This page's words (its name, by which the terminal names it), on This node.
   const named = !compact && app.store.state.pageWords ? h('span', { class: 'page-words' }, ' ', t('pkThisPage'), ' ', h('strong', null, app.store.state.pageWords)) : null;
   return h(compact ? 'div' : 'p', { class: 'acts-line' + (compact ? ' compact' : '') }, h('span', null, words), named, lower, off);

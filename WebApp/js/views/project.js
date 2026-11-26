@@ -11,6 +11,7 @@
 //
 // Every line is the sessions' writing, drawn as text.
 
+import * as kit from '../kit.js';
 import { h, s, setText, setClass, framed } from '../dom.js';
 import { icon } from '../marks.js';
 import { clock, moment, tilde, lastPart, taskLine } from '../words.js';
@@ -61,14 +62,14 @@ export function projectView(app, { sheet }) {
   const { store, ui } = app;
   const big = h('h1', { class: 'big' });
   const name = h('span', { class: 'pname' });
-  const leadLink = h('a', { class: 'switch-link' }, t('lead'));
-  const roadLink = h('a', { class: 'switch-link' }, t('roadmap'));
-  const switcher = h('nav', { class: 'switch', 'aria-label': t('lead') + ' / ' + t('roadmap') }, leadLink, roadLink);
+  const leadLink = kit.segment({ tag: 'a' }, t('lead'));
+  const roadLink = kit.segment({ tag: 'a' }, t('roadmap'));
+  const switcher = kit.segmented({ tag: 'nav', 'aria-label': t('lead') + ' / ' + t('roadmap') }, leadLink, roadLink);
   const dialLinks = ['asks', 'decisions', 'all'].map((level) => {
     const count = h('small');
-    return { level, count, el: h('a', { class: 'switch-link' }, t({ asks: 'dialAsks', decisions: 'dialDecisions', all: 'dialAll' }[level]), count) };
+    return { level, count, el: kit.segment({ tag: 'a' }, t({ asks: 'dialAsks', decisions: 'dialDecisions', all: 'dialAll' }[level]), count) };
   });
-  const dial = h('nav', { class: 'switch dial', 'aria-label': t('dialLabel') }, dialLinks.map((link) => link.el));
+  const dial = kit.segmented({ tag: 'nav', class: 'dial', 'aria-label': t('dialLabel') }, dialLinks.map((link) => link.el));
   // On a phone (style.css's 760 px) the header is one row (the menu, the project's name, what needs you as a count, the
   // team), with Lead | Roadmap under it and the dial folded behind one button there: the level shown and its count,
   // opening the same three links as a menu. Wider, neither the count nor the fold shows and the dial stays as it is.
@@ -89,8 +90,8 @@ export function projectView(app, { sheet }) {
   dial.addEventListener('click', (event) => { if (dialOpen && event.target.closest?.('a')) foldDial(false); });
   dial.addEventListener('keydown', (event) => { if (dialOpen && event.key === 'Escape') { event.stopPropagation(); foldDial(false); dialFold.focus(); } });
   globalThis.document?.addEventListener?.('click', (event) => { if (dialOpen && !dial.contains(event.target) && !dialFold.contains(event.target)) foldDial(false); });
-  const menuButton = h('button', { class: 'icon-button phone-only', type: 'button', 'aria-label': t('menu'), onclick: () => app.drawer('left') }, icon('menu', 16));
-  const teamButton = h('button', { class: 'icon-button phone-only team-button', type: 'button', 'aria-label': t('showTeam'), onclick: () => app.drawer('right') }, icon('team', 16));
+  const menuButton = kit.iconButton({ class: 'phone-only', 'aria-label': t('menu'), onclick: () => app.drawer('left') }, icon('menu', 16));
+  const teamButton = kit.iconButton({ class: 'phone-only team-button', 'aria-label': t('showTeam'), onclick: () => app.drawer('right') }, icon('team', 16));
   const head = h('header', { class: 'centre-head' }, menuButton, h('div', { class: 'head-words' }, big, name), count, switcher, h('span', { class: 'grow' }), dialFold, dial, teamButton);
   const strip = h('div', { class: 'team-strip' });
   // On a phone the team strip is one line, whole counts only, that opens to all of them at a touch.
@@ -127,7 +128,7 @@ export function projectView(app, { sheet }) {
   const quiet = h('section', { class: 'quiet-block', hidden: true, 'aria-label': t('quietProject') },
     h('h2', { class: 'quiet-title' }, t('quietProject')), quietWords, quietLines, h('p', { class: 'confirm-note' }, t('quietNote'), ' ', quietForm));
   let quietDrawn = '';
-  const gone = h('div', { class: 'empty-state', hidden: true }, h('h2', null, t('goneProject')), h('p', null, t('goneProjectSub')), h('a', { class: 'button quiet', href: '#/' }, t('seStartPage')));
+  const gone = kit.empty({ size: 'page', class: 'empty-state', hidden: true }, h('h2', null, t('goneProject')), h('p', null, t('goneProjectSub')), kit.button('plain', { tag: 'a', href: '#/' }, t('seStartPage')));
   // The conversation and what waits on the user: two panes wide (the waiting block under the conversation, scrolling
   // in itself), one scroll on a phone (what waits first, the conversation under it): style.css's `.centre-scroll`.
   const scroller = h('div', { class: 'centre-scroll' }, talk, waitBox);
@@ -194,7 +195,7 @@ export function projectView(app, { sheet }) {
     const told = toldOf(lead, entry);
     if (told?.delivered) return [t('swReadByLead')];
     const back = told && actsFor(app, 'tell.retract')
-      ? h('button', { class: 'link take-back', type: 'button', onclick: () => takeBack(entry) }, t('swTakeBack')) : null;
+      ? kit.button('quiet', { size: 's', class: 'take-back', onclick: () => takeBack(entry) }, t('swTakeBack')) : null;
     return [entry.said || t('acToldLead'), back ? ' ' : null, back, entry.backWhy ? h('span', { class: 'refused' }, ' ', entry.backWhy) : null];
   }
   // Takes back a message the lead hasn't read (`tell.retract`); the node refuses once it has (`delivered`).
@@ -258,7 +259,7 @@ export function projectView(app, { sheet }) {
     const why = changing.get(line.key) || '';
     if (!open) {
       return [h('p', { class: 'answer-state' }, t('swNotReadYet'), ' ',
-        h('button', { class: 'link', type: 'button', onclick: () => { changing.set(line.key, ''); drawn = ''; render(); } }, t('swChange')))];
+        kit.button('quiet', { size: 's', onclick: () => { changing.set(line.key, ''); drawn = ''; render(); } }, t('swChange')))];
     }
     const replace = (text) => {
       if (!text.trim()) return;
@@ -270,12 +271,12 @@ export function projectView(app, { sheet }) {
       });
     };
     const options = (card?.question?.options || []).filter((option) => option !== line.answer);
-    const own = h('input', { class: 'answer-input', type: 'text', placeholder: t('cOwnWords'), 'aria-label': t('yourAnswer'), autocomplete: 'off', maxlength: 4000 });
+    const own = kit.field({ class: 'answer-input', type: 'text', placeholder: t('cOwnWords'), 'aria-label': t('yourAnswer'), autocomplete: 'off', maxlength: 4000 });
     return [h('div', { class: 'answer-change' },
       h('p', { class: 'answer-state' }, t('swChangeTo')),
       options.length ? h('div', { class: 'options' }, options.map((option) => h('button', { class: 'option', type: 'button', onclick: () => replace(option) }, h('span', { class: 'option-text' }, option)))) : null,
-      h('form', { class: 'answer', onsubmit: (event) => { event.preventDefault(); replace(own.value); } }, own, h('button', { class: 'button', type: 'submit' }, t('cAnswer')),
-        h('button', { class: 'button quiet', type: 'button', onclick: () => { changing.delete(line.key); drawn = ''; render(); } }, t('swKeep'))),
+      h('form', { class: 'answer', onsubmit: (event) => { event.preventDefault(); replace(own.value); } }, own, kit.button('primary', { type: 'submit' }, t('cAnswer')),
+        kit.button('plain', { onclick: () => { changing.delete(line.key); drawn = ''; render(); } }, t('swKeep'))),
       why ? h('p', { class: 'card-notice', role: 'alert' }, why) : null)];
   }
 
@@ -328,7 +329,7 @@ export function projectView(app, { sheet }) {
     const config = card.kind === 'config';
     const kind = config ? 'config.held' : 'base.show';
     const said = h('span', { class: 'act-said', role: 'status' });
-    const button = h('button', { class: 'button quiet', type: 'button', onclick: () => {
+    const button = kit.button('plain', { onclick: () => {
       button.disabled = true;
       button.setAttribute('aria-busy', 'true');
       button.textContent = t('shReading');
@@ -365,7 +366,7 @@ export function projectView(app, { sheet }) {
       whole ? showWhole(card) : null,
       acts ? h('div', { class: 'card-acts' },
         doButton(app, { label: t(config ? 'acAccept' : 'acAcceptMove'), kind: config ? 'config.accept' : 'base.accept', args: () => cardArgs(card) }).el,
-        !config && actsFor(app, 'base.keep') ? doButton(app, { label: t('acKeepBase'), kind: 'base.keep', quiet: true, args: () => cardArgs(card) }).el : null) : null,
+        !config && actsFor(app, 'base.keep') ? doButton(app, { label: t('acKeepBase'), kind: 'base.keep', plain: true, args: () => cardArgs(card) }).el : null) : null,
       acts && whole ? null
       : acts ? h('div', { class: 'card-command' }, h('span', { class: 'card-command-label' }, t('acSeeFirst')),
         config ? copyLine(`vibeswitcher config held ${shellWord(root)}`, 'the command that shows it') : copyLine(`vibeswitcher base show ${shellWord(root)}`, 'the command that shows it'))
@@ -415,9 +416,9 @@ export function projectView(app, { sheet }) {
       children.unshift(h('a', { class: 'latest-said', href: routeHref(route, { sheet: latest.key }) }, h('small', null, t('leadSaid', { time: moment(latest.at) })), cut(shortHashes(latest.head), 220)),
         h('span', { class: 'col-gap' }));
     }
-    if (!shown.length && !asks) children.push(h('p', { class: 'empty-line' }, t('emptyTalk')));
+    if (!shown.length && !asks) children.push(kit.empty({ tag: 'p', size: 'page', class: 'empty-line' }, t('emptyTalk')));
     const waits = [];
-    if (asks && !waiting) waits.push(h('p', { class: 'empty-line' }, t('emptyAsks')));
+    if (asks && !waiting) waits.push(kit.empty({ tag: 'p', size: 'page', class: 'empty-line' }, t('emptyAsks')));
     if (waiting) {
       const push = lead?.push ? 1 : 0;
       waits.push(h('h2', { class: 'asked-title' }, push && waiting === 1 ? t('pushWaits') : t('questionsForYou', { n: waiting - push }) + (push ? t('andAPush') : '')));
@@ -591,7 +592,7 @@ export function projectView(app, { sheet }) {
       children.push(h('h2', { class: 'road-head' }, t('roadQueued')), band);
       if (open) children.push(h('div', { class: 'road-queue' }, team.queued.map((task) => taskRow(task, task.after?.length ? [t('after', { list: listed(titles(task.after)) })] : [], dates))));
     }
-    if (!team.motion.length && !team.blocked.length && !team.queued.length) children.push(h('p', { class: 'empty-line' }, t('roadNothing')));
+    if (!team.motion.length && !team.blocked.length && !team.queued.length) children.push(kit.empty({ tag: 'p', size: 'page', class: 'empty-line' }, t('roadNothing')));
     col.replaceChildren(...children);
     setClass(col, 'dated', !!axis);
     talk.scrollTop = 0;
@@ -687,7 +688,7 @@ export function projectView(app, { sheet }) {
       const acts = actsFor(app, 'lead');
       quietLines.replaceChildren(...(acts ? [h('div', { class: 'card-acts quiet-starts' },
         ...leadStartOrLine(app, { folder: root, extra: () => ({ resume: true }), label: t('acResumeLead') }),
-        ...leadStartOrLine(app, { folder: root, label: t('acFreshLead'), quiet: true, baseChoice: false }))]
+        ...leadStartOrLine(app, { folder: root, label: t('acFreshLead'), plain: true, baseChoice: false }))]
         : [copyLine(`${leadLine(root)} --resume`, 'the command that starts its lead again in its conversation'),
           copyLine(leadLine(root), 'the command that starts a new lead there')]));
       quietForm.onclick = (event) => { event.preventDefault(); app.startLead?.(root); };

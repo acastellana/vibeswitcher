@@ -105,7 +105,7 @@ test('U2 phone: the lead view’s header is one row: the menu, the project’s n
   assert.equal(under(PHONE, '.project-view .centre-head .pname')['grid-row'], '1');
   assert.equal(under(PHONE, '.project-view .head-count:not([hidden])')['grid-row'], '1');
   assert.equal(under(PHONE, '.project-view .centre-head .team-button')['grid-row'], '1');
-  assert.equal(under(PHONE, '.project-view .centre-head > .switch:not(.dial)')['grid-row'], '2');
+  assert.equal(under(PHONE, '.project-view .centre-head > .segmented:not(.dial)')['grid-row'], '2');
   assert.equal(under(PHONE, '.project-view .dial-fold:not([hidden])')['grid-row'], '2');
   // Wider, the phone's parts never show.
   assert.equal(under('', '.head-count').display, 'none');
@@ -319,7 +319,7 @@ test('the keyboard on a phone: the page is the visible part’s height and place
   const app = under(PHONE, '.app.keyboard');
   assert.equal(app.height, 'var(--vv-height, 100dvh)');
   assert.equal(app.transform, 'translateY(var(--vv-top, 0px))');
-  const hidden = rules().find((rule) => rule.media === PHONE && listed(rule).includes('.app.keyboard .project-view :is(.team-strip, .dial-fold, .centre-head > .switch)'));
+  const hidden = rules().find((rule) => rule.media === PHONE && listed(rule).includes('.app.keyboard .project-view :is(.team-strip, .dial-fold, .centre-head > .segmented)'));
   assert.ok(hidden && declarations(hidden.body).display === 'none');
   // The page's own wiring: app.js follows the keyboard on a phone's width.
   const source = readFileSync(join(here, '..', 'app.js'), 'utf8');

@@ -62,7 +62,7 @@ test('U14: a setting’s Change is the page’s ordinary (quiet) button at the r
     const control = find(row, button(change));
     assert.ok(control, `${change} in ${row.textContent}`);
     assert.equal(control.tag, 'button');
-    assert.ok(control.classList.contains('button') && control.classList.contains('quiet'), control.className);
+    assert.ok(control.classList.contains('button') && control.classList.contains('plain'), control.className);
     assert.ok(!control.classList.contains('confirm-clear'), 'no longer grey text');
     // At the row's end, with the value beside it.
     const end = find(row, byClass('setting-end'));

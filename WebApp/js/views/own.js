@@ -5,6 +5,7 @@
 // - New project (#/new): the lines that make a project and start its lead, and the recent folders with theirs.
 // Nothing here starts anything: each line is copied and run in a terminal, where the code is typed.
 
+import * as kit from '../kit.js';
 import { h, setClass, setText, framed } from '../dom.js';
 import { sessionMark, icon } from '../marks.js';
 import { STATES, stateOf, since, tilde, lastPart, AGENTS } from '../words.js';
@@ -20,7 +21,7 @@ const ENDED_SHOWN = 5;
 
 function screenHead(app, title, sub) {
   return h('header', { class: 'centre-head screen-head' },
-    h('button', { class: 'icon-button phone-only', type: 'button', 'aria-label': t('menu'), onclick: () => app.drawer('left') }, icon('menu', 16)),
+    kit.iconButton({ class: 'phone-only', 'aria-label': t('menu'), onclick: () => app.drawer('left') }, icon('menu', 16)),
     h('div', { class: 'head-words' }, h('h1', { class: 'big' }, title), sub ? h('span', { class: 'pname' }, sub) : null));
 }
 
@@ -67,8 +68,8 @@ export function ownSessionsView(app, { session = null } = {}) {
   const endedNote = h('p', { class: 'confirm-note' }, t('owRunTheLineInA'));
   const ended = h('section', { class: 'ended', hidden: true }, h('h2', { class: 'new-title' }, t('owEndedLately')), endedList, endedNote);
   // The list's head: a new session (its form beside the list) and a new project.
-  const newSession = h('a', { class: 'icon-button tc-new', href: '#/sessions/new', 'aria-label': t('owNewSession'), title: t('owNewSession') }, icon('plus', 16));
-  const newProject = h('a', { class: 'icon-button', href: '#/new', 'aria-label': t('newProject'), title: t('newProject') }, icon('team', 16));
+  const newSession = kit.iconButton({ tag: 'a', class: 'tc-new', href: '#/sessions/new', 'aria-label': t('owNewSession'), title: t('owNewSession') }, icon('plus', 16));
+  const newProject = kit.iconButton({ tag: 'a', href: '#/new', 'aria-label': t('newProject'), title: t('newProject') }, icon('team', 16));
   const columns = twoColumns(app, { label: t('ownSessions'), title: t('ownSessions'), searchLabel: t('owSearch'), placeholder: t('owSearchShort'), listHref: '#/sessions', head: [newSession, newProject] });
   columns.onSearch(() => render());
   const startPage = h('div', { class: 'screen-col tc-start' }, h('p', { class: 'tc-lede' }, t('ownSub')), starting.el, ended);
@@ -103,7 +104,7 @@ export function ownSessionsView(app, { session = null } = {}) {
       setText(endedNote, actsFor(app, 'session.resume') ? t('owEndedActs') : t('owRunTheLineInA'));
       endedList.replaceChildren(...endedNow.map((entry) => h('div', { class: 'ended-row' },
         h('div', { class: 'ended-name' }, h('span', null, entry.name || t('owASession')), h('span', { class: 'ended-folder' }, tilde(entry.folder, state.node?.home))),
-        ...(entry.conversation ? resumeOrLine(app, entry, { quiet: true }) : [h('p', { class: 'confirm-note' }, t('owItsConversationIdWasnT'))]))));
+        ...(entry.conversation ? resumeOrLine(app, entry, { plain: true }) : [h('p', { class: 'confirm-note' }, t('owItsConversationIdWasnT'))]))));
     }
     columns.show({ title: t('owNewSession'), sub: mine.length ? t('owCount', { n: mine.length }) : '', body: [startPage] });
   }
@@ -148,10 +149,10 @@ export function newProjectView(app) {
       return h('div', { class: 'ended-row recent-row' },
         h('div', { class: 'ended-name' }, h('span', null, name), h('span', { class: 'ended-folder' }, tilde(one.folder, state.node?.home))),
         h('div', { class: 'recent-acts' },
-          ...startOrLine(app, { kind: 'session.new', label: t('owNewSessionHere'), quiet: true, orLine: false, args: () => ({ folder: one.folder, agent: 'claude' }),
+          ...startOrLine(app, { kind: 'session.new', label: t('owNewSessionHere'), plain: true, orLine: false, args: () => ({ folder: one.folder, agent: 'claude' }),
             line: lines.session, lineLabel: t('owStartsIn', { name }), terminalOnly: 'drStartTerminalOnly',
             target: (result) => ({ session: typeof result.session === 'string' ? result.session : null }) }),
-          ...(lines.lead ? leadStartOrLine(app, { folder: one.folder, label: t('acStartLead'), quiet: true, line: lines.lead, lineLabel: t('owTheCommandThatStartsIts') })
+          ...(lines.lead ? leadStartOrLine(app, { folder: one.folder, label: t('acStartLead'), plain: true, line: lines.lead, lineLabel: t('owTheCommandThatStartsIts') })
             : [h('a', { class: 'link', href: projectHref(one.lead) }, t('owItsLeadRunsOpenIt'))])));
     }));
   }

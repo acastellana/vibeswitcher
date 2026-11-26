@@ -13,6 +13,7 @@
 // it in the asking colour; `meta` is its count or one-word state; `group` the heading it goes under (in the order the
 // items come); `mark` a node drawn before its title, made again only when `markKey` changes.
 
+import * as kit from '../kit.js';
 import { h, setText, setClass } from '../dom.js';
 import { icon } from '../marks.js';
 import { t } from '../i18n.js';
@@ -58,20 +59,23 @@ export function marked(text, words) {
   return parts;
 }
 
+// A row's metaTone, as the badge's tones: what needs you, what works, what is done; anything else neutral.
+const BADGE_TONES = { asked: 'asking', working: 'working', done: 'done' };
+
 export function twoColumns(app, { label, title, searchLabel, placeholder = searchLabel, head = [], foot = null, listHref = null }) {
   let query = '';
   let onSearch = () => {};
-  const menu = h('button', { class: 'icon-button phone-only', type: 'button', 'aria-label': t('menu'), onclick: () => app.drawer?.('left') }, icon('menu', 16));
+  const menu = kit.iconButton({ class: 'phone-only', 'aria-label': t('menu'), onclick: () => app.drawer?.('left') }, icon('menu', 16));
   const search = h('input', {
     class: 'tc-search', type: 'search', placeholder, 'aria-label': searchLabel, spellcheck: 'false', autocomplete: 'off',
     oninput: (event) => { query = event.target.value; onSearch(query); },
   });
   const searchKey = h('kbd', { class: 'tc-key', 'aria-hidden': 'true' }, '/');
   const rows = h('div', { class: 'tc-rows' });
-  const none = h('p', { class: 'tc-none', hidden: true });
+  const none = kit.empty({ tag: 'p', class: 'tc-none', hidden: true });
   const list = h('nav', { class: 'tc-list', 'aria-label': label },
     h('header', { class: 'tc-head' }, menu, h('h1', { class: 'tc-title' }, title), h('span', { class: 'grow' }), ...head),
-    h('div', { class: 'tc-find' }, icon('search', 13), search, searchKey),
+    h('div', { class: kit.fieldClass('search', 'tc-find') }, icon('search', 13), search, searchKey),
     none, rows, foot ? h('div', { class: 'tc-foot' }, foot) : null);
   const detail = h('div', { class: 'tc-detail' });
   const el = h('section', { class: 'twocol', 'aria-label': label, data: { pane: 'list' } }, list, detail);
@@ -83,7 +87,7 @@ export function twoColumns(app, { label, title, searchLabel, placeholder = searc
     const markSlot = h('span', { class: 'tc-mark' });
     const name = h('span', { class: 'tc-name' });
     const sub = h('span', { class: 'tc-sub' });
-    const meta = h('span', { class: 'tc-meta' });
+    const meta = kit.badge('neutral', '', { class: 'tc-meta' });
     const link = h('a', { class: 'tc-row', data: { key: item.key } }, markSlot, h('span', { class: 'tc-words' }, name, sub), meta);
     let markKey = null;
     return {
@@ -99,7 +103,7 @@ export function twoColumns(app, { label, title, searchLabel, placeholder = searc
         // A time the page's clock keeps current (app.js's tick reads `data-since`).
         if (next.since) meta.dataset.since = next.since; else delete meta.dataset.since;
         meta.hidden = next.meta == null || next.meta === '';
-        meta.className = 'tc-meta' + (next.metaTone ? ` tone-text-${next.metaTone}` : '');
+        meta.className = kit.badgeClass(BADGE_TONES[next.metaTone] || 'neutral', 'tc-meta');
         setClass(link, 'asked', next.tone === 'asked');
         setClass(link, 'dim', next.tone === 'dim');
         link.title = next.about || '';
@@ -116,7 +120,7 @@ export function twoColumns(app, { label, title, searchLabel, placeholder = searc
     const nextGroups = new Map();
     for (const item of items) {
       if (item.group && !nextGroups.has(item.group)) {
-        const heading = groups.get(item.group) || h('h2', { class: 'tc-group' }, item.group);
+        const heading = groups.get(item.group) || kit.sectionTitle('h2', { class: 'tc-group' }, item.group);
         nextGroups.set(item.group, heading);
         wanted.push(heading);
       }
@@ -175,7 +179,7 @@ export function twoColumns(app, { label, title, searchLabel, placeholder = searc
   });
 
   // The detail's own header (its title, a line under it, and on a phone the way back to the list) and its body.
-  const back = h('a', { class: 'tc-back icon-button', href: listHref || '#/', 'aria-label': t('tcBackToList'), title: t('tcBackToList') }, icon('back', 16));
+  const back = kit.iconButton({ tag: 'a', class: 'tc-back', href: listHref || '#/', 'aria-label': t('tcBackToList'), title: t('tcBackToList') }, icon('back', 16));
   const detailTitle = h('h2', { class: 'tc-dtitle' });
   const detailSub = h('span', { class: 'tc-dsub' });
   const detailHead = h('header', { class: 'tc-dhead' }, back, h('div', { class: 'tc-dwords' }, detailTitle, detailSub));

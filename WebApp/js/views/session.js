@@ -2,6 +2,7 @@
 // Terminal, with the inspector beside them (the Mac's window: session | inspector). The terminal is the session's
 // screen where the node opens one (views/terminal.js), and says to use the session's own terminal elsewhere.
 
+import * as kit from '../kit.js';
 import { h, setText, setClass, framed, motionOK } from '../dom.js';
 import { agentMark, statusMark, setMark, icon } from '../marks.js';
 import { STATES, ROLES, stateOf, since, tilde, KEY, AGENTS, clock } from '../words.js';
@@ -29,23 +30,23 @@ export function sessionView(app) {
   const stateTime = h('time');
   const state = h('span', { class: 'head-state' }, stateMark, stateWord, stateTime);
   const place = h('p', { class: 'head-place' });
-  const tabs = PANES.map((pane) => h('button', {
-    type: 'button', title: `${pane.label} (${KEY.mod}${KEY.alt}${pane.key})`,
+  const tabs = PANES.map((pane) => kit.segment({
+    title: `${pane.label} (${KEY.mod}${KEY.alt}${pane.key})`,
     onclick: () => ui.setPane(ui.state.route.id, pane.id),
   }, pane.label));
   // Quiet, at the header's end, where it stays whether the inspector is open or not.
-  const toggle = h('button', {
-    class: 'icon-button inspect-toggle', type: 'button', 'aria-label': t('seInspector'), 'aria-controls': 'inspector', 'aria-expanded': 'false',
+  const toggle = kit.iconButton({
+    class: 'inspect-toggle', 'aria-label': t('seInspector'), 'aria-controls': 'inspector', 'aria-expanded': 'false',
     title: `${t('seToggleInspector')} (${KEY.mod}${KEY.alt}0)`, onclick: () => ui.toggleInspector(),
   }, icon('inspector', 16));
   // Renaming, pausing, ending a session and the rest of the Mac's row menu: the line that does each, under the header.
   const acting = actionsStrip(app);
   // On a phone (style.css's 760 px) its three dots, the words its name.
-  const end = h('button', { class: 'button quiet end-button', type: 'button', title: t('seRenamePauseOrEndThis'), 'aria-label': t('seActions'), onclick: () => acting.toggle() },
+  const end = kit.button('plain', { class: 'end-button', title: t('seRenamePauseOrEndThis'), 'aria-label': t('seActions'), onclick: () => acting.toggle() },
     icon('more', 16), h('span', { class: 'end-words' }, t('seActions')));
   // On a phone the header is one row: Terminal | Chat is this one button, the other pane's, and only where the node
   // gives this session a terminal (a tab that says the terminal comes later leads nowhere there).
-  const paneToggle = h('button', { class: 'icon-button pane-toggle', type: 'button', onclick: () => {
+  const paneToggle = kit.iconButton({ class: 'pane-toggle', onclick: () => {
     const id = ui.state.route.id;
     ui.setPane(id, ui.pane(id) === 'terminal' ? 'chat' : 'terminal');
   } });
@@ -57,13 +58,13 @@ export function sessionView(app) {
   const terminalOffered = (session) => session.hosted !== false && store.can('term.open') && store.watches?.() !== false
     && typeof app.feed?.sendBinary === 'function' && typeof app.feed?.onBinary === 'function';
   // Back: to the project a team's session works for, else to Your own sessions (on a phone it opens the left column).
-  const back = h('a', { class: 'back icon-button', href: '#/sessions', 'aria-label': t('seBack') }, icon('back', 16));
+  const back = kit.iconButton({ tag: 'a', class: 'back', href: '#/sessions', 'aria-label': t('seBack') }, icon('back', 16));
   const head = h('header', { class: 'head' },
     back,
     markSlot,
     h('div', { class: 'head-text' }, h('div', { class: 'head-line' }, title, state), place),
     end,
-    h('div', { class: 'segmented', role: 'group', 'aria-label': t('seShow') }, tabs),
+    kit.segmented({ role: 'group', 'aria-label': t('seShow') }, tabs),
     paneToggle,
     toggle);
 
@@ -78,7 +79,7 @@ export function sessionView(app) {
   // How it ended, as the host recorded it (the Mac's inspector's Exit): "exited 0 at 10:42", "killed by SIGTERM at 10:42".
   const goneExit = h('p', { class: 'gone-exit', hidden: true });
   const gone = h('div', { class: 'pane', hidden: true },
-    h('div', { class: 'placeholder' }, h('h2', null, t('seThisSessionIsnTHere')), goneWhy, goneExit, goneResume, h('a', { class: 'button quiet', href: '#/' }, t('seStartPage'))));
+    kit.empty({ size: 'page', class: 'placeholder' }, h('h2', null, t('seThisSessionIsnTHere')), goneWhy, goneExit, goneResume, kit.button('plain', { tag: 'a', href: '#/' }, t('seStartPage'))));
   let goneDrawn = '';
   function drawGone(id) {
     const entry = endedEntry(store.state.node, id);

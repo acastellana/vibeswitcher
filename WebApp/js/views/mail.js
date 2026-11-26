@@ -2,6 +2,7 @@
 // as `vibeswitcher mail` shows it. Read-only: the page reads the record (its token's `read` right) and changes nothing;
 // a project's newest 20, and Show all for every one of them (`mail` with `all`).
 
+import * as kit from '../kit.js';
 import { h, setText, framed } from '../dom.js';
 import { icon } from '../marks.js';
 import { since, plural, tilde, lastPart, dateTime } from '../words.js';
@@ -20,7 +21,7 @@ export function mailView(app) {
   const body = h('div', { class: 'node-column' });
   const el = h('section', { class: 'node mail', 'aria-label': t('mvBetweenLeads') },
     h('header', { class: 'head' },
-      h('a', { class: 'back icon-button', href: '#/node', 'aria-label': t('mvThisNode') }, icon('back', 16)),
+      kit.iconButton({ tag: 'a', class: 'back', href: '#/node', 'aria-label': t('mvThisNode') }, icon('back', 16)),
       h('div', { class: 'head-text' }, h('div', { class: 'head-line' }, h('h1', { class: 'head-title' }, t('mvBetweenLeads'))))),
     h('div', { class: 'pane node-pane' }, body));
   let result = null;
@@ -65,7 +66,7 @@ export function mailView(app) {
   // Show all: a button that reads them whole; Loading…, then all of them in the list; the node's refusal beside it.
   function showAll(entry) {
     const said = h('span', { class: 'act-said', role: 'status' });
-    const button = h('button', { class: 'button quiet small', type: 'button', onclick: () => {
+    const button = kit.button('plain', { size: 's', onclick: () => {
       button.disabled = true;
       button.setAttribute('aria-busy', 'true');
       button.textContent = t('mvLoading');
@@ -84,7 +85,7 @@ export function mailView(app) {
   function project(entry, home) {
     const messages = entry.messages || [];
     return h('section', { class: 'node-group' },
-      h('h2', { class: 'section-title' }, `${lastPart(entry.root) || entry.project} · ${t('mvMessages', { n: entry.total })}`),
+      kit.sectionTitle('h2', {}, `${lastPart(entry.root) || entry.project} · ${t('mvMessages', { n: entry.total })}`),
       messages.length ? h('ul', { class: 'mail-list' }, messages.map((message) => {
         const line = mailLine(message);
         return h('li', { class: line.sent ? 'mail-message' : 'mail-message refused' },

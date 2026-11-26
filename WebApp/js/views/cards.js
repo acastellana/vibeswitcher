@@ -9,6 +9,7 @@
 // Keys, with the focus anywhere in a card: 1–9 answer with that option, ↑ ↓ move, ↩ answers with the focused one,
 // H holds the timer. ↑ from an empty message box steps into the last card.
 
+import * as kit from '../kit.js';
 import { h, setText, setClass } from '../dom.js';
 import { icon } from '../marks.js';
 import { since, until, clock } from '../words.js';
@@ -105,7 +106,7 @@ function confirmBox(card, drafted, clear) {
   return h('div', { class: 'confirm' + (drafted.sending ? ' sending' : ''), role: 'group', 'aria-label': t('cConfirmLabel') },
     h('div', { class: 'confirm-head' },
       h('span', { class: 'confirm-label' }, drafted.sending ? t('cSaving') : t('yourAnswer')),
-      h('button', { class: 'confirm-clear', type: 'button', title: t('cTakeOff'), onclick: clear }, t('clear'))),
+      kit.button('quiet', { size: 's', title: t('cTakeOff'), onclick: clear }, t('clear'))),
     h('p', { class: 'confirm-text' }, drafted.text),
     copyLine(`vibeswitcher answer ${short}`, 'the command that sends it'),
     h('p', { class: 'confirm-note' }, t('cConfirmNote')));
@@ -227,7 +228,7 @@ export function questionCard(app, first, { expand = null } = {}) {
     if (sending) {
       el.classList.add('closed', 'sending');
       el.append(h('div', { class: 'card-closed', role: 'status' }, icon('send', 13), h('div', null,
-        h('p', null, t('cSending', { x: optionWords(card, sending.text) }), ' · ', h('button', { class: 'link card-undo', type: 'button', onclick: undo }, t('cUndo'))),
+        h('p', null, t('cSending', { x: optionWords(card, sending.text) }), ' · ', kit.button('quiet', { size: 's', class: 'card-undo', onclick: undo }, t('cUndo'))),
         h('p', { class: 'card-about' }, shortHashes(questionHead(question.text))))));
       keys = { buttons: [], hold: null };
       return;
@@ -275,7 +276,7 @@ export function questionCard(app, first, { expand = null } = {}) {
     if (counting) {
       el.append(h('div', { class: 'timer' },
         h('span', { class: 'timer-text' }, t('cGoingWith'), h('strong', null, question.proposal), ' ', h('span', { data: { until: question.decideBy } }, until(question.decideBy))),
-        app.store.can('hold') ? h('button', { class: 'button quiet', type: 'button', title: t('cHoldTitle'), onclick: hold }, icon('pause', 12), t('cHold')) : null));
+        app.store.can('hold') ? kit.button('plain', { title: t('cHoldTitle'), onclick: hold }, icon('pause', 12), t('cHold')) : null));
     } else if (held) {
       el.append(h('p', { class: 'timer held' }, t('cHeld'), h('strong', null, question.proposal), t('ccWaitsAnswer')));
     }
@@ -299,9 +300,9 @@ export function questionCard(app, first, { expand = null } = {}) {
     el.append(list.el);
 
     const draft = input?.value || '';
-    input = h('input', { class: 'answer-input', type: 'text', placeholder: question.options.length ? t('cOwnWords') : t('yourAnswer'), 'aria-label': t('yourAnswer'), autocomplete: 'off' });
+    input = kit.field({ class: 'answer-input', type: 'text', placeholder: question.options.length ? t('cOwnWords') : t('yourAnswer'), 'aria-label': t('yourAnswer'), autocomplete: 'off' });
     input.value = draft;
-    const send = h('button', { class: 'button', type: 'submit', disabled: !draft.trim() }, t('cAnswer'));
+    const send = kit.button('primary', { type: 'submit', disabled: !draft.trim() }, t('cAnswer'));
     input.addEventListener('input', () => { send.disabled = !input.value.trim(); });
     el.append(h('form', { class: 'answer', onsubmit: (event) => { event.preventDefault(); choose(input.value); } }, input, talkButton(input), send));
 
@@ -336,13 +337,13 @@ export function questionCard(app, first, { expand = null } = {}) {
 
     const own = drafted && !question.options.includes(drafted.text) ? drafted.text : '';
     const typed = input?.value ?? '';
-    input = h('input', { class: 'answer-input', type: 'text', placeholder: question.options.length ? t('cOwnWords') : t('yourAnswer'), 'aria-label': t('yourAnswer'), autocomplete: 'off', maxlength: 4000 });
+    input = kit.field({ class: 'answer-input', type: 'text', placeholder: question.options.length ? t('cOwnWords') : t('yourAnswer'), 'aria-label': t('yourAnswer'), autocomplete: 'off', maxlength: 4000 });
     input.value = typed || own;
     // Acting is on for the node but not in this tab (it isn't paired): a pick isn't a draft for a terminal, it's a choice
     // this tab can't send; the banner at the top says how to make it act.
     const level = app.store.state.node?.web?.acts?.level ?? (app.store.state.node?.web?.acts?.on ? 'trust' : 'off');
     const notYet = level !== 'off';
-    const send = h('button', { class: 'button quiet', type: 'submit', disabled: !input.value.trim() || input.value.trim() === drafted?.text }, t(notYet ? 'cChoose' : 'cDraft'));
+    const send = kit.button('plain', { type: 'submit', disabled: !input.value.trim() || input.value.trim() === drafted?.text }, t(notYet ? 'cChoose' : 'cDraft'));
     input.addEventListener('input', () => { send.disabled = !input.value.trim() || input.value.trim() === app.store.draftOf(card.id)?.text; });
     el.append(h('form', { class: 'answer', onsubmit: (event) => { event.preventDefault(); pick(input.value); } }, input, talkButton(input), send));
 
@@ -368,7 +369,7 @@ export function questionCard(app, first, { expand = null } = {}) {
     const route = app.ui?.state?.route;
     const key = lineKey('card', app.store.cardKey(card.id));
     if (route?.name === 'project') return h('a', { class: 'link', href: routeHref(route, { sheet: key }) }, t('ccReadAll'));
-    return h('button', { class: 'link', type: 'button', onclick: () => app.sheet?.open(cardSheet(card)) }, t('ccReadAll'));
+    return kit.button('quiet', { size: 's', onclick: () => app.sheet?.open(cardSheet(card)) }, t('ccReadAll'));
   }
 
   // The card is built again only when what it shows changed, so typing into it survives every other delta.
@@ -414,9 +415,9 @@ export function pushCard(lead, app = null, { onPush = null, onDecline = null, sa
   const said = pushLines(lead.push, lead.root);
   const fact = (name, ...value) => [h('dt', null, name), h('dd', null, value)];
   const acts = app && actsFor(app, 'push');
-  const button = (label, kind, go, quiet) => (go
-    ? h('button', { class: 'button' + (quiet ? ' quiet' : ''), type: 'button', onclick: go }, label)
-    : doButton(app, { label, kind, quiet, args: () => ({ folder: lead.root, request: lead.push.id }) }).el);
+  const button = (label, kind, go, plain) => (go
+    ? kit.button(plain ? 'plain' : 'primary', { onclick: go }, label)
+    : doButton(app, { label, kind, plain, args: () => ({ folder: lead.root, request: lead.push.id }) }).el);
   return h('article', { class: 'card push-card', 'aria-label': t('cPushAsk') },
     h('header', { class: 'card-head' }, h('span', { class: 'priority important' }, t('cPush')), h('span', { class: 'card-asker' }, t('askerLead')),
       h('time', { class: 'asked', data: { ago: lead.push.askedAt } }, t('askedAgo', { d: since(lead.push.askedAt) }))),
@@ -505,7 +506,7 @@ export function pushBlock(app, { onChange = () => {} } = {}) {
     if (going) {
       const words = t(going.kind === 'push' ? 'puPushing' : 'puDeclining', { short: going.short, target: going.target });
       el.replaceChildren(h('article', { class: 'card push-card closed sending', 'aria-label': t('cPushAsk') }, h('div', { class: 'card-closed', role: 'status' }, icon('send', 13), h('div', null,
-        h('p', null, words, waiting ? [' · ', h('button', { class: 'link card-undo', type: 'button', onclick: undo }, t('cUndo'))] : null),
+        h('p', null, words, waiting ? [' · ', kit.button('quiet', { size: 's', class: 'card-undo', onclick: undo }, t('cUndo'))] : null),
         h('p', { class: 'card-about' }, t('cPushAsk'))))));
       return;
     }
@@ -635,7 +636,7 @@ export function pluginCard(card, app = null) {
     // The agent's own words beside it, never among the node's facts.
     f.context ? h('p', { class: 'card-context' }, h('span', { class: 'card-context-label' }, `${f.context.label}: `), f.context.text) : null,
     wait && acting ? h('div', { class: 'card-acts' }, f.actions.map((action) => doButton(app, { label: action.label || action.word, kind: 'answer',
-      args: () => answerArgs(card, action.word), quiet: action.word !== f.actions[0]?.word }).el))
+      args: () => answerArgs(card, action.word), plain: action.word !== f.actions[0]?.word }).el))
       : wait ? h('div', { class: 'card-command' }, h('span', { class: 'card-command-label' }, t('settleInTerminal')),
         f.actions.map((action) => copyLine(action.line, action.says)))
       : h('p', { class: 'card-notice' }, f.outcome || f.state),

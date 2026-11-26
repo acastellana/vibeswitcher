@@ -6,6 +6,7 @@
 // one line. Rows are written in place (`setText`), and a fact that comes and goes while you watch keeps its row, so
 // nothing under it moves. Nothing is drawn while the inspector is closed.
 
+import * as kit from '../kit.js';
 import { h, keyed, setText, setClass, framed } from '../dom.js';
 import { statusMark, setMark, icon } from '../marks.js';
 import { STATES, AGENTS, ROLES, stateOf, since, short, moment, tilde, plural } from '../words.js';
@@ -47,7 +48,7 @@ function fact(name, ...content) {
 
 // A titled group of facts, left out while none of them has anything to say.
 function group(title, ...facts) {
-  const el = h('section', { class: 'inspect-group' }, h('h2', { class: 'group-head' }, title), h('dl', null, facts.map((entry) => entry.el)));
+  const el = h('section', { class: 'inspect-group' }, kit.sectionTitle('h2', { class: 'group-head' }, title), h('dl', null, facts.map((entry) => entry.el)));
   return { el, settle() { el.hidden = facts.every((entry) => entry.el.hidden); } };
 }
 
@@ -74,7 +75,7 @@ function overview(app) {
   const began = fact(t('inSince'));
   const running = fact(t('inRunning'));
   const says = h('p', { class: 'inspect-says' });
-  const status = h('section', { class: 'inspect-group' }, h('h2', { class: 'group-head' }, t('inStatus')), h('dl', null, state.el, began.el, running.el), says);
+  const status = h('section', { class: 'inspect-group' }, kit.sectionTitle('h2', { class: 'group-head' }, t('inStatus')), h('dl', null, state.el, began.el, running.el), says);
 
   const folder = fact(t('inFolder'));
   folder.el.classList.add('wraps');
@@ -114,7 +115,7 @@ function overview(app) {
   // Dev servers (the app's dev pages): the ports the session's processes listen on (`session.ports`), asked as the tab
   // shows and again at most every `USAGE_EVERY` ms; each opens in a new tab on the node's own machine.
   const portList = h('ul', { class: 'inspect-ports' });
-  const ports = { el: h('section', { class: 'inspect-group', hidden: true }, h('h2', { class: 'group-head' }, t('inDevServers')), portList) };
+  const ports = { el: h('section', { class: 'inspect-group', hidden: true }, kit.sectionTitle('h2', { class: 'group-head' }, t('inDevServers')), portList) };
   let portsFor = null;
   let portsAt = 0;
   let portsAsking = false;
@@ -377,8 +378,8 @@ function activityPane(app, scroller, again) {
 
 export function inspector(app) {
   const { store, ui } = app;
-  const tabs = TABS.map((tab) => h('button', { type: 'button', onclick: () => ui.setInspectorTab(tab.id) }, tab.label));
-  const close = h('button', { class: 'icon-button inspect-close', type: 'button', 'aria-label': t('inCloseTheInspector'), onclick: () => ui.setInspector(false) }, icon('close', 14));
+  const tabs = TABS.map((tab) => kit.segment({ onclick: () => ui.setInspectorTab(tab.id) }, tab.label));
+  const close = kit.iconButton({ class: 'inspect-close', 'aria-label': t('inCloseTheInspector'), onclick: () => ui.setInspector(false) }, icon('close', 14));
   const scroller = h('div', { class: 'inspect-scroll' });
   let current = null;
   const again = framed(() => {
@@ -388,7 +389,7 @@ export function inspector(app) {
   const panes = { team: teamPane(app), overview: overview(app), activity: activityPane(app, scroller, again) };
   scroller.append(panes.team.el, panes.overview.el, panes.activity.el);
   const el = h('aside', { class: 'inspector', id: 'inspector', 'aria-label': t('inInspector') },
-    h('div', { class: 'inspect-top' }, h('div', { class: 'segmented', role: 'group', 'aria-label': t('inInspector') }, tabs), close), scroller);
+    h('div', { class: 'inspect-top' }, kit.segmented({ role: 'group', 'aria-label': t('inInspector') }, tabs), close), scroller);
   // Under a sheet: a touch beside it closes it.
   const scrim = h('div', { class: 'inspect-scrim', onclick: () => ui.setInspector(false) });
   let shownTab = null;

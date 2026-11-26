@@ -1,6 +1,7 @@
 // This node: the session host, the server, the build it runs, and what it wants you to know. `vibeswitcher status`
 // as a page, in the same order and the same words (Sources/vibeswitcher-cli/Status.swift).
 
+import * as kit from '../kit.js';
 import { h, framed } from '../dom.js';
 import { icon } from '../marks.js';
 import { since, plural, tilde, dateTime } from '../words.js';
@@ -68,7 +69,7 @@ function showRows(el, words, all = false) {
 
 const row = (name, ...value) => h('div', { class: 'fact' }, h('dt', null, name), h('dd', null, value));
 const ago = (iso) => (iso ? h('time', { data: { since: iso }, title: dateTime(iso) }, since(iso)) : 'unknown');
-const group = (title, ...children) => h('section', { class: 'node-group' }, h('h2', { class: 'section-title' }, title), children);
+const group = (title, ...children) => h('section', { class: 'node-group' }, kit.sectionTitle('h2', {}, title), children);
 
 // The account's usage (the node's `usage`): each limit known, the ones holding work back marked; null before the
 // node's first read. Also on Settings.
@@ -169,7 +170,7 @@ function passkeysPart(acts) {
   const when = (iso) => (iso ? dateTime(iso) : t('pkNeverUsed'));
   return h('div', { class: 'passkeys' },
     acts.notice ? h('p', { class: 'node-says passkey-notice' }, acts.notice) : null,
-    keys.length ? h('p', { class: 'col-title' }, t('pkKeys', { n: keys.length })) : null,
+    keys.length ? kit.sectionTitle('p', { class: 'col-title' }, t('pkKeys', { n: keys.length })) : null,
     keys.map((key) => h('p', { class: 'passkey-row' }, h('code', null, key.id), ' ', t('pkKeyWhen', { added: when(key.added), used: when(key.lastUsed) }))));
 }
 
@@ -194,7 +195,7 @@ export function nodeView(app) {
       const items = result?.items || [];
       el.hidden = !items.length && !(result?.own || []).length && !result?.terminal?.count;
       self.count = items.length + (result?.own || []).length + (result?.terminal?.count || 0);
-      el.replaceChildren(h('h2', { class: 'section-title' }, t('acApproveTitle')),
+      el.replaceChildren(kit.sectionTitle('h2', {}, t('acApproveTitle')),
         items.length ? h('ol', { class: 'approve-list' }, items.map((item) => h('li', null, h('b', null, item.subject || item.kind), (item.reasons || []).length ? h('ul', { class: 'lines' }, item.reasons.map((reason) => h('li', null, reason))) : null))) : null,
         items.length && result.batch ? doButton(app, { label: t('acApproveAll', { n: items.length }), kind: 'approve', args: () => ({ batch: result.batch, seen: items.map((item) => item.seen ?? null) }), done: load }).el : null,
         // What a page may not approve (the hooks' install): left out of the list, its count and the terminal's command.
@@ -214,8 +215,8 @@ export function nodeView(app) {
       const list = reply.ok ? reply.result.plugins || [] : [];
       el.replaceChildren(...list.map((plugin) => h('div', { class: 'plugin-act' },
         h('span', { class: 'plugin-act-name' }, plugin.title || plugin.id, h('small', null, plugin.unavailable || (plugin.on ? t('noOn') : t('noOff')))),
-        doButton(app, { label: plugin.on ? t('acTurnOff') : t('acTurnOn'), kind: plugin.on ? 'plugin.off' : 'plugin.on', quiet: plugin.on, args: () => ({ plugin: plugin.id }), done: load }).el,
-        plugin.id !== 'shell' && store.can('plugin.remove') ? doButton(app, { label: t('acRemove'), kind: 'plugin.remove', quiet: true, confirm: t('acRemoveSure'), args: () => ({ plugin: plugin.id }), done: load }).el : null)));
+        doButton(app, { label: plugin.on ? t('acTurnOff') : t('acTurnOn'), kind: plugin.on ? 'plugin.off' : 'plugin.on', plain: plugin.on, args: () => ({ plugin: plugin.id }), done: load }).el,
+        plugin.id !== 'shell' && store.can('plugin.remove') ? doButton(app, { label: t('acRemove'), kind: 'plugin.remove', plain: true, confirm: t('acRemoveSure'), args: () => ({ plugin: plugin.id }), done: load }).el : null)));
     });
     return { el, refresh(key) { if (key !== asked) { asked = key; load(); } } };
   })();
@@ -245,7 +246,7 @@ export function nodeView(app) {
     const top = usage?.limits?.length ? Math.max(...usage.limits.map((limit) => limit.percent)) : null;
     return [
       approving ? { key: 'approve', title: t('acApproveTitle'), meta: approveActs.count ? String(approveActs.count) : '', tone: 'asked', metaTone: 'asked', el: approveActs.el } : null,
-      notices.length ? { key: 'notices', title: t('noNotices'), meta: String(notices.length), metaTone: 'working', el: h('section', { class: 'node-group' }, h('h2', { class: 'section-title' }, plural(notices.length, t('noNotice'))),
+      notices.length ? { key: 'notices', title: t('noNotices'), meta: String(notices.length), metaTone: 'working', el: h('section', { class: 'node-group' }, kit.sectionTitle('h2', {}, plural(notices.length, t('noNotice'))),
         h('ul', { class: 'notices' }, notices.map((notice) => h('li', null, icon('warning', 14), h('span', null, notice))))) } : null,
       // Acting from a page (`web_acts`): whether this page acts for you and since when, and the switch.
       node.web?.acts ? { key: 'acting', title: t('acGroupTitle'), meta: store.acts() ? t('noOn') : t('noOff'), el: group(t('acGroupTitle'), actsLine(app), passkeysPart(node.web.acts)) } : null,
@@ -353,7 +354,7 @@ export function nodeView(app) {
     const top = verdictOf(node);
     for (const one of groups) { unmarkWords(one.el); if (!words.length) showRows(one.el, null); }
     if (!chosen) {
-      columns.show({ title: t('noThisNode'), top, body: [h('p', { class: 'tc-empty' }, t('noNoMatchLong', { query: query.trim() }))] });
+      columns.show({ title: t('noThisNode'), top, body: [kit.empty({ tag: 'p', size: 'page', class: 'tc-empty' }, t('noNoMatchLong', { query: query.trim() }))] });
       return;
     }
     if (words.length) {

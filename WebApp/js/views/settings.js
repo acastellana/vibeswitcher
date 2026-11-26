@@ -5,6 +5,7 @@
 // (`set`) and may set it, else the line that sets it from a terminal (`vibeswitcher set …`, a click to copy), where the
 // change is shown and a code asked. Never both.
 
+import * as kit from '../kit.js';
 import { h, setText, framed } from '../dom.js';
 import { icon } from '../marks.js';
 import { tilde, lastPart } from '../words.js';
@@ -35,11 +36,11 @@ function settingRow(setting, { folder, home, editing, toggle, app = null, words 
   const drafted = editing.get(setting.key);
   const value = h('code', { class: 'setting-value', title: setting.value }, shownValue(setting) || t('svEmpty'));
   const marks = [
-    setting.isDefault ? h('span', { class: 'setting-mark' }, t('svMarkDefault')) : h('span', { class: 'setting-mark changed', title: t('svDefaultIs', { x: setting.default }) }, t('svMarkChanged')),
-    setting.guardRail ? h('span', { class: 'setting-mark rail', title: t('svAChangeHereIsRecorded') }, t('svMarkRail')) : null,
+    setting.isDefault ? kit.badge('neutral', t('svMarkDefault'), { class: 'setting-mark' }) : kit.badge('neutral', t('svMarkChanged'), { class: 'setting-mark changed', title: t('svDefaultIs', { x: setting.default }) }),
+    setting.guardRail ? kit.badge('neutral', t('svMarkRail'), { class: 'setting-mark rail', title: t('svAChangeHereIsRecorded') }) : null,
   ];
   // A control that looks like one (the page's quiet button), always at the row's end with the value beside it.
-  const change = h('button', { class: 'button quiet small setting-change', type: 'button', 'aria-expanded': String(drafted != null), onclick: () => toggle(setting) },
+  const change = kit.button('plain', { size: 's', class: 'setting-change', 'aria-expanded': String(drafted != null), onclick: () => toggle(setting) },
     drafted != null ? t('svClose') : t('svChange'));
   // The machine-wide limits' file keeps the Mac's name (mac-limits.json, which the leads' tools read): this node's.
   const where = [setting.home === 'floor' ? setting.where : (setting.home === 'limits' ? t('svThisNodeSLimits') : '') + tilde(setting.where, home)];
@@ -89,21 +90,21 @@ export function editor(setting, folder, editing, app = null) {
     case 'flag':
     case 'choice': {
       const choices = setting.form === 'flag' ? ['on', 'off'] : setting.choices;
-      control = h('select', { class: 'setting-input', 'aria-label': name, onchange: (event) => take(event.target.value) },
+      control = kit.select({ wrap: 'setting-input', 'aria-label': name, onchange: (event) => take(event.target.value) },
         choices.map((choice) => h('option', { value: choice, selected: choice === editing.get(setting.key) }, choice)));
       break;
     }
     case 'text':
-      control = h('textarea', { class: 'setting-input setting-text', rows: 7, 'aria-label': name, oninput: (event) => take(event.target.value) });
+      control = kit.field({ tag: 'textarea', kind: 'code', class: 'setting-input setting-text', rows: 7, 'aria-label': name, oninput: (event) => take(event.target.value) });
       control.value = editing.get(setting.key) ?? '';
       break;
     default:
-      control = h('input', { class: 'setting-input', 'aria-label': name, inputmode: setting.form === 'count' || setting.form === 'number' ? 'decimal' : 'text',
+      control = kit.field({ kind: 'code', class: 'setting-input', 'aria-label': name, inputmode: setting.form === 'count' || setting.form === 'number' ? 'decimal' : 'text',
         spellcheck: 'false', autocomplete: 'off', oninput: (event) => take(event.target.value) });
       control.value = editing.get(setting.key) ?? '';
   }
-  const reset = h('button', { class: 'confirm-clear', type: 'button', title: t('svDraftTheLineThatPuts'), onclick: () => {
-    if (control.tagName !== 'SELECT') control.value = 'default';
+  const reset = kit.button('quiet', { size: 's', title: t('svDraftTheLineThatPuts'), onclick: () => {
+    if (!control.control) control.value = 'default';
     take('default');
   } }, t('svDefault'));
   draw();
@@ -248,7 +249,7 @@ export function settingsView(app) {
       return;
     }
     if (!chosen) {
-      columns.show({ title: t('svSettings'), body: [h('p', { class: 'tc-empty' }, words.length ? t('svNoMatchLong', { query: query.trim() }) : t('svNoneHere'))] });
+      columns.show({ title: t('svSettings'), body: [kit.empty({ tag: 'p', size: 'page', class: 'tc-empty' }, words.length ? t('svNoMatchLong', { query: query.trim() }) : t('svNoneHere'))] });
       return;
     }
     const counted = chosen.kind === 'settings' ? (words.length ? t('svMatchCount', { n: chosen.matches.length }) : t('svCount', { n: chosen.settings.length })) : '';

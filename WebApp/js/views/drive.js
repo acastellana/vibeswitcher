@@ -3,6 +3,7 @@
 // the session (`session.draft`), and everything else is the one line that does it in a terminal, a click to copy. The
 // node shows that line's effect when it happens; the terminal asks for the typed code first.
 
+import * as kit from '../kit.js';
 import { h, setText, setClass } from '../dom.js';
 import { icon } from '../marks.js';
 import { AGENTS } from '../words.js';
@@ -46,11 +47,11 @@ export function draftBox(app, { edit }) {
   const refused = h('p', { class: 'card-notice', role: 'alert', hidden: true });
   let id = null;
   let drawn = '';
-  const editButton = h('button', { class: 'confirm-clear', type: 'button', title: t('drPutTheMessageBackIn'), onclick: () => {
+  const editButton = kit.button('quiet', { size: 's', title: t('drPutTheMessageBackIn'), onclick: () => {
     const drafted = app.store.sessionDraftOf(id);
     if (drafted) edit(drafted.text, drafted.images || []);
   } }, t('drEdit'));
-  const discard = h('button', { class: 'confirm-clear', type: 'button', title: t('drTakeTheDraftOffThe'), onclick: () => app.store.sessionDraft(id, null) }, t('drDiscard'));
+  const discard = kit.button('quiet', { size: 's', title: t('drTakeTheDraftOffThe'), onclick: () => app.store.sessionDraft(id, null) }, t('drDiscard'));
   const note = h('p', { class: 'confirm-note' }, t('drRunItInATerminal'));
   const el = h('div', { class: 'confirm composer-draft', role: 'group', 'aria-label': t('drSendYourMessageFromA'), hidden: true },
     h('div', { class: 'confirm-head' }, label, h('span', { class: 'confirm-actions' }, editButton, discard)), text, pictures, lineSlot, note, refused);
@@ -218,7 +219,7 @@ export function promptCard(app) {
     if (mine?.phase === 'waiting') {
       el.classList.add('closed', 'sending');
       return closedCard(session, icon('send', 13), h('div', null, h('p', null, t('cSending', { x: mine.text ? `${mine.option}: ${mine.text}` : mine.option }), ' · ',
-        h('button', { class: 'link card-undo', type: 'button', onclick: undo }, t('cUndo'))), h('p', { class: 'card-about' }, mine.question.split('\n').at(-1))));
+        kit.button('quiet', { size: 's', class: 'card-undo', onclick: undo }, t('cUndo'))), h('p', { class: 'card-about' }, mine.question.split('\n').at(-1))));
     }
     if (mine?.phase === 'sending') {
       el.classList.add('closed', 'sending');
@@ -259,8 +260,8 @@ export function promptCard(app) {
       parts.push(h('div', { class: 'options' }, buttons));
       if (chosen !== null && takes.has(chosen)) {
         const index = chosen;
-        const input = h('input', { class: 'answer-input', type: 'text', value: words, placeholder: t('drYourWords'), 'aria-label': t('drYourWordsForThisOption'), autocomplete: 'off' });
-        const send = h('button', { class: 'button', type: 'submit', disabled: !words.trim() }, t('drReplySend'));
+        const input = kit.field({ class: 'answer-input', type: 'text', value: words, placeholder: t('drYourWords'), 'aria-label': t('drYourWordsForThisOption'), autocomplete: 'off' });
+        const send = kit.button('primary', { type: 'submit', disabled: !words.trim() }, t('drReplySend'));
         input.addEventListener('input', () => { words = input.value; send.disabled = !words.trim(); });
         parts.push(h('form', { class: 'answer', onsubmit: (event) => { event.preventDefault(); if (words.trim()) { const text = words.trim(); words = ''; chosen = null; answer(session, index, text); } } }, input, send));
       }
@@ -270,7 +271,7 @@ export function promptCard(app) {
     } else {
       parts.push(h('div', { class: 'options' }, buttons));
       if (chosen !== null && takes.has(chosen)) {
-        const input = h('input', { class: 'answer-input', type: 'text', value: words, placeholder: t('drYourWords'), 'aria-label': t('drYourWordsForThisOption'),
+        const input = kit.field({ class: 'answer-input', type: 'text', value: words, placeholder: t('drYourWords'), 'aria-label': t('drYourWordsForThisOption'),
           oninput: () => { words = input.value; line.replaceChildren(command()); } });
         parts.push(input);
       }
@@ -331,9 +332,9 @@ export function actionsStrip(app = null) {
     { id: 'shells', label: t('drCloseShells') },
     { id: 'resume', label: t('drResume') },
   ];
-  const tabs = h('div', { class: 'segmented', role: 'group', 'aria-label': t('drDo') });
+  const tabs = kit.segmented({ role: 'group', 'aria-label': t('drDo') });
   const panel = h('div', { class: 'action-panel' });
-  const close = h('button', { class: 'icon-button', type: 'button', 'aria-label': t('drClose'), title: t('drClose') }, icon('close', 13));
+  const close = kit.iconButton({ 'aria-label': t('drClose'), title: t('drClose') }, icon('close', 13));
   const el = h('div', { class: 'end-strip action-strip', role: 'group', 'aria-label': t('drRenamePauseOrEndThis'), hidden: true }, tabs, panel, close);
   let opened = false;
   let tab = 'rename';
@@ -364,7 +365,7 @@ export function actionsStrip(app = null) {
   function body() {
     if (tab === 'rename') {
       if (typed === null) typed = session.name || '';
-      const input = h('input', { class: 'answer-input', type: 'text', value: typed, placeholder: session.task || t('drItsOwnName'), 'aria-label': t('drName'), spellcheck: 'false', autocomplete: 'off' });
+      const input = kit.field({ class: 'answer-input', type: 'text', value: typed, placeholder: session.task || t('drItsOwnName'), 'aria-label': t('drName'), spellcheck: 'false', autocomplete: 'off' });
       const slot = h('div');
       const fill = () => {
         const text = renameLine(session, typed);
@@ -381,8 +382,8 @@ export function actionsStrip(app = null) {
         return line(pauseLine(session, 'off'), t('drTheCommandThatResumesIts'),
           t('drPausedGreyedOutNeverReminded'), 'session.pause', { session: session.id, for: 'off' });
       }
-      const choices = h('div', { class: 'segmented presets', role: 'group', 'aria-label': t('drForHowLong') }, PAUSES.map((one) => h('button', {
-        type: 'button', 'aria-pressed': String(one.id === pause), onclick: () => { pause = one.id; draw(true); },
+      const choices = kit.segmented({ class: 'presets', role: 'group', 'aria-label': t('drForHowLong') }, PAUSES.map((one) => kit.segment({
+        'aria-pressed': String(one.id === pause), onclick: () => { pause = one.id; draw(true); },
       }, one.label)));
       return [choices, ...line(pauseLine(session, pause), t('drTheCommandThatPausesIt'), t('drGreyedOutAndNothingReminds'), 'session.pause', { session: session.id, ...pauseArgs(pause) })];
     }
@@ -406,8 +407,8 @@ export function actionsStrip(app = null) {
     const key = JSON.stringify([session?.id, session?.name, session?.paused, session?.cwd, can, tab, pause, endedEntry(node, session?.id), app?.store.acts()]);
     if (!force && key === drawn) return;
     drawn = key;
-    tabs.replaceChildren(...TABS.filter((one) => can.includes(one.id)).map((one) => h('button', {
-      type: 'button', 'aria-pressed': String(one.id === tab), onclick: () => { tab = one.id; draw(true); el.querySelector('.action-panel input, .action-panel .copy-button')?.focus(); },
+    tabs.replaceChildren(...TABS.filter((one) => can.includes(one.id)).map((one) => kit.segment({
+      'aria-pressed': String(one.id === tab), onclick: () => { tab = one.id; draw(true); el.querySelector('.action-panel input, .action-panel .copy-button')?.focus(); },
     }, one.id === 'pause' && session?.paused ? t('drResumeNotifications') : one.label)));
     tabs.hidden = can.length < 2;
     panel.replaceChildren(...(session && can.length ? body() : []).filter(Boolean));
@@ -476,7 +477,7 @@ export function shellsPanel(app, folder) {
 // `note(result)` what to say instead of going (a lead that waits for its host). `busy`: the button's words while it
 // is out; `orLine`: the terminal's line beside the button too (false: the button alone, the line only where there is
 // none). Returns the slot's nodes.
-export function startOrLine(app, { kind, label, args, line, lineLabel, terminalOnly, target, note = () => null, busy = null, orLine = true, quiet = false, after = null, confirm = null }) {
+export function startOrLine(app, { kind, label, args, line, lineLabel, terminalOnly, target, note = () => null, busy = null, orLine = true, plain = false, after = null, confirm = null }) {
   if (!actsFor(app, kind)) {
     return [line ? copyLine(line, lineLabel) : null, h('p', { class: 'confirm-note start-why' }, app.store.acts() ? t(terminalOnly) : t('drStartPageReads'))].filter(Boolean);
   }
@@ -484,7 +485,7 @@ export function startOrLine(app, { kind, label, args, line, lineLabel, terminalO
   // Where the user was when it started: the page goes to what started only while they are still there.
   const here = () => JSON.stringify(app.ui.state?.route ?? null);
   let from = null;
-  const button = doButton(app, { label, kind, args, quiet, confirm, className: 'start-button', busy: busy || t('drStarting'), done: (reply) => {
+  const button = doButton(app, { label, kind, args, plain, confirm, className: 'start-button', busy: busy || t('drStarting'), done: (reply) => {
     stop();
     after?.(reply.result || {}, button);
     // Started: the button doesn't start a second one (the form drawn again for another folder or preset gives a new one).
@@ -540,7 +541,7 @@ export function baseMoveOf(app, folder) {
 // (`takeHead`: the lead starts on the branch as it is now, the move not asked again); where the lead runs without its
 // role and nothing started (the node's answer), Replace it (`replace`: a new lead takes the role, a second click in
 // place). Returns the slot's nodes.
-export function leadStartOrLine(app, { folder, extra = () => ({}), label, quiet = false, line, lineLabel, orLine = false, baseChoice = true }) {
+export function leadStartOrLine(app, { folder, extra = () => ({}), label, plain = false, line, lineLabel, orLine = false, baseChoice = true }) {
   const choices = h('div', { class: 'lead-choices', hidden: true });
   const go = (result) => ({ lead: typeof result.session === 'string' ? result.session : null });
   const words = (result) => (result.happened === 'waiting' ? t('drLeadWaiting') : leadNeeds(result) === 'replace' ? t('drLeadNoRole') : null);
@@ -551,21 +552,21 @@ export function leadStartOrLine(app, { folder, extra = () => ({}), label, quiet 
       ...startOrLine(app, { kind: 'lead', label: t('drReplaceLead'), busy: t('drReplacing'), confirm: t('drReplaceSure'), orLine: false,
         args: () => ({ folder, ...extra(), replace: true }), terminalOnly: 'drLeadTerminalOnly', target: go, note: words }));
   };
-  const start = startOrLine(app, { kind: 'lead', label, quiet, orLine, args: () => ({ folder, ...extra() }), line, lineLabel, terminalOnly: 'drLeadTerminalOnly',
+  const start = startOrLine(app, { kind: 'lead', label, plain, orLine, args: () => ({ folder, ...extra() }), line, lineLabel, terminalOnly: 'drLeadTerminalOnly',
     target: go, note: words, after: offerReplace });
   const base = baseChoice && actsFor(app, 'lead') ? baseMoveOf(app, folder) : null;
   if (!base) return [...start, choices];
   const moved = base.base;
   return [...start, h('div', { class: 'lead-choices base-choice' },
     h('p', { class: 'confirm-note choice-what' }, t('drTakeBaseWhat', { branch: moved.branch || '', to: String(moved.to || '').slice(0, 8) })),
-    ...startOrLine(app, { kind: 'lead', label: t('drTakeBase'), quiet: true, orLine: false, args: () => ({ folder, ...extra(), takeHead: true }),
+    ...startOrLine(app, { kind: 'lead', label: t('drTakeBase'), plain: true, orLine: false, args: () => ({ folder, ...extra(), takeHead: true }),
       terminalOnly: 'drLeadTerminalOnly', target: go, note: words, after: offerReplace })), choices];
 }
 
 // Resume for an ended session of yours (`session.resume`): started again in its conversation, the page goes to it once
 // the node lists it; what the node refused (no conversation recorded) said beside it. Elsewhere its line and why.
-export function resumeOrLine(app, entry, { quiet = false } = {}) {
-  return startOrLine(app, { kind: 'session.resume', label: t('acResume'), busy: t('drResuming'), quiet, orLine: false,
+export function resumeOrLine(app, entry, { plain = false } = {}) {
+  return startOrLine(app, { kind: 'session.resume', label: t('acResume'), busy: t('drResuming'), plain, orLine: false,
     args: () => ({ session: entry.session }), line: resumeLine(entry), lineLabel: t('drTheCommandThatResumesIt'), terminalOnly: 'drResumeTerminalOnly',
     target: (result) => ({ session: typeof result.reopened?.[0]?.session === 'string' ? result.reopened[0].session : null }),
     note: (result) => (!result.reopened?.length && result.refused?.length ? t('drResumeRefused', { why: result.refused[0].why || '' }) : null) });
@@ -577,8 +578,8 @@ export function resumeOrLine(app, entry, { quiet = false } = {}) {
 // Starting a project lead in a folder (the Mac's Start Project Lead…, and the palette's "Start Project Lead in …"): the
 // folder and the goal, and the line that starts it, a click to copy. Returns { el, choose(folder), update() }.
 export function newLeadForm(app) {
-  const path = h('input', { class: 'answer-input', type: 'text', placeholder: t('drPathPlaceholder'), 'aria-label': t('drProjectFolder'), spellcheck: 'false', autocomplete: 'off' });
-  const goal = h('textarea', { class: 'answer-input lead-goal', rows: 2, placeholder: t('drTheGoalOptionalWithoutOne'), 'aria-label': t('drGoal') });
+  const path = kit.field({ class: 'answer-input', type: 'text', placeholder: t('drPathPlaceholder'), 'aria-label': t('drProjectFolder'), spellcheck: 'false', autocomplete: 'off' });
+  const goal = kit.field({ tag: 'textarea', class: 'answer-input lead-goal', rows: 2, placeholder: t('drTheGoalOptionalWithoutOne'), 'aria-label': t('drGoal') });
   const lineSlot = h('div', { class: 'prompt-line' });
   const el = h('section', { class: 'new-session new-lead', 'aria-label': t('drStartAProjectLead') },
     h('div', { class: 'new-head' }, h('h2', { class: 'new-title' }, t('drStartAProjectLead'))),
@@ -619,9 +620,9 @@ export function newLeadForm(app) {
 // New Project… (the Mac's sheet): a name, where (the node's projects folder when empty) and a goal, drafted as the
 // `vibeswitcher new-project` line that makes its folder, repository and first commit, then starts its lead.
 export function newProjectForm(app) {
-  const name = h('input', { class: 'answer-input', type: 'text', placeholder: t('drProjectName'), 'aria-label': t('drProjectName'), spellcheck: 'false', autocomplete: 'off' });
-  const location = h('input', { class: 'answer-input', type: 'text', placeholder: t('drWhereOptionalTheNodeS'), 'aria-label': t('drWhere'), spellcheck: 'false', autocomplete: 'off' });
-  const goal = h('textarea', { class: 'answer-input lead-goal', rows: 2, placeholder: t('drTheGoalOptional'), 'aria-label': t('drGoal') });
+  const name = kit.field({ class: 'answer-input', type: 'text', placeholder: t('drProjectName'), 'aria-label': t('drProjectName'), spellcheck: 'false', autocomplete: 'off' });
+  const location = kit.field({ class: 'answer-input', type: 'text', placeholder: t('drWhereOptionalTheNodeS'), 'aria-label': t('drWhere'), spellcheck: 'false', autocomplete: 'off' });
+  const goal = kit.field({ tag: 'textarea', class: 'answer-input lead-goal', rows: 2, placeholder: t('drTheGoalOptional'), 'aria-label': t('drGoal') });
   const folderNote = h('p', { class: 'confirm-note', hidden: true });
   const lineSlot = h('div', { class: 'prompt-line' });
   const el = h('section', { class: 'new-session new-project', 'aria-label': t('drNewProject') },
@@ -654,14 +655,14 @@ export function newSessionForm(app, { folder }) {
   let picked = false;
   let asked = null;
   let timer = null;
-  const path = h('input', { class: 'answer-input', type: 'text', placeholder: t('drPathPlaceholder'), 'aria-label': t('drFolder'), spellcheck: 'false', autocomplete: 'off' });
-  const model = h('input', { class: 'answer-input model-input', type: 'text', placeholder: t('drModelOptional'), 'aria-label': t('drModel'), spellcheck: 'false', autocomplete: 'off' });
-  const kinds = h('div', { class: 'segmented presets', role: 'group', 'aria-label': t('drPreset') });
+  const path = kit.field({ class: 'answer-input', type: 'text', placeholder: t('drPathPlaceholder'), 'aria-label': t('drFolder'), spellcheck: 'false', autocomplete: 'off' });
+  const model = kit.field({ class: 'answer-input model-input', type: 'text', placeholder: t('drModelOptional'), 'aria-label': t('drModel'), spellcheck: 'false', autocomplete: 'off' });
+  const kinds = kit.segmented({ class: 'presets', role: 'group', 'aria-label': t('drPreset') });
   const about = h('p', { class: 'confirm-note preset-about', hidden: true });
   const lineSlot = h('div', { class: 'prompt-line' });
   // Adding, changing and removing the folder's presets: the `vibeswitcher preset` line for each.
   const editor = presetEditor({ folder: () => where(), app, saved: () => { asked = null; ask(); } });
-  const editing = h('button', { class: 'confirm-clear preset-edit-toggle', type: 'button', 'aria-expanded': 'false', onclick: () => {
+  const editing = kit.button('quiet', { size: 's', class: 'preset-edit-toggle', 'aria-expanded': 'false', onclick: () => {
     const open = editor.el.hidden;
     editor.el.hidden = !open;
     editing.setAttribute('aria-expanded', String(open));
@@ -702,8 +703,8 @@ export function newSessionForm(app, { folder }) {
 
   function draw() {
     const preset = presets.find((one) => one.name === chosen && !one.refused) || presets.find((one) => one.name === chosen) || presets[0];
-    kinds.replaceChildren(...presets.map((one) => h('button', {
-      type: 'button', 'aria-pressed': String(one === preset), disabled: !!one.refused, title: one.refused ? t('drCantStartHere', { why: one.refused }) : presetNote(one),
+    kinds.replaceChildren(...presets.map((one) => kit.segment({
+      'aria-pressed': String(one === preset), disabled: !!one.refused, title: one.refused ? t('drCantStartHere', { why: one.refused }) : presetNote(one),
       onclick: () => { chosen = one.name; picked = true; draw(); },
     }, one.name)));
     model.hidden = preset.kind === 'shell';
@@ -826,11 +827,11 @@ export function presetEditor({ folder, app = null, saved = () => {} }) {
       name: original?.name || '', kind: original?.kind === 'shell' ? 'shell' : 'claude', args: original ? presetArgs(original) : '',
       keepShell: !!original?.keepShell, isDefault: false, env: [], unset: [], scoped: original ? !!original.project : !!where,
     };
-    const name = h('input', { class: 'answer-input', type: 'text', value: state.name, placeholder: t('drName'), 'aria-label': t('drPresetName'), spellcheck: 'false', autocomplete: 'off' });
-    const args = h('input', { class: 'answer-input', type: 'text', value: state.args, placeholder: t('drClaudeSArgumentsEG'), 'aria-label': t('drClaudeSArguments'), spellcheck: 'false', autocomplete: 'off' });
-    const kinds = h('div', { class: 'segmented', role: 'group', 'aria-label': t('drRuns') });
+    const name = kit.field({ class: 'answer-input', type: 'text', value: state.name, placeholder: t('drName'), 'aria-label': t('drPresetName'), spellcheck: 'false', autocomplete: 'off' });
+    const args = kit.field({ class: 'answer-input', type: 'text', value: state.args, placeholder: t('drClaudeSArgumentsEG'), 'aria-label': t('drClaudeSArguments'), spellcheck: 'false', autocomplete: 'off' });
+    const kinds = kit.segmented({ role: 'group', 'aria-label': t('drRuns') });
     const tick = (label, key, disabled = false) => {
-      const box = h('input', { type: 'checkbox', disabled });
+      const box = kit.checkbox({ disabled });
       box.checked = state[key];
       box.addEventListener('change', () => { state[key] = box.checked; fill(); });
       return h('label', { class: 'preset-tick' }, box, ' ', label);
@@ -839,19 +840,19 @@ export function presetEditor({ folder, app = null, saved = () => {} }) {
     const lineSlot = h('div', { class: 'prompt-line' });
     const listId = 'preset-variables';
     const names = h('datalist', { id: listId }, PRESET_VARIABLES.map((variable) => h('option', { value: variable })));
-    const addVariable = h('button', { class: 'confirm-clear', type: 'button', onclick: () => { state.env.push(['', '']); drawVariables(); variables.querySelector('.preset-var:last-child input')?.focus(); } }, t('drAddAVariable'));
+    const addVariable = kit.button('quiet', { size: 's', onclick: () => { state.env.push(['', '']); drawVariables(); variables.querySelector('.preset-var:last-child input')?.focus(); } }, t('drAddAVariable'));
 
     function drawVariables() {
       const kept = (original?.env || []).map((variable) => {
         const off = state.unset.includes(variable);
-        return h('span', { class: 'preset-chip' + (off ? ' off' : '') }, variable, h('button', {
-          class: 'icon-button', type: 'button', 'aria-label': t(off ? 'drKeepVar' : 'drTakeVar', { variable }), title: off ? t('drKeepIt') : t('drTakeItOff'),
+        return h('span', { class: 'preset-chip' + (off ? ' off' : '') }, variable, kit.iconButton({
+          'aria-label': t(off ? 'drKeepVar' : 'drTakeVar', { variable }), title: off ? t('drKeepIt') : t('drTakeItOff'),
           onclick: () => { state.unset = off ? state.unset.filter((one) => one !== variable) : [...state.unset, variable]; drawVariables(); fill(); },
         }, icon(off ? 'plus' : 'close', 11)));
       });
       const rows = state.env.map((pair, index) => {
-        const key = h('input', { class: 'answer-input', type: 'text', value: pair[0], placeholder: 'VARIABLE', list: listId, 'aria-label': t('drVariable'), spellcheck: 'false', autocomplete: 'off' });
-        const value = h('input', { class: 'answer-input', type: 'text', value: pair[1], placeholder: t('drValue'), 'aria-label': t('drValue'), spellcheck: 'false', autocomplete: 'off' });
+        const key = kit.field({ class: 'answer-input', type: 'text', value: pair[0], placeholder: 'VARIABLE', list: listId, 'aria-label': t('drVariable'), spellcheck: 'false', autocomplete: 'off' });
+        const value = kit.field({ class: 'answer-input', type: 'text', value: pair[1], placeholder: t('drValue'), 'aria-label': t('drValue'), spellcheck: 'false', autocomplete: 'off' });
         key.addEventListener('input', () => { state.env[index][0] = key.value.trim(); fill(); });
         value.addEventListener('input', () => { state.env[index][1] = value.value; fill(); });
         return h('div', { class: 'preset-var' }, key, value);
@@ -875,8 +876,8 @@ export function presetEditor({ folder, app = null, saved = () => {} }) {
           : copyLine(line, op === 'add' ? 'the command that adds it' : 'the command that changes it'));
     }
 
-    kinds.replaceChildren(...[['claude', 'Claude'], ['shell', 'Shell']].map(([kind, label]) => h('button', {
-      type: 'button', 'data-kind': kind, onclick: () => { state.kind = kind; fill(); },
+    kinds.replaceChildren(...[['claude', 'Claude'], ['shell', 'Shell']].map(([kind, label]) => kit.segment({
+      'data-kind': kind, onclick: () => { state.kind = kind; fill(); },
     }, label)));
     name.addEventListener('input', () => { state.name = name.value; fill(); });
     args.addEventListener('input', () => { state.args = args.value; fill(); });
@@ -895,9 +896,9 @@ export function presetEditor({ folder, app = null, saved = () => {} }) {
     list.replaceChildren(...mine.map((preset) => h('div', { class: 'preset-row' },
       h('span', { class: 'preset-name' }, preset.name), h('span', { class: 'preset-note' }, [presetNote(preset), preset.project ? t('drThisFolders') : t('drEveryFolders'), preset.refused ? t('drCantStart', { why: preset.refused }) : null].filter(Boolean).join(' · ')),
       h('span', { class: 'confirm-actions' },
-        h('button', { class: 'confirm-clear', type: 'button', onclick: () => { open = { op: 'edit', original: preset }; formSlot.replaceChildren(form()); formSlot.querySelector('input')?.focus(); } }, t('drEdit')),
-        h('button', { class: 'confirm-clear', type: 'button', onclick: () => { open = { op: 'remove', original: preset }; formSlot.replaceChildren(form()); formSlot.querySelector('.copy-button')?.focus(); } }, t('drRemove'))))),
-    h('button', { class: 'confirm-clear', type: 'button', onclick: () => { open = { op: 'add' }; formSlot.replaceChildren(form()); formSlot.querySelector('input')?.focus(); } }, t('drAddAPreset')));
+        kit.button('quiet', { size: 's', onclick: () => { open = { op: 'edit', original: preset }; formSlot.replaceChildren(form()); formSlot.querySelector('input')?.focus(); } }, t('drEdit')),
+        kit.button('quiet', { size: 's', onclick: () => { open = { op: 'remove', original: preset }; formSlot.replaceChildren(form()); formSlot.querySelector('.copy-button')?.focus(); } }, t('drRemove'))))),
+    kit.button('quiet', { size: 's', onclick: () => { open = { op: 'add' }; formSlot.replaceChildren(form()); formSlot.querySelector('input')?.focus(); } }, t('drAddAPreset')));
   }
 
   return {

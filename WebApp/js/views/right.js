@@ -6,6 +6,7 @@
 // - Files: the lead's files and the project's place.
 // Read-only; every line is the sessions' writing, drawn as text.
 
+import * as kit from '../kit.js';
 import { h, setText } from '../dom.js';
 import { clock, moment, tilde, lastPart, taskLine } from '../words.js';
 import { t, listed, lang, nodeWords } from '../i18n.js';
@@ -22,10 +23,10 @@ const sessionOf = (task) => (task.status === 'review' && task.verifier) || task.
 export function rightColumn(app) {
   const { store, ui } = app;
   const name = h('span', { class: 'colhead-name' });
-  const tabs = ['team', 'stats', 'files'].map((tab) => h('a', { class: 'switch-link', role: 'tab', data: { tab } }, t({ team: 'tabTeam', stats: 'tabStats', files: 'tabFiles' }[tab])));
+  const tabs = ['team', 'stats', 'files'].map((tab) => kit.segment({ tag: 'a', role: 'tab', data: { tab } }, t({ team: 'tabTeam', stats: 'tabStats', files: 'tabFiles' }[tab])));
   const body = h('div', { class: 'colbody right-body' });
   const el = h('aside', { class: 'right', 'aria-label': t('team') },
-    h('div', { class: 'colhead' }, name), h('div', { class: 'right-tabs' }, h('nav', { class: 'switch tabs', role: 'tablist' }, tabs)), body);
+    h('div', { class: 'colhead' }, name), h('div', { class: 'right-tabs' }, kit.segmented({ tag: 'nav', class: 'tabs', role: 'tablist' }, ...tabs)), body);
   let drawn = '';
 
   function taskDetails(task, board, route) {
@@ -73,9 +74,9 @@ export function rightColumn(app) {
     const parts = [];
     // Its first three lines or so, cut at a word; the whole in the side sheet.
     if (said) parts.push(h('a', { class: 'now', href: routeHref(route, { sheet: lineKey('update', said.id), task: null }) }, h('small', null, t('leadSaid', { time: moment(said.at) })), h('span', { class: 'now-text' }, cut(shortHashes(said.summary || said.text), 130))));
-    parts.push(h('h3', { class: 'col-title' }, t('inMotionTitle', { n: team.motion.length })));
+    parts.push(kit.sectionTitle('h3', { class: 'col-title' }, t('inMotionTitle', { n: team.motion.length })));
     parts.push(...(team.motion.length ? team.motion.flatMap((task) => taskRow(task, board, route)) : [h('p', { class: 'col-note' }, t('nothingMoving'))]));
-    if (team.blocked.length) parts.push(h('h3', { class: 'col-title' }, t('blockedTitle', { n: team.blocked.length })), ...team.blocked.flatMap((task) => taskRow(task, board, route)));
+    if (team.blocked.length) parts.push(kit.sectionTitle('h3', { class: 'col-title' }, t('blockedTitle', { n: team.blocked.length })), ...team.blocked.flatMap((task) => taskRow(task, board, route)));
     const foot = [team.queued.length ? t('queuedLine', { n: team.queued.length }) : null, team.merged.length ? t('mergedLine', { n: team.merged.length }) : null].filter(Boolean);
     if (foot.length) parts.push(h('p', { class: 'col-foot' }, foot.join(' · ')));
     if (!lead?.session || !store.state.sessions.has(lead.session)) parts.push(h('p', { class: 'col-note' }, t('noLeadRunning')));
@@ -85,8 +86,8 @@ export function rightColumn(app) {
   // The estimating score: its line as the node says it, and its three numbers.
   function scoreParts(score) {
     if (!score) return [];
-    const tile = (value, label) => h('div', { class: 'tile' }, h('b', null, value), h('span', null, label));
-    return [h('h3', { class: 'col-title' }, t('scoreTitle')),
+    const tile = (value, label) => kit.tile({ value, label });
+    return [kit.sectionTitle('h3', { class: 'col-title' }, t('scoreTitle')),
       h('div', { class: 'tiles' },
         tile(score.ratioPct === null || score.ratioPct === undefined ? '—' : `×${(score.ratioPct / 100).toFixed(1)}`, t('scoreRatio')),
         tile(score.insideWorstPct === null || score.insideWorstPct === undefined ? '—' : `${score.insideWorstPct}%`, t('scoreInside')),
@@ -97,9 +98,9 @@ export function rightColumn(app) {
   function stats(board) {
     const card = board?.scorecard;
     if (!card || !card.merged) return [...scoreParts(board?.score), h('p', { class: 'col-note' }, t('scoreNone'))];
-    return [...scoreParts(board?.score), board?.score ? h('h3', { class: 'col-title' }, t('scorecard')) : null,
-      h('div', { class: 'tiles' }, h('div', { class: 'tile' }, h('b', null, String(card.merged)), h('span', null, t('merged', { n: card.merged }).replace(String(card.merged), '').trim())),
-        (card.tiles || []).map((tile) => h('div', { class: 'tile', title: tile.help || '' }, h('b', null, tile.value), h('span', null, tile.label), tile.note ? h('small', null, tile.note) : null))),
+    return [...scoreParts(board?.score), board?.score ? kit.sectionTitle('h3', { class: 'col-title' }, t('scorecard')) : null,
+      h('div', { class: 'tiles' }, kit.tile({ value: String(card.merged), label: t('merged', { n: card.merged }).replace(String(card.merged), '').trim() }),
+        (card.tiles || []).map((tile) => kit.tile({ value: tile.value, label: tile.label, note: tile.note, help: tile.help }))),
       card.footnote ? h('p', { class: 'col-note' }, card.footnote) : null,
       card.receipts ? h('p', { class: 'col-note' }, card.receipts) : null,
     ];
@@ -113,9 +114,9 @@ export function rightColumn(app) {
     const kv = (label, ...value) => [h('span', null, label), h('span', null, ...value)];
     const live = lead?.session && store.state.sessions.has(lead.session);
     return [
-      h('h3', { class: 'col-title' }, t('files')), ...rows,
+      kit.sectionTitle('h3', { class: 'col-title' }, t('files')), ...rows,
       board ? h('p', { class: 'col-note' }, filesLine(board, home)) : null,
-      h('h3', { class: 'col-title' }, t('place')),
+      kit.sectionTitle('h3', { class: 'col-title' }, t('place')),
       h('div', { class: 'kv' }, kv(t('folder'), tilde(root, home)), board?.baseBranch ? kv(t('baseBranch'), board.baseBranch) : null,
         kv(t('leadSession'), live ? h('a', { class: 'link', href: sessionHref(lead.session) }, t('leadChat')) : t('noLeadRunning')),
         kv(t('settings'), h('a', { class: 'link', href: settingsHref(lead?.project || board?.project) }, lastPart(root)))),

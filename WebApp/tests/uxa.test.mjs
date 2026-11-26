@@ -228,7 +228,7 @@ test('U8: on a touch screen every kind of control is 44 px both ways by its padd
   // Icon buttons, a message's actions, Send: square.
   for (const selector of ['.icon-button', '.row-action', '.send', '.composer-attach']) if (tall(selector) < 44 || wide(selector) < 44) short.push(selector);
   // Switches, small and text buttons.
-  for (const selector of ['.switch-link', '.segmented button', '.button', '.button.small', '.copy-button', '.confirm-clear', '.link', '.summary-brief', '.take-back', '.fold', '.offer button']) {
+  for (const selector of ['.segment', '.button', '.button.small', '.copy-button', '.confirm-clear', '.link', '.summary-brief', '.take-back', '.fold', '.offer button']) {
     if (tall(selector) < 44 || wide(selector) < 44) short.push(selector);
   }
   // The drawers' rows and the two-column list's rows: the whole width already, 44 tall.

@@ -20,6 +20,7 @@
 // What it decides (`summarize`, `changes`, `wanted`, `firstLine`, `titled`, `sounding`) knows nothing of the page and is tested on
 // its own; `notifications(app)` puts it on the page.
 
+import * as kit from './kit.js';
 import { h } from './dom.js';
 import { pluginOn, pluginsOn } from './plugincard.js';
 import { t } from './i18n.js';
@@ -187,21 +188,21 @@ export function notifications(app, env = {}) {
   // answered; either answer is kept.
   const offerText = h('span', null, t('ntGetANotificationWhenSomething'));
   const offer = h('div', { class: 'offline offer', role: 'status', hidden: true }, offerText,
-    h('button', { class: 'offer-yes', type: 'button', onclick: () => turn(true) }, t('ntTurnOn')),
-    h('button', { class: 'offer-no', type: 'button', onclick: () => turn(false) }, t('ntNotNow')));
+    kit.button('quiet', { size: 's', class: 'offer-yes', onclick: () => turn(true) }, t('ntTurnOn')),
+    kit.button('quiet', { size: 's', class: 'offer-no', onclick: () => turn(false) }, t('ntNotNow')));
 
   // The toggle on This node.
-  const box = h('input', { type: 'checkbox', class: 'notify-toggle', onchange: () => turn(box.checked) });
+  const box = kit.checkbox({ class: 'notify-toggle', onchange: () => turn(box.checked) });
   const said = h('span', { class: 'notify-said' });
   // The sound's toggle beside it.
-  const ring = h('input', { type: 'checkbox', class: 'sound-toggle', onchange: () => sound(ring.checked) });
+  const ring = kit.checkbox({ class: 'sound-toggle', onchange: () => sound(ring.checked) });
   // Each kind's choice (the Mac's Settings › Notifications): something needs me; a session finishes.
   const kindBoxes = {
-    needs: h('input', { type: 'checkbox', class: 'notify-kind', onchange: () => choose('needs', kindBoxes.needs.checked) }),
-    done: h('input', { type: 'checkbox', class: 'notify-kind', onchange: () => choose('done', kindBoxes.done.checked) }),
-    reminders: h('input', { type: 'checkbox', class: 'notify-kind', onchange: () => choose('reminders', kindBoxes.reminders.checked) }),
+    needs: kit.checkbox({ class: 'notify-kind', onchange: () => choose('needs', kindBoxes.needs.checked) }),
+    done: kit.checkbox({ class: 'notify-kind', onchange: () => choose('done', kindBoxes.done.checked) }),
+    reminders: kit.checkbox({ class: 'notify-kind', onchange: () => choose('reminders', kindBoxes.reminders.checked) }),
   };
-  const el = h('section', { class: 'node-group notify' }, h('h2', { class: 'section-title' }, t('ntNotifications')),
+  const el = h('section', { class: 'node-group notify' }, kit.sectionTitle('h2', {}, t('ntNotifications')),
     h('label', { class: 'notify-line' }, box, t('ntTellMeWhenSomethingHappens')), said,
     h('label', { class: 'notify-line notify-sub' }, kindBoxes.needs, t('ntWhenASessionOrA')),
     h('label', { class: 'notify-line notify-sub' }, kindBoxes.done, t('ntWhenALeadStopsOr')),

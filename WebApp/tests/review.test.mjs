@@ -270,7 +270,7 @@ test('Stop the node is a plain button in the danger colour, never the primary bl
   app.later = (fn) => { timers.push(fn); return () => {}; };
   const el = nodeView(app).el;
   const stop = find(el, (node) => node.tag === 'button' && node.textContent === 'Stop the node');
-  assert.ok(stop.classList.contains('quiet') && stop.classList.contains('danger'), stop.className);
+  assert.ok(stop.classList.contains('plain') && stop.classList.contains('danger'), stop.className);
   stop.click();
   assert.deepEqual(app.sent, []);
   assert.equal(stop.textContent, 'Click again to stop the node');
