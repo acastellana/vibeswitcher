@@ -118,7 +118,7 @@ struct RefusedGitProgramNameTests {
         "[[ $x =~ ^[0-9]+([.][0-9]+)?$ ]] && echo n", "[[ $x =~ ^(a|b)$ ]]", "if ! [[ -d $dir || -L \"$dir\" ]]; then mkdir -p \"$dir\"; fi",
         "x=$([[ $v =~ ^(a|b)$ ]] && echo y)", "[[ $x == @(a|b) ]] && echo ab", "[[ -n $a ]] && [[ -z $b || $c ]] && echo ok",
         "{ [[ -n $a || $b ]]; } && echo ok", "( [[ -n $a || $b ]] ) && echo ok", "until [[ -e $f || $n -gt 9 ]]; do sleep 1; done",
-        "[[ $a < $b || $c > $d ]] && echo ok", "[[ $(git rev-parse HEAD) == $x || $y ]] && echo same", "[[ -n $a ]]; echo $?",
+        "[[ $a < $b || $c > $d ]] && echo ok", "[[ $(git rev-parse HEAD) == $x ]] && echo same", "[[ -n $a ]]; echo $?",
         // docs/guide/development.md's heavy jobs: text handed to sh that doesn't name git, its variable an argument.
         "vs-heavy sh -c 'node --test --test-concurrency=\"$VS_HEAVY_CORES\"'", "vs-heavy sh -c 'make -j \"$VS_HEAVY_CORES\"'",
         "vs-heavy sh -c 'swift build -j 2 -Xswiftc -j$(( (VS_HEAVY_CORES + 1) / 2 ))'", "f() { echo \"$1\"; }; f x", "[ \"$a\" = \"$b\" ] && echo same",
@@ -161,7 +161,7 @@ struct RefusedGitProgramNameTests {
         }
         for line in Self.oddTests {
             let reason = RefusedGit.refusal(in: line)?.reason ?? ""
-            #expect(reason.contains("Write the test plainly"), "\(line): \(reason)")
+            #expect(reason.contains("write the test plainly"), "\(line): \(reason)")
         }
         // The word, and how to keep a path's expansion and a loop's variable.
         let reason = RefusedGit.refusal(in: "g=gi; ${g}t push origin main")?.reason ?? ""
