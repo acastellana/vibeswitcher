@@ -353,8 +353,10 @@ own `withKnownIssue` (`aChildCollectedElsewhereIsNamedAndItsEndComes`, `aChildSt
 Each in [scripts/mac-measure](../../scripts/mac-measure), one measurement each, run by the user in Terminal (or an ssh
 login where said). Each prints what will appear before it happens and waits for Return; refuses from an agent's
 session or without a terminal; loads only a job labelled `dev.vibeswitcher.measure.<what>.<pid>` from a property list in
-its own `/tmp/mac-measure.*` folder (never `~/Library/LaunchAgents`), boots it out when it ends (Ctrl-C too), and
-prints a record (the account's name and home taken out) to paste back. They run in Terminal.app or in a shell card
+its own `/tmp/mac-measure.*` folder (never `~/Library/LaunchAgents`), boots it out when it ends (Ctrl-C too; a job
+that asks only once its ask has ended, never killing it mid-dialog), and prints a record (the account's name and home
+taken out), saved in the checkout's `.build/mac-measure-records/`. **The user's session, in order, with every command:
+[the keyboard session's runbook](v2-mac-keyboard-session.md).** They run in Terminal.app or in a shell card
 the lead files (the app's shell session, which carries `VIBESWITCHER_SESSION` and a pty): the guard refuses an agent's
 own process (`CLAUDECODE`, `CODEX_SANDBOX`) and a run without a terminal, and the Return prompt is the person's. ANC-1
 alone wants Terminal.app (it refuses a shell card); ESC-1 and ESC-2 compare with "your own" facts where they ran, so
