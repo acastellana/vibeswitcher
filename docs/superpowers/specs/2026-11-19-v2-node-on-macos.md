@@ -179,6 +179,713 @@ copy hashed once, the record): the Mac's arm differs in
   node signs with the local identity `scripts/setup-signing.sh` already makes for the app's builds (one decision for
   the user). Notarisation isn't needed: a build made on the Mac carries no quarantine, and nothing is distributed.
 
+## The anchor: a root-owned record of the builds (the Mac's tasks, items 3, 10 and 12)
+
+Written 2026-11-25 on the first real Mac (macOS 27.2, SIP on), after the user chose, of item 10's three anchors, the
+root-owned record: one administrator password per install or update, nothing day to day. Until it, every fact the Mac's
+checks compared against was the user's to write (the job's plist and label, the builds folder, `build-info`, the
+program `launchctl print` names), so a session with a genuine host and a server of its own passed them.
+
+**Where it lives.** `/Library/Application Support/VibeSwitcher/node-<uid>.pins` (`Platform.Service.nodePinsRecord`;
+nil on Linux, which has no such record and whose checks are unchanged). A process of the user's can't write, replace,
+rename over or shadow it, and the readers check each reason every time they read it, from `/` down, never trusting a
+resolved path:
+
+- **Every folder on the path** (`/`, `/Library`, `/Library/Application Support`, `…/VibeSwitcher`) is owned by root
+  (uid 0) and writable by neither its group nor others, so no one but root makes, removes or renames an entry in it:
+  a rename over the record, a link put in its place and a folder swapped above it all need write on a folder above.
+  Measured here: `/` and `/Library` `root:wheel 755`, `/Library/Application Support` `root:admin 755`. The group test
+  carries weight: the user is in `admin`, so a `775` there would be the user's to write. The administrator step makes
+  `VibeSwitcher` `root:wheel 755`.
+- **The file** is owned by root, a regular file, `0644` (readable by the user's processes, written by root
+  alone), at most 64 KiB. Its link count isn't asked (the review of 2026-11-25, F2): macOS lets a user
+  hard-link a root-owned file it can't write, a second name gives no write, and refusing it would let any process of
+  the user's make every check refuse.
+- **No link is followed.** The reader opens `/` and then each component with `openat(…, O_NOFOLLOW)` from the folder it
+  holds, checks what it opened by `fstat` on that descriptor, and reads the record from the descriptor it checked: a
+  link anywhere on the path is refused, not followed, and nothing is checked by one name and read by another.
+- **No access control list.** Mode bits don't show an ACL's grant (`chmod +a "everyone allow add_file"`), so a component
+  carrying any extended ACL is refused (`Platform.Files.hasExtendedACL`; none on the path today, `ls -le`).
+- **Shadowing.** A mount over a folder on the path needs the covered folder to be the user's (macOS lets a user mount
+  only on a folder they own) **(not measured here: unproven)**; a mount over it would also show its own root's owner and
+  mode to the walk, which refuses anything not root's.
+- **What SIP adds.** Nothing to the record: `…/Application Support` carries no `restricted` flag (`ls -lO`), so root
+  writes it, which is the point (root is the administrator step). SIP keeps the tools the step and the checks run
+  (`/usr/bin/sudo`, `/usr/bin/codesign`, Security) and the kernel's code-signing enforcement out of root's reach, and
+  root is one password away (the security architecture's S1): the record moves only with that password.
+
+The path, the folder the walk starts from and the owner it expects are parameters of the reader for tests only (a
+scratch tree, an injected owner fact): in the node no environment variable, flag or file chooses them.
+
+**What it holds.** Text, one fact per line, parsed whole and refused whole on anything unusual:
+
+```
+# VibeSwitcher node pins: written by the install's administrator step (scripts/node-pins-mac.sh); read by the node's checks
+format 1
+uid 501
+build <commit, 40 hex> host <cdhash, 40 hex> server <cdhash> cli <cdhash>
+build …
+```
+
+`uid` must be the reader's own. Each `build` line names a commit and the cdhashes of that build's
+`vibeswitcher-host`, `vibeswitcher-server` and `vibeswitcher` (the command line), each this Mac's slice as the install
+signed it (`mac_sign_hardened`, then `codesign -d -a <this Mac's arch>`): a process running another slice of the same
+file (Rosetta's x86_64) has another cdhash and is refused. One to sixteen builds: the installed one first, then the
+builds a rollback may go to. No commit and no cdhash twice; every other line, case, length or byte refused.
+
+**Who writes it, and when.** Only the install's administrator step, `scripts/node-pins-mac.sh`, called by
+`install-node-mac.sh` once the build is checked, before it is renamed into place (a step refused or cancelled leaves no
+build installed: the install runs again whole). It takes values, not paths:
+the new build's commit and three cdhashes, which the install read from the copies it signed and hashed (never read
+again from the builds folder), and it carries the existing record's rows forward verbatim, after reading that record
+with the same checks (never recomputed from files a session can write). It prints exactly what it will write and
+where, then runs one `sudo` whose script is text inside it, not a file: it makes the folder (root, `755`, checked
+afterwards), writes a temporary file in it as root, sets it `root:wheel 0644`, and renames it over the record. The
+install checks the step's text against the commit's blob and runs it from memory, as it does its libraries, so what
+`sudo` runs isn't a file a session could edit before the password is typed. A commit already in the record with other
+cdhashes is refused (a build's pins never change). `--dry-run` prints and writes nothing. `--record` names only the node's record or a trial's
+(`/Library/Application Support/VibeSwitcher-trial/node-<uid>.pins`), and the root half checks the path, the uid (sudo's
+`SUDO_UID`) and every line it is handed by the record's pattern before it touches a folder (the review's F4). The step
+drops every function its shell imported, as the install does, fixes `LC_ALL`, and runs as `/usr/bin/env -i /bin/bash
+-p` (privileged mode imports no function, so an exported `builtin` can't defeat the drop; the install calls it so: F3,
+F5, the re-check's N1). `--keep N` takes no values: it rewrites the record there, root's alone, to its first N rows, which root checks
+against the record itself; after a security update `--keep 1` is the lever (below). Nothing else writes it: no check,
+no start, no switch.
+
+**How each check reads it** (every read through the walk above; anything unreadable is a refusal):
+
+1. **The command line's server check.** The listener's audit token (bound as before: pid, link read before and after,
+   `Link.isProcess(of:)`) must run, by Security's dynamic check, the cdhash of a server pinned in the record, with the
+   Hardened Runtime. Which file is beside which program no longer matters: no path under the home chooses the row, and
+   `launchctl print`'s `program` line drops out (item 12): the running image is read from the process bound to its
+   token. Only `pid` stays from `launchctl print`, launchd's own word for the job's process: the listener must be its
+   child, in its session, as before.
+2. **The host's server child.** The Mac's node host finds its own build by its own running cdhash (`SecCodeCopySelf`,
+   `Platform.CodeIdentity.ownCdhash`): no row, no start. Its `--server` file's cdhash must be that row's server; the
+   child is then started only while the file still has it, and its connector answers only a child whose token runs it
+   (`Image.checked`, as before, now holding the pinned value).
+3. **The command line's anchor (item 3's owed half).** The server takes the command line's cdhash from the record's
+   row whose server is its own running code, read once at its start: never from `<root>/bin/vibeswitcher`, so a
+   command line swapped there after the start is not the installed one.
+4. **A switch or a rollback.** The target's host image must be a host pinned in the record (its file's cdhash for this
+   Mac's slice, checked by path before the handover), and the new image, once running, finds its row by its own
+   running code (2) before it starts a server. A rollback goes only to a build the record still holds: one dropped
+   from it is refused. The check is by path, then the switch goes through a keeper proven to run the cdhash that check
+   read ("The checked node start", "A switch"); what a swapped file can still do is in "What it doesn't cover", F6.
+
+**When it isn't right**, each refused with one plain line naming the record's path and what to do: install a newer
+commit (`install-node-mac.sh`, whose administrator step writes the record from the build it checked). Never values by
+hand: a build's cdhashes read from the builds folder are a session's to choose, and a checkout's copy of the step is
+the user's file (the install runs the commit's checked blob); the step's no-values form, `--keep N`, only rewrites the
+rows of the record there, root's alone, checked again as root. The cases: the record missing; unreadable; a link
+anywhere on its path; any folder on it or the file not root's, or writable by its group or others, or carrying an ACL;
+not a regular file, too large; not parseable, another format, another uid; and a running code that names no row (an
+unknown build). A second hard link isn't one of them (the review of 2026-11-25, F2: any process of the user's can add
+one to a root-owned file, so refusing it let a session make every check refuse).
+
+**The fake host (closed at the server's start, the review of 2026-11-25, F7).** A session that re-bootstraps the job
+with a host of its own that runs the genuine pinned server passes the command line's check (1): the listener is the
+genuine server, the child of the job's process. Closing it from the command line would mean a pid looked up through
+launchd and then checked, the racy shape this design avoids. The server closes it instead: at its start, before it
+serves or writes anything, a Mac node server finds its own row by its running code and requires its connector's peer
+token to run that row's host, hardened (`NodeCheck.macConnectorRefusal`, in `ServerStart`; off with the rest, since no
+Mac host starts a `--node` server yet). Measured by the reviewer (`pair.c`): a stream pair's `LOCAL_PEERTOKEN` names
+the process that made the pair (its pid and pidversion), fixed at creation: not "the last sender", as this section said
+before. Two things for item 13: after an in-place exec handover that token is stale (Security refuses a token whose
+process exec'd), so a server carried across a handover needs a new connector or a restart; and the test is at the
+function, with a real pair's token (a node server's record path isn't a test's to choose). And from the re-check: a
+server child checks its connector's peer once, at its start, so after a handover it would keep serving a swapped host
+image; on the Mac the server child is ended and started again after every handover, so the check runs against the new
+image (to build with item 13, not here).
+
+## The checked node start (the Mac's tasks, item 13)
+
+Written 2026-11-25 on the same Mac, before the code, on top of the anchor. What `HostImages.isCheckedMacNode` being true
+will mean, in one sentence: **a `--node` host on the Mac runs a server child on the account's node lock, keeps the
+vault's record of the user's actions (`vaultV2`) and its hooks only after it found its own running code in the
+root-owned record and that row's server in its `--server` file, and it hands its state over only to an image whose
+running code proved, by a fresh audit token, to be the pinned host it checked.** The constant stays false here: this
+section is what makes it safe to turn on, and a later review turns it on.
+
+**At a node start** (`HostImages.macNodeStart`, called by `main` behind `isCheckedMacNode`, before the vault is
+opened from disk or anything is served), in this order, each failure a refusal that starts nothing (`notStarted`, exit
+78, one plain line naming the record and the remedy):
+
+1. `--node-root` (its build's absolute folder, `<builds>/<commit>`, as the unit and the agent start it; the row is
+   found by code, never by this path) and `--server` given, and the lock the host takes is the node's data root's own
+   (`<accountHome>/.vibeswitcher/v2/node/host.lock`, the home from the user database, compared by path and by file):
+   any other lock is refused, as Linux's `mayStart` refuses it (the Mac's `mayStart` says nothing).
+2. The record, read once (`NodePins.read()`, the walk from `/`): missing, unreadable, not root's alone, unparseable or
+   another uid's refuses.
+3. The host's own running code, from the kernel (`Platform.CodeIdentity.ownCdhash`, `SecCodeCopySelf`'s dynamic
+   cdhash): unreadable, or no row's host, refuses ("this host's code is no host the node's record pins").
+4. The `--server` file, opened once (`O_NOFOLLOW`, a regular file, the build folder's own `bin/vibeswitcher-server` by
+   device and inode, as Linux's `openServer`), and its cdhash for this Mac's slice, read by path while the path still
+   names the file opened (device and inode after the read), must be the row's server: another build's server, an
+   unsigned or unreadable file, a link, a copy elsewhere refuses.
+
+The result (`HostImages.CheckedNode`: the row, the server's cdhash) goes in the host's config, and only a host holding
+one is a node host (`HostServer.isMacNodeHost`): it runs the server child by the row's server cdhash (each start
+checks the file still has it, and the connector answers only a child whose token runs it), answers `vaultV2`, and its
+vault keeps the record (item 14, below). No checked start, no node host: the refusals at the account's locks
+(`macServerRefusal`) stay as they are. Tests reach the same function with an injected record, own cdhash and home;
+nothing in the node lets a flag, file or variable choose them.
+
+**A switch (F6 narrowed; the fix round's re-check pending).** macOS has no exec from a descriptor, so whatever is checked before the in-place exec, the
+exec runs what the path names then. A checked node host's switch goes through a keeper (`MacHandoverKeeper`):
+
+1. The path check as before (`HandoverTarget.macPinned`): the target's file, read once, is a pinned host; that read's
+   cdhash is *expected* (never a second read of the path).
+2. The target is started from the path as the keeper (`--handover-keeper FD`), a child of the host. Its first act is
+   to make a fresh stream pair and send one end over the inherited channel; that end's `LOCAL_PEERTOKEN` names the
+   keeper's own image, made after its exec. The old host requires that token to be its spawned pid, to run *expected*
+   by Security's dynamic check, and to be hardened. Otherwise the keeper is ended and the switch refused: the old host
+   and its sessions are as they were (a file swapped before this point is caught here, the long window F6 named).
+3. On the old host's queue: the server child is ended and reaped (below), the state built, and the state's bytes and
+   every descriptor it names (the lock, the listener, the secrets' channel, each session's terminal) sent to the
+   proven keeper over the pair it made. Then the host execs the target with only its end of the channel, and with the
+   target build's `--node-root` and `--server` in place of its own. Anything
+   failing before the exec closes the keeper and leaves the host as it was (its server child started again).
+4. The new image, first thing (`MacHandoverKeeper.takeIfAsked`), makes a fresh pair of its own and sends one end to the
+   keeper, which requires: the token's pid its parent (the job's pid), the token running the keeper's own cdhash (the
+   code proven in 2), hardened. Only then does it make a pair of its own, give one end to the new image, and send the
+   state and descriptors over the other, and exit; the new image requires that pair's token to be the keeper's pid
+   (`--handover-keeper-pid`, its child), running its own code, hardened (the review's N2). Otherwise the keeper closes
+   every descriptor and exits: the image at the job's pid gets nothing (no state, no secret, no terminal, no lock, no
+   listener). A keeper that sees no new image within its limit does the same (N6).
+5. The new image has run its own checked start (1 to 4 above, and its arguments and environment, below) before it
+   takes anything: a checked node's parcel says so (`fromCheckedNode`), and an image holding no checked start of its
+   own takes nothing from it and exits; a checked start takes state only from a keeper it proved, never from
+   `--handover PATH` (the review's F1 and N2). Then it restores from what it was given, renumbered, and starts a new
+   server child.
+
+**A checked node's command line: one parser, one value (the re-check of 2026-11-25, I1).** The gates prove code, not
+mode: a wrapper renamed over the target can run the genuine pinned image with arguments of its own, and two readings
+of one command line can disagree (a check that skipped each value unread, while `main` took each flag at its first
+occurrence anywhere, let `--handover --log …` move the log). So on the Mac, a host whose arguments hold `--node`
+anywhere is parsed once, by one strict parser (`HostImages.CheckedCommandLine.parse`), into a value, or refused:
+
+- The grammar is closed: `--node`, `--node-root DIR`, `--server FILE`, and on a switch both of
+  `--handover-keeper-channel FD` and `--handover-keeper-pid PID`, or neither. Each flag once; each value present, not
+  starting with `-`, absolute where it is a path, a decimal number where it is a descriptor (above 2) or a pid (above
+  1). Nothing else: no other flag, no `--x=v` form, no `--`, no positional word. `--handover PATH` is not in it: a
+  checked node takes state only through a keeper, so there is no state file to read, decode, go back with or unlink.
+- `main` then reads nothing more of the raw command line: for a checked node its `arguments` are the executable
+  alone, so every `value(after:)` and `contains` that main or a helper does sees "absent" and takes its default (a
+  reader added later fails closed the same way). What needs the node's values takes them from the value: the checked
+  start (`macNodeStart(_:…)`), the server child (`ServerChild.adopt`'s arguments, rendered by the value), the build's
+  folders, and what the next image of a switch is started with (`CheckedCommandLine.rendered`, which parses back to
+  the same value).
+- Read before the parser, and so in a class of their own: the mode dispatches at the top of `main` (each recognises
+  its mode by its first argument, but the probe, `--handover-probe` anywhere, which only reads and prints a state
+  file's format and exits, and the keeper, now its first argument too) and `HostHardening.refusal` (which reads
+  `--handover` only when the start is refused, never on the Mac). None of them takes a node's state; a dispatch holding
+  an inherited keeper channel never writes the handshake's byte the keeper waits for, so the keeper gives it nothing.
+- A test scans the sources of `main` and of every helper it hands the arguments to (their `"--…"` literals and their
+  flag constants, `HostHardening.testFlags` among them) and requires each flag found to be classified, in the grammar or
+  refused, in a flag's place and in every value's place: a flag added later fails it until it is classified.
+
+**What a checked node resets at its start** (before the record is read): its environment is built from a fixed list,
+not filtered: `HOME`, `USER`, `LOGNAME` and `SHELL` from the user database, `VIBESWITCHER_HOME` the data root, the
+descriptor limit it carries across its own exec, `PATH` the system's (`/usr/bin:/bin:/usr/sbin:/sbin`) and `TMPDIR`
+the system's per-user folder (`confstr(_CS_DARWIN_USER_TEMP_DIR)`); every other variable is gone (`SSH_AUTH_SOCK`,
+`DYLD_*`, `SWIFT_*`, `Malloc*`, the locale, `XPC_*`). Every open descriptor above 2 that isn't close-on-exec, as the
+kernel lists them (`PROC_PIDLISTFDS`, so one above a limit the starter lowered too), is closed but the keeper channel;
+`umask` 077; the working folder `/`; no core files (`RLIMIT_CORE` 0, soft and hard)
+(`MacCheckedLastTests/theResetClosesWhatItWasGivenAboveALoweredLimit`). What the reset can't undo:
+variables the loader, the Swift runtime and malloc read before `main` have already acted on this process (the
+Hardened Runtime refuses `DYLD_*`; the rest are debugging aids); the reset keeps them from its children. The other
+resource limits stay as given (one set low only ends the node). What the sessions on a checked node lose under the
+reset, for step 5 and the switch-on review: `SSH_AUTH_SOCK`, the user's `PATH`, `LANG`, `LC_ALL`, `LC_CTYPE` and
+`__CF_USER_TEXT_ENCODING` from the host's environment; and they inherit its umask 077 and its hard `RLIMIT_CORE` 0 (no
+session can raise it). `NodeAgent` writes `SWIFT_BACKTRACE` into the plist, which the reset drops. Step 5 owes how the
+job gives the sessions what they need of these (the plist's own environment is a wrapper's to replace, so it is no
+answer).
+
+**The switch's proof, both ways and bound to the node (the re-check, I2).** A keeper that proves only its own code,
+and a new image that proves only that its keeper is its child running its code, let whoever starts the genuine image
+park any state first. So:
+
+- (a) **The keeper proves its parent** before it takes anything. The old host makes a pair after the keeper's proof,
+  gives the keeper one end and sends the parcel over the other once the keeper has said it took that end. The keeper
+  requires that end's token to be its parent's pid, hardened; and the parcel, when it says it is a checked node's
+  (`fromCheckedNode`), only from a parent whose code is a host the root record pins (`NodePins.read`, never a value
+  from its arguments). A keeper that finds no record, or a parent the record doesn't pin, takes nothing and exits.
+- (b) **A checked start takes a parcel only when it is the node's**: the parcel says it is a checked node's (an
+  unmarked one is refused), it came through a keeper the image proved, and its lock descriptor is the node's own
+  `host.lock` held through that open file: the data root's lock opened afresh can't be locked (someone holds it),
+  then the given descriptor can (so it is the holder), compared by device and inode, before the secrets are read.
+  Anything else is refused with every descriptor closed (the image exits).
+- (c) **Only a checked node starts on the node's lock**, by file: a host that isn't one, whose lock is the data root's
+  `host.lock` by device and inode (or, before it exists, whose folder is the data root's by device and inode and whose
+  name is `host.lock`), doesn't start; and once its lock is open, the descriptor itself is compared with the node's
+  `host.lock` by device and inode (`HostImages.heldLockAllowed`, `HostServer.Config.heldLockIsAllowed`), so a lock that
+  made the node's by opening it (another letter case, a dangling link) is refused, the descriptor closed
+  (`MacCheckedLastTests/aHostOpeningTheNodesLockByAnotherNameIsRefused`). This is one check in place of refusing its
+  test flags one by one. What no check at the start covers: a data root renamed into place after a host started on a
+  lock in it (that host holds a lock that becomes the node's); this is inherent to a check made at the start.
+- What (b) proves is that the sender held the node's lock. Who the sender was rests on (a), the mark (only a checked
+  node's host writes `fromCheckedNode`, and the keeper takes a marked parcel only from a parent running a host the
+  record pins), and on (c): a host that isn't a checked node can't start on the node's lock as it is at its start,
+  by its path or by the descriptor it opened (a root renamed in later aside). The scratch hosts' `--handover-test-checked-parcel` is gone from the
+  sources: it forged the mark on genuine code.
+- **The handshake (the flake's cause).** Every pair is passed by the process that made it, which keeps its own copy of
+  the end it passed until the receiver says, by a byte over the socket it came on (whose far end the receiver alone
+  holds, so a receiver that went is seen at once), that it holds it; nothing is written over a pair whose other end is
+  still in flight; every keeper read and write has the keeper's limit (`SO_RCVTIMEO`, `SO_SNDTIMEO`), and a poll that
+  couldn't be made is tried again. Caught under load before (8 of 20 runs, 2026-11-25): the new image got the keeper's
+  pair, read an end of file before the parcel was whole, and the keeper said it had given it ("the keeper's state
+  didn't arrive whole"; 6 of 8); or the keeper's word to the old host failed ("the host has gone"; 2 of 8). Each time a
+  socket in flight had been closed by its sender right after it was sent. That the kernel's collection of descriptors
+  in flight broke it is inferred, not seen; what the runs show is that no failure came once the senders held their
+  copies (100 runs, below).
+- **What no test reaches**, with no record on this Mac: a keeper accepting a checked node's parcel (its parent proved
+  against the installed record), so the re-check's route 2 (a scratch host of the pinned build given test flags) is
+  tested only as far as the acceptance function (`mayTakeHandover`, `nodeLockRefusal`), and route 1 (a parent that is
+  no host) end to end.
+- **Why no end-to-end test shows a marked parcel refused by an unchecked image, until a record exists.** A parcel is
+  marked only by a host holding a checked start (`HostServer.handoverState`: `fromCheckedNode` when `config.checkedNode`
+  is set), which only the installed record gives; and a keeper passes a marked parcel on only from a parent running a
+  host that record pins. With no record, no marked parcel reaches any image, so the refusal can't be reached end to end
+  without a seam that forges the mark on genuine code, which the re-check removed. The property is carried by
+  `HostImages.mayTakeHandover`'s first condition (a marked state and no checked start: refused), called for every Mac
+  handover that isn't a checked node's switch (`main.swift`, the `mayTakeHandover(state, viaKeeper: kept != nil, …)`
+  call), and tested by `MacCheckedFixRoundTests/aCheckedNodesStateGoesOnlyToACheckedStartThroughAKeeper`.
+- **N6 once the keeper holds the state**: a keeper whose new image never asks exits at its limit with everything it
+  held closed, and the session ends (`MacCheckedLastTests/aKeeperHoldingTheStateWithNoNewImageExitsByItsLimit`, a
+  scratch host's `--handover-test-keeper-limit 3`).
+
+What stays: a file swapped in the short window between the keeper's proof (2) and the exec runs at the job's pid. It
+gets nothing, but the old image is gone by then: the keeper closes everything and the sessions end. And a wrapper that
+runs the genuine pinned image passes both gates at any point (they check code): what bounds it is that image's own
+start, above. "The old host keeps
+running" holds for every refusal before the exec, not for that one; closing it too needs an exec bound to the checked
+code (an open question for the reviewer: `LightweightCodeRequirements`' launch constraint, untested with an in-place
+exec and ad-hoc signatures). A proven new image that can't restore doesn't go back (its fallback would be an unchecked
+exec by path): it exits, and the sessions end, said in its log. Going back through a keeper of its own is an idea for
+the reviewer.
+
+**The server child after a handover.** On the Mac a server child checks its connector's peer once, at its start, and
+a token taken before an exec is refused after it. So the checked node host ends its server child (its connector
+closed, SIGKILL, reaped: `ServerChild.endForHandover`) before it parks the state, started again if the switch fails
+before its exec, and the new image starts a new one from its own checked
+start: its connector is a pair the new image made, so the server's check (`NodeCheck.macConnectorRefusal`) runs
+against the new image's code. No Mac handover carries a server child.
+
+**What a real Mac proved (2026-11-25, this Mac, macOS 27.2, SIP on):** the start's checks with this Mac's real signed
+images and the kernel's own cdhash (`MacCheckedStartTests`); the keeper's proofs by fresh audit tokens of real
+hardened host images, the in-place exec at the same pid, every descriptor carried over `SCM_RIGHTS` and renumbered,
+and a real server child ended and started again (`MacKeeperHandoverTests`).
+
+**What no test reaches while `macUnbuilt`, `approvalMeasured` and `isCheckedMacNode` are off:** a real `--node` host
+process reading the installed record (the record's path isn't a test's to choose in a node process), a real node
+server's connector check end to end, and a real job's pid. The tests drive the same functions with a scratch record
+and this Mac's real signed images and tokens, and scratch hosts (`--handover-test-keeper`, a scratch host's test flag)
+take the keeper's switch end to end.
+
+**What it doesn't cover** (open, in the reviewer's words where they are the reviewer's):
+
+- **A switch's target swapped between check and exec (F6): narrowed, not closed (the fix round of 2026-11-25; the
+  review's re-check of F1 is pending).** The reviewer first: it "is reliable, not a tight race: `HostServer.handOver`
+  checks the path, then probes the new build off the queue". With the keeper, what the probes show:
+  - A file of other code renamed over the target after the path check: refused at the keeper's proof, the old host and
+    its sessions as they were (`MacKeeperHandoverTests/aTargetSwappedAfterThePathCheckHandsOverNothing`).
+  - The same in the window between the proof and the exec: the image at the job's pid gets no state, secret,
+    terminal, lock or listener (`aTargetSwappedJustBeforeTheExecGetsNothing`), but the old image is gone and the
+    sessions end.
+  - A wrapper that runs a byte copy of the genuine pinned host with arguments of its own (the review's probe,
+    `aWrapperThatRunsTheGenuineImageWithItsOwnArguments`) passes both gates: they prove code, not mode. Before the fix
+    round its image "took over 1 sessions and 22 bytes of secrets" with the attacker's `--log` and `--app-executable`.
+    Now the parcel goes only to an image holding its own checked start, which takes no argument but its own and keeps
+    no variable of this program's (`MacCheckedFixRoundTests/aWrapperRunningThePinnedImageWithItsOwnArgumentsTakesNothing`,
+    with a scratch host standing in for the checked node): the wrapper's image takes nothing and exits, and the sessions
+    end. A wrapper that runs it with the node's own arguments is the node, and since the re-check it chooses only the
+    values of `--node-root` and `--server` (bounded by the start: the row's server, by cdhash, in that folder): its
+    environment is rebuilt from a fixed list and its descriptors, umask, folder and core limit reset at its start. What
+    stays the wrapper's: what the loader, the Swift runtime and malloc read from the environment before `main` (the
+    Hardened Runtime refuses `DYLD_*`; the rest are debugging aids, kept from its children), and its other resource
+    limits (one set low only ends the node): for the switch-on review.
+- **The stale connector check after a handover: closed (item 13).** No Mac handover carries a server child: the node
+  host ends and reaps it before the exec, and the new image starts one whose connector it made
+  (`afterASwitchTheServerChildIsANewProcess`).
+- **Every pinned build passes for good (F8).** "Every pinned build up to 16 back passes every check for good, so a
+  session can re-bootstrap an old pinned build whole": an older build's host, server and command line are each the
+  record's. The lever is the administrator step: on a security update, install with `--fresh` (or run
+  `node-pins-mac.sh --keep 1` afterwards), so no older build stays pinned.
+- **The install's own window**: a session that rewrites the staged build between its check and the administrator step
+  is the install's S9, as on Linux.
+
+**Where it is built.** `NodePins` (VibeCore: the format, the walk's rules, the lookups), `Platform.Files.readRootRecord`
+and `hasExtendedACL`, `Platform.CodeIdentity.ownCdhash`, `Platform.Service.nodePinsRecord` (the seam; Linux's arms answer
+nil and nothing on Linux calls them), the checks above in `NodeCheck` (the command line's and the server's connector check), `HostImages`, `HandoverTarget` and `ApprovalVoice`;
+off, as the rest of the Mac node is, until items 5 and 13 and the switch-on (`HostImages.isCheckedMacNode`,
+`NodeSystem.approvalMeasured`, `macUnbuilt` and `macServerRefusal` unchanged).
+
+## The LaunchAgent: start, stop and status (step 5)
+
+Written 2026-11-26 on the same Mac, before the code, on top of the checked start and the web port hold. What it
+builds: `vibeswitcher start`, `stop` and `status` on the Mac as the user's LaunchAgent. All of it stays refused for the
+user's node by `NodeSystem.macUnbuilt` (unchanged): the command line's Mac arm sits behind that refusal, and the tests
+reach it with a scratch label, plist folder and data root (`NodeAgent.Place`) and a scratch record.
+
+**Measured first (this Mac, 2026-11-26, from an agent's session in `Aqua`; scratch labels `dev.vibeswitcher.node.test-*`,
+plists in the clone's `.build`, never `~/Library/LaunchAgents`).**
+
+- *What the user sees.* A `launchctl bootstrap gui/501` of a scratch-path plist (`/bin/sleep 30`, `RunAtLoad`) and its
+  `bootout`: the unified log for those seconds (`log show`, no sudo) has no line of Background Task Management's about
+  the job (only its routine store saves and monitor updates, the same as before any load) and no notification
+  (`usernoted`: another app's only). A plist in `~/Library/LaunchAgents` was not tried: that is the folder BTM watches,
+  and the install (step 7) is where it is written.
+- *`launchctl print`'s lines* (one tab in, as M11): before a run `state = not running`, `runs = 0`,
+  `last exit code = (never exited)`; running, `state = running`, `pid = N`, `runs = 1`; after its process was killed,
+  `state = not running`, no `pid`, `runs = 1`, `last terminating signal = Killed: 9` (and on a plain exit
+  `last exit code = N`). With `ProcessType` Interactive launchd shows `exit timeout = 5`.
+- *What `bootout` ends* (the measurement AG-1 asked for; its own script still is the user's): a job running
+  `sh -c 'sleep 302 & perl -e "fork or (setsid, exec sleep 303)"; exec sleep 300'`: `bootout` returned once the job's
+  process (`sleep 300`, pid N, group N) and the child in its group (`sleep 302`, group N) had ended; the child in a
+  session of its own (`sleep 303`, parent pid 1) ran on. A process of the job killed by a signal took its group with it
+  too (`sleep 302` gone, `sleep 303` running). So launchd ends the job's process group and nothing outside it: the host's
+  sessions (each in a session of its own, `PTYSpawn`) and its server child (a group of its own) are the node's to end.
+
+**The plist** (`NodeAgent.Job`, written by `NodeAgent.plist`, the same function `agent-plist` prints for the install):
+
+| Key | Value | Why |
+| --- | --- | --- |
+| `Label` | `dev.vibeswitcher.node` (a test's scratch label) | the job's name in `gui/<uid>`; one job |
+| `ProgramArguments` | `<builds>/<commit>/bin/vibeswitcher-host --node --node-root <builds>/<commit> --server <builds>/<commit>/bin/vibeswitcher-server` | exactly `HostImages.CheckedCommandLine`'s rendering for that build (a test parses it back to the same value): nothing a checked start refuses, nothing it doesn't read |
+| `EnvironmentVariables` | `SWIFT_BACKTRACE` = `enable=no` | the only variable that acts: the Swift runtime reads it at load, before `main` and so before the reset; `HOME` and `PATH` are gone from the plist (the reset rebuilds both from the user database and the system) |
+| `KeepAlive` | false | as the unit's `Restart=no`. A crash leaves the job loaded, not running (`last terminating signal`), and launchd starts nothing again: no loop of any speed, the sessions' terminals gone with the host (they get a hangup), and `status` says it with the signal. `start` again unloads the dead job and loads it afresh. A `KeepAlive` true would restart a host that dies at its start every 10 s for good (launchd's throttle), each time on the node's lock, and would bring back a host the user's `stop` through the server ended |
+| `RunAtLoad` | true only with `--at-login` | the unit's `WantedBy=default.target`; without it `start` loads and then `kickstart`s the job |
+| `ProcessType` | `Interactive` | the user's own work: not throttled as a background job; its LocalAuthentication dialog (step 4) is drawn in the session |
+| `LimitLoadToSessionType` | `Aqua` | only the GUI login's domain takes it (an ssh login's `Background` doesn't) |
+| `StandardErrorPath` | `<data root>/node.log` | where the checked start's one-line refusals and the host's stderr go: read, trusted for nothing |
+| `StandardOutPath` | `/dev/null` | nothing is written there |
+
+No `Sockets` (the host holds the web port, item 9), no `WatchPaths`, `KeepAlive` dictionary, `AbandonProcessGroup`,
+`UserName` or `Program`: any key start doesn't write is a refusal (`NodeAgent.check`).
+
+**Who writes it, and a changed or planted one.** `start` writes it when there is none: the bytes made for this build
+as a new file at the plist's path (`open` with `O_EXCL` and `O_NOFOLLOW`, the user's, `0644` as LaunchAgents' are),
+then read back and checked (a write cut short leaves a file the next `start` refuses, naming why). When there is one, `start` reads it (`O_NOFOLLOW`, a regular file, at most 64 KiB) and it must
+be exactly what `start` would write for this build (`NodeAgent.check`: every key and value, nothing added, and byte for
+byte, so a value of another type that reads back equal, an integer for a boolean, is refused); otherwise
+it refuses, naming the key, and loads nothing, the file left as it is (the install of another build writes its own,
+step 7). Between the check and `bootstrap` the path is read again by launchd: a file swapped in that gap is a program
+launchd starts, and the check after the load (below) is what catches it: the job's process must run the job's own
+command line as well as the pinned host's code, so the pinned host started with arguments of the swapped file's (its
+own `--socket` and `--lock`, a plain host) is refused and booted out.
+
+**How `start` knows the host is the one it meant: by audit token and code, never launchctl's text** (M11: `program` is
+the configured program, any path's text a session can give). The build is chosen by code first: the command line finds
+its own row in the root's record by its running code (`Platform.CodeIdentity.ownCdhash`, the row whose `cli` it is),
+and that row's folder `<builds>/<commit>` must hold a host and a server with that row's cdhashes (read by path; the
+host checks its own running code again at its checked start). A record that is missing, or a command line it doesn't
+pin, refuses before anything is written. After the load `start` waits for the host's socket (`<data root>/host.sock`)
+to take a connection, and takes the connection's `LOCAL_PEERTOKEN`: its pid must be launchd's `pid` for the job (the
+one word of `launchctl print` used, as item 12 does), its running code (Security's dynamic check) the host the record
+pins for that build, with the Hardened Runtime, and the process the same before and after those reads
+(`Link.isProcess(of:)`); then the host's welcome, whose pid must be the token's; and the process's command line (the
+kernel's, to its own user) exactly the job's (`Steps.jobArguments`: `NodeUnit.execStart` for the user's node). Only then
+"the node runs". `status` and `stop` check the same, a switched node's process allowed the keeper's two flags and their
+numbers after it (`NodeAgent.keeperFlags`): read from the switch, not run (no checked node runs here), a checked node's
+next image is started as `<target build>/bin/vibeswitcher-host` with `NodeUnit.execStart`'s arguments for that build,
+then `--handover-keeper-channel FD --handover-keeper-pid PID` (`MacHandoverSwitch.keeperArguments`, then
+`HostHandover.exec`). While it
+waits, a job whose process ended (`state = not running`) refuses at once with the end of `node.log`; at the limit
+(30 s) it refuses; and every refusal after the load boots out what `start` loaded, so it leaves no job behind.
+
+**A job of that label already there.** Running: the host at the socket is checked as above against any build the record
+pins; it passes, and `start` says the node runs already (nothing loaded or written); it doesn't, and `start` refuses
+("a job labelled … runs pid N, which isn't the node's host: …") and leaves it alone. Loaded and not running (a crash, an
+exit) from the agent's own file (`print`'s `path`, by device and inode): nothing of it runs, so `start` boots it out and
+loads its own checked plist; loaded from another file, it is refused and left loaded. A `bootstrap` that fails (a job of
+the label loaded meanwhile, by a second `start` or a login) loaded nothing of this start's: nothing is booted out.
+
+**`stop`: what it ends and what the user is told first.** The job's host checked as above (a job running another program
+is refused and left alone, as `start` does). Then it says what ends: "the node's host (pid N, build C), its server and
+its K sessions end, and the job is unloaded" (K the server's count, `status`'s `host.liveSessions`, as on Linux: the
+host's welcome lists only the sessions its caller may end, none for the command line; "every session it runs" when no
+server answers), and asks for the typed code (`TypedWord`). It
+then asks the server to stop when one answers (it ends the leads and every session, and the host shuts down, as on
+Linux), takes a snapshot of the host's children (pid and start), and boots the job out: launchd ends the host's group;
+the sessions and the server child are outside it (measured above), and end with the host (the server's connector
+closes, each session's terminal hangs up). `stop` waits, within a limit (30 s), until launchd has no such job, the
+host's pid and every child of the snapshot have gone and the socket takes no connection, and removes the socket's
+file once the host's lock is free. A process still there at the limit is named, and `stop` fails. Not loaded: "the
+node isn't running" (69).
+
+**`status`: from the host itself.** Not loaded: not running. Loaded, no pid: not running, with launchd's last exit or
+signal. A pid: the host at the socket checked as above against every build the record pins, then its welcome: "the node
+runs: build C (the record's row its running code is), host pid N since T", then the server's own status. A host that
+fails the check is
+said with why ("a job labelled … runs pid N, which isn't the node's host").
+
+**Sessions' environment** (step 5's debt from the checked start's reset). A session's program on the Mac runs as
+`$SHELL -l -i -c COMMAND` (`Platform.Tools.sessionShellArguments`), so the user's own login shell builds most of the
+environment, as in Terminal and in the app's sessions: `PATH` (`/etc/zprofile`'s `path_helper`, then the user's
+`.zprofile` and `.zshrc`: Homebrew, nvm), and whatever locale or variable the user's startup files export. What a
+Terminal session gets from launchd and not from the shell, a checked node's host gives its sessions itself, never from
+its starter (whose environment the reset dropped), and on the session's spawn alone, never in the base environment the
+server child is started with:
+
+- `SSH_AUTH_SOCK`: launchd's own value for the user's domain, `launchctl getenv SSH_AUTH_SOCK`, read by the host at its
+  start (`/bin/launchctl`, `Platform.Service.launchctl`): taken only when it is an absolute path to a socket the user
+  owns, not a link; else the sessions have none. Measured: a scratch job in `gui/501` running `launchctl getenv
+  SSH_AUTH_SOCK` gets the same socket (`/var/run/com.apple.launchd.<random>/Listeners`) as a process outside launchd,
+  and launchd gives the job the same in its own environment. *Residual:* the domain's value is any process of the user's to set
+  (`launchctl setenv`), as for every Terminal opened after it; the Mac seal list (step 8) watches launchctl's user
+  environment.
+- `__CF_USER_TEXT_ENCODING`: `0x<uid>:<encoding>:<region>` as launchd gives it, from the user's
+  `~/.CFUserTextEncoding` (home from the user database; two hex or decimal numbers), `0x<uid>:0x0:0x0` without one.
+- `LANG`: `en_US.UTF-8` when nothing sets it, as the app's sessions get it (`HostedSession.environment`, unchanged): a
+  GUI job has no locale from launchd either. `LC_ALL` and `LC_CTYPE` are the user's startup files' to set.
+- `umask`: 022 for the session's program, set by the launcher (`--pty-exec`'s child, before it execs the program); the
+  host itself keeps 077.
+- The core limit: the reset's hard `RLIMIT_CORE` 0 stays (three reviews passed it); sessions inherit soft 0, which is
+  launchd's own default (`launchctl limit core`: `0 unlimited`), so a session's crash writes no core file, as in
+  Terminal, but `ulimit -c unlimited` is refused in it. For the reviewer: making the reset's hard limit the one given and
+  only the soft one 0 would give it back (no process can change another's limits on the Mac, so soft 0 is what keeps the
+  node from dumping).
+- A variable the starter planted (the plist's, `launchctl setenv`'s, a wrapper's) never reaches a session: the reset
+  dropped it from the host, and a session's environment is taken from the host's by name.
+
+The same is given to the sessions of a scratch host started with `--test-checked-shape HOME` (a scratch host's test
+flag, refused for the user's host and a checked node, and refused by the checked grammar): it resets itself as a checked
+node does, with `HOME` the given scratch home in place of the user database's, so its tests run the login shell on a
+scratch `.zprofile`, never the user's.
+
+**`SWIFT_BACKTRACE`, which the reset drops.** The plist keeps `enable=no`: the Swift runtime reads it at load, so it acts
+on the host itself before the reset. For the host's children a checked node puts `SWIFT_BACKTRACE=enable=no` in its base
+environment as a fixed value (the server child, the launchers, the parsers and the sessions get it, as Linux's
+`sessionEnvironmentFixed` gives it; `MacCheckedSessionsTests` sees it in a session): no Swift child of the node starts the backtracer, which reads the crashed process's
+memory into its stderr (the server's is `node.log`). A crash of any of them still goes to the system's crash reporter
+(`~/Library/Logs/DiagnosticReports`), as every process's does.
+
+**The review's round (2026-11-26, "ready with fixes"; designed before the code).** What launchd loaded, and the job of
+the label, are now bound as follows; each is a refusal that boots out only what this `start` loaded.
+
+- *Measured first* (macOS 27.2): `launchctl print`'s job shows `properties = inferred program` for the agent's plist,
+  `runatload | inferred program` with `RunAtLoad`, `keepalive | …` with `KeepAlive` (and a `KeepAlive` job runs at load
+  with no `kickstart`, `immediate reason = speculative`); its `environment = { … }` block is the plist's
+  `EnvironmentVariables` plus launchd's own `OSLogRateLimit => 64` and `XPC_SERVICE_NAME => <label>`; `arguments = { … }`,
+  `stdout path` and `stderr path` are the plist's. A rename of a file away and back, and a hard link to it, change its
+  ctime (`stat`, nanoseconds), so a file put back after a swap is not the file as it was.
+- *I1, the file launchd read.* `start` keeps the descriptor its read-back checked open and takes its device, inode,
+  ctime and size, and the plist folder's device, inode and ctime after its own write. Once the host is seen (token,
+  code, command line, executable), the path must still name that inode, its ctime and size unchanged, its bytes read
+  again from the descriptor still start's, and the folder the same with its ctime unchanged: any change to the file
+  or its folder while launchd read it (a rename over it, one away and back, a write and a write back, a folder swapped
+  and back) refuses. And launchd's own word for what it loaded must be the job's: `path` the agent's plist by device and
+  inode, `arguments` the job's, the `environment` block the job's variables and launchd's two, `stdout path` and
+  `stderr path` the job's, `properties` exactly the measured line for its `RunAtLoad` and no `keepalive`. (Superseded by
+  the re-check's round below: that reading was partial, and launchd's raw text let a value add a `path` line.)
+- *What can't be bound:* see the re-check's round below (its list replaces this one, whose keys `print` "shows
+  nothing of" were wrong: `ThrottleInterval`, `Nice`, `ExitTimeOut` and `SoftResourceLimits` all print a line).
+- *I2, a job of the label that runs.* `start`'s "runs already", `status`'s "runs" and `stop` take a running job only when
+  launchd loaded it from the agent's own plist (`print`'s `path`, by device and inode), launchd's word for it is the
+  job's (as in I1), its process's executable (the kernel's path of its image) is the job's program by device and inode
+  (a byte copy elsewhere, or the same code at another path, is another file), its command line is the job's, and its
+  token runs a pinned host. The plist on disk must be start's bytes too. *Residual:* a job loaded earlier from other
+  bytes at the agent's path, put back to start's since, whose differing keys `print` doesn't show (above).
+- *N1, stop asks once.* The server asked for `status` first: it answers, and what ends is said with its count, and the
+  server's own stop is asked under the rule the other commands use (`TypedWord.said(approval: client.approvalRule)`: the
+  typed code, or the Mac's dialog once `approvalMeasured` is on), its answer read: taken, the host shuts down in order,
+  then the job is unloaded; refused, or an answer that can't be read (within `Requests.stopWait + 30` s, as on Linux),
+  stop fails, says why and unloads nothing. A server that answers `status` with an error, or unreadably, is a refusal
+  too (nothing stopped), and so (the re-check's note 6) is a listener that fails the server check or a hello that is
+  garbage or late: only nothing listening at all (`connect` refused or no socket) is no server. Then stop says what
+  ends and how ("nothing listens …: the host ends by launchd's bootout; its sessions lose their terminal"), asks the
+  typed code, and boots out. A refusal names the manual `launchctl bootout gui/<uid>/<label>` for a wedged node.
+- *N2, everything the host started that can be found.* Before the prompt, and again after it (what started while it
+  waited), the host's descendants by parent links (every level) and every process in a POSIX session one of them leads;
+  and, read at each look (a process that leaves its session between two looks still carries one), the session ids in
+  their environments (`VIBESWITCHER_SESSION`, where the kernel gives a process's environment to
+  its user: not for Apple's platform binaries), with which every process still carrying one is found at the wait.
+  `stop` waits for all of them within its limit, names what is left, and fails rather than saying they ended; done, it
+  says "every process of it stop could find has ended". *Can't be found on a Mac:* a process that left its session and
+  lost its parent before a look, and whose environment can't be read or carries no session id (a platform binary
+  started with an emptied environment).
+- *N3.* After a crash, `stop` unloads the dead job and removes the socket's file under the same rule as a live stop
+  (a socket, the lock free).
+- *N4.* The plist folder must be a real folder (no link), the user's, writable by neither group nor others, with no
+  access control list (the re-check's note 4), before
+  anything is written or loaded; the plist itself the user's, a regular file, writable by neither, no ACL (launchd refuses a
+  group- or world-writable plist; `start` says so itself first).
+- *N5.* `status --json` checks the host as the plain `status` does, its line on stderr.
+- A plist from the earlier installer (with `HOME` and `PATH`) is refused as any other; the refusal says to remove it and
+  run `start` again (`start` writes its own), and the installer (step 7) must write exactly what `start` writes.
+
+**What a real Mac proved (2026-11-26, this Mac, macOS 27.2, SIP on).** Red and green, exactly: `MacAgentTests`' five
+launchd tests (a) to (e) and its three first function tests were red on the seams `01d34331` and are green from
+`4c2f76b5`; in `MacCheckedSessionsTests` (f) the session's `SSH_AUTH_SOCK`, `SWIFT_BACKTRACE` and umask were red there,
+while its `PATH`, locale and the dropped planted names were already green (the login shell and the session's list by
+name gave them); `NodeAgentTests`' new cases were green on the seams (the plist as data came with them);
+`MacSwitchedHostTokenTests` is a measurement, green when written; the four function tests the blind check's findings
+added (`3abd3048`) use the steps that fix adds, so no run before the fix exists. With a scratch label in `gui/501`, a scratch plist folder and data root, and a
+scratch record pinning hardened copies of the built host, server and command line: `start` writes and checks the plist,
+loads the job, and its host comes up from the plist's exact arguments (the job's pid's arguments are them), known by its
+socket's audit token and running code; `status` says so with its build; `stop` unloads it and leaves no job, no process
+and no socket (`startLoadsTheJobAndStopLeavesNothing`). A plist that differs (`KeepAlive` true) is refused before any
+load and left as it was (`aChangedPlistIsRefusedBeforeAnyLoad`). A job of the label running `/bin/sleep` is refused by
+`start` and `stop` and runs on (`aJobOfTheLabelRunningAnotherProgramIsLeftAlone`). The job's host passes `see`; the same
+host against a record pinning other code doesn't; a look-alike (`perl` started as `exec -a <the host's path>`, listening,
+its first argument the host's path) doesn't (`theHostIsKnownByTokenAndCodeNotByThePathsText`). A killed host isn't
+started again: launchd says `not running`, `runs = 1`, the signal; `status` says it; `start` loads it afresh
+(`aCrashedHostIsNotStartedAgainByLaunchd`). A scratch host shaped as a checked node (`--test-checked-shape`, the checked
+reset itself) gives its session the login shell's `PATH`, launchd's `SSH_AUTH_SOCK`, `en_US.UTF-8`, the text encoding,
+`SWIFT_BACKTRACE=enable=no` and the umask 022, and not the starter's planted variable, `SSH_AUTH_SOCK`, `LANG` or
+`SWIFT_BACKTRACE` (`MacCheckedSessionsTests`). After an in-place switch through a keeper (a scratch host, the listener
+carried across the exec), a connection made afterwards has a token whose running code is the new image's and not the
+old's, hardened, at the same pid (`MacSwitchedHostTokenTests`): so `see`, and with it `status` and `stop`, know a switched
+host by the build it now runs. No Background Task Management item and no notification came of any of these loads (the
+unified log after the runs).
+
+**The re-check's round (2026-11-26, "not yet"): launchd's word read by one grammar.** The round above read `print`
+leniently (lines found by their key, the last `path =` taken, any line it didn't know passed over), and launchd prints
+values raw: a job's variable whose value holds a newline printed a `path` line of its choosing, and a key the reader
+didn't know (a `KeepAlive` dictionary's `semaphores`) was never seen. The rule now, one of its kind for every reading of
+launchd's word:
+
+- **Nothing is searched for.** `print`'s whole output is read against a template derived from the job `start` wrote, line
+  by line in launchd's order, as bytes (split at 0x0A; any byte but a tab, a newline or printable ASCII refuses). Each
+  template line is either a literal made from the job (its label, its plist's path as launchd resolves it, its program,
+  arguments, output paths, variables, `properties`) or a strict pattern for what launchd counts (`pid`, `runs`, `forks`,
+  `active count`, `asid`, the coalition IDs, and five lines this Mac always prints with the same values, `jetsam priority`
+  40, the two `jetsam memory limit`s `(unlimited)`, `jetsam thread limit` 32 and `sanitizer flags` `0x0`, kept as
+  patterns, digits or hex: no key measured moves them, `JetsamProperties` included). A line the template can't place, a line after the closing `}`,
+  or a value that differs is a refusal. Optional are only the groups measured coming and going: the running group (`pid`
+  to `checked allocations flags`), the two coalition blocks, and one of the four last-exit lines. The `environment` block
+  must hold exactly the job's variables and launchd's two, each once, any order (launchd's own order is by hash);
+  `inherited environment` (the user domain's `launchctl setenv`, the job's to ignore: the reset drops it) only lines
+  `NAME => VALUE` with a name, each name once; `default environment` exactly `PATH => /usr/bin:/bin:/usr/sbin:/sbin`.
+- **What a value can and can't do.** launchd prints its own lines after an injected value too, so a value that adds
+  lines adds them to a whole the template already fixes: the real lines then don't fit, or come after the closing `}`,
+  and no key is looked up, so an added line can't be "the" path (always printed, at line 3, before any value), a second
+  variable, or another key. *Except* a line launchd prints only for a key that is set: `stdout path` and `stderr path`
+  (measured: neither prints without its key). A plist with no `StandardErrorPath` and `StandardOutPath` set to
+  `/dev/null` followed by a newline and `\tstderr path = <the agent's log>` prints exactly the two lines the template
+  wants, and is placed. But launchd never spawns such a job (measured by the re-check: it can't open that stdout path,
+  which lies under `/dev/null`, under `/dev` that the user can't write; every start ends `last exit code = 78: EX_CONFIG`
+  with no pid): the host never runs under it, `status` says it doesn't run (69), and `start` boots it out and loads its
+  own. Every other key it could change still prints a line the template refuses, and the host's command line, program
+  and code are the kernel's. (A plist's `OSLogRateLimit` prints a second line, which refuses; its `XPC_SERVICE_NAME` is launchd's own:
+  measured, so no variable can stand in for launchd's two.)
+- **The path** printed must be the agent's plist as launchd resolves it (`realpath` of the folder, then the file's name),
+  and that path, by `lstat` (no link followed), the file `start` holds open (in `start`) or the agent's plist (`status`,
+  `stop`) by device and inode: a link, a hard link elsewhere, another file refuses.
+- **One reader, three answers.** `launchctl print`: exit 113 with "Could not find service" (measured) is "not loaded";
+  exit 0 and placed is the job; anything else (exit 0 and unplaceable, another exit) is "loaded, not ours": refused,
+  and in `start`'s wait it is "not yet" until the wait's limit, then the job is booted out. The bootout's own wait asks
+  "not loaded" (113) and nothing else: a bootout that didn't unload says so (note 7).
+- **The job refuses to be written** with anything but printable ASCII in its label, arguments, variables and paths (a
+  home with a non-ASCII name then refuses: said with the reason).
+- **The format is macOS 27.2's** (measured with scratch jobs, below). On another release a line that changed refuses: the
+  node then doesn't start until someone looks, which is the intended failure.
+
+*Measured (macOS 27.2, scratch jobs of the node's key set, under `/tmp`):* the states `not running` (loaded, never run:
+`last exit code = (never exited)`), `xpcproxy` and `running` (with the running group), and after an exit `last exit code
+= 0` (`= 1` bare, `= 78: EX_CONFIG` with its name, `last terminating signal = Terminated: 15` for a SIGTERM), a kill `last terminating signal = Killed: 9`, a code-signing refusal `last exit reason = OS_REASON_CODESIGNING`;
+the coalition blocks from the first run on; `path` resolved (`/private/tmp/…`), `program`, `arguments` and `stderr path`
+as the plist gives them; `immediate reason = non-ipc demand` after a `kickstart`, `speculative` with `RunAtLoad`. One job
+per `launchd.plist` key, diffed against that baseline: `Nice` (`nice`), `ThrottleInterval` (`minimum runtime`),
+`ExitTimeOut` (`exit timeout`), `Soft`/`HardResourceLimits` (`resource limits`), `Umask` (`umask`), `WorkingDirectory`
+(`working directory`), `StandardInPath` (`stdin path`), `StartInterval` (`run interval`), `StartCalendarInterval`,
+`WatchPaths` and `QueueDirectories` (`event triggers`, `event channels`), a `KeepAlive` dictionary (`semaphores`, and it
+runs at load), `MachServices` (`endpoints`), `Sockets` (`sockets`, and it runs), `ProcessType` (`spawn type`), and in
+`properties` `AbandonProcessGroup`, `EnableTransactions`, `EnablePressuredExit`, `inetdCompatibility`, `LaunchOnlyOnce`,
+`LegacyTimers`, `LowPriorityIO`, `LowPriorityBackgroundIO`, `MaterializeDatalessFiles`, `SessionCreate`, `StartOnMount`,
+`WaitForDebugger` and an unknown key (`partial import`): each a line the template refuses. No line at all (seven keys):
+`AssociatedBundleIdentifiers`, `Debug`, `Disabled`, `InitGroups`, `LimitLoadToSessionType`, `POSIXSpawnType` and
+`JetsamProperties`. With their other values (the re-check's measurement, real scratch jobs): `Disabled` true isn't loaded
+at all (bootstrap 5, no override written); `LimitLoadToSessionType` `Background` or `LoginWindow` isn't loaded in `gui/`,
+absent or `[Aqua]` prints the same; `POSIXSpawnType` `Background`, `Adaptive`, `App` or `TALApp` prints the same and runs
+at the baseline's nice 0 and priority 31 (`ProcessType` Interactive wins); `InitGroups` false prints the same, `id` shows
+the same groups; `Debug` true is launchd's own logging; `AssociatedBundleIdentifiers` names the job in System Settings'
+Login Items only; `JetsamProperties` (`JetsamPriority`, `JetsamMemoryLimit` and its variants, `JetsamThreadLimit`) loads
+and runs with every jetsam line at the baseline: launchd ignores it for a gui agent here. None runs other code, changes
+the command line, environment, outputs or restarts, or gives a session anything.
+
+*What start still can't bind, and what an attacker must already be able to do for each:*
+
+| Not bound | What it takes |
+| --- | --- |
+| A key `print` shows nothing of (the seven above) in the plist launchd read | for a job `start` itself loads: a process of the user's renaming `~/Library` (or the home) away and back in the instant launchd reads the plist, with every app's files there gone meanwhile. For a job found loaded (`start`'s "runs already", `status`, `stop`, which bind the plist's bytes on disk as they are now): a process of the user's that rewrites the agent's plist with one of those keys, bootstraps it and writes start's bytes back, with no race. What it gets either way is at most those keys, with the effects measured above: none restarts, reconfigures or runs the host otherwise |
+| A disk image mounted over the plist's folder for launchd's read (the covered folder keeps its inode and ctime); not run here (attaching may show UI) | a process of the user's attaching an image at that instant (`hdiutil attach -mountpoint`); its gain as in the row above, since every key `print` shows is still compared |
+| Two different plists that print identically | a difference only in the keys of the first row, or the output paths of the next row |
+| The job's output paths stood in by a value (no `StandardErrorPath`, `StandardOutPath`'s value carrying the `stderr path` line): placed, but never run | the same as the row above. launchd refuses to spawn such a job (exit 78 at every start, no pid), so nothing runs under it and no log is lost: `status` says it doesn't run, `start` replaces it |
+| A server whose listen backlog is full looks like none (`connect` refused, as on the Mac it is) and gets the typed code and the bootout | a wedged server: the user's code is still asked first |
+| An orphan in a session whose leader ended before stop's first look, its parent gone (stop's words stay "every process of it stop could find") | nothing: any session's program can leave such a child; found once a host-side record of its sessions' ids exists (owed) |
+| A process that left its session and lost its parent before a look, with no readable session id | as the row above |
+
+**What the re-check's round proved on this Mac** (red on `a290cb47`, green from `5fe57dda`): the re-check's tests,
+taken over (`MacAgentRecheckTests`): a variable's value printing a `path` line, a job from another plist then made a
+symbolic or a hard link to the agent's, a `KeepAlive` dictionary job (`semaphores`) swapped in after start's bootstrap,
+each refused by start, status and stop; ACLs on the folder and the plist refused; a link to the user's lock (not yet
+made) refused as the user's lock; a child leaving its session between stop's two looks, carrying the session's id, is
+waited for; and `limitAnAncestorSwappedAndBackWithAnUnshownKey` (with `Debug`, a key `print` shows nothing of) and
+`limitAnOrphanInADeadLeadersSessionCarryingTheId` hold as the table above states. The round's own
+(`MacAgentGrammarTests`): the fixtures cut from this Mac's captures placed in each state and refused for every line the
+grammar can't place; a job with a control character or a non-ASCII byte not written; this Mac's real launchd printing
+the scratch host's job as the grammar says when running, killed and loaded (the canary for a newer release); one real
+job per key `print` shows refused, the six it shows nothing of tested there placed (`JetsamProperties`, the seventh, measured by the final re-check); only no listener is no server; a failed bootout
+said as failed; and `HostLockLinkTests` (a lock that is a link refuses the host's start, nothing made where it points).
+
+**What the round proved on this Mac** (red on `5dfbde9b`, green from `abab3abd`): `MacAgentRoundTests`, the reviewer's
+tests taken over (a swap to `KeepAlive` true or an extra variable at the bootstrap; the pinned host's exact command
+line in a job from another plist, and a byte copy of it at another path; a plist folder that is a link; a grandchild in
+a session of its own outliving a stop; a killed host's socket file after stop), and the round's own (the file and the
+folder swapped away and back with `Nice` 5, a line the agent doesn't compare; a job loaded from other bytes at the
+agent's own path, then start's bytes written back; a folder writable by others; a `0666` plist said by start; the
+earlier installer's plist; the server's stop refused, taken, and not there; `status --json`); `MacCheckedSessionsRoundTests`
+(nothing a starter plants, `ZDOTDIR`, `BASH_ENV`, `HOME`, `SHELL` and `LC_ALL` among it, reaches a session; the test
+shape's lock by file). The reviewer's seventeen others pass as they did.
+
+**What no test reaches while `macUnbuilt` and `isCheckedMacNode` are off, and what only the functions cover.** The
+real plist's program: a `--node` host on the Mac refuses at once (`macNodeRefusal`), and a checked start needs the
+installed root record, which no test chooses; so the plist's checked command line is tested as data (it parses back to
+the build's folder and server, `NodeAgentTests/theProgramArgumentsAreACheckedNodesCommandLine`), and the jobs here run
+a scratch host's arguments with a scratch environment (the real plist's `SWIFT_BACKTRACE` alone would leave the host's
+`HOME`, and so its files, the user's). The command line's Mac arm (`MacAgentCommand`: the build by its own code in the
+installed record, `~/Library/LaunchAgents`, the label `dev.vibeswitcher.node`) runs only past `usersNodeRefusal`, never
+here. The server's stop inside `stop` is tested at function level only (refused, taken, none; no scratch job has a
+server child: the server needs a checked node's connector check), and so a stop that ends sessions through it; with no server, the bootout ends the host and the host's sessions
+lose their terminal (shown for the group and a session-leader child in the measurement above, not with a scratch job's
+own sessions: a launchd job's stdin is `/dev/null`, so no app key reaches it and no session can be spawned there). The
+`launchctl getenv` refusal of a loader variable (no test sets one in the user's launchd: that would reach every job of
+the user's). The plist written at the user's login (`--at-login`, `RunAtLoad`).
+
+**What it doesn't cover** (for the switch-on review):
+
+- *The plist between its check and `bootstrap`* is read again by launchd by path: a file swapped in that gap is started
+  by launchd, then refused by the binding after the load (the review's round, I1) and booted out. It ran, as any
+  program of the user's can; an ancestor folder swapped and back with a key `print` doesn't show is the residual.
+- *A switch rewrites no plist.* After an in-place switch the job's `ProgramArguments` still name the build it was
+  started as, while another runs; `status` and `stop` check the host against every build the record pins, so they
+  pass, but the next `start` after a `stop` starts the plist's build and refuses the plist once the command line is
+  another build's. The switch (or `start`) must rewrite the plist for the build it goes to: owed with the Mac's switch.
+- *`launchctl getenv SSH_AUTH_SOCK`* is any process of the user's to set (`launchctl setenv`), as for every Terminal
+  opened after it (the Mac seal list, step 8).
+- *Sessions keep a hard core limit of 0* (the reset's): soft-only in the reset would give `ulimit -c` back.
+- *A session that ignores the hangup* outlives a `stop` without the server: `stop` names it by pid and fails after its
+  limit (it doesn't kill what may be the user's own program).
+- *The Mac's `start` is not Linux's start sequence*: no not-promised acknowledgment (S11), typed code, journal entry,
+  interop refusal or preflight runs before it (the Mac has no journal yet, step 6). For the switch-on review to decide.
+- *The plist outlives a refused start* once written (a failed bootstrap, a host that ended at its start, no host in
+  30 s): with `--at-login` it is in `~/Library/LaunchAgents` with `RunAtLoad`, and launchd loads it at the next login
+  unchecked (its host then runs its own checked start). And a plist written by a plain `start` refuses a later
+  `start --at-login` (its `RunAtLoad` differs), with no command yet that rewrites or removes it.
+- *The welcome is waited for 5 s* on each look: a checked node that listens but answers late on a loaded Mac makes
+  `start` look again until its 30 s, then refuse and unload it.
+- *Two `start`s at once* have no lock between them: the second's plist write (`O_EXCL`) or `bootstrap` fails and it
+  refuses, touching nothing; a start lock as Linux's is an idea for the reviewer.
+
+**Where it is built.** `NodeAgent` (the plist as data: `Job`, `Place`, `check`, the `launchctl` lines and `print`'s
+lines), `MacAgent` (VibeNode: `start`, `stop`, `status` with every step injected, and the host check by token and
+code), the command line's Mac arm (`vibeswitcher-cli`, behind `usersNodeRefusal`), `CheckedSessions` (VibeHost: what a
+checked node's sessions are given) and the launcher's umask flag. No `#if os(macOS)` in the node's targets: the Mac's
+facts come through `Platform.Service`, `Platform.Sockets` and `Platform.CodeIdentity`; Linux's systemd path is
+unchanged.
+
 ## The seal's Mac list
 
 `LinuxSealList` stays empty on the Mac; a `MacSealList` beside it, by the same rules (a change waits for the user's

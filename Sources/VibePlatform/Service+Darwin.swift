@@ -14,6 +14,8 @@ extension Platform.Service {
         static func runtimeFolder(uid: uid_t) -> String? { nil }
         // Beside the app's `~/.vibeswitcher` (its host's lock, socket and log, its vault), never in its place.
         static let nodeRootFolder = ".vibeswitcher/v2/node"
+        // The node's record of its builds' cdhashes, root's to write (the node on the Mac's design, "The anchor").
+        static func nodePinsRecord(uid: uid_t) -> [String]? { ["Library", "Application Support", "VibeSwitcher", "node-\(uid).pins"] }
     }
 }
 #endif

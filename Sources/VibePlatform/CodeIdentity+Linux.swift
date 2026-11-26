@@ -36,6 +36,9 @@ extension Platform.CodeIdentity {
 
         /// nil: no code signature, so no code directory and no hash of one.
         static func cdhash(atPath path: String, architecture: Architecture? = nil) -> Data? { nil }
+
+        /// nil: no code signature, so nothing runs as one.
+        static func ownCdhash() -> Data? { nil }
     }
 }
 #endif

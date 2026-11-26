@@ -77,6 +77,14 @@ public enum ServerStart {
             exit(69)
         }
         if let child = parsed.testChild { startTestChild(child) }
+        // The Mac's node server (never started yet: the host refuses `--node` there): its connector's peer must run the
+        // host of its own row in the node's record, before anything is served or written (the review's F7).
+        if parsed.node, Platform.CodeIdentity.isAvailable,
+           let why = NodeCheck.macConnectorRefusal(token: Platform.Sockets.peerToken(parsed.connector), own: Platform.CodeIdentity.ownCdhash(),
+                                                   pins: NodePins.read()) {
+            say("not started: \(why)")
+            exit(77)
+        }
 
         HostConnection.register(connector: parsed.connector, for: parsed.hostSocket)
         watchConnector(parsed.connector)
@@ -116,7 +124,7 @@ public enum ServerStart {
         // The Mac's rule (`NodeSystem.approvalMeasured`): Touch ID asked by this server, the caller's code the installed
         // command line's, read once from the build it runs (`<node root>/bin/vibeswitcher`); unreadable, no peer is the user's.
         if rule.mode == .approval {
-            let commandLine = parsed.nodeRoot.flatMap { Platform.CodeIdentity.cdhash(atPath: NodeFolders.join($0, "bin/\(NodeFolders.installedCLI)")) }
+            let commandLine = ApprovalVoice.commandLineAnchor(nodeRoot: parsed.nodeRoot, own: Platform.CodeIdentity.ownCdhash(), pins: NodePins.read())
             requests.approval = ApprovalVoice(authenticator: ApprovalVoice.System(timeout: 60), commandLine: commandLine)
             say("the Mac's rule: Touch ID per state change; the command line's code \(commandLine == nil ? "couldn't be read: no peer is the user's" : "read")")
         }

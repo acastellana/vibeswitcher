@@ -76,6 +76,10 @@ enum StatusCommand {
     /// `health`: only the health digest (`NodeHealth.lines`; with `json`, its object).
     static func throughServer(json asJSON: Bool, health: Bool = false, long: Bool = false) -> Int32 {
         let context = NodeContext.current()
+        // The Mac: the user's node's LaunchAgent says first whether its host runs, and its build (MacAgentCommand.swift);
+        // reached only once the Mac's refusal (`usersNodeRefusal`) is lifted.
+        if MacAgent.statusChecksHost(onTheMac: Platform.Service.manager == .launchd, isScratch: context.isScratch, refused: context.usersNodeRefusal != nil,
+                                     json: asJSON), let code = MacAgentCommand.status(json: asJSON) { return code }
         context.sayScratch()
         let client: NodeClient
         switch NodeClient.connect(context) {

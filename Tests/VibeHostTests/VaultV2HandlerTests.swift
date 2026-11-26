@@ -13,6 +13,8 @@ struct VaultV2HandlerTests {
 
     @Test func aNodesHostRecordsTheUsersActionOnceAndAnswersItsRetry() {
         let book = LeadVault.Book()
+        // A node host's book keeps the record: `HostServer` sets it once it is one (item 14).
+        book.recordsActions = true
         #expect(VaultV2Handler.answer(record, from: .app, vault: book, nodeHost: true, viaConnector: true) == .recorded(first: true))
         #expect(VaultV2Handler.answer(record, from: .app, vault: book, nodeHost: true, viaConnector: true) == .recorded(first: false))
         // The Mac: `.app` from a socket's peer that proved itself isn't the server child (the review of 2026-11-21).

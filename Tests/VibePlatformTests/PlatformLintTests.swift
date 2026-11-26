@@ -200,10 +200,11 @@ struct PlatformLintTests {
             .filter { FileManager.default.fileExists(atPath: repo.appendingPathComponent($0).path) }
     }
 
-    /// Mode dispatches that are calls: each returns only when this process isn't in that mode (the host's three, the
-    /// session sandbox's relay, porter, egress proxy and branch run's launcher, each of which settles SIGPIPE itself
-    /// before it writes), or never (`MCPHandover.answerProbe`, declared `-> Never`).
+    /// Mode dispatches that are calls: each returns only when this process isn't in that mode (the host's four, the
+    /// Mac switch's keeper among them, the session sandbox's relay, porter, egress proxy and branch run's launcher, each
+    /// of which settles SIGPIPE itself before it writes), or never (`MCPHandover.answerProbe`, declared `-> Never`).
     static let dispatchCalls = ["PTYSpawn.execIfLaunched(", "SessionParser.runIfAsked(", "HostHandover.probeIfAsked(",
+                                "MacHandoverKeeper.keepIfAsked(",
                                 "MCPHandover.answerProbe()", "DoorRelay.runIfConfined(", "Porter.runIfAsked(",
                                 "EgressProxy.runIfAsked(", "BranchRun.execIfLaunched("]
 

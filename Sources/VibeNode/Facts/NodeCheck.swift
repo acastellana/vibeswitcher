@@ -67,6 +67,8 @@ public enum NodeCheck {
         /// runs the installed build's server code (its cdhash, Security's dynamic check) with the Hardened Runtime; nil
         /// when it can't be told.
         public var code: Bool?
+        /// Why `code` is false or nil, when the check said (the node's record refused, or the code it names no build).
+        public var codeWhy: String?
 
         public init(pid: pid_t, dumpable: Bool?, parent: pid_t?, cgroup: [String]?, session: pid_t?, code: Bool? = nil) {
             self.pid = pid
@@ -85,7 +87,8 @@ public enum NodeCheck {
     /// (`Platform.Processes.lockHolder(path:exclusiveFlock:patience:)`: one look at /proc/locks can miss a held lock).
     public static let lockPatience: TimeInterval = 3
 
-    /// The Mac's server check: the server beside an installed build's host, `<prefix>/<build>/bin/vibeswitcher-server`
+    /// The server beside an installed build's host (the Mac's server check took it before the node's record; nothing
+    /// chooses the server by it now), `<prefix>/<build>/bin/vibeswitcher-server`
     /// for the host `<prefix>/<build>/bin/vibeswitcher-host` (both paths resolved); nil for a host anywhere else.
     public static func installedServer(host: String, prefix: String) -> String? {
         let parts = host.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
@@ -96,6 +99,88 @@ public enum NodeCheck {
         return (parts.dropLast() + [BuildInfo.server]).joined(separator: "/")
     }
 
+    /// The Mac's answer about the listener's code (`macServerCode`).
+    public enum MacCode: Equatable, Sendable {
+        /// A server of an installed build, with the Hardened Runtime.
+        case runs
+        /// Not: why.
+        case other(String)
+        /// Can't be told: why.
+        case unknown(String)
+
+        /// As `Listener.code` holds it.
+        public var told: Bool? {
+            switch self {
+            case .runs: return true
+            case .other: return false
+            case .unknown: return nil
+            }
+        }
+
+        /// Why it isn't `.runs`.
+        public var why: String? {
+            switch self {
+            case .runs: return nil
+            case .other(let why), .unknown(let why): return why
+            }
+        }
+    }
+
+    /// The Mac: whether the process `token` names runs an installed build's server with the Hardened Runtime (the node on
+    /// the Mac's design, "The anchor", check 1): its running code, by Security's dynamic check of the token (`runs`), must
+    /// be the server of a build the node's record pins (`pins`, `NodePins.read`: root's to write, never the user's), and
+    /// hardened (`hardened`). No path under the home chooses the build: not the builds folder, not the job's program
+    /// (`job`, as `launchctl print` names it after a plist anyone of the user's can bootstrap; item 12: after an
+    /// in-place switch it names the next build while this one's server still runs). `job` and `prefix` are taken so a
+    /// caller's and a test's facts are the same; they choose nothing. A record that can't be taken: can't be told, why
+    /// said. Every reader is a parameter, the system's by default.
+    public static func macServerCode(token: Platform.PeerToken, job: NodeAgent.Printed?, prefix: String?,
+                                     pins: Result<NodePins, NodePins.Refused>,
+                                     runs: (Platform.PeerToken, Data) -> Bool = { Platform.CodeIdentity.runs($0, cdhash: $1) },
+                                     hardened: (Platform.PeerToken) -> Bool? = Platform.CodeIdentity.isHardened) -> MacCode {
+        let record: NodePins
+        switch pins {
+        case .failure(let why): return .unknown(why.description)
+        case .success(let read): record = read
+        }
+        guard record.builds.contains(where: { runs(token, $0.server) }) else {
+            return .other("it runs no server the node's record pins: not an installed build's server")
+        }
+        return hardened(token) == true ? .runs : .other("it doesn't run with the Hardened Runtime")
+    }
+
+    /// The Mac's node server at its start: why the host at the other end of its connector isn't its own build's, or nil
+    /// (the review of 2026-11-25, F7: the fake host running the genuine server). `token` is the connector's peer token: a
+    /// stream pair's names the process that made the pair (the host that started this server), fixed at creation. The
+    /// server finds its own row by the code it runs (`own`, the kernel's cdhash), and the token's process must run that
+    /// row's host, by Security's dynamic check (`runs`), hardened. No pid is looked up. A token taken after the host
+    /// exec'd (a handover) names no code any more and refuses: a carried server needs a new connector or a restart.
+    public static func macConnectorRefusal(token: Platform.PeerToken?, own: Data?, pins: Result<NodePins, NodePins.Refused>,
+                                           runs: (Platform.PeerToken, Data) -> Bool = { Platform.CodeIdentity.runs($0, cdhash: $1) },
+                                           hardened: (Platform.PeerToken) -> Bool? = Platform.CodeIdentity.isHardened) -> String? {
+        let record: NodePins
+        switch pins {
+        case .failure(let why): return why.description
+        case .success(let read): record = read
+        }
+        guard let own, let build = record.build(server: own) else {
+            return "this server's code is no server the node's record pins: not an installed build's server"
+        }
+        guard let token else { return "the host at the other end of the connector can't be read" }
+        guard runs(token, build.host) else {
+            return "the process at the other end of the connector (pid \(token.pid)) doesn't run the host the node's record pins for build \(build.commit)"
+        }
+        guard hardened(token) == true else { return "the host at the other end of the connector (pid \(token.pid)) doesn't run with the Hardened Runtime" }
+        return nil
+    }
+
+    /// `path` with its links resolved (`realpath`); nil when it can't be.
+    public static func resolved(_ path: String) -> String? {
+        guard let real = realpath(path, nil) else { return nil }
+        defer { free(real) }
+        return String(cString: real)
+    }
+
     /// `codeIdentity`: the Mac's form (`Platform.CodeIdentity.isAvailable`): the listener's code (`Listener.code`) in
     /// place of its dumpable state, and no cgroup (the Mac has none: the parent and the session hold it to the host).
     public static func refusal(_ listener: Listener, mode: Mode, expectedParent: pid_t?, parentSession: pid_t?,
@@ -104,7 +189,9 @@ public enum NodeCheck {
             switch listener.code {
             case true?: break
             case false?: return "the process listening on the server's socket (pid \(listener.pid)) doesn't run the installed build's server code with the Hardened Runtime: not the node's server"
+                + (listener.codeWhy.map { " (\($0))" } ?? "")
             case nil: return "whether the process listening on the server's socket (pid \(listener.pid)) runs the installed build's server code can't be told"
+                + (listener.codeWhy.map { ": \($0)" } ?? "")
             }
         } else {
             switch listener.dumpable {

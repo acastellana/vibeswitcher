@@ -12,6 +12,9 @@ PTYSpawn.execIfLaunched(CommandLine.arguments)
 SessionParser.runIfAsked(CommandLine.arguments)
 // As the probe of a handover (see `HostHandover`): only whether this build can take over.
 HostHandover.probeIfAsked(CommandLine.arguments)
+// As the keeper of a Mac switch (V2/MacHandoverKeeper.swift): it proves its code, holds the state, gives it back only
+// to a new image that proves its own, and exits.
+MacHandoverKeeper.keepIfAsked(CommandLine.arguments)
 // As the node's egress proxy for its confined sessions (the session sandbox plan's SB9, `EgressProxy`). Hardened first.
 EgressProxy.runIfAsked(CommandLine.arguments)
 
@@ -24,7 +27,11 @@ if let why = HostHardening.refusal(hardening, arguments: CommandLine.arguments) 
     exit(1)
 }
 
-let arguments = CommandLine.arguments
+// The Mac's node (`--node` anywhere on its command line): that command line is read once, by the checked start's
+// parser (`HostImages.startAsNode`, `CheckedCommandLine`), and every reader here and in the helpers sees the executable
+// alone, so none can read it differently (the re-check's I1). What needs the node's values takes them from the value.
+let isMacNode = Platform.CodeIdentity.isAvailable && CommandLine.arguments.dropFirst().contains(HostImages.nodeFlag)
+let arguments = isMacNode ? Array(CommandLine.arguments.prefix(1)) : CommandLine.arguments
 func value(after flag: String) -> String? {
     guard let index = arguments.firstIndex(of: flag), arguments.indices.contains(index + 1) else { return nil }
     return arguments[index + 1]
@@ -37,7 +44,21 @@ func notStarted(_ why: String) -> Never {
 // The node's host (`--node`, Linux): HOME from the user database, VIBESWITCHER_HOME and CFFIXED_USER_HOME unset,
 // before anything reads a path; its --node-root and its own --server needed (see V2/HostImages.swift). Refused, it
 // doesn't start, or, as a new image of a handover, goes back (below).
-var startRefusal = HostImages.startAsNode(arguments: arguments)
+var startRefusal = HostImages.startAsNode(arguments: isMacNode ? CommandLine.arguments : arguments)
+// A Mac node refused stops here, whatever its command line said (no going back, no state read).
+if isMacNode, let startRefusal { notStarted(startRefusal) }
+// The Mac's checked node start (behind `isCheckedMacNode`, never yet): what it found, and its command line as the value
+// renders it, for the helpers that take the node's values (its folders, its server child).
+let checkedStart = isMacNode ? HostImages.takeCheckedMacNode() : nil
+let nodeArguments = checkedStart.map { Array(CommandLine.arguments.prefix(1)) + $0.commandLine.rendered } ?? arguments
+// A scratch host shaped as a checked node for its sessions' tests (`--test-checked-shape HOME`, V2/CheckedSessions.swift):
+// reset as one is, HOME the given scratch home; refused for the user's host, a node and the node's lock.
+var testShapeHome: String?
+switch CheckedSessions.takeTestShape(arguments: arguments, isMacNode: isMacNode, lock: value(after: "--lock"), usersLock: VibePaths.hostLock.path) {
+case .failure(let why)?: notStarted(why.description)
+case .success(let home)?: testShapeHome = home
+case nil: break
+}
 
 VibePaths.ensurePrivateDirectories()
 let environment = ProcessInfo.processInfo.environment
@@ -47,7 +68,7 @@ let inherited = Platform.Tools.sessionEnvironmentNames
 let shell = environment["SHELL"].flatMap { $0.isEmpty ? nil : $0 } ?? Platform.Tools.loginShell
 let executable = Bundle.main.executablePath ?? arguments[0]
 // This build's folders: on Linux from --node-root, else --image-path, else the executable (see V2/HostImages.swift).
-let folders = HostImages.folders(arguments: arguments, executable: executable)
+let folders = HostImages.folders(arguments: nodeArguments, executable: executable)
 let build = HostBuild.id(ofExecutableAt: folders.image)
 let lockPath = value(after: "--lock") ?? VibePaths.hostLock.path
 // The user's host, not a scratch host on its own lock (which runs beside it, and leaves its files alone). On Linux by
@@ -98,6 +119,28 @@ var config = HostServer.Config(
                                                  adding: folders.commandFolder),
                                                  adding: Platform.CodeIdentity.isAvailable ? nil : VibePaths.root.appendingPathComponent("plugins/bin").path),
     hostBuild: build)
+config.checkedNode = checkedStart
+// A checked node's sessions are given back what its reset took, on their spawn alone (V2/CheckedSessions.swift), as are a
+// scratch host's shaped as one; and no Swift child of the node (the server child, the launchers, the parsers) starts the
+// backtracer, as Linux's fixed list gives (the plist's SWIFT_BACKTRACE acted on this process only, before its reset).
+if Platform.CodeIdentity.isAvailable, checkedStart != nil || testShapeHome != nil, let home = testShapeHome ?? HostImages.accountHome {
+    config.checkedSessions = CheckedSessions.read(uid: getuid(), accountHome: home)
+    config.baseEnvironment["SWIFT_BACKTRACE"] = "enable=no"
+}
+if let why = HostImages.checkedNodeRefusal(config.checkedNode, ownsLaunchers: ownsLaunchers) { notStarted(why) }
+// Only a checked node starts on the node's lock, by file (the re-check's I2c): one check, in place of refusing each test
+// flag such a host might be given.
+if config.checkedNode == nil, HostImages.isNodeLock(lockPath, accountHome: HostImages.accountHome) {
+    notStarted("the lock \(lockPath) is the node's own: only a checked node start takes it")
+}
+// A scratch host's test of the Mac's switch through a keeper (`HostServer.Config.testKeeperHost`): never the user's
+// host's, nor a checked node host's.
+if Platform.CodeIdentity.isAvailable, !ownsLaunchers, config.checkedNode == nil {
+    config.testKeeperHost = value(after: "--handover-test-keeper").flatMap(NodePins.bytes)
+    config.testSwapAfterCheck = value(after: "--handover-test-swap-after-check")
+    config.testSwapBeforeExec = value(after: "--handover-test-swap-before-exec")
+    config.testKeeperLimit = value(after: "--handover-test-keeper-limit").flatMap(TimeInterval.init)
+}
 config.idleExit = value(after: "--idle-exit").flatMap(TimeInterval.init) ?? 600
 // A bench's host: it ends, sessions and all, with the bench (see `HostServer.Config.owner`). Kept through a handover.
 config.owner = value(after: "--exit-with").flatMap(pid_t.init).flatMap { $0 > 0 ? $0 : nil }
@@ -120,6 +163,9 @@ config.spawnNeedsLead = ownsLaunchers && !Platform.CodeIdentity.isAvailable
 config.watchesItsPath = ownsLaunchers && !Platform.CodeIdentity.isAvailable
 // On Linux a host that took itself for a scratch host never holds the user's lock (see `HostHardening`).
 config.heldLockIsAllowed = HostHardening.heldLockIsAllowed(ownsLaunchers: ownsLaunchers, usersLock: VibePaths.hostLock.path)
+// The Mac: a host that isn't a checked node holds no lock that is the node's own once opened, by its descriptor (another
+// letter case, a dangling link: the re-check's round 2, note 1).
+if Platform.CodeIdentity.isAvailable, checkedStart == nil { config.heldLockIsAllowed = { HostImages.heldLockAllowed($0, accountHome: HostImages.accountHome) } }
 // On Linux the node's host hands over only to a build installed under ~/.vibeswitcher/v2/builds that it checked; a
 // scratch host to one under its --install-root; any other to any build, as before (see V2/HandoverTarget.swift).
 config.installRoot = HandoverTarget.installRoot(arguments: arguments, ownsLaunchers: ownsLaunchers, accountHome: HostImages.accountHome)
@@ -132,7 +178,8 @@ config.logPath = value(after: "--log") ?? (ownsLaunchers ? VibePaths.root.append
 // What a build this one hands over to is started with: the same, without this start's handover.
 let handoverFlags: [String: Bool] = ["--handover": true, "--handover-fallback": true, "--handover-fail-restore": false,
                                      "--handover-fallback-app": true, "--app-executable": true,
-                                     HostStart.appKeyFlag: false, HostImages.imagePathFlag: true, HandoverMemory.fallbackImageFlag: true].merging(TestAppPrincipal.handoverFlags) { $1 }
+                                     HostStart.appKeyFlag: false, HostImages.imagePathFlag: true, HandoverMemory.fallbackImageFlag: true,
+                                     MacHandoverKeeper.channelFlag: true, MacHandoverKeeper.pidFlag: true].merging(TestAppPrincipal.handoverFlags) { $1 }
     // On Linux --node-root and --server too: a handover appends the target's, and its fallback's (V2/HandoverMemory.swift).
     .merging(HandoverMemory.handoverFlags) { $1 }
 config.arguments = HostHardening.withoutTestFlags(arguments.dropFirst().enumerated().reduce(into: (kept: [String](), skip: false)) { result, item in
@@ -140,6 +187,12 @@ config.arguments = HostHardening.withoutTestFlags(arguments.dropFirst().enumerat
     if let takesValue = handoverFlags[item.element] { result.skip = takesValue; return }
     result.kept.append(item.element)
 }.kept, ownsLaunchers: ownsLaunchers)
+// A checked node's next image is started with its own command line, from the value (its keeper's flags left out).
+if let checkedStart {
+    var line = checkedStart.commandLine
+    line.keeper = nil
+    config.arguments = line.rendered
+}
 // This build's own copy, there for as long as it runs: if a build it hands over to can't restore, it comes back to it.
 // On Linux what runs is its own sealed copy (`HostImages.ownCopy`, carried across the exec: V2/HandoverMemory.swift);
 // this path only names it, as `--handover-fallback-image` (its build and folders). The Mac: its launcher copy, by path.
@@ -171,7 +224,18 @@ var restoring: HostHandover.State?
 var restoredSecrets: Data?
 // The state as handed over, its secrets' descriptor still named: what `HandoverMemory.finish` closes once restored.
 var handedOver: HostHandover.State?
-if let handoverPath {
+if let checkedStart, let keeper = checkedStart.commandLine.keeper {
+    // A checked node's switch: the state only from the keeper it proved, only a checked node's, only holding the node's
+    // lock; any refusal closes everything with this process (the re-check's I2). No state file, no going back.
+    switch MacHandoverKeeper.take(channel: keeper.channel, keeper: keeper.pid) {
+    case .failure(let why): notStarted("couldn't take over: \(why.description)")
+    case .success(var state):
+        if let why = HostImages.mayTakeHandover(state, viaKeeper: true, checkedNode: checkedStart, lockPath: lockPath) { notStarted(why) }
+        handedOver = state
+        restoredSecrets = HostHandover.takeSecrets(from: &state)
+        restoring = state
+    }
+} else if let handoverPath {
     // Refused at its start (traced): back to the build before, its state and secrets unread here.
     if case .refused(let why) = hardening { goBack(handoverPath, HostHardening.Refused(why)) }
     if let startRefusal { goBack(handoverPath, HostHardening.Refused(startRefusal)) }
@@ -179,7 +243,12 @@ if let handoverPath {
         // A test of the fallback: as if this build couldn't read the state (on Linux, once it has read it and its
         // secrets, below: V2/HandoverMemory.swift).
         if arguments.contains("--handover-fail-restore"), !HandoverMemory.failsRestoreLate { throw HostHandover.Failure.unreadable("--handover-fail-restore") }
-        var state = try HostHandover.read(from: handoverPath)
+        // A Mac switch through a keeper: the state it held, given only once this image proved its code to it.
+        let kept = MacHandoverKeeper.takeIfAsked(arguments)
+        var state = try kept?.get() ?? HostHandover.read(from: handoverPath)
+        // A checked node's state only to a checked start, and a checked start's only from a proven keeper: otherwise
+        // nothing is taken, and the exit closes every descriptor this image was given (the review's F1, N2).
+        if let why = HostImages.mayTakeHandover(state, viaKeeper: kept != nil, checkedNode: config.checkedNode) { notStarted(why) }
         handedOver = state
         restoredSecrets = HostHandover.takeSecrets(from: &state)
         restoring = state
@@ -221,7 +290,7 @@ HostHardening.watch(server)
 // A detached host's log (its stderr, shared with its server child) kept to about 2 MB and one older copy (V2/StderrCap.swift).
 StderrCap.start()
 // Its soft limit on descriptors raised to the hard one; its sessions' programs get the old one back (V2/HostImages.swift).
-HostImages.raiseDescriptorLimit(handedOver: handoverPath != nil)
+HostImages.raiseDescriptorLimit(handedOver: handoverPath != nil || checkedStart?.commandLine.keeper != nil)
 // The vault is what a build this one hands over to must hold in memory too.
 if let vault = config.vault { server.secretsForHandover = { vault.serialized } }
 // What a held first look kept from being recorded, in the host's log.
@@ -256,17 +325,19 @@ signals.setEventHandler {
     server.queue.asyncAfter(deadline: .now() + 1) { _exit(128 + number) }
 }
 signals.resume()
-if let handoverPath, let state = restoring {
+if let state = restoring {
     do {
         if arguments.contains("--handover-fail-restore") { throw HostHandover.Failure.unreadable("--handover-fail-restore, after its secrets") }
         _ = try server.start(restoring: state)
         // Each session's output is in its ring now: the decoded copies let go (V2/HandoverMemory.swift).
         restoring = restoring.map(HandoverMemory.withoutOutput)
         handedOver = handedOver.map(HandoverMemory.withoutOutput)
-        if HandoverMemory.descriptor(named: handoverPath) == nil { unlink(handoverPath) }
+        if let handoverPath, HandoverMemory.descriptor(named: handoverPath) == nil { unlink(handoverPath) }
         if let testSecret { log("test secret carried: \(restoredSecrets == testSecret ? "yes" : "no")") }
         log("took over \(state.sessions.count) sessions\(restoredSecrets.map { " and \($0.count) bytes of secrets" } ?? "") from build \(state.fromBuild) \(Date())")
     } catch {
+        // A checked node doesn't go back: its fallback would be an unchecked exec by path.
+        guard let handoverPath else { notStarted("couldn't take over: \(error)") }
         goBack(handoverPath, error)
     }
 } else {
@@ -285,7 +356,7 @@ if let handoverPath, let state = restoring {
 TestAppPrincipal.adopt(arguments: arguments, restored: restoring?.testAppConnector, ownsLaunchers: ownsLaunchers, server: server)
 // The app on Linux: the server child, from a sealed copy of `--server PATH`, through its connector (see `ServerChild`);
 // after a handover, the one the build before ran, once checked.
-ServerChild.adopt(arguments: arguments, ownsLaunchers: ownsLaunchers, nodeRoot: folders.installFolder, config: config, server: server,
+ServerChild.adopt(arguments: nodeArguments, ownsLaunchers: ownsLaunchers, nodeRoot: folders.installFolder, config: config, server: server,
                   restored: restoring, copy: images.server)
 // Restored and taken again: on Linux the state's and secrets' sealed memory and the old image's copy closed, every
 // other descriptor kept marked close-on-exec (V2/HandoverMemory.swift).

@@ -7,9 +7,9 @@ import Testing
 /// before; and the Mac's vault hooks do nothing.
 struct LeadVaultV2Tests {
     /// The record per host (the review of 2026-11-21): `on` decides, on both systems, for the answer and both hooks; the
-    /// default is Linux's every host and, on the Mac, only a host that said it's a node host (`recordsOnThisHost`).
+    /// default is Linux's every host and none on the Mac, where a book says for itself (`LeadVault.Book.recordsActions`).
     @Test func theRecordIsKeptWhereTheHostSaysSo() {
-        #expect(LeadVaultV2.isOn == (!Platform.CodeIdentity.isAvailable || LeadVaultV2.recordsOnThisHost))
+        #expect(LeadVaultV2.isOn == !Platform.CodeIdentity.isAvailable)
         let request = LeadVaultV2.Request.recordUserAction(action: "a", kind: "set", subject: nil, digest: "d")
         var book: LeadVaultV2.Book?
         #expect(LeadVaultV2.answer(request, from: .app, book: &book, on: true) == .recorded(first: true))
@@ -25,6 +25,30 @@ struct LeadVaultV2Tests {
         _ = LeadVaultV2.answer(.retireUserSeals([message.id]), from: .app, book: &off, on: true)
         #expect(LeadVaultV2.verified([message], [true], book: &off, changed: &changed, on: true) == [false])
         #expect(LeadVaultV2.verified([message], [true], book: &off, changed: &changed, on: false) == [true])
+    }
+
+    /// The Mac's tasks, item 14: the record is the book's, not the process's. A book set to keep it (a checked Mac node
+    /// host's) records a user's seal through its `.seal` hook and refuses a retired one through `.verify`; another book in
+    /// the same process, never set, records nothing and verifies by the key alone, on the Mac. Linux: every book keeps it.
+    /// Before, one process-wide switch (`recordsOnThisHost`, one-way) decided for every book, so a test that made a node
+    /// host left it on for every host after it, and setting one book changed nothing.
+    @Test func theRecordIsTheBooksNotTheProcesss() {
+        let node = LeadVault.Book(), other = LeadVault.Book()
+        #expect(node.recordsActions == !Platform.CodeIdentity.isAvailable && other.recordsActions == node.recordsActions)
+        node.recordsActions = true
+        let message = SteerMessage(text: "yes", from: .user, agentPid: 42)
+        guard case .seal(let seal) = node.answer(.seal(message), from: .app), case .seal(let otherSeal) = other.answer(.seal(message), from: .app) else {
+            Issue.record("a user's message from the app wasn't sealed")
+            return
+        }
+        #expect(node.v2 { $0?.seals[message.id] } != nil, "the node host's book didn't record the user's seal")
+        #expect(other.v2 { $0?.seals[message.id] != nil } == !Platform.CodeIdentity.isAvailable, "another book recorded as the node host's")
+        var sealedNode = message, sealedOther = message
+        sealedNode.seal = seal
+        sealedOther.seal = otherSeal
+        _ = node.v2 { LeadVaultV2.answer(.retireUserSeals([message.id]), from: .app, book: &$0, on: true) }
+        #expect(node.answer(.verify([sealedNode]), from: .app) == .verified([false]), "a retired seal verified on the node host's book")
+        #expect(other.answer(.verify([sealedOther]), from: .app) == .verified([true]))
     }
 
     private let scratch = Scratch()

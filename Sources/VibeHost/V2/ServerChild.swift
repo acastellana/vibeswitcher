@@ -179,7 +179,17 @@ public final class ServerChild {
             if let carried { Sys.close(carried.fd) }
             // The review of 2026-11-21: a child's connections are the app's, so only a scratch host runs one until the
             // Mac's node start is checked (`HostImages.macServerRefusal`).
-            if let why = HostImages.macServerRefusal(lockPath: config.lockPath, ownsLaunchers: ownsLaunchers) {
+            // A `--node` host runs one only from its checked start (`Config.checkedNode`, item 13), with that start's server.
+            if arguments.contains(HostImages.nodeFlag) {
+                guard let checked = config.checkedNode else {
+                    say(server, "refused --server: a --node host on the Mac runs a server child only from a checked node start")
+                    return nil
+                }
+                guard launch.image == checked.serverPath else {
+                    say(server, "refused --server: \(launch.image) isn't the server its node start checked (\(checked.serverPath))")
+                    return nil
+                }
+            } else if config.checkedNode == nil, let why = HostImages.macServerRefusal(lockPath: config.lockPath, ownsLaunchers: ownsLaunchers) {
                 say(server, "refused --server: \(why)")
                 return nil
             }
@@ -371,9 +381,16 @@ public final class ServerChild {
     /// each start from the file once its cdhash is still that (`Image.checked`).
     public static func start(_ launch: Launch, server: HostServer, loaded: Platform.ProcessSelf.SealedCopy? = nil) -> ServerChild? {
         if Platform.CodeIdentity.isAvailable {
-            guard let cdhash = Platform.CodeIdentity.cdhash(atPath: launch.image) else {
-                say(server, "no server child: \(launch.image) has no code signature to check it by (no cdhash)")
+            // A checked Mac node start's child is checked by its row's server, as its start found it (`Config.checkedNode`).
+            let pinned: Result<Data, HostImages.Refused> = server.config.checkedNode.map { .success($0.server) }
+                ?? Platform.CodeIdentity.cdhash(atPath: launch.image).map { .success($0) }
+                    ?? .failure(HostImages.Refused("\(launch.image) has no code signature to check it by (no cdhash)"))
+            let cdhash: Data
+            switch pinned {
+            case .failure(let why):
+                say(server, "no server child: \(why.description)")
                 return nil
+            case .success(let read): cdhash = read
             }
             let child = ServerChild(server: server, image: .checked(path: launch.image, cdhash: cdhash), launch: launch)
             server.queue.async {
@@ -469,6 +486,35 @@ public final class ServerChild {
         if DispatchQueue.getSpecific(key: HostServer.queueKey) != nil { work() } else { queue.sync(execute: work) }
     }
 
+    /// A Mac switch through a keeper (the node on the Mac's design, "The server child after a handover"): the child
+    /// running is ended (its connector closed, SIGKILL, reaped) and none is started again until `resumeAfterHandover`,
+    /// so the new image starts its own, whose connector is a pair it made and whose check runs against its code. Its pid,
+    /// or nil when none ran. On `queue`.
+    @discardableResult
+    func endForHandover() -> pid_t? {
+        let running = lock.withLock { () -> Running? in
+            guard !stopped else { return nil }
+            stopped = true
+            restartPending = false
+            defer { child = nil }
+            return child
+        }
+        guard let running else { return nil }
+        running.watch.cancel()
+        server?.closeAppConnector(running.connector)
+        kill(running.pid, SIGKILL)
+        var status: Int32 = 0
+        while waitpid(running.pid, &status, 0) < 0, errno == EINTR {}
+        if let server { Self.say(server, "server child pid \(running.pid) ended for the handover: the new image starts its own") }
+        return running.pid
+    }
+
+    /// The switch `endForHandover` was for failed before its exec: the server child started again. On `queue`.
+    func resumeAfterHandover() {
+        lock.withLock { stopped = false }
+        spawn()
+    }
+
     /// A server child the host stopped before it took it (`HostServer.stop` ran on the queue first, finding no
     /// `serverChild` to stop): started never, its copy closed (`stop`), and the carried child of `record`, when there is
     /// one, ended and reaped with its connector closed (`release`), so a host that stops and waits to exit
@@ -484,7 +530,8 @@ public final class ServerChild {
     /// child from the copy, its token named, its end closed here. A copy whose mode can't be put back starts nothing:
     /// tried again after the wait. On `queue`.
     private func spawn() {
-        guard let server, !server.stopped, !lock.withLock({ stopped }) else { return }
+        // Never a second child beside one that runs (a restart queued before a switch that failed, the blind check's item 2).
+        guard let server, !server.stopped, !lock.withLock({ stopped || child != nil }) else { return }
         lock.withLock { restartPending = false }
         // What runs: Linux's sealed copy, its mode put back and kept across the spawn, named to the image; the Mac's file,
         // still the code the host loaded.

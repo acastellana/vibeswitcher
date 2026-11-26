@@ -75,6 +75,23 @@ public final class HostServer {
         /// handover goes only to an installed build checked on its sealed copy (see V2/HandoverTarget.swift). Nil: any
         /// target, as always (the Mac's and every scratch host's).
         public var installRoot: URL?
+        /// The Mac: what this host's checked node start found (`HostImages.macNodeStart`), made by `main` only behind
+        /// `HostImages.isCheckedMacNode`, by tests through the function. Nil: no node host (every host today).
+        public var checkedNode: HostImages.CheckedNode?
+        /// The Mac: what a checked node's sessions are given back of the user's environment, on each spawn only (never
+        /// the server child's): launchd's `SSH_AUTH_SOCK`, the text encoding, the umask 022 (V2/CheckedSessions.swift).
+        /// Set by `main` for a checked node, and for a scratch host shaped as one (`--test-checked-shape`). Nil: none,
+        /// as always.
+        public var checkedSessions: CheckedSessions?
+        /// A scratch host's test of the Mac's switch through a keeper (`MacHandoverKeeper`): the host code its test pins
+        /// (`--handover-test-keeper HEX`), and the files renamed over the target after the path check, or after the
+        /// keeper's proof (`--handover-test-swap-after-check PATH`, `--handover-test-swap-before-exec PATH`). Nil: none
+        /// (every other host; a checked node host's switch takes its pins from the record).
+        public var testKeeperHost: Data?
+        public var testSwapAfterCheck: String?
+        public var testSwapBeforeExec: String?
+        /// A scratch host's test: its keeper's limit, shorter than the keeper's own (`--handover-test-keeper-limit S`).
+        public var testKeeperLimit: TimeInterval?
         /// The project allow-list (`~/.vibeswitcher/v2/projects` for the node's host on Linux): a spawn whose working
         /// folder isn't inside a repository it names is refused, saying why (see V2/ProjectAllowList.swift). Nil: any
         /// folder, as always (the Mac's and every scratch host's).
@@ -162,16 +179,22 @@ public final class HostServer {
     var appConnectors: [Int32: AppConnector] = [:]
     /// The server child, the app on Linux (see V2/ServerChild.swift); on the Mac only a node's host's (`--server`, the
     /// node on the Mac's step 3); none without `--server`. A Mac node host's vault keeps the record of the user's
-    /// actions, its hooks included, from then on (`LeadVaultV2.recordsOnThisHost`).
+    /// actions, its hooks included, from then on (its book's `recordsActions`: that book's alone, item 14).
     var serverChild: ServerChild? {
-        didSet { if isMacNodeHost { LeadVaultV2.recordsOnThisHost = true } }
+        didSet { if isMacNodeHost { config.vault?.recordsActions = true } }
     }
 
     /// A node's host on the Mac: it runs a server child and keeps a vault. It answers `vaultV2` there (the record of the
     /// user's actions, `VaultV2Handler`) and lists it in its welcome; the Mac app's host has no server child and doesn't.
-    /// Only from a checked node start (`HostImages.isCheckedMacNode`, never yet), never from "has a server child": any
+    /// Only from a checked node start (`Config.checkedNode`: `main` makes one only behind `HostImages.isCheckedMacNode`,
+    /// never yet), never from "has a server child": any
     /// host can be given `--server` (the review of 2026-11-21).
-    var isMacNodeHost: Bool { Platform.CodeIdentity.isAvailable && HostImages.isCheckedMacNode && serverChild != nil && config.vault != nil }
+    var isMacNodeHost: Bool { Platform.CodeIdentity.isAvailable && config.checkedNode != nil && serverChild != nil && config.vault != nil }
+
+    /// A checked Mac node host from its start (`Config.checkedNode`), before its server child is adopted too: who the
+    /// app is (no executable beside it, no key, no proof) keys on this, so no window opens between the listener's start
+    /// and the child's (the review's N1).
+    var isCheckedNodeHost: Bool { Platform.CodeIdentity.isAvailable && config.checkedNode != nil }
 
     /// What the welcome lists: the configured capabilities, and on a Mac node's host `vaultV2` too.
     var welcomeCapabilities: [String] {
@@ -190,7 +213,9 @@ public final class HostServer {
 
     public func start() throws {
         queue.setSpecific(key: Self.queueKey, value: true)
-        lockFD = open(config.lockPath, O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
+        // No link followed (the re-check's note 5): a link at the lock's path, dangling or not, refuses the start (ELOOP)
+        // rather than making and holding the file it names.
+        lockFD = open(config.lockPath, O_CREAT | O_RDWR | O_CLOEXEC | O_NOFOLLOW, 0o600)
         guard lockFD >= 0 else { throw Failure.lock(errno) }
         guard flock(lockFD, LOCK_EX | LOCK_NB) == 0 else {
             Sys.close(lockFD)
@@ -386,7 +411,7 @@ public final class HostServer {
     /// else sends on it.
     private func prove(_ answer: Data, from client: ClientConnection) -> HostEvent {
         let refusal: String
-        if isMacNodeHost {
+        if isCheckedNodeHost {
             refusal = "A node's session host on the Mac takes no proof: its app is its server, through its connector."
         } else if !client.runsAppCode {
             refusal = "This connection isn't VibeSwitcher's: its process doesn't run the app's code outside every session, or something else sent on it."
@@ -405,7 +430,7 @@ public final class HostServer {
 
     /// A host with no app key takes the first one the app's code gives it (a build before challenges handed over).
     private func enroll(_ key: Data, from client: ClientConnection) {
-        guard client.runsAppCode, !isMacNodeHost, appKey == nil, key.count == AppProof.keySize else { return }
+        guard client.runsAppCode, !isCheckedNodeHost, appKey == nil, key.count == AppProof.keySize else { return }
         if let vault = config.vault { vault.adoptAppKey(key) } else { looseAppKey = SymmetricKey(data: key) }
         log.note("host: took the app's first key (it held none), \(HostLog.peer(client.peerPID))")
     }
@@ -414,7 +439,7 @@ public final class HostServer {
     /// verifier is there to race it).
     private func replaceAppKey(_ key: Data, from client: ClientConnection) -> HostEvent {
         let live = sessions.values.filter { $0.info.isLive }.count
-        guard !isMacNodeHost else { return .error("A node's session host on the Mac takes no app key: its app is its server.") }
+        guard !isCheckedNodeHost else { return .error("A node's session host on the Mac takes no app key: its app is its server.") }
         guard client.runsAppCode, live == 0, key.count == AppProof.keySize else {
             log.note("host: refused to replace the app's key (\(client.runsAppCode ? "\(live) sessions live" : "not the app's code")), \(HostLog.peer(client.peerPID))")
             return .error(client.runsAppCode ? "End every session first: the session host replaces VibeSwitcher's key only while none runs."
@@ -535,9 +560,11 @@ public final class HostServer {
                 return reply(.error("The session host runs \(max(1, config.maxSessions)) sessions, its limit: end one first."))
             }
             do {
-                let session = try HostedSession.spawn(request, shell: config.shell, launcher: config.launcher, baseEnvironment: config.baseEnvironment,
+                // A checked node's sessions: what it gives them back, on the spawn alone (V2/CheckedSessions.swift).
+                let base = config.baseEnvironment.merging(config.checkedSessions?.environment ?? [:]) { $1 }
+                let session = try HostedSession.spawn(request, shell: config.shell, launcher: config.launcher, baseEnvironment: base,
                                                       ringCapacity: config.ringCapacity, queue: queue, parser: config.parser,
-                                                      launcherTestDelay: config.launcherTestDelay)
+                                                      launcherTestDelay: config.launcherTestDelay, sessionUmask: config.checkedSessions?.umask)
                 // Only once it started: a spawn that fails leaves the ended sessions as they were.
                 for ended in room {
                     log.note("host: at its limit of \(max(1, config.maxSessions)) sessions, forgetting \(Self.short(ended.id)), ended \(Int(-ended.at.timeIntervalSinceNow)) s ago")
@@ -817,7 +844,7 @@ public final class HostServer {
     /// The app's executable a socket's peer is checked against (`identify`), nil on a Mac node host: its folder's
     /// `VibeSwitcher` is the command line's `bin/vibeswitcher` on a case-insensitive volume, the user's to replace, and
     /// the app is the server child through the connector there (the review of 2026-11-21's second HIGH).
-    var appExecutableInForce: String? { isMacNodeHost ? nil : config.appExecutable }
+    var appExecutableInForce: String? { isCheckedNodeHost ? nil : config.appExecutable }
 
     /// The live session `pid` runs in (its program or anything under it, by parent processes, or with the session's
     /// terminal), by id; nil for none. Branch code (see `identify`) runs in none. On Linux, by token, with the chain
@@ -857,6 +884,14 @@ public final class HostServer {
         }
         // On Linux from the target's sealed copy, through sealed memory, writing no file (V2/HandoverMemory.swift).
         if !Platform.CodeIdentity.isAvailable { return handOverThroughMemory(to: executable, reply: reply) }
+        // The Mac's checked node host (never yet): only to a build the node's record pins, and through a keeper whose
+        // running code proved to be it (V2/MacHandoverKeeper.swift); the new image's own start then finds its row by the
+        // code it runs (`HostImages.macNodeStart`).
+        switch keeperTarget(executable) {
+        case .failure(let why): return reply(.error("Couldn't hand over: \(why.description)."))
+        case .success(let expected): return handOverThroughKeeper(to: executable, expected: expected, reply: reply)
+        case nil: break
+        }
         handingOver = true
         let path = config.handoverPath
         let fail: (Error) -> Void = { [weak self] error in
@@ -912,6 +947,13 @@ public final class HostServer {
     }
 
     func handoverState(secretFD: Int32?) -> HostHandover.State {
+        var state = handoverStateParts(secretFD: secretFD)
+        // A checked node's state goes only to an image holding its own checked start (`HostImages.mayTakeHandover`).
+        if config.checkedNode != nil { state.fromCheckedNode = true }
+        return state
+    }
+
+    private func handoverStateParts(secretFD: Int32?) -> HostHandover.State {
         HostHandover.State(fromBuild: config.hostBuild, startedAt: startedAt, lockFD: pathWatch?.lockToCarry ?? lockFD, listenFD: listenFD, secretFD: secretFD,
                            sessions: order.compactMap { id in
                                sessions[id].map { session in

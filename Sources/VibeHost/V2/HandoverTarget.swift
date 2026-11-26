@@ -89,6 +89,26 @@ public enum HandoverTarget {
         return .success(Build(info: info, folder: folder))
     }
 
+    /// The Mac's node host: why a switch or a rollback to the host image at `path` is refused, or nil (the node on the
+    /// Mac's design, "The anchor", check 4): its file's cdhash (`cdhashOf`, this Mac's slice) must be a host the node's
+    /// record pins (`pins`, root's to write); a rollback goes only to a build the record still holds. Checked by path
+    /// before the handover; the switch then goes through a keeper proven to run the cdhash read here
+    /// (`HostServer.keeperTarget`, V2/MacHandoverKeeper.swift), so a file swapped after this check is the keeper's to
+    /// refuse. Asked only by a checked Mac node host (`Config.checkedNode`, made only behind `HostImages.isCheckedMacNode`).
+    public static func macPinned(_ path: String, pins: Result<NodePins, NodePins.Refused>,
+                                 cdhashOf: (String) -> Data? = { Platform.CodeIdentity.cdhash(atPath: $0) }) -> Refused? {
+        let record: NodePins
+        switch pins {
+        case .failure(let why): return Refused(why.description)
+        case .success(let read): record = read
+        }
+        guard let cdhash = cdhashOf(path) else { return Refused("\(path) has no code signature to check it by (no cdhash)") }
+        guard record.build(host: cdhash) != nil else {
+            return Refused("\(path) (\(NodePins.hex(cdhash))) isn't a host the node's record pins: not in the record, install it again")
+        }
+        return nil
+    }
+
     /// `build`'s `vibeswitcher-server`, loaded into a sealed copy and checked against the same `build-info`: the copy,
     /// or why not (nothing left open).
     public static func server(of build: Build) -> Result<Platform.ProcessSelf.SealedCopy, Refused> {

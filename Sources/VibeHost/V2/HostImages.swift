@@ -114,7 +114,32 @@ public enum HostImages {
     /// its host is unchanged.
     public static func startAsNode(arguments: [String]) -> String? {
         guard arguments.contains(nodeFlag) else { return nil }
-        guard !Platform.CodeIdentity.isAvailable else { return macNodeRefusal }
+        if Platform.CodeIdentity.isAvailable {
+            // The Mac: refused until its node start is switched on; then checked (`macNodeStart`) before anything else.
+            guard isCheckedMacNode else { return macNodeRefusal }
+            // Its command line, read once (the re-check's I1): nothing reads it again.
+            let line: CheckedCommandLine
+            switch CheckedCommandLine.parse(arguments) {
+            case .failure(let why): return why.description
+            case .success(let parsed): line = parsed
+            }
+            guard let home = accountHome else { return "the account has no home in the user database" }
+            // What it was started with, reset before the record is read: its environment from a fixed list, the
+            // descriptors it was given but the keeper's channel, its umask, folder and core limit.
+            let given = ProcessInfo.processInfo.environment
+            let wanted = checkedNodeEnvironment(nodeEnvironment(given, accountHome: home, accountName: accountName, shell: accountShell))
+            for name in Set(given.keys).union(wanted.keys) where given[name] != wanted[name] {
+                if let value = wanted[name] { setenv(name, value, 1) } else { unsetenv(name) }
+            }
+            if let why = Platform.NodeReset.processState(keeping: Set(line.keeper.map { [$0.channel] } ?? [])) { return why }
+            let lock = (Platform.Service.nodeRoot(accountHome: home) as NSString).appendingPathComponent("host.lock")
+            switch macNodeStart(line, lockPath: lock, own: Platform.CodeIdentity.ownCdhash(), pins: NodePins.read(), accountHome: home) {
+            case .failure(let why): return why.description
+            case .success(let checked):
+                checkedServerLock.withLock { checkedMacNode = checked }
+            }
+            return nil
+        }
         guard let nodeRoot = value(after: nodeRootFlag, in: arguments), nodeRoot.hasPrefix("/") else {
             return "\(nodeFlag) needs \(nodeRootFlag) and an absolute folder after it"
         }
@@ -238,6 +263,292 @@ public enum HostImages {
     /// host is a node host (`HostServer.isMacNodeHost`) and none but a scratch host runs a server child.
     public static let isCheckedMacNode = false
 
+    /// What a checked Mac node start found (the node on the Mac's design, "The checked node start"): its own build's row
+    /// in the node's record, and its `--server` file's cdhash, that row's server. Only a host holding one is a node host
+    /// (`HostServer.isMacNodeHost`); `main` makes one only behind `isCheckedMacNode`, tests through `macNodeStart`.
+    public struct CheckedNode: Equatable, Sendable {
+        public var build: NodePins.Build
+        /// Its command line, parsed once (`CheckedCommandLine`): the only reading of it.
+        public var commandLine: CheckedCommandLine
+        /// The `--server` path checked, and its cdhash (the row's server): what every start of the child is checked by.
+        public var serverPath: String
+        public var server: Data
+
+        public init(build: NodePins.Build, commandLine: CheckedCommandLine? = nil, serverPath: String, server: Data) {
+            self.build = build
+            // A test's checked start names its server alone: its folder is the server's build folder.
+            self.commandLine = commandLine ?? CheckedCommandLine(
+                nodeRoot: ((serverPath as NSString).deletingLastPathComponent as NSString).deletingLastPathComponent, server: serverPath, keeper: nil)
+            self.serverPath = serverPath
+            self.server = server
+        }
+    }
+
+    /// A checked Mac node's command line, parsed once into this value (the node on the Mac's design, "A checked node's
+    /// command line"; the re-check's I1). Nothing else reads a checked node's raw arguments: `main` gives every other
+    /// reader the executable alone, and what needs these values takes them from here (`rendered`).
+    public struct CheckedCommandLine: Equatable, Sendable {
+        /// `--node-root DIR`: the build's folder, where `--server` must be.
+        public var nodeRoot: String
+        /// `--server FILE`.
+        public var server: String
+        /// On a switch: `--handover-keeper-channel FD --handover-keeper-pid PID`, both or neither.
+        public var keeper: Keeper?
+
+        public struct Keeper: Equatable, Sendable {
+            public var channel: Int32
+            public var pid: pid_t
+        }
+
+        /// The closed grammar: each flag, and the kind of its value (nil: none).
+        enum Value { case path, descriptor, pid }
+        static let grammar: [String: Value?] = [nodeFlag: .none, nodeRootFlag: .path, "--server": .path,
+                                               MacHandoverKeeper.channelFlag: .descriptor, MacHandoverKeeper.pidFlag: .pid]
+
+        /// `arguments` (the executable first) as a checked node's command line, or why not: the grammar's flags only,
+        /// each once, each value present, not starting with `-`, absolute where it is a path, a decimal number above 2
+        /// for a descriptor and above 1 for a pid; `--node`, `--node-root` and `--server` given; the keeper's two both or
+        /// neither. Nothing else: no other flag, no `--x=v`, no `--`, no positional word.
+        public static func parse(_ arguments: [String]) -> Result<CheckedCommandLine, Refused> {
+            func refused(_ why: String) -> Result<CheckedCommandLine, Refused> { .failure(Refused("a checked node's command line: \(why): refused")) }
+            var values: [String: String] = [:]
+            var index = arguments.index(after: arguments.startIndex)
+            while index < arguments.endIndex {
+                let flag = arguments[index]
+                guard let kind = grammar[flag] else { return refused("\(flag) isn't one of its arguments") }
+                guard values[flag] == nil else { return refused("\(flag) is given twice") }
+                index += 1
+                guard let kind else { values[flag] = ""; continue }
+                guard index < arguments.endIndex else { return refused("\(flag) has no value") }
+                let value = arguments[index]
+                index += 1
+                guard !value.hasPrefix("-"), !value.isEmpty else { return refused("\(flag)'s value \(value) isn't one") }
+                switch kind {
+                case .path: guard value.hasPrefix("/") else { return refused("\(flag)'s value \(value) isn't an absolute path") }
+                case .descriptor: guard value.allSatisfy(\.isASCII), value.allSatisfy(\.isNumber), let fd = Int32(value), fd > STDERR_FILENO else {
+                    return refused("\(flag)'s value \(value) isn't a descriptor") }
+                case .pid: guard value.allSatisfy(\.isASCII), value.allSatisfy(\.isNumber), let pid = pid_t(value), pid > 1 else {
+                    return refused("\(flag)'s value \(value) isn't a pid") }
+                }
+                values[flag] = value
+            }
+            guard values[nodeFlag] != nil else { return refused("no \(nodeFlag)") }
+            guard let nodeRoot = values[nodeRootFlag] else { return refused("no \(nodeRootFlag)") }
+            guard let server = values["--server"] else { return refused("no --server") }
+            let channel = values[MacHandoverKeeper.channelFlag].flatMap { Int32($0) }, pid = values[MacHandoverKeeper.pidFlag].flatMap { pid_t($0) }
+            guard (channel == nil) == (pid == nil) else { return refused("the keeper's channel and pid come together") }
+            return .success(CheckedCommandLine(nodeRoot: nodeRoot, server: server, keeper: channel.flatMap { c in pid.map { Keeper(channel: c, pid: $0) } }))
+        }
+
+        /// The command line this value is, after the executable: what parses back to it.
+        public var rendered: [String] {
+            [nodeFlag, nodeRootFlag, nodeRoot, "--server", server]
+                + (keeper.map { [MacHandoverKeeper.channelFlag, String($0.channel), MacHandoverKeeper.pidFlag, String($0.pid)] } ?? [])
+        }
+    }
+
+    /// The Mac's checked node start (the node on the Mac's design, "The checked node start"): what this `--node` host
+    /// is, or why it may not start, checked in this order: its command line (`CheckedCommandLine.parse`, once); its
+    /// `--node-root` names only where its `--server` must be (by device and inode: a link to the build's folder, or any
+    /// folder holding a byte copy of the pinned server, passes, since the row is found by code, never by that path), and
+    /// `lockPath` the node's data root's own `host.lock` (`Platform.Service.nodeRoot` of the user database's home,
+    /// `accountHome`; by its exact path; a link refused); the record (`pins`, read once by the caller) taken; its own
+    /// running code (`own`, the kernel's cdhash) a row's host; its `--server` opened once as the node root's own
+    /// `bin/vibeswitcher-server` (`openServer`: no link, a regular file, by device and inode), and that file's cdhash
+    /// (`cdhashOf`, this Mac's slice, read while the path still names the file opened) the row's server. `main` asks it
+    /// only behind `isCheckedMacNode`; tests give the record, the code and the home. Each refusal is one plain line.
+    public static func macNodeStart(arguments: [String], lockPath: String, own: Data?, pins: Result<NodePins, NodePins.Refused>,
+                                    accountHome: String?,
+                                    cdhashOf: (String) -> Data? = { Platform.CodeIdentity.cdhash(atPath: $0) }) -> Result<CheckedNode, Refused> {
+        switch CheckedCommandLine.parse(arguments) {
+        case .failure(let why): return .failure(why)
+        case .success(let line): return macNodeStart(line, lockPath: lockPath, own: own, pins: pins, accountHome: accountHome, cdhashOf: cdhashOf)
+        }
+    }
+
+    /// `macNodeStart(arguments:…)` on a command line already parsed.
+    public static func macNodeStart(_ line: CheckedCommandLine, lockPath: String, own: Data?, pins: Result<NodePins, NodePins.Refused>,
+                                    accountHome: String?,
+                                    cdhashOf: (String) -> Data? = { Platform.CodeIdentity.cdhash(atPath: $0) }) -> Result<CheckedNode, Refused> {
+        func refused(_ why: String) -> Result<CheckedNode, Refused> { .failure(Refused(why)) }
+        guard let accountHome else { return refused("the account has no home in the user database, so the node's root can't be found") }
+        let nodeRoot = line.nodeRoot, server = line.server
+        let dataRoot = Platform.Service.nodeRoot(accountHome: accountHome)
+        // 1. The lock: the node root's own, and only it.
+        let ownLock = (dataRoot as NSString).appendingPathComponent("host.lock")
+        // By its exact path alone (the review's F2): `main` takes the user's host by comparing this path
+        // (`HostHardening.ownsLaunchers`), so another spelling or a hard link elsewhere would make a checked node it
+        // took for a scratch host.
+        var held = stat()
+        if lstat(lockPath, &held) == 0, held.st_mode & S_IFMT == S_IFLNK { return refused("the lock \(lockPath) is a symbolic link") }
+        guard lockPath == ownLock else {
+            return refused("\(nodeFlag) takes only the node root's own lock (\(ownLock)), not \(lockPath)")
+        }
+        // 2. The record. 3. This host's own running code, a row's host.
+        let record: NodePins
+        switch pins {
+        case .failure(let why): return refused(why.description)
+        case .success(let read): record = read
+        }
+        guard let own else { return refused("this host's own code can't be read, so its build in the node's record can't be found") }
+        guard let build = record.build(host: own) else {
+            return refused("this host's code (\(NodePins.hex(own))) is no host the node's record pins: not an installed build's host; \(NodePins.remedy)")
+        }
+        // 4. Its --server, opened once: the node root's own file, whose cdhash is the row's server.
+        let fd: Int32
+        switch openServer(server: server, nodeRoot: nodeRoot) {
+        case .failure(let why): return .failure(why)
+        case .success(let opened): fd = opened
+        }
+        defer { Sys.close(fd) }
+        var opened = stat(), named = stat()
+        let cdhash = cdhashOf(server)
+        guard fstat(fd, &opened) == 0, lstat(server, &named) == 0, named.st_mode & S_IFMT == S_IFREG,
+              named.st_dev == opened.st_dev, named.st_ino == opened.st_ino else {
+            return refused("the server \(server) changed while it was checked")
+        }
+        guard let cdhash else { return refused("\(server) has no code signature to check it by (no cdhash)") }
+        guard cdhash == build.server else {
+            return refused("\(server) (\(NodePins.hex(cdhash))) isn't the server the node's record pins for this host's build \(build.commit)")
+        }
+        return .success(CheckedNode(build: build, commandLine: line, serverPath: server, server: cdhash))
+    }
+
+    /// Why `main` refuses a checked start (`checked`) it doesn't take for the user's host (`ownsLaunchers`), or nil: a
+    /// checked node is always the user's host (its vault from disk, no test arguments for its server), never a scratch
+    /// one (the review's F2; `macNodeStart` takes the lock by its exact path too, so neither can drift).
+    public static func checkedNodeRefusal(_ checked: CheckedNode?, ownsLaunchers: Bool) -> String? {
+        guard checked != nil, !ownsLaunchers else { return nil }
+        return "a checked node start on a lock this host doesn't take for the user's: refused"
+    }
+
+    /// Why this image doesn't take `state`, or nil: every condition in one place (the reviews' F1, N2 and the re-check's
+    /// I2b). A checked node's state (`fromCheckedNode`) goes only to an image holding its own checked start (`checkedNode`:
+    /// so a wrapper that runs the pinned code with other arguments gets nothing). A checked start takes only a checked
+    /// node's state (an unmarked one is refused), only through a keeper it proved (`viaKeeper`), and only when the state's
+    /// lock descriptor is the node's own lock held through that open file (`lockHeld`, on the node's `lockPath`). `main`
+    /// then exits, which closes every descriptor it was given. What this proves is that the sender held the node's lock;
+    /// who the sender was rests on the keeper's proof of its parent (pinned host code) and on no host but a checked node
+    /// starting on that lock (`isNodeLock`).
+    public static func mayTakeHandover(_ state: HostHandover.State, viaKeeper: Bool, checkedNode: CheckedNode?, lockPath: String? = nil,
+                                       lockHeld: (Int32, String) -> String? = { nodeLockRefusal($0, $1) }) -> String? {
+        if state.fromCheckedNode == true, checkedNode == nil {
+            return "a checked node's state goes only to an image holding its own checked start: nothing taken"
+        }
+        guard checkedNode != nil else { return nil }
+        guard viaKeeper else { return "a checked node takes state only through a keeper it proved, never from a state file: nothing taken" }
+        guard state.fromCheckedNode == true else { return "a checked start takes only a checked node's state: nothing taken" }
+        guard let lockPath else { return "a checked start has no lock to bind the state to: nothing taken" }
+        if let why = lockHeld(state.lockFD, lockPath) { return why + ": nothing taken" }
+        return nil
+    }
+
+    /// Why `fd` isn't the node's lock `lockPath` held through that open file, or nil (the re-check's I2b; Linux's
+    /// `heldLockIsAllowed` in spirit): the same file (device and inode; the path no link), the lock opened afresh can't
+    /// be taken (someone holds it), and then `fd` can (so its open file is the holder). In that order: the other would
+    /// take a free lock and prove nothing.
+    public static func nodeLockRefusal(_ fd: Int32, _ lockPath: String) -> String? {
+        var given = stat(), named = stat()
+        guard fstat(fd, &given) == 0, lstat(lockPath, &named) == 0, named.st_mode & S_IFMT == S_IFREG,
+              given.st_dev == named.st_dev, given.st_ino == named.st_ino else {
+            return "the state's lock isn't the node's own (\(lockPath))"
+        }
+        let fresh = open(lockPath, O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK)
+        guard fresh >= 0 else { return "the node's lock \(lockPath) can't be opened (errno \(errno))" }
+        defer { Sys.close(fresh) }
+        if flock(fresh, LOCK_EX | LOCK_NB) == 0 {
+            _ = flock(fresh, LOCK_UN)
+            return "the node's lock isn't held, so the state's lock descriptor doesn't hold it"
+        }
+        guard flock(fd, LOCK_EX | LOCK_NB) == 0 else { return "the state's lock descriptor doesn't hold the node's lock" }
+        return nil
+    }
+
+    /// Whether a host that isn't a checked node may hold the lock it opened, `fd` (the re-check's round 2, note 1): not
+    /// when it is the node's own `host.lock`, by the opened descriptor's device and inode, so another letter case or a
+    /// dangling link that made the node's lock by opening it is refused too (`HostServer.Config.heldLockIsAllowed`: the
+    /// descriptor closed, the start refused). Any other lock, and with no home: yes.
+    public static func heldLockAllowed(_ fd: Int32, accountHome: String?) -> Bool {
+        guard Platform.CodeIdentity.isAvailable, let accountHome else { return true }
+        var held = stat(), node = stat()
+        let lock = (Platform.Service.nodeRoot(accountHome: accountHome) as NSString).appendingPathComponent("host.lock")
+        guard fstat(fd, &held) == 0 else { return false }
+        guard stat(lock, &node) == 0 else { return true }
+        return !(held.st_dev == node.st_dev && held.st_ino == node.st_ino)
+    }
+
+    /// Whether `lockPath` is the node's lock by file (the re-check's I2c): the data root's `host.lock` (device and
+    /// inode), or, while that doesn't exist, a `host.lock` in a folder that is the data root by device and inode. Only a
+    /// checked node starts on it (`main`). False on Linux and with no home.
+    public static func isNodeLock(_ lockPath: String, accountHome: String?) -> Bool {
+        guard Platform.CodeIdentity.isAvailable, let accountHome else { return false }
+        let dataRoot = Platform.Service.nodeRoot(accountHome: accountHome)
+        var lock = stat(), node = stat()
+        if stat(lockPath, &lock) == 0, stat((dataRoot as NSString).appendingPathComponent("host.lock"), &node) == 0 {
+            return lock.st_dev == node.st_dev && lock.st_ino == node.st_ino
+        }
+        var folder = stat(), root = stat()
+        guard (lockPath as NSString).lastPathComponent == "host.lock", stat((lockPath as NSString).deletingLastPathComponent, &folder) == 0,
+              stat(dataRoot, &root) == 0 else { return false }
+        return folder.st_dev == root.st_dev && folder.st_ino == root.st_ino
+    }
+
+    /// A checked node's environment (the review's F1, the re-check): `HOME`, `USER`, `LOGNAME` and `SHELL` from the user
+    /// database, `VIBESWITCHER_HOME` its data root, `PATH` the system's, `TMPDIR` the system's per-user folder, and the
+    /// descriptor limit the host carries across its own exec (`descriptorCarriedVariable`, digits only) from
+    /// `environment`; nothing else (`SSH_AUTH_SOCK`, `DYLD_*`, `SWIFT_*`, `Malloc*`, the locale, `VIBESWITCHER_HOST_LOG`).
+    /// `environment` is `nodeEnvironment`'s (the user database's values already in it).
+    public static func checkedNodeEnvironment(_ environment: [String: String],
+                                              temporaryFolder: String? = Platform.NodeReset.userTemporaryFolder) -> [String: String] {
+        // From a fixed list, never by filtering what it was given (the re-check): the user database's values (put there
+        // by `nodeEnvironment`), its data root, the descriptor limit it carries across its own exec, the system's PATH
+        // and per-user temporary folder.
+        var node: [String: String] = ["PATH": checkedNodePath]
+        for name in ["HOME", "USER", "LOGNAME", "SHELL", "VIBESWITCHER_HOME"] { node[name] = environment[name] }
+        node["TMPDIR"] = temporaryFolder
+        if let carried = environment[descriptorCarriedVariable], !carried.isEmpty, carried.allSatisfy(\.isNumber) { node[descriptorCarriedVariable] = carried }
+        return node
+    }
+
+    /// A checked node's PATH: the system's folders, root's alone.
+    public static let checkedNodePath = "/usr/bin:/bin:/usr/sbin:/sbin"
+
+    /// The checked start `startAsNode` made on the Mac (behind `isCheckedMacNode`), held until `main` puts it in the
+    /// host's config (`takeCheckedMacNode`).
+    nonisolated(unsafe) private static var checkedMacNode: CheckedNode?
+
+    /// The Mac's checked start `startAsNode` made, taken (no longer held); nil when there is none.
+    public static func takeCheckedMacNode() -> CheckedNode? {
+        checkedServerLock.lock()
+        defer { checkedServerLock.unlock() }
+        defer { checkedMacNode = nil }
+        return checkedMacNode
+    }
+
+    /// The Mac's node host's server child (the node on the Mac's design, "The anchor", check 2): the cdhash the child is
+    /// started and checked by, or why not. The host finds its own build by the code it runs (`own`,
+    /// `Platform.CodeIdentity.ownCdhash`), in the node's record (`pins`, root's to write): no row, no child. Its
+    /// `--server` file (`server`, read by `cdhashOf`, this Mac's slice) must be that row's server; the child is then
+    /// started only while the file still has that cdhash, and its connector answers only a child whose token runs it
+    /// (`ServerChild.Image.checked`). Asked only by a checked Mac node start (`isCheckedMacNode`, never yet).
+    public static func macServerPin(server: String, own: Data?, pins: Result<NodePins, NodePins.Refused>,
+                                    cdhashOf: (String) -> Data? = { Platform.CodeIdentity.cdhash(atPath: $0) }) -> Result<Data, Refused> {
+        let record: NodePins
+        switch pins {
+        case .failure(let why): return .failure(Refused(why.description))
+        case .success(let read): record = read
+        }
+        guard let own else { return .failure(Refused("this host's own code can't be read, so its build in the node's record can't be found")) }
+        guard let build = record.build(host: own) else {
+            return .failure(Refused("this host's code (\(NodePins.hex(own))) is no host the node's record pins: not an installed build's host; \(NodePins.remedy)"))
+        }
+        guard let cdhash = cdhashOf(server) else { return .failure(Refused("\(server) has no code signature to check it by (no cdhash)")) }
+        guard cdhash == build.server else {
+            return .failure(Refused("\(server) (\(NodePins.hex(cdhash))) isn't the server the node's record pins for this host's build \(build.commit)"))
+        }
+        return .success(cdhash)
+    }
+
     /// The Mac: why this host may not run a `--server` child, or nil. Its child's connections through the connector
     /// are the app's (`.app`), so a host given `--server PATH` by anyone would make PATH the app: refused for the user's
     /// host (`ownsLaunchers`) and for any host on the account's own locks (the app's `~/.vibeswitcher/host.lock` and the
@@ -308,11 +619,13 @@ public enum HostImages {
     /// `--image-path`, else from `executable`; on the Mac from `executable`, as always.
     public static func folders(arguments: [String], executable: String) -> Folders {
         let nodeRoot = Platform.CodeIdentity.isAvailable ? nil : value(after: nodeRootFlag, in: arguments)
+        // The Mac's node: its server child is told the build's folder (`--node-root`), as on Linux (the review's N3).
+        let macNodeRoot = Platform.CodeIdentity.isAvailable && arguments.contains(nodeFlag) ? value(after: nodeRootFlag, in: arguments) : nil
         let image = Platform.CodeIdentity.isAvailable ? executable
             : nodeRoot.map { ($0 as NSString).appendingPathComponent("bin/" + BuildInfo.host) }
                 ?? value(after: imagePathFlag, in: arguments) ?? executable
         let folder = URL(fileURLWithPath: image).deletingLastPathComponent()
-        return Folders(image: image, installFolder: nodeRoot ?? folder.path,
+        return Folders(image: image, installFolder: nodeRoot ?? macNodeRoot ?? folder.path,
                        toolServer: folder.appendingPathComponent("vibeswitcher-mcp").path,
                        commandFolder: TestLock.commandFolder(besideExecutable: image),
                        appExecutable: folder.appendingPathComponent("VibeSwitcher").path)

@@ -313,16 +313,10 @@ public enum LeadVaultV2 {
         set { lifeLock.withLock { life = max(1, newValue) } }
     }
 
-    /// Whether this host keeps the record: on Linux, every host; on the Mac, a node host only, which says so
-    /// (`recordsOnThisHost`, set by `HostServer` once it is one: the review of 2026-11-21), never the Mac app's.
-    public static var isOn: Bool { !Platform.CodeIdentity.isAvailable || recordsOnThisHost }
-
-    /// Set by a Mac node host (one host to a process): its vault keeps the record, the hooks included.
-    public static var recordsOnThisHost: Bool {
-        get { lifeLock.withLock { nodeHost } }
-        set { lifeLock.withLock { nodeHost = newValue } }
-    }
-    nonisolated(unsafe) private static var nodeHost = false
+    /// The default of whether a record is kept, where no book says (a call without `on:`): on Linux, yes; on the Mac,
+    /// no. A book says for itself (`LeadVault.Book.recordsActions`: on the Mac only a checked node host's book keeps it,
+    /// the Mac's tasks, item 14), and its hooks and the host's handler pass that.
+    public static var isOn: Bool { !Platform.CodeIdentity.isAvailable }
 
     /// The digest the record keeps of `text`: SHA-256, lower-case hex.
     public static func digest(_ text: String) -> String { BuildInfo.sha256(of: Data(text.utf8)) }

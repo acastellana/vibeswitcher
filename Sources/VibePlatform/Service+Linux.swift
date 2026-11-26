@@ -13,6 +13,8 @@ extension Platform.Service {
         static func runtimeFolder(uid: uid_t) -> String? { "/run/user/\(uid)" }
         // No app here: the node's root is the account's `~/.vibeswitcher`, as it has always been.
         static let nodeRootFolder = ".vibeswitcher"
+        // No such record on Linux: its checks are the unit's cgroup and the sealed copies (unchanged).
+        static func nodePinsRecord(uid: uid_t) -> [String]? { nil }
     }
 }
 #endif

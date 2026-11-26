@@ -25,6 +25,8 @@ enum StopCommand {
         guard arguments.isEmpty else { return Say.usage(usage) }
         let context = NodeContext.current()
         if let unbuilt = context.usersNodeRefusal { return Say.unbuilt(unbuilt) }
+        // The Mac: the user's LaunchAgent (MacAgentCommand.swift), past the refusal above; a scratch node's stop is its server's.
+        if Platform.Service.manager == .launchd, !context.isScratch { return MacAgentCommand.stop(context: context) }
         context.sayScratch()
         let home = VibePaths.accountHome
         let prefix = NodeFolders.defaultPrefix(accountHome: home)

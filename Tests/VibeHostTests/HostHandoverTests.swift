@@ -25,12 +25,15 @@ final class ScratchHostProcess {
     /// `old`: the build it starts as (another commit's host, for an upgrade); this one's otherwise. `prepare`: given the
     /// scratch folder once it is made, before the host starts (a test's leftovers put there). `environment`: added to
     /// the host's own environment (or replacing a variable of it).
-    init(arguments extra: [String] = [], old: String = hostLauncher, environment: [String: String] = [:],
-         prepare: (String) throws -> Void = { _ in }) async throws {
+    /// `socketName`: the socket's name in the scratch folder; `rootIsScratch`: `VIBESWITCHER_HOME` the scratch folder
+    /// (so a server child's root is it, and its socket `host.sock` the root's). `late`: arguments added once `prepare`
+    /// ran (what it made).
+    init(arguments extra: [String] = [], old: String = hostLauncher, environment: [String: String] = [:], socketName: String = "h.sock",
+         rootIsScratch: Bool = false, prepare: (String) throws -> Void = { _ in }, late: () -> [String] = { [] }) async throws {
         // Short: a socket's path has a 104-byte limit.
         dir = "\(shortScratchRoot)/vsho-\(UUID().uuidString.prefix(8))"
         home = dir + "/home"
-        socket = dir + "/h.sock"
+        socket = dir + "/" + socketName
         lock = dir + "/h.lock"
         oldBinary = dir + "/old/vibeswitcher-host"
         newBinary = dir + "/new/vibeswitcher-host"
@@ -52,9 +55,9 @@ final class ScratchHostProcess {
         try prepare(dir)
 
         process.executableURL = URL(fileURLWithPath: oldBinary)
-        process.arguments = ["--socket", socket, "--lock", lock, "--idle-exit", "600", "--log", sessionLog] + extra
+        process.arguments = ["--socket", socket, "--lock", lock, "--idle-exit", "600", "--log", sessionLog] + extra + late()
         process.environment = ["HOME": home, "CFFIXED_USER_HOME": home, "SHELL": "/bin/sh", "PATH": "/usr/bin:/bin",
-                               "TMPDIR": dir + "/"].merging(environment) { $1 }
+                               "TMPDIR": dir + "/"].merging(rootIsScratch ? ["VIBESWITCHER_HOME": dir] : [:]) { $1 }.merging(environment) { $1 }
         files.createFile(atPath: dir + "/host.log", contents: nil)
         let log = try FileHandle(forWritingTo: URL(fileURLWithPath: dir + "/host.log"))
         process.standardOutput = log
