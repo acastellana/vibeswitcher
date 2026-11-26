@@ -9,7 +9,7 @@
 //
 // It writes the fixture (a Swift file holding one JSON document, every byte string in hex) and prints what it measured.
 //
-//   node scripts/e2e/webauthn-vectors.cjs --by-hand --out <a scratch folder> [--port 47999]
+//   node scripts/e2e/webauthn-vectors.cjs --by-hand --out <a scratch folder> [--port 47999] [--host localhost]
 //
 // serves the same page with buttons instead, for a look on a real device (Safari, an iPhone): no Chrome is started.
 // Each button's ceremony (its rpId the page's own host name) is shown on the page and printed here as one JSON line
@@ -158,8 +158,9 @@ document.getElementById('read').onclick = run('marker-read', async () => {
 });
 </script>`;
 
-// `--by-hand`: the page on `--port` of localhost, each ceremony printed in the fixture's form and kept in by-hand.jsonl.
-function serveByHand(port) {
+// `--by-hand`: the page on `--port` of `--host` (`localhost` by default, which may be ::1 alone; 127.0.0.1 for a
+// proxy such as `tailscale serve` to reach), each ceremony printed in the fixture's form and kept in by-hand.jsonl.
+function serveByHand(port, host) {
   const kept = path.join(out, 'by-hand.jsonl');
   const server = http.createServer((request, response) => {
     if (request.method === 'POST' && request.url === '/record') {
@@ -181,7 +182,7 @@ function serveByHand(port) {
     response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
     response.end(handPage);
   });
-  server.listen(port, 'localhost', () => console.error(`by hand: http://localhost:${port}/ (kept in ${kept}); Ctrl-C ends it`));
+  server.listen(port, host, () => console.error(`by hand: http://${host}:${port}/ (kept in ${kept}); Ctrl-C ends it`));
 }
 
 function chromePath() {
@@ -402,7 +403,7 @@ async function main() {
 }
 
 // Chrome and the servers stopped on a failure too: nothing of this run outlives it.
-if (byHand) serveByHand(Number(option('--port', '47999')));
+if (byHand) serveByHand(Number(option('--port', '47999')), option('--host', 'localhost'));
 else main().then(() => process.exit(0), (error) => {
   console.error(error);
   for (const server of servers) server.close();
