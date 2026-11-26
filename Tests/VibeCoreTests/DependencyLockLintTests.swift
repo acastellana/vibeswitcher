@@ -11,8 +11,12 @@ import Testing
 ///   outside a `$(…)`) and comments aren't commands;
 /// - every download (a `curl` or `wget` that writes a file) is checked against its SHA-256 within the next three lines;
 /// - every action a workflow uses is pinned by its commit (scripts/ci/check-workflows.sh's rule, run here, not restated);
-/// - every workflow that runs the tests checks Node's major against scripts/ci/checked-versions.txt
-///   (scripts/ci/check-versions.sh), and one checks Chrome's too, where the browser checks run.
+/// - every workflow job that runs the tests checks its Swift against .swift-version and Node's major against
+///   scripts/ci/checked-versions.txt (scripts/ci/check-versions.sh), and one checks Chrome's too, where the browser
+///   checks run; a Mac job, on the image's Xcode, checks its Swift as well;
+/// - a workflow that puts swiftly's bin on GITHUB_PATH also gives the steps after it SWIFTLY_HOME_DIR, SWIFTLY_BIN_DIR
+///   and SWIFTLY_TOOLCHAINS_DIR (GITHUB_ENV): swiftly's `swift` finds its folder by them or by HOME, and scripts/test.sh
+///   runs on a scratch HOME (v2 linux, platform, 1e377af0: a runner whose image lacked Swift 6.4.2 ran no Swift test).
 /// A finding that is no such thing is listed in `allowed` with its reason; a listing that matches nothing fails.
 struct DependencyLockLintTests {
     static let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
@@ -114,6 +118,18 @@ struct DependencyLockLintTests {
             guard writesAFile(line, tool: String(line[range])) else { return nil }
             let after = lines[(index + 1)..<min(lines.count, index + 4)].map(\.text).joined(separator: "\n")
             return matches(checksum, after).isEmpty ? (entry.line, line.trimmingCharacters(in: .whitespaces)) : nil
+        }
+    }
+
+    /// The lines of `workflow` that put swiftly's bin on GITHUB_PATH without the three variables of swiftly's own
+    /// folders in GITHUB_ENV in the six lines after.
+    static func swiftlyWithoutItsFolders(_ workflow: String) -> [Int] {
+        let lines = workflow.components(separatedBy: "\n")
+        return lines.enumerated().compactMap { index, line in
+            guard line.contains("swiftly/bin"), line.contains("GITHUB_PATH"), !line.trimmingCharacters(in: .whitespaces).hasPrefix("#") else { return nil }
+            let after = lines[(index + 1)..<min(lines.count, index + 7)].filter { $0.contains("GITHUB_ENV") }.joined(separator: "\n")
+            let given = ["SWIFTLY_HOME_DIR=", "SWIFTLY_BIN_DIR=", "SWIFTLY_TOOLCHAINS_DIR="].allSatisfy { after.contains($0) }
+            return given ? nil : index + 1
         }
     }
 
@@ -251,6 +267,16 @@ struct DependencyLockLintTests {
         #expect(Self.unchecked("echo \"curl -O is how\"").isEmpty, "a message's words")
     }
 
+    @Test func swiftlyOnThePathWithoutItsFoldersIsFound() {
+        let path = #"          echo "$HOME/.local/share/swiftly/bin" >> "$GITHUB_PATH""#
+        #expect(Self.swiftlyWithoutItsFolders("x\n" + path + "\n      - name: Versions") == [2])
+        #expect(Self.swiftlyWithoutItsFolders(path + "\n" + #"          echo "SWIFTLY_HOME_DIR=$HOME/.local/share/swiftly" >> "$GITHUB_ENV""#) == [1])
+        let all = [path, "          # why", #"          echo "SWIFTLY_HOME_DIR=$HOME/.local/share/swiftly" >> "$GITHUB_ENV""#,
+                   #"          echo "SWIFTLY_BIN_DIR=$HOME/.local/share/swiftly/bin" >> "$GITHUB_ENV""#,
+                   #"          echo "SWIFTLY_TOOLCHAINS_DIR=$HOME/.local/share/swiftly/toolchains" >> "$GITHUB_ENV""#]
+        #expect(Self.swiftlyWithoutItsFolders(all.joined(separator: "\n")).isEmpty)
+    }
+
     @Test func aPackageThatIsntExactOrIsPinnedElsewhereIsFound() {
         let resolved = Data(#"{"pins":[{"location":"https://github.com/a/b.git","state":{"version":"1.2.3"}}]}"#.utf8)
         #expect(Self.lockProblems(manifest: #".package(url: "https://github.com/a/b.git", exact: "1.2.3")"#, resolved: resolved).isEmpty)
@@ -322,17 +348,25 @@ struct DependencyLockLintTests {
         }
     }
 
-    @Test func theWorkflowsCheckNodeAndChromeAgainstTheirRanges() throws {
+    @Test func theWorkflowsCheckSwiftNodeAndChromeAndSwiftlysFolders() throws {
         let ranges = Self.ranges(try String(contentsOf: Self.repo.appendingPathComponent("scripts/ci/checked-versions.txt"), encoding: .utf8))
         #expect(ranges["node"] != nil && ranges["chrome"] != nil, "scripts/ci/checked-versions.txt: \(ranges.keys.sorted())")
         var chrome = false
         for (path, text) in try Self.scripts() where path.hasPrefix(".github/workflows/") {
             let runsTests = text.contains("scripts/test.sh") || text.contains("scripts/ci/macos-tests.sh")
-            for job in Self.jobs(text) where job.contains("scripts/test.sh") || job.contains("scripts/ci/macos-tests.sh") {
-                #expect(job.contains("bash scripts/ci/check-versions.sh node"), "\(path): a job runs the tests without checking Node's major: \(job.prefix(40))")
+            for job in Self.jobs(text) {
+                if job.contains("scripts/test.sh") || job.contains("scripts/ci/macos-tests.sh") {
+                    #expect(job.contains("bash scripts/ci/check-versions.sh swift node"),
+                            "\(path): a job runs the tests without checking its Swift and Node's major: \(job.prefix(40))")
+                }
+                if job.contains("DEVELOPER_DIR=") {
+                    #expect(job.contains("bash scripts/ci/check-versions.sh swift"), "\(path): a Mac job takes the image's Xcode without checking its Swift: \(job.prefix(40))")
+                }
             }
+            #expect(Self.swiftlyWithoutItsFolders(text).isEmpty,
+                    "\(path): swiftly's bin on GITHUB_PATH, lines \(Self.swiftlyWithoutItsFolders(text)), without SWIFTLY_HOME_DIR, SWIFTLY_BIN_DIR and SWIFTLY_TOOLCHAINS_DIR in GITHUB_ENV")
             #expect(!runsTests || !text.contains("node --version"), "\(path): node --version alone, not checked against its range")
-            chrome = chrome || text.contains("check-versions.sh node chrome")
+            chrome = chrome || text.contains("check-versions.sh swift node chrome")
         }
         #expect(chrome, "no workflow checks Chrome's major, where the browser checks run")
     }
