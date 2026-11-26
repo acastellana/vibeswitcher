@@ -64,6 +64,10 @@ public enum ConfigSeal {
             /// sources when it restores a window (`/etc/zshrc_Apple_Terminal`), each by its bytes, but the ones that
             /// hold only the restore line that file writes (`MacSealList.sessionsHash`; the review's R5). The Mac's list only.
             case sessions
+            /// What a read stopped at a cap stands for (`LinuxSealList.addSourced`'s `capName` row: the files sourced past
+            /// it), hashed by what it says (which cap), so the look that first crosses the cap holds a change (the
+            /// re-check's N5). Never a path: nothing is read for it.
+            case capped(String)
         }
 
         public var name: String
@@ -828,6 +832,7 @@ public enum ConfigSeal {
         case .preferences: return MacSealList.preferencesHash(watched.path)
         // Its folder's own state is in its hash, absent included (`sessionsHash`).
         case .sessions: return MacSealList.sessionsHash(watched.path)
+        case .capped(let said): return hex(SHA256.hash(data: Data("capped \(said)".utf8)))
         default: break
         }
         var hasher = SHA256()
@@ -855,6 +860,8 @@ public enum ConfigSeal {
             return MacSealList.preferencesHash(watched.path)  // Taken above, before the absent guard.
         case .sessions:
             return MacSealList.sessionsHash(watched.path)  // Taken above, before the absent guard.
+        case .capped:
+            break  // Taken above, before the absent guard.
         case .mcpServers:
             var servers = mcpServers(watched.path)
             for _ in 1..<3 where servers == nil {

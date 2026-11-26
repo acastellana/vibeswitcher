@@ -56,6 +56,30 @@ public enum MacSealList {
     /// The startup files whose `.` and `source` targets are watched (`LinuxSealList.sourced`): zsh's, the Mac's shell.
     public static let startupFiles = [".zshenv", ".zprofile", ".zshrc", ".zlogin"]
 
+    /// The ending of a file `zcompile` makes, which zsh reads in place of the file it was compiled from: for a startup
+    /// file, and for each `.` or `source`, zsh opens `<file>.zwc` first and runs it when it is there and as new as
+    /// `<file>` or `<file>` is absent (zsh 5.9's `try_source_file`; probed in scratch homes 2026-11-26: a newer
+    /// `~/.zshrc.zwc` runs in place of `~/.zshrc`, `~/.zlogin.zwc` with no `~/.zlogin` runs at a login shell, a twin of a
+    /// sourced `~/.cargo/env` at every `zsh -c`, one of a restore-line `<id>.session` at that window's restore, one of a
+    /// shell snapshot at its session's next `source`; an upper-case `.ZWC` too, the volume ignoring case). The re-check's N1.
+    static let twinSuffix = ".zwc"
+
+    /// Whether `name` ends in `twinSuffix`, in any case (the home's volume ignores it, so zsh's open of `<file>.zwc`
+    /// finds `<file>.ZWC`).
+    static func isTwin(_ name: String) -> Bool {
+        (name as NSString).range(of: twinSuffix, options: [.anchored, .backwards, .caseInsensitive]).location != NSNotFound
+    }
+
+    /// The zsh startup files whose compiled twins are rows (`<file>.zwc`, by contents, absent included, so one appearing
+    /// is a change): `ConfigSeal.homeFiles`' zsh files (`.zlogout` among them) and `startupFiles`.
+    static var twinnedStartupFiles: [String] {
+        var files: [String] = []
+        for file in ConfigSeal.homeFiles.map(\.0).filter({ $0.hasPrefix(".z") }) + startupFiles where !files.contains(file) {
+            files.append(file)
+        }
+        return files
+    }
+
     /// The rows outside the home, by their own path (their names): read only for the account's own home.
     public static let outsideEntries: [(String, ConfigSeal.Watched.Kind)] = [
         // Each link's target's line too (`readsLinkTargets`): a Cellar file rewritten in place behind a link (R7).
@@ -83,9 +107,13 @@ public enum MacSealList {
         var items = homeEntries.map { entry in
             ConfigSeal.Watched(name: "~/" + entry.0, path: (home as NSString).appendingPathComponent(entry.0), kind: entry.1)
         }
+        // Each zsh startup file's compiled twin, which zsh runs in place of it (N1).
+        items += twinnedStartupFiles.map { file in
+            ConfigSeal.Watched(name: "~/" + file + twinSuffix, path: (home as NSString).appendingPathComponent(file + twinSuffix), kind: .file)
+        }
         var names = Set(items.map(\.name))
         names.formUnion(ConfigSeal.homeFiles.map { "~/" + $0.0 })
-        LinuxSealList.addSourced(from: startupFiles, home: home, names: &names, to: &items)
+        LinuxSealList.addSourced(from: startupFiles, home: home, names: &names, to: &items, twins: true)
         if let root = outside ?? (LinuxSealList.isAccountHome(home, uid: uid) ? "/" : nil) {
             items += outsideEntries.map { entry in
                 ConfigSeal.Watched(name: entry.0, path: root == "/" ? entry.0 : (root as NSString).appendingPathComponent(entry.0), kind: entry.1)
@@ -135,13 +163,18 @@ public enum MacSealList {
         guard lstat(path, &info) == 0 else { return ("absent", []) }
         var said = ""
         if (info.st_mode & S_IFMT) == S_IFLNK {
-            said = "link " + ((try? FileManager.default.destinationOfSymbolicLink(atPath: path)) ?? "") + " "
+            said = linkSaid(path)
             guard stat(path, &info) == 0 else { return (said + "absent", []) }
         }
         guard (info.st_mode & S_IFMT) == S_IFDIR else { return (said + "not a folder", []) }
         let folder = said + "folder \(info.st_mode & 0o7777) \(info.st_uid)"
         guard let names = try? FileManager.default.contentsOfDirectory(atPath: path) else { return (folder + " unreadable", []) }
-        let sessions = names.filter { ($0 as NSString).range(of: ".session", options: [.anchored, .backwards, .caseInsensitive]).location != NSNotFound }
+        let ends = { (name: String, suffix: String) in
+            (name as NSString).range(of: suffix, options: [.anchored, .backwards, .caseInsensitive]).location != NSNotFound
+        }
+        // A saved session's compiled twin (`<id>.session.zwc`, N1) is what the restore's `.` runs in its place: read by
+        // its bytes, never as the restore line, whatever it holds.
+        let sessions = names.filter { ends($0, ".session") || ends($0, ".session" + twinSuffix) }
         var files: [(name: String, said: String?)] = []
         for name in sessions.sorted(by: { Array($0.utf8).lexicographicallyPrecedes(Array($1.utf8)) }) {
             let file = (path as NSString).appendingPathComponent(name)
@@ -149,8 +182,8 @@ public enum MacSealList {
             guard lstat(file, &entry) == 0 else { continue }
             var what = ""
             if (entry.st_mode & S_IFMT) == S_IFLNK {
-                what = "link " + ((try? FileManager.default.destinationOfSymbolicLink(atPath: file)) ?? "") + " "
-            } else if (entry.st_mode & S_IFMT) == S_IFREG, let data = ConfigSeal.regularContents(file, limit: 4096, followLink: false),
+                what = linkSaid(file)
+            } else if !isTwin(name), (entry.st_mode & S_IFMT) == S_IFREG, let data = ConfigSeal.regularContents(file, limit: 4096, followLink: false),
                       isRestoreLineOnly(data) {
                 files.append((name, nil))
                 continue
@@ -163,6 +196,24 @@ public enum MacSealList {
             files.append((name, what))
         }
         return (folder, files)
+    }
+
+    /// What a link at `path` is said as in a sessions or preferences hash: "link <length>:<target> ", its target's bytes
+    /// as text with their count first (`linkTarget`), so no target's name can spell the lines after it (the re-check's
+    /// N2: a target may hold newlines).
+    static func linkSaid(_ path: String) -> String { "link " + linkTarget(path) + " " }
+
+    /// The target of the link at `path`, unambiguous: "<count of its bytes>:<its text>" when its bytes are UTF-8, else
+    /// "x<its bytes in hex>"; "?" when it can't be read (it was replaced between the `lstat` and this read).
+    static func linkTarget(_ path: String) -> String {
+        var buffer = [UInt8](repeating: 0, count: Int(PATH_MAX) + 1)
+        let count = buffer.withUnsafeMutableBufferPointer { pointer in
+            pointer.baseAddress!.withMemoryRebound(to: CChar.self, capacity: pointer.count) { readlink(path, $0, pointer.count) }
+        }
+        guard count >= 0 else { return "?" }
+        let bytes = Array(buffer.prefix(count))
+        guard let text = String(bytes: bytes, encoding: .utf8) else { return "x" + ConfigSeal.hex(bytes) }
+        return "\(bytes.count):\(text)"
     }
 
     /// A sessions row's hash: the folder's state, then each session file that isn't the restore line alone, by name
@@ -224,7 +275,7 @@ public enum MacSealList {
         guard lstat(byHost, &info) == 0 else { return ("absent", files) }
         var said = ""
         if (info.st_mode & S_IFMT) == S_IFLNK {
-            said = "link " + ((try? FileManager.default.destinationOfSymbolicLink(atPath: byHost)) ?? "") + " "
+            said = linkSaid(byHost)
             guard stat(byHost, &info) == 0 else { return (said + "absent", files) }
         }
         guard (info.st_mode & S_IFMT) == S_IFDIR else { return (said + "not a folder", files) }
@@ -245,12 +296,12 @@ public enum MacSealList {
     /// R3); or what it is instead: "absent", "unreadable", or a file read but not taken apart ("bytes <digest>" past
     /// `preferencesLimit`, "not a property list <digest>"), by its bytes, so every rewrite of it is a change (R2b);
     /// never nothing to compare. A link at `path` is said ("link <target>"), and read through.
-    static func preferenceParts(_ path: String) -> (said: String, keys: [(key: String, hash: String)]?) {
+    static func preferenceParts(_ path: String) -> (said: String, keys: [(key: String, form: String, hash: String)]?) {
         var info = stat()
         guard lstat(path, &info) == 0 else { return ("absent", nil) }
         var said = ""
         if (info.st_mode & S_IFMT) == S_IFLNK {
-            said = "link " + ((try? FileManager.default.destinationOfSymbolicLink(atPath: path)) ?? "") + " "
+            said = linkSaid(path)
         }
         let bytes = { () -> String in
             switch ConfigSeal.contentsDigest(path, followLink: true) {
@@ -268,32 +319,32 @@ public enum MacSealList {
             return (said + "not a property list " + ConfigSeal.hex(SHA256.hash(data: data)), nil)
         }
         let keys = pairs(top).filter { !isChurn($0.key) }.map { pair in
-            (key: pair.key, hash: ConfigSeal.hex(SHA256.hash(data: Data(canonical(pair.value).utf8))))
+            (key: pair.key, form: pair.form, hash: ConfigSeal.hex(SHA256.hash(data: Data(canonical(pair.value).utf8))))
         }
         return (said + "plist", keys)
     }
 
     /// The per-key hashes of a preferences row (`ConfigSeal.keyHashes`): "<label>: <key>" for each file's keys ("" for
     /// the domain's own file, `ByHost/…` for the others), and "<label>" for one that isn't a property list now. A key
-    /// canonically equal to one already named is named with its UTF-8 bytes after it, so the card names each (the hash
-    /// has both anyway).
+    /// canonically equal to one already named, or read the same (two that differ by a lone surrogate, N6), is named
+    /// with its form's bytes after it (`form`), so the card names each (the hash has both anyway).
     static func preferenceKeys(_ path: String) -> [String: String] {
         var all: [String: String] = [:]
-        let put = { (name: String, value: String) in
-            let unique = all[name] == nil ? name : name + " [" + ConfigSeal.hex(Data(name.utf8)) + "]"
+        let put = { (name: String, value: String, form: String?) in
+            let unique = all[name] == nil ? name : name + " [" + ConfigSeal.hex(Data((form ?? name).utf8)) + "]"
             all[unique] = value
         }
         let (folder, files) = preferenceFiles(path)
-        put("ByHost", folder)
+        put("ByHost", folder, nil)
         for file in files {
             let (said, keys) = preferenceParts(file.path)
             let label = file.label.isEmpty ? "" : file.label + ": "
             guard let keys else {
-                put(file.label.isEmpty ? "file" : file.label, said)
+                put(file.label.isEmpty ? "file" : file.label, said, nil)
                 continue
             }
-            if !said.hasPrefix("plist") { put((file.label.isEmpty ? "file" : file.label) + " link", said) }
-            for (key, hash) in keys { put(label + key, hash) }
+            if !said.hasPrefix("plist") { put((file.label.isEmpty ? "file" : file.label) + " link", said, nil) }
+            for key in keys { put(label + key.key, key.hash, label + key.form) }
         }
         return all
     }
@@ -312,21 +363,47 @@ public enum MacSealList {
         for file in files {
             let (said, keys) = preferenceParts(file.path)
             add("file \(file.label.utf8.count):\(file.label) \(said)")
-            for (key, hash) in keys ?? [] { add("key \(key.utf8.count):\(key) \(hash)") }
+            for key in keys ?? [] { add("key \(key.form) \(key.hash)") }
         }
         return ConfigSeal.hex(hasher.finalize())
     }
 
-    /// A dictionary's keys and values, in the order of the keys' UTF-8 bytes. Walked as `NSDictionary` with its own
-    /// keys: bridged to `[String: Any]`, two keys that are canonically equal (an NFC and an NFD "Café", two keys to
-    /// CFDictionary, which compares code points) would be one, and one value would be dropped (R3).
-    static func pairs(_ dictionary: NSDictionary) -> [(key: String, value: Any)] {
-        var pairs: [(key: String, value: Any, bytes: [UInt8])] = []
+    /// A dictionary's keys and values, in the order of the keys' UTF-8 bytes (then of their forms, for two keys that
+    /// read the same: N6), each key with its form (`form`). Walked as `NSDictionary` with its own keys: bridged to
+    /// `[String: Any]`, two keys that are canonically equal (an NFC and an NFD "Café", two keys to CFDictionary, which
+    /// compares code points) would be one, and one value would be dropped (R3).
+    static func pairs(_ dictionary: NSDictionary) -> [(key: String, form: String, value: Any)] {
+        var pairs: [(key: String, form: String, value: Any, bytes: [UInt8])] = []
         dictionary.enumerateKeysAndObjects { key, value, _ in
-            let text = (key as? String) ?? "?\(type(of: key))\(key)"
-            pairs.append((text, value, Array(text.utf8)))
+            let text = (key as? NSString).map { $0 as String } ?? "?\(type(of: key))\(key)"
+            let form = (key as? NSString).map(form) ?? "\(text.utf8.count):\(text)"
+            pairs.append((text, form, value, Array(text.utf8)))
         }
-        return pairs.sorted { $0.bytes.lexicographicallyPrecedes($1.bytes) }.map { ($0.key, $0.value) }
+        return pairs.sorted { $0.bytes == $1.bytes ? Array($0.form.utf8).lexicographicallyPrecedes(Array($1.form.utf8))
+            : $0.bytes.lexicographicallyPrecedes($1.bytes) }.map { ($0.key, $0.form, $0.value) }
+    }
+
+    /// A string or key as the hash takes it, one form per string of UTF-16 code units (what a binary property list stores
+    /// and CFString compares): "<count of its UTF-8 bytes>:<it>" when it is valid Unicode (the form before N6, so such a
+    /// string hashes as it did), "u<count of its code units>:<them in hex>" when it holds a lone surrogate, which
+    /// Swift's `String` reads as U+FFFD (the re-check's N6: `P\u{D800}` and `P\u{DC00}` would read the same).
+    static func form(_ text: NSString) -> String {
+        var units = [unichar](repeating: 0, count: text.length)
+        text.getCharacters(&units, range: NSRange(location: 0, length: text.length))
+        var index = 0, lone = false
+        while index < units.count, !lone {
+            if UTF16.isLeadSurrogate(units[index]), index + 1 < units.count, UTF16.isTrailSurrogate(units[index + 1]) {
+                index += 2
+            } else {
+                lone = UTF16.isLeadSurrogate(units[index]) || UTF16.isTrailSurrogate(units[index])
+                index += 1
+            }
+        }
+        guard lone else {
+            let string = text as String
+            return "\(string.utf8.count):\(string)"
+        }
+        return "u\(units.count):" + units.map { String(format: "%04x", $0) }.joined()
     }
 
     /// A property list value as text, the same for the same value whatever its file's format or key order, and
@@ -334,9 +411,9 @@ public enum MacSealList {
     /// (`pairs`), a string or key by its length first (so no text passes for two), nested values whole.
     static func canonical(_ value: Any) -> String {
         if let dictionary = value as? NSDictionary {
-            return "{" + pairs(dictionary).map { "k\($0.key.utf8.count):\($0.key)=" + canonical($0.value) }.joined(separator: ",") + "}"
+            return "{" + pairs(dictionary).map { "k" + $0.form + "=" + canonical($0.value) }.joined(separator: ",") + "}"
         }
-        if let text = value as? String { return "s\(text.utf8.count):\(text)" }
+        if let text = value as? NSString { return "s" + form(text) }
         if let data = value as? Data { return "d" + ConfigSeal.hex(data) }
         if let date = value as? Date { return "t\(date.timeIntervalSince1970)" }
         if let number = value as? NSNumber {

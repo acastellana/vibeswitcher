@@ -91,28 +91,81 @@ public enum LinuxSealList {
         return resolved(home) == resolved(own)
     }
 
-    /// A startup file read whole at most for what it sources (`addSourced`): past it, it names nothing (owed).
+    /// A startup file read whole at most for what it sources (`addSourced`): past it, the cap is hit (`capName`).
     static let startupLimit = 16 << 20
 
-    /// The most files `addSourced` reads for what they source, the startup files among them.
-    static let sourcedReads = 256
+    /// The most rows `addSourced` adds (each target, and on the Mac its compiled twin), and so the most files it reads
+    /// (each read file is one of them, or a startup file); and the most bytes it reads in all. Past any of them, or at a
+    /// file past `startupLimit`, it stops and adds the cap's row (`capName`), held as a change (the re-check's N5 and
+    /// N4: before, a `.zshrc` of 100,000 `. ~/aN` lines ran for 30 minutes and more, and a file sourced past the 256th
+    /// read named nothing, silently). This Mac's zsh files source 2.
+    static let maxSourcedRows = 1024
+    static let maxSourcedBytes = 32 << 20
+
+    /// The name of the row `addSourced` adds when it stops at a cap (`Kind.capped`): no sourced path can be it (a
+    /// target's name holds no space or parenthesis, `sourced`).
+    static let capName = "~/(sourced files past the seal's cap)"
 
     /// What the startup files (`startupFiles`, under `home`) source (`sourced`), and what those source in turn, every
     /// level (the review's R6: a line added to a sourced file is held as that file's change, and its target is then a
     /// row too): each target a `.file` row named as shown, added to `items` once (`names`, which holds the names
-    /// already watched); each file read once, whole up to `startupLimit` (the review's R6c: past 1 MB, a startup file
-    /// named nothing), at most `sourcedReads` of them.
-    static func addSourced(from startupFiles: [String], home: String, names: inout Set<String>, to items: inout [ConfigSeal.Watched]) {
+    /// already watched); with `twins` (zsh's, the Mac's list), its compiled twin too (`<target>.zwc`,
+    /// `MacSealList.twinSuffix`: zsh runs it in place of the target, N1). Each file read once, whole up to
+    /// `startupLimit`. Its work is bounded (`maxSourcedRows`, `maxSourcedBytes`, linear in what it reads): at a cap it
+    /// stops and adds one `capName` row saying which, so the look that first crosses it holds a change, never a
+    /// silent cut; what lies past the cap is then unwatched until the files are under it again.
+    static func addSourced(from startupFiles: [String], home: String, names: inout Set<String>, to items: inout [ConfigSeal.Watched],
+                           twins: Bool = false) {
         var queue = startupFiles.map { (home as NSString).appendingPathComponent($0) }
+        var next = 0, rows = 0, bytes = 0
         var read: Set<String> = []
-        while !queue.isEmpty, read.count < sourcedReads {
-            let file = queue.removeFirst()
-            guard read.insert(file).inserted, let data = ConfigSeal.regularContents(file, limit: startupLimit) else { continue }
-            for path in sourced(startupFile: String(decoding: data, as: UTF8.self), home: home) {
+        var capped: String?
+        // Adds `watched` once; false when it would be a row past the cap.
+        func add(_ watched: ConfigSeal.Watched) -> Bool {
+            guard !names.contains(watched.name) else { return true }
+            guard rows < maxSourcedRows else { return false }
+            names.insert(watched.name)
+            rows += 1
+            items.append(watched)
+            return true
+        }
+        reading: while next < queue.count {
+            let file = queue[next]
+            next += 1
+            guard read.insert(file).inserted else { continue }
+            var info = stat()
+            guard stat(file, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG else { continue }  // Its own row says what it is.
+            guard info.st_size <= Int64(startupLimit) else {
+                capped = "a file past \(startupLimit >> 20) MB: " + ConfigSeal.shown(file, home: home)
+                break
+            }
+            guard bytes + Int(info.st_size) <= maxSourcedBytes else {
+                capped = "more than \(maxSourcedBytes >> 20) MB read"
+                break
+            }
+            // Read whole, or the cap is hit: it grew past its limit since the `stat`, or can't be read now.
+            guard let data = ConfigSeal.regularContents(file, limit: min(startupLimit, maxSourcedBytes - bytes)) else {
+                capped = "a file not read whole: " + ConfigSeal.shown(file, home: home)
+                break
+            }
+            bytes += data.count
+            let (paths, more) = sourced(startupFile: String(decoding: data, as: UTF8.self), home: home, limit: maxSourcedRows)
+            for path in paths {
                 queue.append(path)
                 let watched = ConfigSeal.Watched(name: ConfigSeal.shown(path, home: home), path: path, kind: .file)
-                if names.insert(watched.name).inserted { items.append(watched) }
+                let twin = ConfigSeal.Watched(name: watched.name + MacSealList.twinSuffix, path: path + MacSealList.twinSuffix, kind: .file)
+                guard add(watched), !twins || add(twin) else {
+                    capped = "more than \(maxSourcedRows) rows"
+                    break reading
+                }
             }
+            if more {
+                capped = "more than \(maxSourcedRows) rows"
+                break
+            }
+        }
+        if let capped, names.insert(capName).inserted {
+            items.append(ConfigSeal.Watched(name: capName, path: "", kind: .capped(capped)))
         }
     }
 
@@ -120,21 +173,29 @@ public enum LinuxSealList {
     /// path, quoted or not, as a path under `home`, in order, once each. What a variable other than HOME names (nvm's
     /// `$NVM_DIR`) is left to the static entries; a comment line's, and anything outside the home, are left out.
     public static func sourced(startupFile text: String, home: String) -> [String] {
+        sourced(startupFile: text, home: home, limit: .max).paths
+    }
+
+    /// `sourced`, at most `limit` targets (`more`: there were more), in time linear in the text (a set of the targets
+    /// found, the re-check's N5: a list's `contains` made it the square of its lines).
+    static func sourced(startupFile text: String, home: String, limit: Int) -> (paths: [String], more: Bool) {
         let homes = [#"~"#, #"\$HOME"#, #"\$\{HOME\}"#, NSRegularExpression.escapedPattern(for: home)].joined(separator: "|")
         let pattern = #"(?:^|[\s;&|(){}`])\\?(?:\.|source)[ \t]+["']?(?:"# + homes + #")(/[^\s"';&|()<>`$]+)"#
-        guard let expression = try? NSRegularExpression(pattern: pattern) else { return [] }
+        guard let expression = try? NSRegularExpression(pattern: pattern) else { return ([], false) }
         var found: [String] = []
+        var seen: Set<String> = []
         for line in text.split(separator: "\n", omittingEmptySubsequences: true) {
             let line = String(line)
             guard !line.trimmingCharacters(in: .whitespaces).hasPrefix("#") else { continue }
             for match in expression.matches(in: line, range: NSRange(line.startIndex..., in: line)) {
                 guard let range = Range(match.range(at: 1), in: line) else { continue }
                 let path = ((home as NSString).appendingPathComponent(String(line[range])) as NSString).standardizingPath
-                guard path.hasPrefix(home + "/"), !found.contains(path) else { continue }
+                guard path.hasPrefix(home + "/"), seen.insert(path).inserted else { continue }
+                guard found.count < limit else { return (found, true) }
                 found.append(path)
             }
         }
-        return found
+        return (found, false)
     }
 
     /// The entries outside the home, read under `root` ("/" on the node): the manager's runtime units and drop-ins, and
@@ -262,8 +323,17 @@ public enum LinuxSealList {
         let modified = Platform.Files.modified(info), changed = Platform.Files.changed(info)
         var text = "\(type) \(relative.utf8.count):\(relative) \(info.st_mode & 0o7777) \(info.st_size) \(info.st_ino) "
             + "\(modified.tv_sec).\(modified.tv_nsec) \(changed.tv_sec).\(changed.tv_nsec)"
-        if type == "l" { text += " -> " + ((try? FileManager.default.destinationOfSymbolicLink(atPath: path)) ?? "") }
+        if type == "l" { text += targetSaid(path) }
         return text
+    }
+
+    /// A listing link's target, at the end of its line: " -> <target>", as ever, for one that holds no newline; else
+    /// " ->x <its UTF-8 bytes in hex>" (the re-check's N2: a target's newline could spell the lines after it). The two
+    /// can't be one: the first has a space after the arrow. So a listing's hash bytes are unchanged but for such a link.
+    static func targetSaid(_ path: String) -> String {
+        let target = (try? FileManager.default.destinationOfSymbolicLink(atPath: path)) ?? ""
+        guard target.utf8.contains(0x0A) else { return " -> " + target }
+        return " ->x " + ConfigSeal.hex(Array(target.utf8))
     }
 
     /// The line of what the link at `path` (`relative` in the listing) leads to, every link on the way followed (one
@@ -464,6 +534,9 @@ public enum LinuxSealList {
         for (path, entry) in old {
             if let current = new[path], ConfigSeal.entryHash(current) != ConfigSeal.entryHash(entry) { return nil }
         }
+        // A compiled twin (`*.zwc`, any case) coming or going is judged as ever, so held: zsh's `source` of a session's
+        // snapshot runs `<snapshot>.zwc` in its place (the re-check's N1), and no session's start writes one.
+        for path in Set(old.keys).symmetricDifference(new.keys) where MacSealList.isTwin(path) { return nil }
         if name == hooksName {
             for (path, entry) in new where old[path] == nil {
                 guard hookEntryMayCome(path, entry: entry, old: old, new: new) else { return nil }
