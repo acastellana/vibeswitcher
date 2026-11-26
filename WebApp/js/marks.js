@@ -59,7 +59,7 @@ const GLYPHS = {
 export function agentMark(agent, size = 20) {
   const kind = AGENTS[agent] ? agent : 'shell';
   const svg = s('svg', { class: `agent agent-${kind}`, viewBox: '0 0 16 16', width: size, height: size, role: 'img', 'aria-label': AGENTS[kind] });
-  svg.append(s('rect', { class: 'badge', width: 16, height: 16, rx: 4.5 }));
+  svg.append(s('rect', { class: 'agent-badge', width: 16, height: 16, rx: 4.5 }));
   if (kind === 'claude') svg.append(s('path', { class: 'glyph-fill', d: GLYPHS.claude }));
   else if (kind === 'codex') svg.append(s('path', { class: 'glyph', d: 'M5.6 5.2L3 8L5.6 10.8M10.4 5.2L13 8L10.4 10.8M9 4.4L7 11.6' }));
   else svg.append(s('path', { class: 'glyph', d: 'M4 5.5L6.6 8L4 10.5M8.4 10.8H12' }));

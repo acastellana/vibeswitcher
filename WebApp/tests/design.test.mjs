@@ -180,6 +180,15 @@ const CONTROLS = [];
 // The class may come after other properties, or on the next line.
 for (const match of code.matchAll(/h\('(button|a)', \{[^}]*?\bclass: ['`]([a-z0-9 -]+)/g)) CONTROLS.push({ tag: match[1], classes: match[2].trim().split(/\s+/) });
 for (const match of code.matchAll(/h\('details', \{ class: ['`]([a-z0-9-]+)['`] \}, h\('summary'/g)) CONTROLS.push({ tag: 'summary', classes: [`${match[1]} summary`] });
+// And those js/kit.js builds (a button by its role and size, an icon button, a switch's choice), with the call's own class.
+const KIT = { button: { primary: ['button'], plain: ['button', 'plain'], quiet: ['button', 'quiet'], danger: ['button', 'plain', 'danger'] } };
+for (const match of code.matchAll(/kit\.(button|iconButton|segment)\((?:'([a-z]+)', )?\{([^}]*)/g)) {
+  const [, call, role, props] = match;
+  const size = props.match(/\bsize: '([sml])'/)?.[1] || 'm';
+  const own = props.match(/\bclass: '([a-z0-9 -]+)'/)?.[1].split(/\s+/) || [];
+  const base = call === 'button' ? KIT.button[role || 'primary'] : call === 'iconButton' ? ['icon-button'] : ['segment'];
+  CONTROLS.push({ tag: /\btag: 'a'/.test(props) ? 'a' : 'button', classes: [...base, ...(size === 's' && call !== 'segment' ? ['small'] : size === 'l' ? ['large'] : []), ...own] });
+}
 
 // The classes a selector names, outside its :not(…) (what it excludes is not what it styles).
 const named = (selector) => {
@@ -284,10 +293,10 @@ test('states: no selector puts a space before a pseudo-class after a parenthesis
 
 // Each kind of button and field, and its height on the scale (rows, options and the palette's big field are rows).
 const SIZED = {
-  '.button': 'm', '.button.small': 's', '.icon-button': 'm', '.row-action': 's', '.task-more': 's', '.segmented button': 's', '.switch-link': 's',
+  '.button': 'm', '.button.small': 's', '.button.large': 'l', '.icon-button': 'm', '.icon-button.small': 's', '.row-action': 's', '.task-more': 's', '.segment': 's',
   '.copy-button': 's', '.code-run': 's', '.confirm-clear': 's', '.summary-brief': 's', '.offer button': 's', '.latest': 's', '.look-colour': 's',
   '.send': 'l', '.composer-attach': 'l', '.composer-input': 'l', '.say': 'l',
-  '.answer-input': 'm', '.setting-input': 'm', '.setting-search': 'm', '.look-input': 'm', '.find-input': 'm', '.left-filter': 'm', '.setting-picker': 'm', '.tc-find': 'm',
+  '.field': 'm', '.setting-search': 'm', '.find-input': 'm', '.tc-find': 'm',
 };
 const TOUCH = '(hover: none) and (pointer: coarse)';
 
@@ -301,7 +310,7 @@ test('sizes: buttons and fields come in three heights (24, 30, 36), and 44 on a 
   }
   // Wherever a button's or a field's height is set, it is one of the scale's.
   for (const block of RULES) {
-    const controls = listed(block.selector).filter((one) => SIZED[one] || /\.(button|icon-button|switch-link|dial-fold|strip-fold)(?![a-z0-9-])/.test(named(one)));
+    const controls = listed(block.selector).filter((one) => SIZED[one] || /\.(button|icon-button|segment|field|dial-fold|strip-fold)(?![a-z0-9-])/.test(named(one)));
     if (!controls.length) continue;
     for (const d of block.declarations) {
       if (!/^(min-)?height$/.test(d.property) || reasoned(d)) continue;
@@ -310,13 +319,13 @@ test('sizes: buttons and fields come in three heights (24, 30, 36), and 44 on a 
     }
   }
   // A tab inside its track: the track is the standard height (24 and 3 px either side).
-  for (const track of ['.segmented', '.switch']) {
+  for (const track of ['.segmented']) {
     const padding = RULES.filter((block) => block.media === '' && block.selector === track).flatMap((block) => block.declarations).filter((d) => d.property === 'padding').at(-1)?.value;
     if (24 + 2 * parseFloat(padding) !== 30) wrong.push(`${track}: padding ${padding} makes the track ${24 + 2 * parseFloat(padding)} px`);
   }
   // The touch block keeps every control a fingertip, on the token.
   const touch = RULES.filter((block) => block.media === TOUCH);
-  for (const selector of ['.icon-button', '.send', '.button', '.switch-link', '.segmented button', '.copy-button', '.offer button']) {
+  for (const selector of ['.icon-button', '.send', '.button', '.segment', '.copy-button', '.offer button']) {
     const sizes = touch.filter((block) => listed(block.selector).includes(selector)).flatMap((block) => block.declarations).filter((d) => /^(min-)?height$/.test(d.property)).map((d) => d.value);
     if (!sizes.includes('var(--ctl-touch)')) wrong.push(`${selector}: not 44 on a touch screen`);
   }
