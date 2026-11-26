@@ -121,7 +121,7 @@ public enum ProjectMaker {
             undoLevels()
             return .failure(Refusal(.location, "The projects folder \(shown(root, home)) isn't a folder that can be opened (errno \(errno))."))
         }
-        let real = realPath(top) ?? LeadInit.resolved(root)
+        let real = LeadInit.resolved(root)
         guard real != "/" else {
             close(top)
             undoLevels()
@@ -256,17 +256,6 @@ public enum ProjectMaker {
         let name = LeadInit.git(["config", "--global", "--get", "user.name"], in: "/", home: home, scratch: scratch).trimmed
         let email = LeadInit.git(["config", "--global", "--get", "user.email"], in: "/", home: home, scratch: scratch).trimmed
         return !name.isEmpty && !email.isEmpty
-    }
-
-    /// The path of the folder `descriptor` is open on, as the system resolves it.
-    static func realPath(_ descriptor: Int32) -> String? {
-        #if os(Linux)
-        return try? FileManager.default.destinationOfSymbolicLink(atPath: "/proc/self/fd/\(descriptor)")
-        #else
-        var buffer = [CChar](repeating: 0, count: Int(MAXPATHLEN))
-        guard fcntl(descriptor, F_GETPATH, &buffer) == 0 else { return nil }
-        return String(cString: buffer)
-        #endif
     }
 
     static func shown(_ path: String, _ home: String) -> String { ProjectCreation.tildePath(path, home: home) }
