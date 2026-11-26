@@ -1388,7 +1388,9 @@ kbd { padding: 1px var(--s-3); border-radius: var(--r-1); box-shadow: var(--e-1-
 .skeleton-ring { width: 28px; height: 28px; border-radius: 50%; box-shadow: var(--e-1-in); background: var(--fill); }
 .skeleton-row .project-text { gap: 0; }
 .skeleton-row .project-text > .bone { width: 70%; margin: var(--s-2) 0; }
-.skeleton-row .project-text > .bone.short { width: 40%; margin: var(--s-2) 0; }
+/* Kept off the scale: a 10 px bone in a caption's 16 px line, 3 above and under, so the skeleton row is the real
+   row's height and nothing moves as the projects come. */
+.skeleton-row .project-text > .bone.short { width: 40%; margin: 3px 0; }
 .place.two-line { display: grid; grid-template-columns: 16px minmax(0, 1fr); column-gap: var(--s-4); }
 .place.two-line > :is(.place-waiting, .place-count, .place-bone) { grid-column: 2; margin-left: 0; }
 .place.two-line > .place-bone { margin: var(--s-2) 0; }
@@ -1729,6 +1731,8 @@ kbd { padding: 1px var(--s-3); border-radius: var(--r-1); box-shadow: var(--e-1-
   .centre-head .segment { flex: 1; padding: var(--s-2) var(--s-3); line-height: var(--lh-caption); text-align: center; white-space: normal; }
   .dial { order: 5; }
   .team-strip, .talk, .composer-lead, .quiet-block { padding-left: var(--s-5); padding-right: var(--s-5); }
+  /* The strip keeps its fold's room at the row's end (the phone's own rule gives it 44 under 760). */
+  .team-strip { padding-right: calc(var(--ctl-s) + var(--s-5) * 2); }
   .quiet-words { display: none; }
   .composer-lead { flex-wrap: wrap; gap: var(--s-3); }
   .to { width: 100%; }

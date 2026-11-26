@@ -87,6 +87,8 @@ const KEPT = new Map([
   ['.goal-row::before { top }', 'the goal\u2019s diamond on its first line: the row\u2019s 8 and the line\u2019s middle less half the mark'],
   // A to-do's box on its first line: half the line, whatever the text's size.
   ['.todo::before { top }', 'half an em: the first line\u2019s middle'],
+  // A skeleton's short bone (10 px) in a caption's 16 px line: the skeleton row is the real row's height.
+  ['.skeleton-row .project-text > .bone.short { margin }', 'a 10 px bone centred in a 16 px line: 3 above and under'],
   // A dot centred on its line by half its own 7 px.
   ['.offline.signed-out::before { margin-top }', 'half the 7 px dot'],
 ]);
@@ -163,4 +165,33 @@ test('no spacing length is set as a literal from js', () => {
   assert.equal(jsLiterals("el.style.gap = 8;").length, 1);
   assert.equal(jsLiterals("node.style.setProperty('left', `${axis.x(from)}%`);").length, 0);
   assert.equal(jsLiterals("el.style.paddingLeft = 'var(--s-5)';").length, 0);
+});
+
+// ---- What the scale must not move (the blind check's two) ----
+
+// A selector's declarations outside any @media (or in one), the later winning.
+const rule = (selector, media = '') => Object.fromEntries(ALL.filter((d) => d.selector === selector && d.media === media).map((d) => [d.property, d.value]));
+const ROOT = rule(':root');
+function px(value) {
+  let text = String(value);
+  for (let n = 0; n < 5 && /var\(/.test(text); n++) text = text.replace(/var\((--[\w-]+)\)/g, (_, name) => `(${ROOT[name]})`);
+  return Function(`return (${text.replace(/calc/g, '').replace(/(\d*\.?\d+)px/g, '$1')})`)();
+}
+
+test('the left column’s loading rows are the real rows’ height, so nothing moves as the projects come', () => {
+  // The real row's words: a body line and a caption line. The skeleton's: two 10 px bones with their margins.
+  const words = px('var(--t-body) * var(--lh-body)') + px('var(--t-caption) * var(--lh-caption)');
+  const bone = px(rule('.bone').height);
+  const margin = (selector) => px(rule(selector).margin.split(' ')[0]) * 2;
+  const bones = bone + margin('.skeleton-row .project-text > .bone') + bone + margin('.skeleton-row .project-text > .bone.short');
+  assert.ok(Math.abs(bones - words) < 0.5, `bones ${bones} px against words ${words} px`);
+});
+
+test('the team strip keeps its fold’s room at every width (the narrow window’s gutter rule doesn’t take it)', () => {
+  const fold = px('var(--ctl-s)');
+  for (const media of ['', '(max-width: 900px)']) {
+    const right = ALL.filter((d) => d.media === media && d.selector.split(/,(?![^(]*\))/).map((one) => one.trim()).includes('.team-strip') && /^padding(-right)?$/.test(d.property)).at(-1);
+    const value = right.property === 'padding' ? right.value.split(' ')[1] ?? right.value : right.value;
+    assert.ok(px(value) >= fold + px('var(--s-5)'), `${media || 'wide'}: ${right.value}`);
+  }
 });
