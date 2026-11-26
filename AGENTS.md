@@ -7,10 +7,7 @@
 - Hide, show or move only scratch windows, not real ones: moving windows across Spaces stranded the user's terminals.
 - Don't attach a debugger or inspect another process (lldb, debugserver, sample, leaks, spindump): each puts a password
   dialog on the user's screen. Use `dyld_info -disassemble` and ~/Library/Logs/DiagnosticReports instead.
-- Keychain work in tests, scripts and probes (`security`, SecItem): scratch keychain files only, made never to lock
-  (`scripts/lib/scratch-keychain.sh`), no-UI on every SecItem call, no access-list calls, and never kill a process in a
-  keychain call; probe live Keychain behaviour only in a keyboard session with the user. 2026-11-26: a locked scratch
-  keychain put dialogs on the user's screen, and a probe killed mid-call crashed securityd, locking the login keychain.
+- Keychain (`security`, SecItem): scratch keychain files only, made never to lock (`scripts/lib/scratch-keychain.sh`), no-UI on every SecItem call, no access-list calls, never kill a process in a keychain call, live probes only with the user at the keyboard: on 2026-11-26 dialogs hit the user's screen and a killed probe crashed securityd, locking the login keychain.
 - Leave /Applications/VibeSwitcher.app and the user's running app alone: check UI in the sandbox below.
   `scripts/build-app.sh --install` relaunches the user's app, so it's the user's call.
 - Install nothing (brew, npm -g, pip, apps): ask the user.
@@ -39,5 +36,4 @@ A new sheet goes in the sheet list in `Sources/VibeSwitcher/Sandbox.swift`.
 - TemporaryFolderLint: a test's files go in a `Scratch` (a socket: `shortFolder`), never `/tmp` or `temporaryDirectory`.
 - Show a fix's test failing without the fix: `git diff <pre-fix> HEAD -- <fix files> | git apply -R`, test, then without `-R`.
 - A failed merge's log is copied into the task's worktree, `.vibeswitcher/merge-failure/`: `~/.vibeswitcher/lead` is refused.
-- Long or many-core jobs (full suites, release builds, mutation, fuzzing, VMs, load and perf runs) run under `vs-heavy`.
 - `docs/lead/` is the lead's record: only the lead edits it.
