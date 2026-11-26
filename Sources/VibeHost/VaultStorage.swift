@@ -48,8 +48,9 @@ public struct VaultStorage {
         let reads = saved.map(LeadVault.Book.reads) ?? false
         let book = LeadVault.Book(restoring: saved, startingOver: !reads && there)
         if key != nil {
-            // A file there that isn't a vault under this key (a handed-over vault doesn't read it) is never saved over.
-            let unopened = there && !(opened.map(LeadVault.Book.reads) ?? false)
+            // A file there that isn't a vault under this key (a handed-over vault doesn't read it) is never saved over,
+            // nor one that opens when the vault waiting for your answer came from memory (a build before without a key).
+            let unopened = there && (!(opened.map(LeadVault.Book.reads) ?? false) || book.awaitsAppKey)
             let saver = Saver(storage: self, log: HostLog(path: logPath), later: retryLater, setAside: unopened)
             book.onChange = { saver.save($0) }
             // What came from memory goes to disk too (the build before may have had no key to save it with).

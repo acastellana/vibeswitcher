@@ -107,6 +107,25 @@ extension LeadVaultHostTests {
         #expect(asideFiles(file).count == 1)
     }
 
+    /// A build before without a key started over and hands its vault over to one whose key opens the file: that file
+    /// isn't saved over either, before your answer or after it (set aside then).
+    @Test func aHandedOverWaitingVaultKeepsAFileThatOpens() throws {
+        let file = folder.appendingPathComponent("opens/vault.sealed")
+        let storage = VaultStorage(file: file, key: SymmetricKey(size: .bits256))
+        keptVault(storage, appKey: try appKey())
+        let kept = try Data(contentsOf: file)
+        let waiting = LeadVault.Book(startingOver: true)
+        #expect(waiting.awaitsAppKey)
+
+        let book = storage.book(handedOver: waiting.serialized)
+        _ = book.answer(.issue(role: .lead, root: root, task: nil, auditing: nil), from: .app)
+        #expect(try Data(contentsOf: file) == kept)
+        #expect(book.adoptAppKey(try appKey(), replacing: true))
+        let aside = asideFiles(file)
+        #expect(aside.count == 1)
+        #expect(aside.first.flatMap { try? Data(contentsOf: $0) } == kept)
+    }
+
     /// A first start with a key saves as ever, and sets nothing aside.
     @Test func aFirstStartSetsNothingAside() throws {
         let file = folder.appendingPathComponent("plain/vault.sealed")
