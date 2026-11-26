@@ -1330,6 +1330,7 @@ const EN = {
   noRuleShortHere: "This computer",
   noRuleShortNone: "No one",
   noRuleShortApproval: "With approval",
+  tlLines: "lines",
 };
 
 

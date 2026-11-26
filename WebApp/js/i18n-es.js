@@ -1318,4 +1318,5 @@ export const ES = {
   noRuleShortHere: "Este ordenador",
   noRuleShortNone: "Nadie",
   noRuleShortApproval: "Con aprobación",
+  tlLines: "líneas",
 };

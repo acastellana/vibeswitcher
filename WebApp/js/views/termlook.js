@@ -58,7 +58,7 @@ export function terminalLookSection() {
       row(t('tlSize'), sizeInput, t('tlRange', { min: FONT_SIZES.min, max: FONT_SIZES.max })),
       row(t('tlCursor'), h('span', { class: 'look-pair' }, select(CURSORS, current.cursorShape, (cursorShape) => saveLook({ cursorShape })),
         h('label', { class: 'look-check' }, check(current.cursorBlink, 'cursorBlink', t('tlBlink')), t('tlBlink')))),
-      row(t('tlScrollback'), scrollInput, 'lines'),
+      row(t('tlScrollback'), scrollInput, t('tlLines')),
       row(KEY.mod === '⌘' ? t('tlOptionAsMeta') : t('tlAltAsMeta'), check(current.optionAsMeta, 'optionAsMeta', KEY.mod === '⌘' ? t('tlOptionAsMeta') : t('tlAltAsMeta')), t('tlOnAMacSendsMeta')),
       row(t('tlBell'), select(BELLS, current.bell, (bell) => saveLook({ bell }))),
       h('div', { class: 'look-row' }, h('span', { class: 'look-label' }, t('tlColours')),
