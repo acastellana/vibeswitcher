@@ -86,7 +86,7 @@ keychain code is reachable from a test any other way. The one test of the real k
 Run them before you call a change done; they take seconds:
 
 ```sh
-bash scripts/test.sh --filter 'AccessibilityLint|AgentExportLint|DebugAidsLint|DocLinksLint|ElapsedTimeLint|HomePathLint|KeychainLint|PreferencesLint|PrivateNamesLint|PhoneMainSyncLint|PrivateWriteLint|ScriptScratchLint|SecretShapeLint|SharedDefaultsLint|TemporaryFolderLint'
+bash scripts/test.sh --filter 'AccessibilityLint|AgentExportLint|DebugAidsLint|DocLinksLint|ElapsedTimeLint|HomePathLint|KeychainCallLint|KeychainLint|PreferencesLint|PrivateNamesLint|PhoneMainSyncLint|PrivateWriteLint|ScriptScratchLint|SecretShapeLint|SharedDefaultsLint|TemporaryFolderLint'
 bash scripts/test.sh --filter 'LintTests/'   # the same suites, as AGENTS.md runs them: every `…LintTests` type
 ```
 
@@ -98,6 +98,7 @@ bash scripts/test.sh --filter 'LintTests/'   # the same suites, as AGENTS.md run
 | `DocLinksLint` | A relative link or `#anchor` in README.md or `docs/**/*.md` that doesn't resolve, an image in `docs/images` no doc shows, or a lint suite missing from the command above. |
 | `ElapsedTimeLint` | A correctness test judging an elapsed time against a bare number (`took < 0.05`, `Date().timeIntervalSince(x) < 5`): it judges the order of events, a baseline from the same test, or it's a `.perf` bench; the short allow list is in `ElapsedTimeLintTests.swift`. |
 | `HomePathLint` | A path under the home folder worked out once per process. |
+| `KeychainCallLint` | A `security` call in scripts/ or Tests/ outside `scripts/lib/scratch-keychain.sh` (a scratch keychain made unlocked with no timeout, each call under a hard timeout) but a few read-only ones, a SecItem call without `kSecUseAuthenticationUIFail`, or a SecKeychain or ACL call; the allow list, each with its reason, is in `KeychainCallLintTests.swift`. |
 | `KeychainLint` | A test that can reach the real keychain. |
 | `PreferencesLint` | A test that makes a defaults suite in the real `~/Library/Preferences`. |
 | `PrivateNamesLint` | A mention of the user's other projects (the list is in the test); write a stand-in, `project-b` or `project-c`. |
