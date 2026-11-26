@@ -26,6 +26,9 @@ bash scripts/test.sh --web WebApp/tests
 | `/?mock&delay=MS`, `/?mock&delay=never` | The mock as a slow node (its first snapshot MS late: the skeletons, then the content without a jump), or one that never answers (the page that says so). |
 | `/?older` | A mock node that doesn't take a session's answer or a start from a page (it lists no `session.reply`, `session.new`, `session.resume` or `lead`): their lines, and why. |
 | `/?toggle` | The mock's asking session shows Claude's auto-mode popup, whose Space-toggled option the node refuses from a page. |
+| `/?mock&rich` | "Add dark mode…" (`#/s/local:a47e9d05-4f6a-4c1e-9b7d-2e5a8c0d1f3b`) holds what an agent writes: a heading, emphasis, a quote, links, nested lists, a table, fenced code, a long output and a failed command. |
+| `/?mock&stream` | "Bank webhooks…" streams a long reply on load, and again each time one ends. |
+| `/?mock&refuse=send,tell` | The node refuses a session's send and a lead's message: the refusal beside the box, with Try again. Any kind the mock's `REFUSALS` names works so. |
 | `/?rows=10000` | One mock session ("Add dark mode…") with a 10,000-row chat: its newest 200 first, the rest paged in as you scroll up. |
 | `/#/p/<project>/lead?show=asks\|all&tab=stats\|files&task=<slug>&sheet=<line>` | A project: you and its lead in the centre (the dial's level, the right column's tab, a task open in place, a line's side sheet). `/#/p/<project>` (the board page's address before) opens it too. |
 | `/#/p/<project>/roadmap?open=<goal>,unsorted,done` | Its roadmap: a row per goal opening in place to its tasks, Unsorted, the done goals folded (each named in `open` is open); with no goals, in motion, blocked and the queue as one band (`open=queue`). |

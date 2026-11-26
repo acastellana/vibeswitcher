@@ -10,6 +10,10 @@
 //                 session.reply, session.new, session.resume and lead (as a node that doesn't take them from a page)
 //   ?toggle       the asking session's question is Claude's auto-mode popup, whose second option is a setting toggled
 //                 with Space: the node refuses it from a page, as it does there
+//   ?rich         "Add dark mode…" holds what an agent writes: a heading, emphasis, a quote, links, nested lists, a
+//                 table, fenced code, a long output and a failed command (each state of the chat, to see and shoot)
+//   ?stream       "Bank webhooks…" streams a long rich reply on load and again each time one ends
+//   ?refuse=send  (with any kind of REFUSALS) the node refuses it: a refused send, beside the box
 
 import { diffOps, summaryOf } from './chatops.js';
 import { taskGroup, taskState } from './words.js';
@@ -249,6 +253,44 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
   const read = (path, at) => tool('Read', 'Read ' + path.split('/').pop(), { type: 'read', path }, at);
   const edit = (path, changes, at) => tool('Edit', 'Edit ' + path.split('/').pop(), { type: 'edit', path, changes }, at);
 
+  // What an agent writes in a reply, every construct the chat draws (`?rich`, `?stream`).
+  const RICH = [
+    '## What changed',
+    '',
+    'The settings page follows the system setting now. Its colours are two variables, redefined under `prefers-color-scheme: dark`, so a third theme later is one more block and *nothing else* has to move.',
+    '',
+    'Three things to know before you merge:',
+    '',
+    '1. The toggle in the header is gone: the page follows the system, as [the design](https://example.com/design/tokens) asked.',
+    '2. The contrast test runs in **both** themes and fails under 4.5:1.',
+    '3. The chart colours are _not_ done:',
+    '   - the bar chart is readable',
+    '   - the pie chart is not',
+    '     - its labels sit on the slices',
+    '',
+    '### The tokens',
+    '',
+    '| Token | Light | Dark | Ratio |',
+    '|---|---|---|--:|',
+    '| `--ink` on `--page` | #1d1d1f | #f2f2f4 | 16.1:1 |',
+    '| `--muted` on `--page` | #636366 | #a8a8ad | 5.9:1 |',
+    '| `--accent` on `--page` | #0a5fc8 | #62adff | 6.2:1 |',
+    '',
+    '```css',
+    ':root {',
+    '  color-scheme: light dark;',
+    '  --page: light-dark(#ffffff, #1c1c1e);',
+    '  --a-very-long-custom-property-name-that-runs-past-the-edge-of-the-column: color-mix(in srgb, var(--ink) 12%, transparent);',
+    '}',
+    '```',
+    '',
+    '> Note: the docs at https://example.com/docs/tokens still show the old values; a_b_c.txt and 2*3*4 stay as typed.',
+    '',
+    '---',
+    '',
+    '~~The snapshot needs updating~~ Done. The lint failure above is a hex colour I’ll move into a token next.',
+  ].join('\n');
+
   const RETRY_OLD = 'def deliver(event):\n    response = post(event.url, event.body)\n    if response.status >= 500:\n        log.warning("webhook failed", event.id)\n    return response';
   const RETRY_NEW = 'def deliver(event, attempt=1):\n    response = post(event.url, event.body)\n    if response.status >= 500 and attempt < MAX_ATTEMPTS:\n        queue.later(deliver, event, attempt + 1, delay=backoff(attempt))\n    elif response.status >= 500:\n        log.warning("webhook failed for good", event.id)\n    return response';
 
@@ -315,6 +357,16 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
       edit(`${DOCS}/README.md`, [{ old: 'To install it you first need to clone it and then run the installer.', new: '1. Clone the repository.\n2. Run `./install.sh`.' }], 5450),
       reply('Shorter intro, and the install steps are a list of two.', 5400),
     ]);
+    if (options.rich) {
+      const items = chats.get(DARK);
+      const long = Array.from({ length: 40 }, (_, i) => `  ✓ contrast of token ${String(i + 1).padStart(2, '0')} at 4.5:1 in light and dark (${3 + (i % 7)} ms)`).join('\n');
+      items.push(
+        prompt('Show me what changed, the *numbers*, and anything you’re **not** sure of.\nKeep it short.', 360),
+        command('npm test -- contrast', `PASS  tests/contrast.test.js\n${long}\n\nTests: 40 passed, 40 total`, 340),
+        command('npm run lint', 'pages/settings.css\n  12:3  error  Unexpected hex colour "#fff" (color-no-hex)\n\n✖ 1 problem (1 error, 0 warnings)', 320, { output: 'pages/settings.css\n  12:3  error  Unexpected hex colour "#fff" (color-no-hex)\n\n✖ 1 problem (1 error, 0 warnings)', failed: true, at: ago(318) }),
+        reply(RICH, 300),
+      );
+    }
     if (options.rows) {
       const long = chats.get(DARK);
       const first = long.shift();
@@ -1213,6 +1265,8 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
   // The node's own words for refusing each (`?refuse=KIND,…`).
   const REFUSE = new Set(options.refuse || []);
   const REFUSALS = {
+    send: 'the session’s terminal didn’t take it: it was busy redrawing; nothing was typed',
+    tell: 'the lead’s mail couldn’t be written: the disk is full',
     'update.check': 'this server doesn’t check for updates (a scratch node asks GitHub nothing)',
     'web.revoke': 'the web tokens weren’t dropped: the token file couldn’t be written',
     'session.close-shells': 'none of them is a finished shell now (back at its prompt): nothing ended',
@@ -1236,6 +1290,12 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
         store.setKinds?.(KINDS);
         store.apply(snapshot());
         if (!options.still && !options.empty) story();
+        // `?stream`: a long reply streaming into "Bank webhooks…", again each time one ends; and a handle for a probe.
+        if (options.stream && !options.empty) {
+          const again = () => later(2500, () => stream(WEBHOOKS, RICH, again));
+          later(1200, () => stream(WEBHOOKS, RICH, again));
+          globalThis.__mockStream = (sid, text) => stream(sid, text);
+        }
       });
     },
     // A snapshot again, after a gap.

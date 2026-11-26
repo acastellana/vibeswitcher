@@ -620,8 +620,11 @@ small { font-size: var(--t-caption); }
 .block-actions { display: flex; justify-content: flex-end; gap: 2px; padding: 3px 4px 0; }
 .diff > .block-actions { box-shadow: 0 1px 0 var(--line); } /* a hairline under the actions, drawn as an edge, not an elevation */
 .diff-scroll { overflow-x: auto; }
-.output-box { border-radius: var(--r-2); background: var(--fill); }
+.output-box { position: relative; border-radius: var(--r-2); background: var(--fill); }
 .output-box > .output { background: none; }
+/* An output's Copy over its corner, so the output starts where it did; on its own fill so the words under it don't show. */
+.output-box > .block-actions { position: absolute; top: 3px; right: 3px; padding: 0; }
+.output-box .block-copy { background-color: var(--raised); }
 @media (hover: hover) {
   .block-copy { opacity: 0; }
   :is(.code, .diff, .output-box):is(:hover, :focus-within) .block-copy, .block-copy:focus-visible { opacity: 1; }
