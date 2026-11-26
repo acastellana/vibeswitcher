@@ -180,6 +180,7 @@ public enum RefusedGit {
         }
         // Then, on any line, a program whose name the shell makes, or a launcher this doesn't read: after everything
         // above, which reads the line as it did before (RefusedGitMonotonicTests: nothing it refused is let through).
+        if scan.tangled { return .unreadable(.tangled) }
         for command in commands {
             if let refusal = built(command, odd: scan.odd, budget: &budget) { return refusal }
         }
@@ -343,7 +344,6 @@ public enum RefusedGit {
     static func built(_ command: ShellWords.Command, odd: Bool, budget: inout Int, depth: Int = 0, filled: [String] = [],
                       appends: Bool = false) -> Refusal? {
         guard depth <= ShellWords.depthLimit else { return .unreadable(.tangled) }
-        guard !command.array else { return nil }
         let words = command.words
         // What follows a test's `]]` or zsh's `always` is a command too, as `refusal(command:)` reads it.
         if let close = words.firstIndex(where: { $0 == "]]" || $0 == "always" }),
@@ -861,9 +861,10 @@ enum ShellWords {
     }
 
     /// What a word is to `RefusedGit.built`, which reads each command's program: a word that may be one (`plain`), or
-    /// one that never is: an operand of a plain `[[ … ]]` test, a word of a `case` arm's pattern, or of zsh's glob
-    /// group or qualifier written without spaces (`*(om[1])`, `^(a|b)$`).
-    enum Kind { case plain, operand, pattern, group }
+    /// one that never is: an operand of a plain `[[ … ]]` test, a word of a `case` arm's pattern, of zsh's glob group
+    /// or qualifier written without spaces (`*(om[1])`, `^(a|b)$`), or an array's element in parentheses that hold
+    /// no separator and are closed (`a=(x $y)`).
+    enum Kind { case plain, operand, pattern, group, element }
 
     /// One simple command: its words, quotes and escapes taken off, and how each was made.
     struct Command {
@@ -900,6 +901,8 @@ enum ShellWords {
     struct Scan {
         var commands: [Command]
         var odd: Bool
+        /// A redirection it doesn't know, which the shell may read otherwise: the line isn't read for `built`.
+        var tangled: Bool
     }
 
     /// The simple commands in `line`, as `commands(in:)`, with what `RefusedGit.built` reads of them. A plain test's
@@ -917,7 +920,7 @@ enum ShellWords {
                 ($0 == .operand && !tests) || ($0 == .pattern && !patterns) ? .plain : $0
             }
         }
-        return Scan(commands: commands, odd: !tests || !patterns)
+        return Scan(commands: commands, odd: !tests || !patterns, tangled: scanner.oddRedirection)
     }
 
     /// The keywords after which `[[` opens a test, or `case` a case: unquoted, in a command's own place.
@@ -935,6 +938,8 @@ enum ShellWords {
         var sawTest = false
         var sawCase = false
         var oddPattern = false
+        /// A redirection this doesn't know (`<|`, `>>>`): the line is refused as too tangled (`RefusedGit.built`'s caller).
+        var oddRedirection = false
         /// Here-documents whose bodies start after the current line: each delimiter, whether `<<-` strips tabs, and
         /// whether the delimiter was quoted (the body is then text; unquoted, the shell runs its substitutions).
         var pending: [(delimiter: String, tabs: Bool, quoted: Bool)] = []
@@ -969,8 +974,10 @@ enum ShellWords {
 
         /// Reads commands until `terminator` (`)` of a subshell or `$(`, or a backtick) or the line's end; past it.
         /// `array`: the words of an array's parentheses; `input`: the list's commands take the input of the subshell
-        /// they're in; `group`: the words of zsh's glob group or qualifier.
-        mutating func list(until terminator: Character?, array: Bool = false, group: Bool = false, input inherited: Bool = false) {
+        /// they're in; `group`: the words of zsh's glob group or qualifier; `parenthesized`: a plain test's `( … )`,
+        /// whose words are its operands.
+        mutating func list(until terminator: Character?, array: Bool = false, group: Bool = false, input inherited: Bool = false,
+                           parenthesized: Bool = false) {
             guard enter() else { return }
             // The word this list is read inside of (`a$(…)b`) keeps how it was made.
             let outer = made
@@ -993,7 +1000,7 @@ enum ShellWords {
             var start = i
             var fresh = true
             var opening = true
-            var testing = false
+            var testing = parenthesized
             var arms = 0
             var caseWord = -1
             var pattern = false
@@ -1025,7 +1032,7 @@ enum ShellWords {
             /// any other `[[` or `]]` makes the line's tests odd. A `case` arm's pattern words: one to an alternative.
             func kind(_ current: String, literal: Bool) -> Kind {
                 let before: Character? = start > 0 ? chars[start - 1] : nil
-                var kind = Kind.plain
+                var kind = array ? Kind.element : Kind.plain
                 if current == "case" { sawCase = true }
                 if testing {
                     kind = .operand
@@ -1083,10 +1090,16 @@ enum ShellWords {
             /// spaces or separators and is closed.
             func finish(closed: Bool) {
                 endCommand()
-                if testing { oddTest = true }
+                // A test still open, or a test's parentheses that its `]]` closed inside (`[[ ( a ]] )`), or that never closed.
+                if parenthesized ? !testing || !closed : testing { oddTest = true }
                 if pattern || arms > 0 { oddPattern = true }
                 if group, closed, !spaced {
                     for index in mine { commands[index].kinds = commands[index].words.map { _ in .group } }
+                }
+                // An array's parentheses with a separator in them, or never closed: the shell doesn't read them as an
+                // array's, and each word that could be a program is read as one.
+                if array, !closed || spaced {
+                    for index in mine { commands[index].kinds = commands[index].kinds.map { $0 == .element ? .plain : $0 } }
                 }
             }
             /// Whether `(` after `word` opens an array's parentheses (`a=(x y)`, `a+=(x)`, `a[1]=(x)`: a name and one
@@ -1104,16 +1117,16 @@ enum ShellWords {
                     let closer = word == "]]" && start > 0 && String(chars[start..<i]) == "]]" && (chars[start - 1] == " " || chars[start - 1] == "\t")
                     let usual: Bool
                     if closer {
-                        usual = c == " " || c == "\t" || c == ";" || c == "&" || c == "|" || c == ")" || c == "\n" || c == terminator
+                        usual = !parenthesized && (c == " " || c == "\t" || c == ";" || c == "&" || c == "|" || c == ")" || c == "\n" || c == terminator)
                     } else if c == terminator {
-                        usual = false
+                        usual = parenthesized
                     } else {
                         switch c {
                         case ";", "\n", ")": usual = false
                         case "#": usual = word != nil
                         case "&": usual = peek(1) != ">" && ((peek(1) == "&" && prior != "&") || (prior == "&" && (i < 2 || chars[i - 2] != "&") && peek(1) != "&"))
                         case "|": usual = peek(1) == "|" && peek(2) != "|" && peek(2) != "&"
-                        case "(": usual = word == "=" || (word != nil && peek(1) != ")" && !isArray(word))
+                        case "(": usual = word == "=" || (word != nil && peek(1) != ")" && !isArray(word)) || (word == nil && (peek(1) == " " || peek(1) == "\t"))
                         case "<", ">": usual = word == nil && (peek(1) == " " || peek(1) == "\t" || peek(1) == "(")
                         default: usual = true
                         }
@@ -1143,6 +1156,7 @@ enum ShellWords {
                     if !usual { oddPattern = true }
                 }
                 if group, " \t\n;&<>".contains(c) || (c == "|" && peek(1) == "|") || ((c == "(" || c == "#") && word == nil) { spaced = true }
+                if array, ";&|<>".contains(c) || (c == "(" && word == nil) { spaced = true }
                 if let terminator, c == terminator {
                     finish(closed: true)
                     i += 1
@@ -1198,9 +1212,11 @@ enum ShellWords {
                     let group = word != nil && !array && peek(1) != ")"
                     if group { made.insert(.pattern) }
                     let input = command.input
+                    // A plain test's own parentheses, `[[ -n $a && ( $b || $c ) ]]`: spaced, and read as operands.
+                    let parenthesized = testing && word == nil && (peek(1) == " " || peek(1) == "\t")
                     endCommand()
                     i += 1
-                    list(until: ")", array: array, group: group, input: input && !array)
+                    list(until: ")", array: array, group: group, input: input && !array, parenthesized: parenthesized)
                     fresh = false
                     // A pattern's group (`@(a|b))`) is its alternative's.
                     if pattern, group { alternative = true }
@@ -1283,6 +1299,7 @@ enum ShellWords {
                         endWord()
                     }
                     opening = false
+                    let run = i
                     i += 1
                     if peek() == "(" {
                         // Process substitution, `<(…)` or `>(…)`: commands of their own, and a word (or the target).
@@ -1294,6 +1311,8 @@ enum ShellWords {
                     }
                     if c == "<" { command.input = true }
                     while let d = peek(), d == "<" || d == ">" || d == "|" { i += 1 }
+                    // The operators the shells have; another (`<|`, `>>>`) may be read otherwise, as a pipe after it.
+                    if !["<", ">", ">>", ">|", ">>|", "<>", "<<<"].contains(String(chars[run..<i])) { oddRedirection = true }
                     if peek() == "&", let d = peek(1), d.isNumber || d == "-" {
                         // A descriptor copied or closed (`2>&1`, `>&-`).
                         i += 1

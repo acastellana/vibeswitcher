@@ -55,7 +55,7 @@ struct RefusedGitProgramNameTests {
     /// Odd-looking tests, read the strict way: not the plain form, so each word that could be a program is read as one.
     /// Harmless, and the accepted cost: the reason says to write the test plainly.
     static let oddTests = [
-        "[[ $f == (*.swift|*.md) ]] && echo yes", "[[ -n $a &&\n $b ]] && echo ok", "[[ ( $a == x ) ]] && echo ok",
+        "[[ $f == (*.swift|*.md) ]] && echo yes", "[[ -n $a &&\n $b ]] && echo ok", "[[ ( $a == x )]] && echo $b", "[[ ( $a ]] ) || $b",
         "\"[[\" $a ]] || $b", "[[ \"]]\" || $b ]]", "[[ a ]]x || $b", "[[ a || $b", "[[ x || $y )]]",
         "case $x in *) [[ -n a || $b ]] ;; esac", "[[ $a == x ||\t$b == y ]]extra",
     ]
@@ -117,7 +117,7 @@ struct RefusedGitProgramNameTests {
         "grep -rn 'script -q' docs", "echo setsid", "man script", "command -v swift", "command -v \"$tool\" >/dev/null || echo missing",
         "[[ $x =~ ^[0-9]+([.][0-9]+)?$ ]] && echo n", "[[ $x =~ ^(a|b)$ ]]", "if ! [[ -d $dir || -L \"$dir\" ]]; then mkdir -p \"$dir\"; fi",
         "x=$([[ $v =~ ^(a|b)$ ]] && echo y)", "[[ $x == @(a|b) ]] && echo ab", "[[ -n $a ]] && [[ -z $b || $c ]] && echo ok",
-        "{ [[ -n $a || $b ]]; } && echo ok", "( [[ -n $a || $b ]] ) && echo ok", "until [[ -e $f || $n -gt 9 ]]; do sleep 1; done",
+        "{ [[ -n $a || $b ]]; } && echo ok", "[[ ( -n $a ) && ( $b || $c ) ]] && echo ok", "[[ $n -gt 1 && ( $s -ne 0 || $c -eq 0 ) ]]", "( [[ -n $a || $b ]] ) && echo ok", "until [[ -e $f || $n -gt 9 ]]; do sleep 1; done",
         "[[ $a < $b || $c > $d ]] && echo ok", "[[ $(git rev-parse HEAD) == $x ]] && echo same", "[[ -n $a ]]; echo $?",
         // docs/guide/development.md's heavy jobs: text handed to sh that doesn't name git, its variable an argument.
         "vs-heavy sh -c 'node --test --test-concurrency=\"$VS_HEAVY_CORES\"'", "vs-heavy sh -c 'make -j \"$VS_HEAVY_CORES\"'",
