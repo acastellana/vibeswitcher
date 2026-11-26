@@ -48,16 +48,15 @@ public struct VaultStorage {
     }
 
     public func load() -> Data? {
-        guard let key, let sealed = FileManager.default.contents(atPath: file.path),
-              let box = try? ChaChaPoly.SealedBox(combined: sealed) else { return nil }
-        return try? ChaChaPoly.open(box, using: key)
+        guard let key, let sealed = FileManager.default.contents(atPath: file.path) else { return nil }
+        return SealedData.open(sealed, key: key)
     }
 
     public func save(_ data: Data) throws {
         guard let key else { return }
         try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true,
                                                 attributes: [.posixPermissions: 0o700])
-        try VibePaths.writePrivate(try ChaChaPoly.seal(data, using: key).combined, to: file, syncing: sync)
+        try VibePaths.writePrivate(try SealedData.seal(data, key: key), to: file, syncing: sync)
     }
 
     /// How long before each next try of a save that failed; the last repeats until one goes through.

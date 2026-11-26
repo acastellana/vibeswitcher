@@ -74,6 +74,10 @@ final class PhoneAccess: ObservableObject {
     private let defaults: UserDefaults
     /// Where the paired phones are kept (`devicesURL`, a test's own otherwise).
     private let devicesFile: URL
+    /// What the paired phones' list is sealed with (`SealedData`): the app's key's `devicesPurpose` key, from your login
+    /// Keychain (AppDelegate); a test's own. Nil: the phones paired are kept in memory only, and a list on disk isn't read.
+    private let devicesKey: SymmetricKey?
+    static let devicesPurpose = "phone-devices"
     private let store: SessionStore
     /// Screens, scrollback and replies of sessions in the window go through the session host.
     weak var hostClient: HostClient?
@@ -181,10 +185,11 @@ final class PhoneAccess: ObservableObject {
     /// What the phone may post: what MediaRecorder makes in Safari and Chrome, and what OpenAI reads.
     static let dictationTypes: Set<String> = ["audio/webm", "audio/mp4", "audio/ogg", "audio/mpeg", "audio/wav", "audio/x-m4a", "audio/aac"]
 
-    init(store: SessionStore, defaults: UserDefaults = .standard, devicesFile: URL? = nil) {
+    init(store: SessionStore, defaults: UserDefaults = .standard, devicesFile: URL? = nil, devicesKey: SymmetricKey? = nil) {
         self.store = store
         self.defaults = defaults
         self.devicesFile = devicesFile ?? Self.devicesURL
+        self.devicesKey = devicesKey
         defaults.register(defaults: ["phonePushOnlyWhenAway": true])
         enabled = defaults.bool(forKey: "phoneAccessEnabled")
         inputAllowed = defaults.bool(forKey: "phoneInputAllowed")
