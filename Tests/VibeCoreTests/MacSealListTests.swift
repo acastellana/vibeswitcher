@@ -535,3 +535,48 @@ struct MacSealVaultTests: LeadTeamFixture {
         #expect(try lead.checkConfig(root: root).held.isEmpty)
     }
 }
+
+/// The fix round after the independent review (review-v2-s-mac-5): what its own tests (MacSealReviewTests) don't reach.
+struct MacSealFixRoundTests {
+    let temp = Scratch()
+    let list = MacSealListTests()
+
+    func home() throws -> String {
+        let url = temp.url("fix-home")
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url.resolvingSymlinksInPath().path
+    }
+
+    func row(_ home: String, _ kind: ConfigSeal.Watched.Kind) throws -> ConfigSeal.Watched {
+        try #require(MacSealList.watched(home: home, uid: getuid()).first { $0.kind == kind })
+    }
+
+    // MARK: R3 at the top level
+
+    /// Two top-level keys that are canonically equal (an NFC and an NFD "Café") are two keys to CFPreferences: a change
+    /// to either is a change, and the card names both.
+    @Test(MacSealListTests.mac) func topLevelKeysThatAreUnicodeEqualAreEachHashed() throws {
+        let home = try home()
+        let row = try row(home, .preferences)
+        // A Swift dictionary literal would merge the two: built as NSDictionary from two NSString keys.
+        let twins = NSMutableDictionary()
+        twins["Caf\u{E9}" as NSString] = "a"
+        twins["Cafe\u{301}" as NSString] = "a"
+        try #require(twins.count == 2, "the probe's premise: two keys")
+        let writeTwins = { (nfc: String, nfd: String) in
+            let object = NSMutableDictionary(dictionary: MacSealListTests.terminal())
+            object["Caf\u{E9}" as NSString] = nfc
+            object["Cafe\u{301}" as NSString] = nfd
+            let data = try PropertyListSerialization.data(fromPropertyList: object, format: .binary, options: 0)
+            try FileManager.default.createDirectory(atPath: (row.path as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+            try data.write(to: URL(fileURLWithPath: row.path))
+        }
+        try writeTwins("a", "a")
+        let sealed = ConfigSeal.fingerprint(row)
+        #expect(MacSealList.preferenceKeys(row.path).keys.filter { $0.hasPrefix("Caf") }.count == 2, "the card names one twin")
+        try writeTwins("evil", "a")
+        #expect(ConfigSeal.fingerprint(row) != sealed, "the NFC twin changed unseen")
+        try writeTwins("a", "evil")
+        #expect(ConfigSeal.fingerprint(row) != sealed, "the NFD twin changed unseen")
+    }
+}

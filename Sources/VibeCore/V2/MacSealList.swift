@@ -108,15 +108,21 @@ public enum MacSealList {
     /// others under it are the same kind of key, one per window type).
     static let churnPrefix = "NSWindow Frame "
 
-    /// Whether `key` (a top-level key) is left out of the hash.
-    static func isChurn(_ key: String) -> Bool { churnKeys.contains(key) || key.hasPrefix(churnPrefix) }
+    /// Whether `key` (a top-level key) is left out of the hash: compared by its UTF-8 bytes, never by Swift's `==`,
+    /// which takes canonically equal strings for one (the review's R3).
+    static func isChurn(_ key: String) -> Bool {
+        churnKeys.contains { $0.utf8.elementsEqual(key.utf8) } || key.utf8.starts(with: churnPrefix.utf8)
+    }
 
-    /// A preferences file read whole at most: past it, it's unreadable.
+    /// A preferences file read whole at most: past it, it's hashed by its bytes (`preferenceParts`).
     static let preferencesLimit = 16 << 20
 
     /// The files a preferences row reads: the domain's file at `path`, and each `ByHost/<domain>.*.plist` beside it,
-    /// by name (CFPreferences reads the current host's domain first). Each with its label: "" for the file, the
-    /// `ByHost/…` name for the others; the ByHost folder's own state ("ByHost": absent, unreadable, or a folder) too.
+    /// its name matched in any case and any Unicode form (the home's volume ignores both by default, so cfprefsd's open
+    /// of the current host's file by the name it builds finds a file named in another case: the review's R1). Each
+    /// with its label: "" for the file, the `ByHost/…` name for the others; and the ByHost folder's own state:
+    /// "absent", "unreadable", "not a folder", or "folder", after "link <target> " when it is a link, read through
+    /// it (R2: a linked folder's files are read, and its target is in the hash).
     static func preferenceFiles(_ path: String) -> (folder: String, files: [(label: String, path: String)]) {
         let folder = (path as NSString).deletingLastPathComponent
         let domain = ((path as NSString).lastPathComponent as NSString).deletingPathExtension
@@ -124,55 +130,88 @@ public enum MacSealList {
         var files: [(label: String, path: String)] = [("", path)]
         var info = stat()
         guard lstat(byHost, &info) == 0 else { return ("absent", files) }
-        guard (info.st_mode & S_IFMT) == S_IFDIR else { return ("not a folder", files) }
-        guard let names = try? FileManager.default.contentsOfDirectory(atPath: byHost) else { return ("unreadable", files) }
-        for name in names.sorted() where name.hasPrefix(domain + ".") && name.hasSuffix(".plist") {
+        var said = ""
+        if (info.st_mode & S_IFMT) == S_IFLNK {
+            said = "link " + ((try? FileManager.default.destinationOfSymbolicLink(atPath: byHost)) ?? "") + " "
+            guard stat(byHost, &info) == 0 else { return (said + "absent", files) }
+        }
+        guard (info.st_mode & S_IFMT) == S_IFDIR else { return (said + "not a folder", files) }
+        guard let names = try? FileManager.default.contentsOfDirectory(atPath: byHost) else { return (said + "unreadable", files) }
+        let matching = names.filter { name in
+            let text = name as NSString
+            return text.range(of: domain + ".", options: [.anchored, .caseInsensitive]).location != NSNotFound
+                && text.range(of: ".plist", options: [.anchored, .backwards, .caseInsensitive]).location != NSNotFound
+        }
+        for name in matching.sorted(by: { Array($0.utf8).lexicographicallyPrecedes(Array($1.utf8)) }) {
             files.append(("ByHost/" + name, (byHost as NSString).appendingPathComponent(name)))
         }
-        return ("folder", files)
+        return (said + "folder", files)
     }
 
-    /// One preferences file's top-level keys, each hashed in its canonical form (`canonical`), churn left out; or what
-    /// it is instead: "absent", "unreadable", "not a property list" (never nothing to compare). A link at `path` is
-    /// said ("link <target>"), and read through.
-    static func preferenceParts(_ path: String) -> (said: String, keys: [String: String]?) {
+    /// One preferences file's top-level keys, each hashed in its canonical form (`canonical`), churn left out, in the
+    /// order of their UTF-8 bytes (two keys that are canonically equal are two keys, as they are to CFPreferences:
+    /// R3); or what it is instead: "absent", "unreadable", or a file read but not taken apart ("bytes <digest>" past
+    /// `preferencesLimit`, "not a property list <digest>"), by its bytes, so every rewrite of it is a change (R2b);
+    /// never nothing to compare. A link at `path` is said ("link <target>"), and read through.
+    static func preferenceParts(_ path: String) -> (said: String, keys: [(key: String, hash: String)]?) {
         var info = stat()
         guard lstat(path, &info) == 0 else { return ("absent", nil) }
         var said = ""
         if (info.st_mode & S_IFMT) == S_IFLNK {
             said = "link " + ((try? FileManager.default.destinationOfSymbolicLink(atPath: path)) ?? "") + " "
         }
-        guard let data = ConfigSeal.regularContents(path, limit: preferencesLimit, followLink: true) else { return (said + "unreadable", nil) }
+        let bytes = { () -> String in
+            switch ConfigSeal.contentsDigest(path, followLink: true) {
+            case .digest(let digest): return digest
+            case .other: return "other"
+            case .unreadable: return "unreadable"
+            }
+        }
+        guard let data = ConfigSeal.regularContents(path, limit: preferencesLimit, followLink: true) else {
+            let digest = bytes()
+            return (said + (digest == "unreadable" || digest == "other" ? digest : "bytes " + digest), nil)
+        }
         guard let object = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil),
-              let top = object as? [String: Any] else { return (said + "not a property list", nil) }
-        var keys: [String: String] = [:]
-        for (key, value) in top where !isChurn(key) {
-            keys[key] = ConfigSeal.hex(SHA256.hash(data: Data(canonical(value).utf8)))
+              let top = object as? NSDictionary else {
+            return (said + "not a property list " + ConfigSeal.hex(SHA256.hash(data: data)), nil)
+        }
+        let keys = pairs(top).filter { !isChurn($0.key) }.map { pair in
+            (key: pair.key, hash: ConfigSeal.hex(SHA256.hash(data: Data(canonical(pair.value).utf8))))
         }
         return (said + "plist", keys)
     }
 
     /// The per-key hashes of a preferences row (`ConfigSeal.keyHashes`): "<label>: <key>" for each file's keys ("" for
-    /// the domain's own file, `ByHost/…` for the others), and "<label>" for one that isn't a property list now.
+    /// the domain's own file, `ByHost/…` for the others), and "<label>" for one that isn't a property list now. A key
+    /// canonically equal to one already named is named with its UTF-8 bytes after it, so the card names each (the hash
+    /// has both anyway).
     static func preferenceKeys(_ path: String) -> [String: String] {
         var all: [String: String] = [:]
+        let put = { (name: String, value: String) in
+            let unique = all[name] == nil ? name : name + " [" + ConfigSeal.hex(Data(name.utf8)) + "]"
+            all[unique] = value
+        }
         let (folder, files) = preferenceFiles(path)
-        all["ByHost"] = folder
+        put("ByHost", folder)
         for file in files {
             let (said, keys) = preferenceParts(file.path)
             let label = file.label.isEmpty ? "" : file.label + ": "
             guard let keys else {
-                all[file.label.isEmpty ? "file" : file.label] = said
+                put(file.label.isEmpty ? "file" : file.label, said)
                 continue
             }
-            if !said.hasPrefix("plist") { all[(file.label.isEmpty ? "file" : file.label) + " link"] = said }
-            for (key, hash) in keys { all[label + key] = hash }
+            if !said.hasPrefix("plist") { put((file.label.isEmpty ? "file" : file.label) + " link", said) }
+            for (key, hash) in keys { put(label + key, hash) }
         }
         return all
     }
 
     /// A preferences row's hash: the ByHost folder's state, then each file's label, what it is and its keys' hashes in
-    /// key order. Never nil: absent, unreadable and not a property list each hash as themselves.
+    /// their bytes' order. Never nil: absent, unreadable and not a property list each hash as themselves. From the
+    /// files alone, never through CFPreferences: a long-lived process keeps its first read of a domain (measured
+    /// 2026-11-26: a path domain rewritten on disk read its old value a second later in the same process, after
+    /// `CFPreferencesAppSynchronize`, and its new one in a new process), and the node's server and its vault each
+    /// fingerprint the row in their own process.
     static func preferencesHash(_ path: String) -> String {
         var hasher = SHA256()
         let add = { (text: String) in hasher.update(data: Data((text + "\n").utf8)) }
@@ -181,31 +220,45 @@ public enum MacSealList {
         for file in files {
             let (said, keys) = preferenceParts(file.path)
             add("file \(file.label.utf8.count):\(file.label) \(said)")
-            for key in (keys ?? [:]).keys.sorted() { add("key \(key.utf8.count):\(key) \(keys?[key] ?? "")") }
+            for (key, hash) in keys ?? [] { add("key \(key.utf8.count):\(key) \(hash)") }
         }
         return ConfigSeal.hex(hasher.finalize())
     }
 
-    /// A property list value as text, the same for the same value whatever its file's format or key order, and
-    /// different for a different type: each value tagged by its type, a dictionary's keys sorted, a string or key by
-    /// its length first (so no text passes for two), nested values whole.
-    static func canonical(_ value: Any) -> String {
-        if let dictionary = value as? [String: Any] {
-            return "{" + dictionary.keys.sorted().map { key in "k\(key.utf8.count):\(key)=" + canonical(dictionary[key] as Any) }.joined(separator: ",") + "}"
+    /// A dictionary's keys and values, in the order of the keys' UTF-8 bytes. Walked as `NSDictionary` with its own
+    /// keys: bridged to `[String: Any]`, two keys that are canonically equal (an NFC and an NFD "Café", two keys to
+    /// CFDictionary, which compares code points) would be one, and one value would be dropped (R3).
+    static func pairs(_ dictionary: NSDictionary) -> [(key: String, value: Any)] {
+        var pairs: [(key: String, value: Any, bytes: [UInt8])] = []
+        dictionary.enumerateKeysAndObjects { key, value, _ in
+            let text = (key as? String) ?? "?\(type(of: key))\(key)"
+            pairs.append((text, value, Array(text.utf8)))
         }
-        if let array = value as? [Any] { return "[" + array.map(canonical).joined(separator: ",") + "]" }
-        if let string = value as? String { return "s\(string.utf8.count):\(string)" }
+        return pairs.sorted { $0.bytes.lexicographicallyPrecedes($1.bytes) }.map { ($0.key, $0.value) }
+    }
+
+    /// A property list value as text, the same for the same value whatever its file's format or key order, and
+    /// different for a different type: each value tagged by its type, a dictionary's keys in their bytes' order
+    /// (`pairs`), a string or key by its length first (so no text passes for two), nested values whole.
+    static func canonical(_ value: Any) -> String {
+        if let dictionary = value as? NSDictionary {
+            return "{" + pairs(dictionary).map { "k\($0.key.utf8.count):\($0.key)=" + canonical($0.value) }.joined(separator: ",") + "}"
+        }
+        if let text = value as? String { return "s\(text.utf8.count):\(text)" }
         if let data = value as? Data { return "d" + ConfigSeal.hex(data) }
         if let date = value as? Date { return "t\(date.timeIntervalSince1970)" }
         if let number = value as? NSNumber {
-            // A plist's boolean is CFBoolean, whose type is a char ("c"); an integer a long long ("q"), a real a double.
+            // A plist's boolean is CFBoolean, whose type is a char ("c"); an integer a long long ("q"), a real a double;
+            // an unsigned 64-bit one ("Q") is tagged apart, so UInt64.max isn't -1 (R4).
             let type = String(cString: number.objCType)
             switch type {
             case "c", "B": return "b\(number.boolValue ? 1 : 0)"
             case "f", "d": return "r\(number.doubleValue)"
+            case "Q": return "u\(number.uint64Value)"
             default: return "i\(number.int64Value)"
             }
         }
+        if let array = value as? NSArray { return "[" + array.map(canonical).joined(separator: ",") + "]" }
         return "?\(type(of: value))"
     }
 }
