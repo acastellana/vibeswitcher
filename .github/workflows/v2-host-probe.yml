@@ -41,7 +41,9 @@ jobs:
           echo "SWIFTLY_BIN_DIR=$HOME/.local/share/swiftly/bin" >> "$GITHUB_ENV"
           echo "SWIFTLY_TOOLCHAINS_DIR=$HOME/.local/share/swiftly/toolchains" >> "$GITHUB_ENV"
       - name: Versions
-        run: swift --version
+        run: |
+          swift --version
+          bash scripts/ci/check-versions.sh node
       - name: The host probe, config held on fresh scratch nodes
         run: bash scripts/ci/host-probe.sh 300
       - name: The parsers fuzzed, long, on a seed of the night
