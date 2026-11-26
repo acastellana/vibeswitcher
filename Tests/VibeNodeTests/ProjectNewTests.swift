@@ -262,22 +262,22 @@ struct ProjectNewTests {
         let world = try world()
         try FileManager.default.createDirectory(atPath: world.home + "/.claude", withIntermediateDirectories: true)
         #expect(symlink(world.home + "/.claude", world.home + "/hidden-link") == 0)
-        let hidden = refusal(ProjectMaker.make(name: "Deploy now", location: nil, projectsFolder: "~/hidden-link/projects", home: world.home, scratch: world.nodeScratch))
-        #expect(hidden?.reason == .hidden, "\(String(describing: hidden))")
-        #expect(listing(world.home + "/.claude").isEmpty, "\(listing(world.home + "/.claude"))")
-
         let elsewhere = world.base + "/elsewhere"
         try FileManager.default.createDirectory(atPath: elsewhere, withIntermediateDirectories: true)
         #expect(symlink(elsewhere, world.home + "/elsewhere-link") == 0)
-        let linked = refusal(ProjectMaker.make(name: "Shop", location: nil, projectsFolder: "~/elsewhere-link/projects/new", home: world.home, scratch: world.nodeScratch))
-        #expect(linked?.reason == .location, "\(String(describing: linked))")
-        #expect(listing(elsewhere).isEmpty, "\(listing(elsewhere))")
-
+        // The dialog first, while the folders aren't there.
         for (folder, expected) in [("~/elsewhere-link/projects/new", LeadInit.resolved(elsewhere) + "/projects/new/shop"),
                                    ("~/hidden-link/projects", LeadInit.resolved(world.home + "/.claude") + "/projects/shop")] {
             let phrase = Requests.projectNewPhrase(name: "Shop", location: nil, goal: nil, projectsFolder: folder, home: world.home)
             #expect(phrase == "make the project “Shop” in \(expected) and start its lead", "\(phrase)")
         }
+
+        let hidden = refusal(ProjectMaker.make(name: "Deploy now", location: nil, projectsFolder: "~/hidden-link/projects", home: world.home, scratch: world.nodeScratch))
+        #expect(hidden?.reason == .hidden, "\(String(describing: hidden))")
+        #expect(listing(world.home + "/.claude").isEmpty, "\(listing(world.home + "/.claude"))")
+        let linked = refusal(ProjectMaker.make(name: "Shop", location: nil, projectsFolder: "~/elsewhere-link/projects/new", home: world.home, scratch: world.nodeScratch))
+        #expect(linked?.reason == .location, "\(String(describing: linked))")
+        #expect(listing(elsewhere).isEmpty, "\(listing(elsewhere))")
     }
 
     /// The lead's start is pinned to what was made: nil while the folder is the one made, holding the commit made, and
