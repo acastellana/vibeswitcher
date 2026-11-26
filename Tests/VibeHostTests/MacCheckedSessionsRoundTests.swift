@@ -42,7 +42,11 @@ struct MacCheckedSessionsRoundTests {
         }, late: { [CheckedSessions.testShapeFlag, home] })
         defer { second.stop() }
         let (client, _, _, _, _, _, _) = try await TestClient.welcomed(second.socket, appKey: second.appKey)
-        let session = try await client.spawn("env; echo umask=$(umask); echo shell=$0; echo DONE-ENV", cwd: home)
+        // And, for a PATH without the marker, whether the shell was a login one and what its home held (the v2 macos host job
+        // of 568df3b5: bash, the marker in .bash_profile, and still not in PATH, where MacCheckedSessionsTests' passed).
+        let session = try await client.spawn("env; echo umask=$(umask); echo shell=$0; "
+            + "(shopt -q login_shell 2>/dev/null || [[ -o login ]] 2>/dev/null) && echo login=yes || echo login=no; "
+            + "echo home-files=$(ls -A \"$HOME\" | tr '\\n' ' '); echo DONE-ENV", cwd: home)
         await client.attach(session.id)
         #expect(await eventually { client.text(session.id).contains("DONE-ENV") }, "\(client.text(session.id))\n\(second.log)")
         let text = client.text(session.id).replacingOccurrences(of: "\r", with: "")
@@ -53,7 +57,8 @@ struct MacCheckedSessionsRoundTests {
             #expect(value(name) != plantedValue, "\(name)=\(plantedValue) reached the session")
         }
         #expect(value("PATH")?.contains("/planted/bin") == false, "PATH=\(value("PATH") ?? "none")")
-        #expect(value("PATH")?.contains("/vs-login-marker") == true, "PATH=\(value("PATH") ?? "none")")
+        #expect(value("PATH")?.contains("/vs-login-marker") == true,
+                "PATH=\(value("PATH") ?? "none"); login=\(value("login") ?? "?"); home-files=\(value("home-files") ?? "?"); HOME=\(value("HOME") ?? "none")")
         #expect(!lines.contains { $0.hasPrefix("DYLD_") }, "a DYLD_ variable reached the session")
         #expect(value("SSH_AUTH_SOCK") == MacCheckedSessionsTests.launchdSocket())
         #expect(value("umask").flatMap { Int($0, radix: 8) } == 0o022)
