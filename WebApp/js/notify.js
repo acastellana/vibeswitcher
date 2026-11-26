@@ -197,7 +197,7 @@ export function notifications(app, env = {}) {
   function settled(words) {
     setText(offerText, words);
     offerAnswers.hidden = true;
-    later(() => { offer.hidden = true; }, 6000);
+    later(() => { offer.hidden = true; app.noteChanged?.(); }, 6000);
   }
 
   // The toggle on This node.
@@ -293,7 +293,7 @@ export function notifications(app, env = {}) {
     count(now);
     if (last !== null) {
       const told = changes(last, now);
-      if (told.length && supported && Note.permission === 'default' && stored(storage) === null) offer.hidden = false;
+      if (told.length && supported && Note.permission === 'default' && stored(storage) === null && offer.hidden) { offer.hidden = false; app.noteChanged?.(); }
       const chosen = wanted(told, choices());
       if (enabled()) chosen.forEach(show);
       if (soundOn() && sounding(chosen.filter((note) => !lookingAt(note)))) play();

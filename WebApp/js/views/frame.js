@@ -32,17 +32,29 @@ const PAGES = {
 export const PAGE_KINDS = Object.keys(PAGES);
 
 // A page of the frame's own. Its one action: pairing is a terminal's line today (device keys aren't built), so the
-// line to copy; the node out of reach, a button that tries again now (`retry`); an empty node, a button that starts a
-// session, and New project beside it.
-export function framePage(kind, { retry = () => globalThis.location?.reload() } = {}) {
+// line to copy; the node out of reach, a button that tries again now (`retry`: the feed's, never a reload, which would
+// lose the page to the browser's own error and a pairing code to the address bar; it says it is trying, then the page
+// gives way the moment the node answers); an empty node, a button that starts a session, and New project beside it.
+export function framePage(kind, { retry = null, later = (fn, ms) => setTimeout(fn, ms) } = {}) {
   const page = PAGES[kind];
   if (!page) throw new Error(`no frame page ${kind}`);
   const action = kind === 'unpaired' || kind === 'revoked' ? copyLine('vibeswitcher web', t('frPairLine'))
-    : kind === 'down' ? kit.button('primary', { class: 'frame-action', onclick: () => retry() }, t('frDownRetry'))
+    : kind === 'down' ? (retry ? tryAgain(retry, later) : null)
       : h('span', { class: 'frame-actions' }, kit.button('primary', { tag: 'a', href: '#/sessions/new' }, t('frEmptyStart')),
         kit.button('plain', { tag: 'a', href: '#/new' }, t('newProject')));
   return kit.empty({ size: 'page', class: `frame-${kind}` }, icon(page.mark, 24), h('h1', null, t(page.title)), h('p', null, t(page.what)),
     h('p', null, t(page.todo)), action, h('p', { class: 'frame-then' }, t(page.then)));
+}
+
+function tryAgain(retry, later) {
+  const button = kit.button('primary', { class: 'frame-action', onclick: () => {
+    retry();
+    button.disabled = true;
+    button.setAttribute('aria-busy', 'true');
+    button.textContent = t('frDownTrying');
+    later(() => { button.disabled = false; button.removeAttribute('aria-busy'); button.textContent = t('frDownRetry'); }, 2500);
+  } }, t('frDownRetry'));
+  return button;
 }
 
 const bone = (kind = '') => h('span', { class: `bone ${kind}`.trim() });

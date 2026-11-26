@@ -506,6 +506,16 @@ export function connectSocket(store, options) {
   }
 
   return {
+    // Try the node again now, not at the backoff's next turn ("Try again now" on the page that says the node isn't
+    // answering): only while it waits between two tries, so an open attempt is never doubled.
+    retryNow() {
+      if (stopped || !timer) return false;
+      cancel(timer);
+      timer = null;
+      attempts = 0;
+      open();
+      return true;
+    },
     // This page no longer acts (the node's `acts-ended`: the pairing ended, the level was lowered, it was revoked).
     dropAct() {
       if (actSecret) {

@@ -69,9 +69,10 @@ export function filterItems(state, query) {
 // What the left column lists, in its order, for the keys (⌥1–9, next and previous): the filter's rows while it
 // holds words, else the projects.
 // The shape the last loaded page had, for the next load's skeletons: how many projects, whether the foot had Brief me
-// and the acting row, and where `#/` went. Kept in this browser (localStorage, which may refuse: then the defaults).
+// and the acting row, and where `#/` went. Kept in this browser (localStorage, which may refuse: then the defaults:
+// a node's own, acting off as `web_acts` is by default, so a first load's foot doesn't lose a row when the truth comes).
 const SHAPE = 'vs.frame';
-const SHAPE_DEFAULT = { projects: 1, brief: true, acts: true, home: 'project' };
+const SHAPE_DEFAULT = { projects: 1, brief: true, acts: false, home: 'project' };
 export function frameShape(storage = globalThis.localStorage) {
   try {
     const kept = JSON.parse(storage?.getItem(SHAPE) || 'null');

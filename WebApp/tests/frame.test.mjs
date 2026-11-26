@@ -85,12 +85,13 @@ test('D6: until the first snapshot the left column says nothing it doesn’t kno
 
 test('D6: the skeleton takes the shape the last load had (how many projects, Brief me, the acting row, where home went), kept in this browser', async () => {
   const storage = memory();
-  assert.deepEqual(frameShape(storage), { projects: 1, brief: true, acts: true, home: 'project' }, 'the defaults, before any load');
+  // A node's own defaults: acting is off until turned on (`web_acts`), so a first load's foot keeps its rows.
+  assert.deepEqual(frameShape(storage), { projects: 1, brief: true, acts: false, home: 'project' }, 'the defaults, before any load');
   keepShape({ projects: 3, brief: false, acts: true, home: 'sessions' }, storage);
   assert.deepEqual(frameShape(storage), { projects: 3, brief: false, acts: true, home: 'sessions' });
   keepShape({ projects: 40 }, storage);
   assert.equal(frameShape(storage).projects, 6, 'never more than a column’s worth');
-  assert.deepEqual(frameShape({ getItem() { throw new Error('refused'); } }), { projects: 1, brief: true, acts: true, home: 'project' }, 'storage refused: the defaults');
+  assert.deepEqual(frameShape({ getItem() { throw new Error('refused'); } }), { projects: 1, brief: true, acts: false, home: 'project' }, 'storage refused: the defaults');
 });
 
 test('D6: a held snapshot shows skeletons in the centre for a project and home; the frame’s pages for not paired, out of reach and an empty node', () => {
@@ -132,11 +133,19 @@ test('D21: not paired, out of reach and an empty node each say what this is, wha
     assert.equal(find(unpaired, byClass('copy-text')).textContent, 'vibeswitcher web', 'pairing still starts in a terminal: the line to copy');
     assert.ok(find(unpaired, byClass('copy-button')), 'with its copy button');
     let tried = 0;
-    const down = framePage('down', { retry: () => { tried += 1; } });
+    const waits = [];
+    const down = framePage('down', { retry: () => { tried += 1; }, later: (fn) => waits.push(fn) });
     const retry = find(down, (node) => node.tag === 'button' && node.classList.contains('frame-action'));
     assert.equal(retry.textContent, TABLES[code].frDownRetry);
     retry.click();
     assert.equal(tried, 1, 'the button tries again now');
+    assert.equal(retry.textContent, TABLES[code].frDownTrying, 'and says so');
+    assert.equal(retry.disabled, true);
+    waits.splice(0).forEach((fn) => fn());
+    assert.equal(retry.textContent, TABLES[code].frDownRetry);
+    // No way to try now (a feed without one): no button that would do nothing, and never a reload.
+    assert.equal(find(framePage('down'), (node) => node.tag === 'button'), null);
+    assert.doesNotMatch(read('../js/views/frame.js') + APP, /location\??\.reload\(\)/);
     const empty = framePage('empty');
     const links = findAll(empty, (node) => node.tag === 'a').map((node) => node.getAttribute('href'));
     assert.deepEqual(links, ['#/sessions/new', '#/new'], 'start a session; or a new project');
@@ -177,8 +186,12 @@ test('D5: the reconnecting line and the notifications’ offer sit in the left c
   // A note is a card in the column's flow: nothing positions it over anything.
   assert.doesNotMatch(rule('.note'), /position:/);
   assert.match(rule('.left-gap'), /flex: 1/, 'the gap gives the room a note takes, so the places under it stay put');
-  // On a phone the column is a drawer: a dot on the button that opens it says a note waits there.
+  // On a phone the column is a drawer: a dot on the button that opens it says a note waits there, the offer's as the
+  // reconnecting line's.
   assert.match(CSS, /\.app\.has-note :is\(\.centre-head, \.tc-head, \.head\) > :is\(\.phone-only, \.back\):first-child::after/);
+  assert.match(APP, /function noteDot\(\) \{ root\.classList\.toggle\('has-note', !offline\.hidden \|\| !app\.notifications\.offer\.hidden\); \}/);
+  // Out of reach only before the node's hello: a node that answered is never called asleep while its state streams.
+  assert.match(APP, /if \(store\.state\.connection !== 'connecting' \|\| store\.state\.kinds !== null\) return;/);
 });
 
 test('D5: the offer is asked once, after the first thing that needs you; answered, it says what happened and goes; “Not now” is remembered', async () => {
@@ -192,12 +205,15 @@ test('D5: the offer is asked once, after the first thing that needs you; answere
   const state = { connection: 'live', node: null, sessions: new Map(), leads: new Map(), cards: new Map(), boards: new Map() };
   const app = { store: { state, subscribe() {} }, ui: { state: { route: { name: 'home' } }, go() {} } };
   const doc = { title: 'VibeSwitcher', visibilityState: 'hidden', hasFocus: () => false };
+  let dots = 0;
+  app.noteChanged = () => { dots += 1; };
   const notes = notifications(app, { Notification, storage, document: doc, later: (fn) => later.push(fn), AudioContext: undefined });
   assert.equal(notes.offer.hidden, true, 'nothing asked at load');
   assert.ok(notes.offer.classList.contains('note') && !notes.offer.classList.contains('offline'), 'a note of the left column, not a row of the centre');
   state.cards.set('c1', card('c1'));
   notes.look();
   assert.equal(notes.offer.hidden, false, 'the first thing that needs you: asked');
+  assert.equal(dots, 1, 'the frame told, for the dot on a phone’s menu');
   find(notes.offer, byClass('offer-no')).click();
   assert.equal(storage.getItem('vibeswitcher.notifications'), 'off');
   assert.equal(notes.offer.hidden, false, 'it says what happened first');
@@ -254,6 +270,8 @@ test('D17: orange means working, and only that: the acting line, the reconnectin
   // Where it stays: something working (a status, a running tool, a to-do in progress, a draft sent now, the ring).
   const working = TOP.filter(([head, body]) => /var\(--working\)/.test(body) && !head.startsWith(':root')).map(([head]) => head);
   assert.deepEqual(working.sort(), ['.badge.working', '.composer-draft.now', '.composer-draft.now .confirm-label', '.running', '.todo.active::before', '.tone-working'].sort());
+  // A refusal said in a card is the danger colour, not quiet ink.
+  assert.match(rule('.card-notice[role="alert"]'), /var\(--danger\)/);
   // Boost keeps its own token.
   assert.match(rule('.boost-mark > .icon'), /var\(--boost\)/);
 });

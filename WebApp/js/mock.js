@@ -1279,6 +1279,8 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
       });
     },
     stop() { for (const timer of timers) clearTimeout(timer); timers.clear(); },
+    // "Try again now": the mock that never answers (`?delay=never`) still doesn't.
+    retryNow() { return true; },
   };
   return feed;
 }

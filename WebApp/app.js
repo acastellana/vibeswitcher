@@ -249,7 +249,8 @@ function watchReach() {
   if (unreachable || reachTimer) return;
   reachTimer = setTimeout(() => {
     reachTimer = null;
-    if (store.state.connection !== 'connecting') return;
+    // A node that said hello is answering (its first state may just be large on a slow link): never called out of reach.
+    if (store.state.connection !== 'connecting' || store.state.kinds !== null) return;
     unreachable = true;
     route();
   }, UNREACHABLE_AFTER);
@@ -262,14 +263,17 @@ let framePageDrawn = '';
 function drawFramePage(kind) {
   if (kind === framePageDrawn) return;
   framePageDrawn = kind;
-  framePage.replaceChildren(frame.framePage(kind));
+  framePage.replaceChildren(frame.framePage(kind, { retry: feed.retryNow ? () => feed.retryNow() : null }));
 }
 // Skip past the left column to what the screen shows: the first stop of the keyboard, shown when it has the focus.
 const centre = h('main', { class: 'centre-wrap', id: 'content', tabindex: '-1' }, unpaired, tabBanner, passkeyOffer, project.el, own.el, newProject.el, node.el, settings.el, stats.el, mail.el, centreSkeleton, framePage);
 const skip = kit.button('plain', { tag: 'a', class: 'skip-link', href: '#content', onclick: (event) => { event.preventDefault(); app.drawer(null); centre.focus(); } }, t('frSkip'));
-// The reconnecting line and the notifications' offer: in the left column's gap, where nothing moves (D5).
+// The reconnecting line and the notifications' offer: in the left column's gap, where nothing moves (D5). Where that
+// column is a drawer (900 px and under), a dot on the button that opens it says a note waits there.
 left.notes.append(offline, app.notifications.offer);
 const root = document.getElementById('app');
+function noteDot() { root.classList.toggle('has-note', !offline.hidden || !app.notifications.offer.hidden); }
+app.noteChanged = noteDot;
 const commandPalette = palette(app);
 const scrim = h('div', { class: 'drawer-scrim', onclick: () => app.drawer(null) });
 root.replaceChildren(skip, left.el, centre, right.el, rightSkeleton, scrim, sheet.scrim, sheet.el, commandPalette.el, confirming, passkeyPill);
@@ -356,7 +360,7 @@ root.addEventListener('click', (event) => {
 store.subscribe('connection', () => {
   const connection = store.state.connection;
   offline.hidden = connection !== 'reconnecting';
-  root.classList.toggle('has-note', !offline.hidden);
+  noteDot();
   unpaired.hidden = (connection !== 'unpaired' && connection !== 'revoked') || store.state.sessions.size === 0;
   const phrase = store.state.phrase;
   confirming.hidden = !phrase || connection === 'unpaired' || connection === 'revoked';

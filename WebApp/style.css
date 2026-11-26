@@ -625,6 +625,7 @@ small { font-size: var(--t-caption); }
 .answer { display: flex; gap: 8px; }
 .answer-input { flex: 1; }
 .card-notice { color: var(--ink-2); font-size: var(--t-caption); }
+.card-notice[role="alert"] { color: var(--danger); }
 .card-context { font-size: var(--t-caption); margin: 6px 0 0; overflow-wrap: anywhere; }
 .card-context-label { color: var(--ink-2); }
 .card > .card-foot { grid-column: 1; color: var(--ink-3); font-size: var(--t-caption); }

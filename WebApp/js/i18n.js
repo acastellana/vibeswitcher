@@ -221,6 +221,7 @@ const EN = {
   frDownWhat: 'This page shows your VibeSwitcher node, and it can’t reach it right now: the computer may be asleep, or the node stopped.',
   frDownDo: 'Check that the computer is on and that VibeSwitcher is running on it.',
   frDownThen: 'This page keeps trying by itself and shows your projects as soon as the node answers.',
+  frDownTrying: 'Trying again…',
   frDownRetry: 'Try again now',
   frEmptyTitle: 'Nothing on this node yet',
   frEmptyWhat: 'Here you’ll see your projects, each with its lead and team, and the sessions you start yourself.',

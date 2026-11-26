@@ -210,6 +210,7 @@ export const ES = {
   frDownWhat: 'Esta página muestra tu nodo de VibeSwitcher y ahora no llega a él: puede que el ordenador esté dormido o que el nodo se haya parado.',
   frDownDo: 'Comprueba que el ordenador está encendido y que VibeSwitcher sigue en marcha en él.',
   frDownThen: 'Esta página lo sigue intentando sola y mostrará tus proyectos en cuanto el nodo conteste.',
+  frDownTrying: 'Intentándolo…',
   frDownRetry: 'Reintentar ahora',
   frEmptyTitle: 'Aún no hay nada en este nodo',
   frEmptyWhat: 'Aquí verás tus proyectos, cada uno con su líder y su equipo, y las sesiones que arranques tú.',
