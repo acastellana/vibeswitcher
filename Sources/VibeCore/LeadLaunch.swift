@@ -616,7 +616,7 @@ public enum LeadLaunch {
                                temporary: URL = SessionTemp.root, home: String = VibePaths.home, resume: String? = nil,
                                teamPlugins: [String] = [], listedPlugins: [String]? = nil,
                                box: Result<SandboxPolicy, SandboxRefusal> = .success(.standard),
-                               auditLogs: [String] = []) throws -> Prepared {
+                               auditLogs: [String] = [], pinModels: Bool = false) throws -> Prepared {
         let folder = folder?.path ?? (root as NSString).appendingPathComponent(".vibeswitcher/run/\(name)")
         try VibePaths.ensurePrivate(URL(fileURLWithPath: folder, isDirectory: true))
         let promptFile = (folder as NSString).appendingPathComponent("prompt.md")
@@ -646,9 +646,10 @@ public enum LeadLaunch {
                                                            + auditLogReads(role, root: root, task: task, logs: auditLogs),
                                                        "deny": rules]]
         var env = environment(role)
-        // The aliases pinned to their ids, and ANTHROPIC_MODEL to this session's model (`WorkerLaunch.pins`): a
-        // worktree's settings `env` remapping one would otherwise run another model than the one recorded.
-        env.merge(WorkerLaunch.pins(model: model)) { mine, _ in mine }
+        // Under the floor that keeps audits off the workers' model (`pinModels`): the aliases pinned to their ids, and
+        // ANTHROPIC_MODEL to this session's model (`WorkerLaunch.pins`), as a worktree's settings `env` remapping one
+        // would otherwise run another model than the one recorded. Without that floor, the env as ever.
+        if pinModels { env.merge(WorkerLaunch.pins(model: model)) { mine, _ in mine } }
         if role == .verifier {
             // Never started with its commands as itself (see `verifierEnvironment`).
             guard BranchCode.prefixable(server) else { throw VerifierUnsafe(server: server) }

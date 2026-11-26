@@ -2463,10 +2463,12 @@ life, so a process in it that ends its agent and starts `claude --model <exclude
 verdict with the bind's judgement. The two ways to close it: the host drops the role when the session's first agent
 process exits (a new verdict then needs a new, judged bind), or the vault checks, at `submitVerdict` and a ballot, that
 the caller's agent process is the one that was running at the bind. Only that check of the running agent's executable
-also closes what a bind's reading of the command can't: a same-uid writer putting a program under Claude Code's or
-Codex's install folders (`~/.local/share/claude/versions/`, a `lib/node_modules` package) or behind the node's links, a
+also closes what a bind's reading of the command can't: a same-uid writer putting a program in Claude Code's
+versions folder (`~/.local/share/claude/versions/`) or behind the node's links, a
 PATH in the session's inherited environment that a bare `claude` or `codex` is found by, and a file swapped after the
 bind looked at it.
+The post-merge Claude re-audit's obligation and its security mark live on the board (`task.claudeReaudit`: `pending`,
+`sensitive`, and the task's `riskRaised`, in board.json, which anyone of the uid can write): moving them into the vault is open.
 Also not seen, with (a): a race on the worktree's settings, written before the worker starts (it reads them), then
 deleted before the bind reads them (the host's read at the bind finds nothing to add).
 (b) `/model` typed in a worker's session; (c) a `claude -p` child the worker starts with a `--model` of its own;

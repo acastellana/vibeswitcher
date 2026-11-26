@@ -52,7 +52,7 @@ struct LeadLaunchTests {
         }
         // Its git never opens an editor, so the `git commit` that ends a merge needs nothing in front; its `git status`
         // (its status line's too) never takes index.lock (IndexLockTests).
-        #expect(settings?["env"] as? [String: String] == ["GIT_EDITOR": "true", "GIT_OPTIONAL_LOCKS": "0"].merging(WorkerLaunch.pins(model: nil)) { $1 })
+        #expect(settings?["env"] as? [String: String] == ["GIT_EDITOR": "true", "GIT_OPTIONAL_LOCKS": "0"])
         let mcp = try LaunchArguments.json("--mcp-config", in: launch.command) as [String: Any]?
         let args = ((mcp?["mcpServers"] as? [String: Any])?["vibeswitcher"] as? [String: Any])?["args"] as? [String]
         #expect(args == ["--keeper", "--role", "worker", "--root", root, "--task", "add-login"])
@@ -74,7 +74,7 @@ struct LeadLaunchTests {
         // (`LeadLaunch.verifierEnvironment`).
         let settings = try LaunchArguments.json("--settings", in: launch.command) as [String: Any]?
         // And the settings for its commands' boxes it was started with (none given: the standard ones).
-        #expect(settings?["env"] as? [String: String] == ["GIT_OPTIONAL_LOCKS": "0"].merging(WorkerLaunch.pins(model: nil)) { $1 }.merging(LeadLaunch.verifierEnvironment(server: "/s")) { $1 }
+        #expect(settings?["env"] as? [String: String] == ["GIT_OPTIONAL_LOCKS": "0"].merging(LeadLaunch.verifierEnvironment(server: "/s")) { $1 }
             .merging([BranchRun.policyVariable: BranchRun.carried(.success(.standard))]) { $1 })
         // On Linux none is left: each is on the command line (aRolesLaunchSettingsAreInlineOnLinux).
         for file in [launch.mcpFile, launch.promptFile, launch.settingsFile] {
