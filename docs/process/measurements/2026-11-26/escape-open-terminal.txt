@@ -1,0 +1,74 @@
+== escape-open-terminal (2026-11-26 19:38, run from: a shell session of the app's host (a shell card))
+== this script's own facts (run from: a shell session of the app's host (a shell card))
+self: pid=81177 ppid=81153 pgid=81153 sid=73425 uid=501
+dev_tty=opens
+VIBESWITCHER_SESSION=set CLAUDECODE=unset
+pid=81177
+bsdinfo=read ppid=81153 pgid=81153 uid=501 status=2 tty=ttys009 start_us=1795718280430463
+shortbsdinfo=read ppid=81153 pgid=81153 uid=501 status=2
+kern_proc_pid=read ppid=81153 tdev=ttys009
+pidpath=/private/tmp/mac-measure.iB2DnV/bin/facts
+coalition=read resource=1841 jetsam=1842
+procargs=read bytes=3644 argc=1 environment_entries=29 MEASURE_MARK_seen=0
+cs_status=0x22020201 valid=1 adhoc=0 get_task_allow=0 hard=0 kill=1 runtime=0 linker_signed=1 platform=0 debugged=0
+responsible=81177
+== the escaped shell's own facts
+self: pid=81876 ppid=81860 pgid=81860 sid=81841 uid=501
+dev_tty=opens
+VIBESWITCHER_SESSION=unset CLAUDECODE=unset
+pid=81876
+bsdinfo=read ppid=81860 pgid=81860 uid=501 status=2 tty=ttys014 start_us=1795718289692325
+shortbsdinfo=read ppid=81860 pgid=81860 uid=501 status=2
+kern_proc_pid=read ppid=81860 tdev=ttys014
+pidpath=/private/tmp/mac-measure.iB2DnV/bin/facts
+coalition=read resource=109496 jetsam=109497
+procargs=read bytes=2380 argc=1 environment_entries=31 MEASURE_MARK_seen=0
+cs_status=0x22020201 valid=1 adhoc=0 get_task_allow=0 hard=0 kill=1 runtime=0 linker_signed=1 platform=0 debugged=0
+responsible=44707
+== its chain
+-- ancestor 0: pid=81860
+bsdinfo=read ppid=81846 pgid=81860 uid=501 status=2 tty=ttys014 start_us=1795718289520792
+shortbsdinfo=read ppid=81846 pgid=81860 uid=501 status=2
+kern_proc_pid=read ppid=81846 tdev=ttys014
+pidpath=/bin/bash
+coalition=read resource=109496 jetsam=109497
+procargs=read bytes=69 argc=2 environment_entries=0 VIBESWITCHER_SESSION_seen=0
+cs_status=0x26010b01 valid=1 adhoc=0 get_task_allow=0 hard=1 kill=1 runtime=1 linker_signed=0 platform=1 debugged=0
+responsible=44707
+-- ancestor 1: pid=81846
+bsdinfo=read ppid=81841 pgid=81846 uid=501 status=2 tty=ttys014 start_us=1795718289434385
+shortbsdinfo=read ppid=81841 pgid=81846 uid=501 status=2
+kern_proc_pid=read ppid=81841 tdev=ttys014
+pidpath=/bin/zsh
+coalition=read resource=109496 jetsam=109497
+procargs=read bytes=25 argc=1 environment_entries=0 VIBESWITCHER_SESSION_seen=0
+cs_status=0x26010b01 valid=1 adhoc=0 get_task_allow=0 hard=1 kill=1 runtime=1 linker_signed=0 platform=1 debugged=0
+responsible=44707
+-- ancestor 2: pid=81841
+bsdinfo=refused got=0 errno=1 (Operation not permitted)
+shortbsdinfo=read ppid=44707 pgid=81841 uid=0 status=2
+kern_proc_pid=read ppid=44707 tdev=ttys014
+pidpath=/usr/bin/login
+coalition=read resource=109496 jetsam=109497
+procargs=refused errno=22 (Invalid argument)
+cs_status=0x26015b11 valid=1 adhoc=0 get_task_allow=0 hard=1 kill=1 runtime=1 linker_signed=0 platform=1 debugged=0
+responsible=-1
+-- ancestor 3: pid=44707
+bsdinfo=read ppid=1 pgid=44707 uid=501 status=2 tty=none start_us=1794933000905148
+shortbsdinfo=read ppid=1 pgid=44707 uid=501 status=2
+kern_proc_pid=read ppid=1 tdev=none
+pidpath=/System/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal
+coalition=read resource=109496 jetsam=109497
+procargs=read bytes=144 argc=1 environment_entries=0 VIBESWITCHER_SESSION_seen=0
+cs_status=0x26017b01 valid=1 adhoc=0 get_task_allow=0 hard=1 kill=1 runtime=1 linker_signed=0 platform=1 debugged=0
+responsible=44707
+-- ancestor 4 (launchd): pid=1
+bsdinfo=refused got=0 errno=1 (Operation not permitted)
+shortbsdinfo=read ppid=0 pgid=1 uid=0 status=2
+kern_proc_pid=read ppid=0 tdev=none
+pidpath=/sbin/launchd
+coalition=read resource=1 jetsam=3
+procargs=refused errno=22 (Invalid argument)
+cs_status=0x26015b11 valid=1 adhoc=0 get_task_allow=0 hard=1 kill=1 runtime=1 linker_signed=0 platform=1 debugged=0
+responsible=-1
+seen: (nothing typed)

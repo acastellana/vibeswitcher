@@ -1,0 +1,18 @@
+== agent-bootout (2026-11-26 19:31, run from: a shell session of the app's host (a shell card))
+== launchctl print, the job's own lines
+	path = /private/tmp/mac-measure.6xRggY/dev.vibeswitcher.measure.agent-bootout.48715.plist
+	type = LaunchAgent
+	state = running
+	program = /bin/sh
+	domain = gui/501 [100020]
+	pid = 48782
+== parsed as NodeAgent.printed does (one tab in, no deeper)
+program=/bin/sh
+pid=48782
+main pid 48782: coalition=read resource=242023 jetsam=242024
+group pid 48789: coalition=read resource=242023 jetsam=242024
+setsid pid 48788: coalition=read resource=242023 jetsam=242024
+== after bootout (once the job's own process ended, or 5 s)
+main (48782): ended
+group (48789): ended
+setsid (48788): still running

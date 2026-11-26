@@ -1,0 +1,16 @@
+== la-cancel (2026-11-26 19:36, run from: a shell session of the app's host (a shell card))
+la: pid=73864 ppid=1 at=2026-11-26T18:35:12Z
+availability=available
+deviceOwnerAuthentication=true error=none
+deviceOwnerAuthenticationWithBiometrics=true error=none
+biometryType=touchID
+asking at=2026-11-26T18:35:12Z timeout=60s reason=MEASURE-2 answer card 1234 with no
+outcome=declined("cancelled at the Mac") after=1.6s at=2026-11-26T18:35:13Z
+la: pid=74014 ppid=1 at=2026-11-26T18:35:22Z
+availability=available
+deviceOwnerAuthentication=true error=none
+deviceOwnerAuthenticationWithBiometrics=true error=none
+biometryType=touchID
+asking at=2026-11-26T18:35:22Z timeout=60s reason=MEASURE-2 answer card 1234 with no
+outcome=declined("not answered within 60 s") after=60.0s at=2026-11-26T18:36:22Z
+seen: yes both

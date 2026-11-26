@@ -1,0 +1,26 @@
+== escape-launchctl (2026-11-26 19:31, run from: a shell session of the app's host (a shell card))
+== this script's own facts (run from: a shell session of the app's host (a shell card))
+self: pid=48471 ppid=48451 pgid=48451 sid=48439 uid=501
+dev_tty=opens
+VIBESWITCHER_SESSION=set CLAUDECODE=unset
+pid=48471
+bsdinfo=read ppid=48451 pgid=48451 uid=501 status=2 tty=ttys009 start_us=1795717867255717
+shortbsdinfo=read ppid=48451 pgid=48451 uid=501 status=2
+kern_proc_pid=read ppid=48451 tdev=ttys009
+pidpath=/private/tmp/mac-measure.9MkYEU/bin/facts
+coalition=read resource=1841 jetsam=1842
+procargs=read bytes=3036 argc=1 environment_entries=29 MEASURE_MARK_seen=0
+cs_status=0x22020201 valid=1 adhoc=0 get_task_allow=0 hard=0 kill=1 runtime=0 linker_signed=1 platform=0 debugged=0
+responsible=48471
+self: pid=48692 ppid=1 pgid=48692 sid=1 uid=501
+dev_tty=none
+VIBESWITCHER_SESSION=unset CLAUDECODE=unset
+pid=48692
+bsdinfo=read ppid=1 pgid=48692 uid=501 status=2 tty=none start_us=1795717870069344
+shortbsdinfo=read ppid=1 pgid=48692 uid=501 status=2
+kern_proc_pid=read ppid=1 tdev=none
+pidpath=/private/tmp/mac-measure.9MkYEU/bin/facts
+coalition=read resource=242021 jetsam=242022
+procargs=read bytes=828 argc=1 environment_entries=11 MEASURE_MARK_seen=0
+cs_status=0x22020201 valid=1 adhoc=0 get_task_allow=0 hard=0 kill=1 runtime=0 linker_signed=1 platform=0 debugged=0
+responsible=48692
