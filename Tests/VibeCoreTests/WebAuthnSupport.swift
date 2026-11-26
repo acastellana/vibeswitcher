@@ -138,3 +138,29 @@ enum WebAuthnSupport {
         var refusal: WebAuthnRefusal? { WebAuthnSupport.refusal { _ = try check() } }
     }
 }
+
+extension WebAuthnSupport {
+    static func registrationListener(_ vector: [String: Any]) -> WebAuthnListener {
+        WebAuthnListener(origin: vector["origin"] as! String, rpId: vector["rpId"] as! String, place: place(vector["place"]))
+    }
+
+    static func registrationResponse(_ vector: [String: Any]) -> WebAuthnRegistration.Response {
+        WebAuthnRegistration.Response(clientDataJSON: bytes(vector["clientDataJSON"] as! String),
+                                      attestationObject: bytes(vector["attestationObject"] as! String))
+    }
+
+    /// A registration vector's check: the verified credential, or the refusal.
+    static func registration(_ vector: [String: Any]) -> Result<WebAuthnRegistration.Verified, WebAuthnRefusal> {
+        do {
+            return .success(try WebAuthnRegistration.check(registrationResponse(vector), challenge: bytes(vector["challenge"] as! String),
+                                                           listener: registrationListener(vector)))
+        } catch { return .failure(error) }
+    }
+
+    static func outcome(ofRegistration vector: [String: Any]) -> String {
+        switch registration(vector) {
+        case .success: "ok"
+        case .failure(let refusal): "\(refusal)"
+        }
+    }
+}

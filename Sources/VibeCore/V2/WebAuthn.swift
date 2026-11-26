@@ -72,6 +72,15 @@ public enum WebAuthnRefusal: Error, Sendable, Equatable {
     case signature
     /// The sign count didn't advance: with either count non-zero, the new one must exceed the stored one.
     case signCount
+    /// The attestation object isn't the canonical CBOR the registration has: an encoding that isn't the shortest, an
+    /// indefinite length, a reserved or truncated head, a tag or a float, another item where the shape has one, a
+    /// key out of order, repeated or extra, trailing bytes, or over 2048 bytes.
+    case cbor
+    /// `fmt` isn't `none`, or `attStmt` isn't the empty map.
+    case attestationFormat
+    /// The credential's key isn't exactly a COSE EC2 P-256 ES256 key (`{1: 2, 3: -7, -1: 1, -2: x, -3: y}`, x and y
+    /// 32 bytes each, in that order and nothing else), or its point isn't on the curve.
+    case coseKey
 }
 
 /// The check of a passkey assertion (`unlock`, a guarded change, a knock): "The unlock", step 3, of the device keys
@@ -159,6 +168,182 @@ public enum WebAuthnAssertion {
             guard signCount > device.signCount else { throw .signCount }
         }
         return Verified(signCount: signCount, backupState: flags.backupState)
+    }
+}
+
+/// The check of a passkey registration (`device.enroll`): "The first device", step 2, of the device keys design. In
+/// order, failing closed at the first that fails:
+///
+/// 1. the listener is one the design has, and the challenge 32 bytes;
+/// 2. `clientDataJSON` passes WebAuthn L3's limited verification (§5.8.1.2) for `webauthn.create`, as an assertion's;
+/// 3. the attestation object, at most 2048 bytes, is exactly the canonical CBOR map `{"fmt": "none", "attStmt": {},
+///    "authData": <bytes>}` in that order and nothing after it (`WebAuthnCBOR`: shortest heads, definite lengths, no
+///    tags or floats, never recursing): `fmt` other than `none` or a non-empty `attStmt` is `attestationFormat`;
+/// 4. `authenticatorData` holds rpIdHash, flags, signCount, the AAGUID, the credential id's length and the id (16 to
+///    1023 bytes, WebAuthn L3 §6.5.1), then the credential's COSE key, and nothing after it; truncated, or with
+///    trailing bytes, it is refused;
+/// 5. its rpIdHash is SHA-256 of the listener's rpId;
+/// 6. UP set; UV set; AT set; ED and the reserved bits clear; BS only with BE;
+/// 7. the COSE key is exactly EC2, ES256, P-256 (`{1: 2, 3: -7, -1: 1, -2: x, -3: y}`, x and y 32 bytes) and its point
+///    is on the curve.
+///
+/// With attestation `none` nothing signs the attestation object: the result says what the authenticator claimed,
+/// and the design's approval (the terminal's words, the Mac's dialog, a phone) is what vouches for the key.
+public enum WebAuthnRegistration {
+    /// What the browser returned (`AuthenticatorAttestationResponse`), as bytes.
+    public struct Response: Sendable {
+        public let clientDataJSON: Data
+        public let attestationObject: Data
+
+        public init(clientDataJSON: Data, attestationObject: Data) {
+            self.clientDataJSON = clientDataJSON
+            self.attestationObject = attestationObject
+        }
+    }
+
+    /// A verified registration: the device record's credential (its id, its key, the COSE key's exact bytes the pin
+    /// hashes), the sign count to store, the backup flags, and the AAGUID as claimed.
+    public struct Verified: Sendable {
+        public let credentialId: Data
+        public let publicKey: P256.Signing.PublicKey
+        public let coseKey: Data
+        public let signCount: UInt32
+        public let backupEligible: Bool
+        public let backupState: Bool
+        public let aaguid: Data
+    }
+
+    /// The longest attestation object taken: the map's own 34 bytes and 1186 at most for its authenticator data (a
+    /// 1023-byte credential id) fit well inside.
+    static let attestationLimit = 2048
+
+    /// The check, in the order above. `challenge` is the 32 bytes the server issued (the design's SHA-256 of the
+    /// enrolment's inputs).
+    public static func check(_ response: Response, challenge: Data,
+                             listener: WebAuthnListener) throws(WebAuthnRefusal) -> Verified {
+        try WebAuthnChecks.listener(listener)
+        guard challenge.count == 32 else { throw .challenge }
+        try WebAuthnChecks.clientData(response.clientDataJSON, type: "webauthn.create", challenge: challenge,
+                                      origin: listener.origin)
+        let data = try authenticatorData(of: response.attestationObject)
+        guard data.count >= 55 else { throw .authenticatorData }
+        guard data[0..<32].elementsEqual(SHA256.hash(data: Data(listener.rpId.utf8))) else { throw .rpIdHash }
+        let flags = try WebAuthnChecks.flags(data[32], attested: true)
+        let signCount = UInt32(data[33]) << 24 | UInt32(data[34]) << 16 | UInt32(data[35]) << 8 | UInt32(data[36])
+        let length = Int(data[53]) << 8 | Int(data[54])
+        guard WebAuthnChecks.credentialIdSizes.contains(length) else { throw .credential }
+        guard data.count > 55 + length else { throw .authenticatorData }
+        let key = data[(55 + length)...]
+        let (publicKey, used) = try coseKey(Array(key))
+        guard used == key.count else { throw .authenticatorData }
+        return Verified(credentialId: Data(data[55..<(55 + length)]), publicKey: publicKey, coseKey: Data(key),
+                        signCount: signCount, backupEligible: flags.backupEligible, backupState: flags.backupState,
+                        aaguid: Data(data[37..<53]))
+    }
+
+    /// The authenticator data inside `{"fmt": "none", "attStmt": {}, "authData": <bytes>}`, read as exactly that.
+    static func authenticatorData(of object: Data) throws(WebAuthnRefusal) -> [UInt8] {
+        guard object.count <= attestationLimit else { throw .cbor }
+        var reader = WebAuthnCBOR(Array(object))
+        try reader.expect(.map, 3, else: .cbor)
+        try reader.expectText("fmt", else: .cbor)
+        let format = try reader.head()
+        guard format.major == .text else { throw .cbor }
+        guard try reader.take(format.argument) == Array("none".utf8) else { throw .attestationFormat }
+        try reader.expectText("attStmt", else: .cbor)
+        try reader.expect(.map, 0, else: .attestationFormat)
+        try reader.expectText("authData", else: .cbor)
+        let data = try reader.head()
+        guard data.major == .bytes else { throw .cbor }
+        let bytes = try reader.take(data.argument)
+        guard reader.atEnd else { throw .cbor }
+        return bytes
+    }
+
+    /// A COSE EC2 P-256 ES256 key at the start of `bytes`, and how many bytes it took: the map of five, its keys and
+    /// values each exactly as RFC 9053 and the CTAP2 canonical order have them, then the point checked on the curve.
+    static func coseKey(_ bytes: [UInt8]) throws(WebAuthnRefusal) -> (P256.Signing.PublicKey, Int) {
+        var reader = WebAuthnCBOR(bytes)
+        try reader.expect(.map, 5, else: .coseKey)
+        try reader.expect(.unsigned, 1, else: .coseKey)  // kty
+        try reader.expect(.unsigned, 2, else: .coseKey)  // EC2
+        try reader.expect(.unsigned, 3, else: .coseKey)  // alg
+        try reader.expect(.negative, 6, else: .coseKey)  // -7, ES256
+        try reader.expect(.negative, 0, else: .coseKey)  // -1, crv
+        try reader.expect(.unsigned, 1, else: .coseKey)  // P-256
+        try reader.expect(.negative, 1, else: .coseKey)  // -2, x
+        try reader.expect(.bytes, 32, else: .coseKey)
+        let x = try reader.take(32)
+        try reader.expect(.negative, 2, else: .coseKey)  // -3, y
+        try reader.expect(.bytes, 32, else: .coseKey)
+        let y = try reader.take(32)
+        guard let key = try? P256.Signing.PublicKey(x963Representation: [0x04] + x + y) else { throw .coseKey }
+        return (key, reader.at)
+    }
+}
+
+/// The CBOR the registration reads (RFC 8949), and only that: unsigned and negative integers, byte and text strings
+/// and maps, each head in its shortest form with a definite length. Indefinite lengths, the reserved heads, tags,
+/// floats and simple values, and a length past the end are `WebAuthnRefusal.cbor`. It never recurses: its caller
+/// reads one fixed shape item by item (`expect`), so nothing is nested deeper than that shape (two maps).
+struct WebAuthnCBOR {
+    enum Major: UInt8 {
+        case unsigned = 0, negative = 1, bytes = 2, text = 3, map = 5
+    }
+
+    let bytes: [UInt8]
+    private(set) var at = 0
+
+    init(_ bytes: [UInt8]) { self.bytes = bytes }
+
+    var atEnd: Bool { at == bytes.count }
+
+    /// The next head: its major type and argument (a value, or a length). Refused unless shortest and definite, and
+    /// of a major type the registration uses (arrays, tags and the simple and float types never are).
+    mutating func head() throws(WebAuthnRefusal) -> (major: Major, argument: Int) {
+        guard at < bytes.count else { throw .cbor }
+        let initial = bytes[at]
+        at += 1
+        guard let major = Major(rawValue: initial >> 5) else { throw .cbor }
+        let info = initial & 0x1F
+        let argument: UInt64
+        switch info {
+        case 0..<24:
+            argument = UInt64(info)
+        case 24...27:
+            let size = 1 << Int(info - 24)
+            guard bytes.count - at >= size else { throw .cbor }
+            argument = bytes[at..<(at + size)].reduce(0) { $0 << 8 | UInt64($1) }
+            at += size
+            // The shortest form: each wider head only for what the narrower one can't hold.
+            let least: UInt64 = [24, 0x100, 0x1_0000, 0x1_0000_0000][Int(info - 24)]
+            guard argument >= least else { throw .cbor }
+        default:
+            throw .cbor // 28 to 30 reserved, 31 an indefinite length
+        }
+        // Nothing the registration reads comes near this; it keeps the conversion below safe.
+        guard argument <= UInt64(Int32.max) else { throw .cbor }
+        return (major, Int(argument))
+    }
+
+    /// The next head must be `major` with `argument`, else `refusal` (an encoding that isn't canonical is `cbor`).
+    mutating func expect(_ major: Major, _ argument: Int, else refusal: WebAuthnRefusal) throws(WebAuthnRefusal) {
+        let head = try head()
+        guard head.major == major, head.argument == argument else { throw refusal }
+    }
+
+    /// The next item must be the text string `text`.
+    mutating func expectText(_ text: String, else refusal: WebAuthnRefusal) throws(WebAuthnRefusal) {
+        let expected = Array(text.utf8)
+        try expect(.text, expected.count, else: refusal)
+        guard try take(expected.count) == expected else { throw refusal }
+    }
+
+    /// The next `count` bytes (a string's content).
+    mutating func take(_ count: Int) throws(WebAuthnRefusal) -> [UInt8] {
+        guard count >= 0, bytes.count - at >= count else { throw .cbor }
+        defer { at += count }
+        return Array(bytes[at..<(at + count)])
     }
 }
 
