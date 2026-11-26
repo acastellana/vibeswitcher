@@ -4752,3 +4752,4 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-26 11:09 Automatically (auto_advance): Started the audit of turn-this-incident-into-20 at b201b734 (An audit was started on it: its verdict decides).
 - 2026-11-26 11:09 Released turn-this-incident-into-20's worker (idle since its done report on b201b734) while its audit runs
 - 2026-11-26 11:09 Automatically (auto_advance): Released turn-this-incident-into-20's worker, idle since its done report on b201b734, while its audit runs (ended pid 70656 (Worker: No Keychain dialog from the team's tests, scripts or probes: a hard rule in AGENTS.md and a lint on `security` calls)): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-26 11:13 Audit of turn-this-incident-into-20: complete, clean, round 2: 2 Important closed, 3 Nit open, 1 Pre-existing open
