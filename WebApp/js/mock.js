@@ -1058,6 +1058,48 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
       });
       return { ok: true, result: { happened: 'started', session: sid, program: `${HOME}/.local/bin/claude`, notes } };
     }
+    // A new project (`project.new`, as `Requests.newProject` and `ProjectMaker.make`): the name by the app's rules, where
+    // the projects folder (~/projects here) or a real folder in it, nothing there by its folder name; made, a moment
+    // later its lead's session and the project are listed. A refusal is a result: `made` false, its reason, the node's
+    // sentence. `?slow`: the node takes a few seconds, as a first commit of a big folder would.
+    if (message.kind === 'project.new') {
+      const name = typeof args.name === 'string' ? args.name.trim() : '';
+      if (!name) return badArgs('project.new needs name, the project’s name');
+      const not = (reason, said) => ({ ok: true, result: { made: false, name: null, folder: null, commit: null, lead: null, session: null, refused: reason, said, notes: [] } });
+      const folderName = name.split(/\s+/).filter(Boolean).join('-').toLowerCase();
+      // eslint-disable-next-line no-control-regex
+      if (/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u2064\ufeff]/.test(name) || [...name].length > 100) return not('name', 'A project name can’t hold a control or invisible character.');
+      if (/[/:]/.test(folderName)) return not('name', 'A folder name can’t contain “/” or “:”.');
+      if (!/[\p{L}\p{N}]/u.test(folderName)) return not('name', 'A project name needs at least one letter or number.');
+      if (folderName.startsWith('.')) return not('name', 'A folder name can’t start with “.”: the folder would be hidden.');
+      const root = `${HOME}/projects`;
+      const typed = typeof args.location === 'string' ? args.location.trim().replace(/\/+$/, '') : '';
+      const where = typed || root;
+      if (where.split('/').some((part) => part === '.' || part === '..') || !(where === root || where.startsWith(root + '/'))) {
+        return not('outside', `A project from here is made in your projects folder, ~/projects, or a folder inside it; ${where.replace(HOME, '~')} isn’t.`);
+      }
+      if (where !== root && !FOLDERS.includes(where)) return not('location', `${where.replace(HOME, '~')} isn’t there.`);
+      const folder = `${where}/${folderName}`;
+      if (FOLDERS.includes(folder) || [...leads.values()].some((lead) => lead.root === folder)) {
+        return not('exists', `There’s already a folder named “${folderName}” in ${where.replace(HOME, '~')}.`);
+      }
+      FOLDERS.push(folder);
+      REPOSITORIES.push(folder);
+      const sid = id(Math.random().toString(16).slice(2, 10).padEnd(8, '0'));
+      const project = `local:project:${Math.random().toString(36).slice(2, 14)}`;
+      const wait = options.slow ? 2600 : 600;
+      return new Promise((resolve) => later(wait, () => {
+        resolve({ ok: true, result: { made: true, name, folder, commit: Array.from({ length: 40 }, (_, at) => '0123456789abcdef'[(at * 7 + name.length) % 16]).join(''),
+          lead: 'started', session: sid, refused: null, said: `“${name}” is made in ${folder.replace(HOME, '~')}, with its git repository and first commit; its lead started.`, notes: [] } });
+        later(400, () => {
+          add(sid, { cwd: folder, role: 'lead', lead: project, status: 'working', since: new Date().toISOString(), startedAt: new Date().toISOString(),
+            title: typeof args.goal === 'string' && args.goal.trim() ? args.goal.trim() : null, detail: 'Reading the project’s records', project });
+          leads.set(project, { named: null, held: 0, reportsWaiting: 0, notice: null, looks: 0, questions: { open: 0, blocking: 0 }, cards: [], told: [], push: null,
+            project, root: folder, session: sid, bound: sid, replaced: [], starting: false, lastStart: 'started', lastStartAt: new Date().toISOString() });
+          emit(put('sessions', sessions, sid), put('leads', leads, project));
+        });
+      }));
+    }
     if (message.kind === 'send') {
       const target = sessions.get(args.session);
       if (!target) return { ok: false, error: { code: 'gone', message: 'That session has ended.' } };
@@ -1322,7 +1364,7 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
   // it showed before, docs/process/v2-no-terminal.md's table B and A5), so their lines can be seen.
   const STARTS = ['lead', 'session.new', 'session.reply', 'session.resume'];
   const BUTTONS = ['config.held', 'config.accept', 'base.show', 'base.accept', 'base.keep', 'shells', 'session.close-shells', 'presets.edit', 'update.check', 'web.revoke',
-    'session.reopen', 'prompt-audit'];
+    'session.reopen', 'prompt-audit', 'project.new'];
   const KINDS = ['chat.page',
     'answer', 'answer.replace', 'tell', 'tell.retract', 'hold', 'send', 'session.draft', 'session.draft.clear', 'session.complete',
     'session.attach', 'session.usage', 'stats', 'session.ports', 'board.task', 'board.image', 'chat.image', 'session.presets', 'brief', 'recent',

@@ -680,9 +680,43 @@ export function newLeadForm(app) {
   };
 }
 
-// A brand-new project (the Mac's New Project…): a name, where (the node's projects folder when empty) and a goal. No
-// node request makes a project's folder from a page yet (`vibeswitcher new-project` makes it, its repository and first
-// commit, in the terminal's own process): the form says so plainly and ends in that line. Returns { el, update() }.
+// Why a project's name can't be one, as the node's rules say it (`ProjectCreation.plan`, `ProjectMaker.nameRefusal`):
+// the words' key, or null when it can be (or is empty).
+export function projectNameProblem(name) {
+  const title = String(name || '').trim();
+  if (!title) return null;
+  // Control and invisible characters (direction marks, zero-width ones), which the node refuses in a name.
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001f\u007f-\u009f\u00ad\u061c\u180e\u200b-\u200f\u2028-\u202e\u2060-\u2064\u2066-\u206f\ufeff\ufff9-\ufffb]/.test(title)) return 'drNameInvisible';
+  if ([...title].length > 100) return 'drNameTooLong';
+  const folder = projectFolderName(title);
+  if (/[/:]/.test(folder)) return 'drNameSeparator';
+  if (!/[\p{L}\p{N}]/u.test(folder)) return 'drNameNoLetters';
+  if (folder.startsWith('.')) return 'drNameLeadingDot';
+  return null;
+}
+
+// What the node's `project.new` answered, in the page's words: why nothing was made (its `refused` reason; one this page
+// doesn't know, the node's sentence), or what was made and how its lead's start went. `name` and `folder`: the
+// project's as asked; `where`: where, as shown (the projects folder when nothing was typed).
+export function projectWords(result, { name, folder, where }) {
+  if (!result?.made) {
+    const key = { name: 'drNewRefusedName', outside: 'drNewRefusedOutside', link: 'drNewRefusedLink', exists: 'drNewRefusedExists', location: 'drNewRefusedLocation',
+      identity: 'drNewRefusedIdentity', repository: 'drNewRefusedRepository', noClaude: 'drNewRefusedNoClaude' }[result?.refused];
+    return key ? t(key, { name, folder, where }) : t('drNewRefusedOther', { why: result?.said || '' });
+  }
+  const shown = { name: result.name || name, folder: result.folder || folder };
+  if (result.lead === 'refused') return t('drNewMadeNoLead', { ...shown, why: (result.notes || [])[0] || '' });
+  if (result.lead === 'waiting') return t('drNewMadeWaiting', shown);
+  return t('drNewMadeStarted', shown);
+}
+
+// A brand-new project (the Mac's New Project…): a name, where (the node's projects folder when empty, or a folder in
+// it) and a goal. Where the page acts and the node lists `project.new`, one button makes it: its folder, git repository
+// and first commit, then its lead. While the node works the form says what it is doing; then what it made, and the
+// project opens once the node lists its lead (the left column lists it then), or why nothing was made, in a sentence. A
+// name the node would refuse is said under it first. Elsewhere (a node from before the kind, a page that doesn't act)
+// the form ends in the `vibeswitcher new-project` line and why. Returns { el, update() }.
 export function newProjectForm(app) {
   const name = kit.field({ class: 'answer-input', type: 'text', placeholder: t('drProjectNamePlaceholder'), 'aria-label': t('drProjectName'), spellcheck: 'false', autocomplete: 'off' });
   const location = kit.field({ class: 'answer-input', type: 'text', placeholder: t('drWhereOptionalTheNodeS'), 'aria-label': t('drWhere'), spellcheck: 'false', autocomplete: 'off' });
@@ -694,12 +728,64 @@ export function newProjectForm(app) {
     startRow(t('drWhere'), location, h('p', { class: 'confirm-note where-hint' }, t('drWhereHint'))),
     startRow(t('drGoalOptional'), goal),
     lineSlot);
+  let drawn = '';
+  // While the request is out the button isn't drawn again under it (an edit then waits for the answer).
+  let out = false;
+  let stop = () => {};
   function draw() {
     const folder = projectFolderName(name.value);
+    const problem = projectNameProblem(name.value);
     folderNote.hidden = !folder;
-    folderNote.textContent = folder ? t('drItsFolder', { folder }) : '';
-    lineSlot.replaceChildren(h('p', { class: 'confirm-note start-why' }, t('drProjectTerminalOnly')),
-      folder ? copyLine(newProjectLine(name.value, location.value, goal.value), t('drTheCommandThatMakesThe')) : h('p', { class: 'confirm-note' }, t('drGiveItANameThe')));
+    setText(folderNote, !folder ? '' : t(problem || 'drItsFolder', { folder }));
+    setClass(folderNote, 'refused', !!problem);
+    const acts = actsFor(app, 'project.new');
+    const key = JSON.stringify(acts ? [true, name.value.trim(), problem] : [false, name.value, location.value, goal.value, app.store.can('project.new')]);
+    if (out || key === drawn) return;
+    drawn = key;
+    stop();
+    if (!acts) {
+      lineSlot.replaceChildren(h('p', { class: 'confirm-note start-why' }, t(app.store.can('project.new') ? 'drStartPageReads' : 'drProjectTerminalOnly')),
+        folder ? copyLine(newProjectLine(name.value, location.value, goal.value), t('drTheCommandThatMakesThe')) : h('p', { class: 'confirm-note' }, t('drGiveItANameThe')));
+      return;
+    }
+    const title = name.value.trim();
+    if (!folder || problem) {
+      lineSlot.replaceChildren(kit.button('primary', { class: 'start-button', disabled: true }, t('drMakeProject')));
+      return;
+    }
+    const progress = h('p', { class: 'confirm-note project-progress', role: 'status', hidden: true }, t('drNewMaking'));
+    const where = () => location.value.trim();
+    const made = doButton(app, { kind: 'project.new', label: t('drMakeProjectNamed', { name: title }), busy: t('drNewMakingShort'), className: 'start-button',
+      args: () => ({ name: title, ...(where() ? { location: folderOf(app, where()) } : {}), ...(goal.value.trim() ? { goal: goal.value.trim() } : {}) }),
+      settled: (reply) => {
+        out = false;
+        progress.hidden = true;
+        if (!reply.ok) return;
+        const result = reply.result || {};
+        made.say(projectWords(result, { name: title, folder, where: where() ? tilde(folderOf(app, where()), app.store.state.node?.home) : t('drTheProjectsFolder') }));
+        if (!result.made) return;
+        // Made: no second one from this button (a new name draws a new one); its project opens once the node lists its
+        // lead, while you are still here.
+        made.button.disabled = true;
+        if (typeof result.session !== 'string') return;
+        const from = JSON.stringify(app.ui.state?.route ?? null);
+        const open = () => {
+          const lead = [...app.store.state.leads.values()].find((one) => one.session === result.session);
+          if (!lead) return;
+          stop();
+          if (JSON.stringify(app.ui.state?.route ?? null) === from) app.ui.go(projectHref(lead.project));
+        };
+        const off = app.store.subscribe('leads', open);
+        stop = () => { off?.(); stop = () => {}; };
+        open();
+      } });
+    // The click went out (doButton marks it busy first): the line that says what the node is doing.
+    made.button.addEventListener('click', () => {
+      if (made.button.getAttribute('aria-busy') !== 'true') return;
+      out = true;
+      progress.hidden = false;
+    });
+    lineSlot.replaceChildren(made.el, progress);
   }
   for (const field of [name, location, goal]) field.addEventListener('input', draw);
   draw();
