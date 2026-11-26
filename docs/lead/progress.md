@@ -4839,3 +4839,7 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-26 19:58 Started a worker on v2-what-is-left
 - 2026-11-26 19:58 Started a worker on re-check-v2-s-4
 - 2026-11-26 20:03 Planned review-v2-s-device-3: Review v2's device keys slice 4 (branch v2-keys-vault: the vault's devices, unlocks, challenges and knocks) as an independent security reviewer: report only
+- 2026-11-26 20:07 Started a worker on review-v2-s-device-3
+- 2026-11-26 20:07 Planned re-check-v2-s-5: Re-check v2's Mac seal list after its fix round (branch v2-mac-seal-list at 01a05734) as an independent security reviewer: report only
+- 2026-11-26 20:08 Kept v2-on-the-mac-7 unmerged: By design nothing of it merges into main: its commits are on the local branch v2-mac-seal-list in its clone (.vibeswitcher/v2-seal, tip 01a05734 after the fix round of 2026-11-26), on top of v2-mac-anchored-cli b15e0052: step 8, the Mac seal list. The fix round closed R1, R2, R2b, R3, R4, R5, R6, R6c, R7, R8 and R9 with red-then-green tests; R6b stays a known issue; owed in the spec: $ZDOTDIR's sessions folder, ~/.bash_sessions, a startup file over 16 MB, the global preferences domain, appWrite around the plist writes, the node root's folders. v2's full suite at c03fb20c: 6,950 tests passed, 8 known issues. Shared Linux code changed and was not built on Linux. Awaiting the independent re-check (re-check-v2-s-5), then pushed as a branch for v2 at the user's say. No merge and no cleanup until then.
+- 2026-11-26 20:08 Started a worker on re-check-v2-s-5
