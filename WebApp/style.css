@@ -1574,63 +1574,63 @@ kbd { padding: 1px 6px; border-radius: var(--r-1); box-shadow: var(--e-1-in); co
 /* The roadmap, without goals: in motion, blocked, the queue as one band */
 .project-view .col:has(.road-row, .road-band, .goal-row) { max-width: 980px; }
 .road-intro { max-width: 70ch; color: var(--ink-2); font-size: var(--t-caption); }
-.road-head { margin: 18px 0 4px; color: var(--ink-3); font-size: var(--t-caption); font-weight: var(--w-strong); }
-.road-row { display: grid; grid-template-columns: minmax(0, 2fr) 62px minmax(0, 1.4fr); gap: 16px; align-items: start; padding: 9px 0; border-top: 1px solid var(--line); }
+.road-head { margin: var(--s-6) 0 var(--s-2); color: var(--ink-3); font-size: var(--t-caption); font-weight: var(--w-strong); }
+.road-row { display: grid; grid-template-columns: minmax(0, 2fr) 62px minmax(0, 1.4fr); gap: var(--s-6); align-items: start; padding: var(--s-4) 0; border-top: 1px solid var(--line); }
 .road-title { display: grid; font-size: var(--t-read); line-height: var(--lh-title); }
 .road-title small { color: var(--ink-2); font-size: var(--t-caption); }
 .road-note:empty { display: none; }
 .road-note { color: var(--ink-2); font-size: var(--t-caption); overflow-wrap: anywhere; }
-.road-band { display: flex; align-items: center; gap: 14px; width: 100%; padding: 11px 14px; border-radius: var(--r-3); background: var(--fill); text-align: left; }
-.road-band-toggle { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; color: var(--ink-2); font-size: var(--t-caption); }
+.road-band { display: flex; align-items: center; gap: var(--s-5); width: 100%; padding: var(--s-4) var(--s-5); border-radius: var(--r-3); background: var(--fill); text-align: left; }
+.road-band-toggle { display: inline-flex; align-items: center; gap: var(--s-3); margin-left: auto; color: var(--ink-2); font-size: var(--t-caption); }
 .road-band-toggle .icon { transition: transform var(--dur-2) var(--ease-out); }
 .road-band[aria-expanded="true"] .road-band-toggle .icon { transform: rotate(90deg); }
 .road-band-bar { width: 120px; height: 8px; border-radius: var(--r-pill); background: color-mix(in srgb, var(--queued) 40%, transparent); }
-.road-queue { padding-left: 14px; border-left: 2px solid var(--line); }
+.road-queue { padding-left: var(--s-5); border-left: 2px solid var(--line); }
 
 /* The roadmap with goals: a row per goal, its tasks opening under it on branch lines. Each row ends in a column for
    its date (`road-when`), empty until the workers' estimates give one. */
 /* A goal is a row as a list's rows are (D28): the whole of it opens (its title's ::after covers it), filled under the
    pointer, rounded; its counts the rows' badges; a long name two lines at most; the date over the cover, for its basis. */
-.goal-row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1.4fr) auto 14px; gap: 16px; align-items: center; width: 100%; margin-top: 4px; padding: 10px 8px 10px 24px; border-radius: var(--r-2); position: relative; }
-.goal-row::before { content: ""; position: absolute; left: 4px; top: 17px; width: 10px; height: 10px; background: var(--ink); transform: rotate(45deg); }
+.goal-row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1.4fr) auto 14px; gap: var(--s-6); align-items: center; width: 100%; margin-top: var(--s-2); padding: var(--s-4) var(--s-4) var(--s-4) var(--s-7); border-radius: var(--r-2); position: relative; }
+.goal-row::before { content: ""; position: absolute; left: var(--s-2); top: 15px; width: 10px; height: 10px; background: var(--ink); transform: rotate(45deg); }
 .goal-title::after { content: ""; position: absolute; inset: 0; border-radius: var(--r-2); }
 .goal-title:focus-visible { outline: none; }
 .goal-title:focus-visible::after { box-shadow: var(--e-focus); }
 .goal-row > .road-when { position: relative; z-index: 1; }
 .goal-name { display: flex; align-items: flex-start; min-width: 0; }
 .goal-name b { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
-.goal-counts { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.goal-counts { display: flex; flex-wrap: wrap; gap: var(--s-2); margin-top: var(--s-2); }
 .goal-counts small { color: var(--ink-2); font-size: var(--t-caption); }
-.goal-means { padding: 0 8px 4px 40px; }
+.goal-means { padding: 0 var(--s-4) var(--s-2) calc(var(--s-7) + var(--s-6)); }
 .goal-row.unsorted::before { background: none; box-shadow: inset 0 0 0 2px var(--ink-3); } /* a mark drawn with a shadow (a ring, a stroke, an edge), not an elevation */
 .goal-row.done::before { background: var(--ready); }
-.goal-title { display: grid; gap: 2px; min-width: 0; text-align: left; }
+.goal-title { display: grid; gap: var(--s-1); min-width: 0; text-align: left; }
 .goal-title b { font-size: var(--t-title); font-weight: var(--w-strong); }
 .goal-row.done .goal-title b { color: var(--ink-2); }
-.goal-marks { display: flex; flex-wrap: wrap; gap: 5px; }
+.goal-marks { display: flex; flex-wrap: wrap; gap: var(--s-2); }
 .goal-mark { width: 9px; height: 9px; border-radius: 50%; background: currentColor; }
 .goal-mark.blocked { border-radius: 1px; transform: rotate(45deg); } /* a diamond: a square turned */
 .goal-mark.tone-queued { background: none; box-shadow: inset 0 0 0 2px currentColor; } /* a mark drawn with a shadow (a ring, a stroke, an edge), not an elevation */
 .road-when:empty { display: none; }
 .road-when { color: var(--ink-2); font-size: var(--t-caption); white-space: nowrap; }
-.goal-toggle { flex: none; display: inline-flex; margin: 4px 0 0 6px; color: var(--ink-3); transition: transform var(--dur-2) var(--ease-out); }
+.goal-toggle { flex: none; display: inline-flex; margin: var(--s-2) 0 0 var(--s-3); color: var(--ink-3); transition: transform var(--dur-2) var(--ease-out); }
 .goal-title[aria-expanded="true"] .goal-toggle { transform: rotate(90deg); }
-.goal-tasks { display: grid; padding-bottom: 6px; }
-.goal-task { position: relative; display: grid; grid-template-columns: minmax(0, 2fr) 62px minmax(0, 1.4fr) auto; gap: 16px; align-items: start; padding: 7px 8px 7px 40px; }
-.goal-task::before { content: ""; position: absolute; left: 8px; top: 0; width: 18px; height: 19px; border-left: 2px solid var(--ink-3); border-bottom: 2px solid var(--ink-3); border-bottom-left-radius: 10px; } /* a branch line's bend */
-.goal-task:not(.last)::after { content: ""; position: absolute; left: 8px; top: 0; bottom: 0; border-left: 2px solid var(--ink-3); }
+.goal-tasks { display: grid; padding-bottom: var(--s-3); }
+.goal-task { position: relative; display: grid; grid-template-columns: minmax(0, 2fr) 62px minmax(0, 1.4fr) auto; gap: var(--s-6); align-items: start; padding: var(--s-3) var(--s-4) var(--s-3) calc(var(--s-7) + var(--s-6)); }
+.goal-task::before { content: ""; position: absolute; left: var(--s-4); top: 0; width: 18px; height: 19px; border-left: 2px solid var(--ink-3); border-bottom: 2px solid var(--ink-3); border-bottom-left-radius: 10px; } /* a branch line's bend */
+.goal-task:not(.last)::after { content: ""; position: absolute; left: var(--s-4); top: 0; bottom: 0; border-left: 2px solid var(--ink-3); }
 .goal-task .road-title { font-size: var(--t-body); }
-.goal-empty { padding: 4px 0 8px 40px; }
-.road-band + .goal-row { margin-top: 10px; }
+.goal-empty { padding: var(--s-2) 0 var(--s-4) calc(var(--s-7) + var(--s-6)); }
+.road-band + .goal-row { margin-top: var(--s-4); }
 
 /* The roadmap with estimates: one axis for every row (now, the hours, each midnight), each row's track on it, its
    date in the last column. Every date is an estimate: where it comes from shows on hover and on focus. */
 .col.dated { --lab: 300px; }
 .col.dated .goal-row, .axis-row { grid-template-columns: var(--lab) minmax(0, 1fr) 150px 14px; }
-.col.dated .goal-task { grid-template-columns: calc(var(--lab) - 16px) minmax(0, 1fr) 150px 14px; align-items: center; padding-left: 40px; }
+.col.dated .goal-task { grid-template-columns: calc(var(--lab) - 16px) minmax(0, 1fr) 150px 14px; align-items: center; padding-left: calc(var(--s-7) + var(--s-6)); }
 .col.dated .road-row { grid-template-columns: calc(var(--lab) + 24px) minmax(0, 1fr) 150px 14px; align-items: center; }
 .col.dated .road-title small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.axis-row { position: sticky; top: 0; z-index: 2; display: grid; gap: 16px; padding: 4px 8px 6px 24px; background: var(--bg); }
+.axis-row { position: sticky; top: 0; z-index: 2; display: grid; gap: var(--s-6); padding: var(--s-2) var(--s-4) var(--s-3) var(--s-7); background: var(--bg); }
 .axis { position: relative; height: 18px; }
 .axis-tick { position: absolute; top: 0; transform: translateX(-50%); color: var(--ink-3); font-size: var(--t-caption); white-space: nowrap; }
 .axis-tick.day { color: var(--ink-2); font-weight: var(--w-strong); }
@@ -1638,16 +1638,16 @@ kbd { padding: 1px 6px; border-radius: var(--r-1); box-shadow: var(--e-1-in); co
 .track { position: relative; display: block; height: 22px; }
 .track > i { position: absolute; display: block; }
 .track-base { left: 0; right: 0; top: 10px; height: 1px; background: var(--line); }
-.track-tick { top: -6px; bottom: -6px; width: 1px; background: var(--line); opacity: 0.55; }
+.track-tick { top: calc(var(--s-3) * -1); bottom: calc(var(--s-3) * -1); width: 1px; background: var(--line); opacity: 0.55; }
 .track-tick.day { opacity: 1; }
-.track-now { top: -6px; bottom: -6px; width: 1px; background: var(--ink-2); }
-.track-band { top: 4px; height: 14px; border-radius: var(--r-pill); background: color-mix(in srgb, currentColor 22%, transparent); }
+.track-now { top: calc(var(--s-3) * -1); bottom: calc(var(--s-3) * -1); width: 1px; background: var(--ink-2); }
+.track-band { top: var(--s-2); height: 14px; border-radius: var(--r-pill); background: color-mix(in srgb, currentColor 22%, transparent); }
 .track-bar { top: 9px; height: 3px; border-radius: var(--r-pill); background: currentColor; }
 .track-bar.late { color: var(--needs-you); }
-.track-dot { top: 5px; width: 12px; height: 12px; margin-left: -6px; border-radius: 50%; background: var(--bg); box-shadow: inset 0 0 0 3px currentColor; } /* a mark drawn with a shadow (a ring, a stroke, an edge), not an elevation */
-.track-mark { top: 7px; width: 8px; height: 8px; margin-left: -4px; border-radius: 50%; background: currentColor; box-shadow: 0 0 0 2px var(--bg); } /* a mark drawn with a shadow (a ring, a stroke, an edge), not an elevation */
+.track-dot { top: 5px; width: 12px; height: 12px; margin-left: calc(var(--s-3) * -1); border-radius: 50%; background: var(--bg); box-shadow: inset 0 0 0 3px currentColor; } /* a mark drawn with a shadow (a ring, a stroke, an edge), not an elevation */
+.track-mark { top: 7px; width: 8px; height: 8px; margin-left: calc(var(--s-2) * -1); border-radius: 50%; background: currentColor; box-shadow: 0 0 0 2px var(--bg); } /* a mark drawn with a shadow (a ring, a stroke, an edge), not an elevation */
 .track-mark.blocked { border-radius: 1px; transform: rotate(45deg); } /* a diamond: a square turned */
-.track-mark.now { margin-left: 6px; }
+.track-mark.now { margin-left: var(--s-3); }
 .tone-goal { color: var(--ink); }
 .goal-row .track-dot { width: 15px; height: 15px; margin-left: -7.5px; top: 3.5px; background: currentColor; box-shadow: none; }
 .road-when b { display: block; font-weight: var(--w-strong); color: var(--ink); white-space: normal; }
@@ -1656,7 +1656,7 @@ kbd { padding: 1px 6px; border-radius: var(--r-1); box-shadow: var(--e-1-in); co
 .road-when.nodate b { color: var(--ink-2); font-weight: var(--w-regular); }
 .road-when[data-basis] { position: relative; cursor: help; outline-offset: 2px; }
 .road-when[data-basis]::after {
-  display: none; content: attr(data-basis); position: absolute; right: 0; top: calc(100% + 4px); z-index: 3; width: 260px; padding: 8px 10px; border-radius: var(--r-2);
+  display: none; content: attr(data-basis); position: absolute; right: 0; top: calc(100% + var(--s-2)); z-index: 3; width: 260px; padding: var(--s-4) var(--s-5); border-radius: var(--r-2);
   background: var(--raised); box-shadow: var(--e-2); color: var(--ink); font-size: var(--t-caption); font-weight: var(--w-regular); white-space: normal;
 }
 .road-when[data-basis]:focus::after { display: block; } /* a tap focuses it too: a phone reads the basis there */
