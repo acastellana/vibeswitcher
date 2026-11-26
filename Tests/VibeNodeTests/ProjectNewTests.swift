@@ -242,6 +242,44 @@ struct ProjectNewTests {
         #expect(listing(world.projects) == [".claude", ".claude/commands"] && listing(hiddenRoot).isEmpty)
     }
 
+    /// The projects folder set to a link into a hidden folder (`~/projects-link -> ~/.claude/commands`): Where typed by
+    /// the path the link resolves to, or through the link, is refused as `hidden` (the re-check's R1), nothing made.
+    @Test func whereTypedByTheResolvedPathOfAHiddenProjectsFolderIsRefused() throws {
+        let world = try world()
+        let commands = world.home + "/.claude/commands"
+        try FileManager.default.createDirectory(atPath: commands + "/sub", withIntermediateDirectories: true)
+        #expect(symlink(commands, world.home + "/projects-link") == 0)
+        for location in [commands + "/sub", LeadInit.resolved(commands) + "/sub", "~/projects-link/sub"] {
+            let refused = refusal(ProjectMaker.make(name: "Ship it", location: location, projectsFolder: "~/projects-link", home: world.home, scratch: world.nodeScratch))
+            #expect(refused?.reason == .hidden, "\(location): \(String(describing: refused))")
+        }
+        #expect(listing(commands) == ["sub"], "\(listing(commands))")
+    }
+
+    /// A projects folder not there yet, below a link (to a hidden folder, or to any folder): none of its levels is made
+    /// through the link, nothing is made, and the dialog names the folder by the path the link resolves to.
+    @Test func aMissingProjectsFolderIsNeverMadeThroughALink() throws {
+        let world = try world()
+        try FileManager.default.createDirectory(atPath: world.home + "/.claude", withIntermediateDirectories: true)
+        #expect(symlink(world.home + "/.claude", world.home + "/hidden-link") == 0)
+        let hidden = refusal(ProjectMaker.make(name: "Deploy now", location: nil, projectsFolder: "~/hidden-link/projects", home: world.home, scratch: world.nodeScratch))
+        #expect(hidden?.reason == .hidden, "\(String(describing: hidden))")
+        #expect(listing(world.home + "/.claude").isEmpty, "\(listing(world.home + "/.claude"))")
+
+        let elsewhere = world.base + "/elsewhere"
+        try FileManager.default.createDirectory(atPath: elsewhere, withIntermediateDirectories: true)
+        #expect(symlink(elsewhere, world.home + "/elsewhere-link") == 0)
+        let linked = refusal(ProjectMaker.make(name: "Shop", location: nil, projectsFolder: "~/elsewhere-link/projects/new", home: world.home, scratch: world.nodeScratch))
+        #expect(linked?.reason == .location, "\(String(describing: linked))")
+        #expect(listing(elsewhere).isEmpty, "\(listing(elsewhere))")
+
+        for (folder, expected) in [("~/elsewhere-link/projects/new", LeadInit.resolved(elsewhere) + "/projects/new/shop"),
+                                   ("~/hidden-link/projects", LeadInit.resolved(world.home + "/.claude") + "/projects/shop")] {
+            let phrase = Requests.projectNewPhrase(name: "Shop", location: nil, goal: nil, projectsFolder: folder, home: world.home)
+            #expect(phrase == "make the project “Shop” in \(expected) and start its lead", "\(phrase)")
+        }
+    }
+
     /// The lead's start is pinned to what was made: nil while the folder is the one made, holding the commit made, and
     /// (once git found it) the top of its own repository; else why not: another folder by its path (a link to another
     /// repository in its place), another commit, another top (the review's I1 (b)).
