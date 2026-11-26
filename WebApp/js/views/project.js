@@ -305,10 +305,13 @@ export function projectView(app, { sheet }) {
     render();
     // What was sent and what comes of it: the note's line at the conversation's end, in sight (on a desktop the waiting
     // block is under it, so not the scroll's end).
-    const sent = col.lastElementChild;
-    if (typeof sent?.scrollIntoView === 'function') sent.scrollIntoView({ block: 'nearest' });
-    else scroller.scrollTop = scroller.scrollHeight;
-    noteReading();
+    // In a frame queued after the draw's own (which keeps a reader at the end at the scroll's end), so this is the last word.
+    requestAnimationFrame(() => {
+      const sent = col.lastElementChild;
+      if (typeof sent?.scrollIntoView === 'function') sent.scrollIntoView({ block: 'nearest' });
+      else scroller.scrollTop = scroller.scrollHeight;
+      noteReading();
+    });
   }
 
   // An answer's state under its pill, as the node says it (`delivered`): read by the lead, or not yet, when it can be
