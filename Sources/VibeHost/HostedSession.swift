@@ -149,19 +149,20 @@ public final class HostedSession {
 
     /// `launcher`: an executable that handles `--pty-exec` (see `PTYSpawn`) and `--parse-session` (see `SessionParser`),
     /// normally the host itself.
-    /// `launcherTestDelay`: see `HostServer.Config.launcherTestDelay`.
+    /// `launcherTestDelay`: see `HostServer.Config.launcherTestDelay`. `sessionUmask`: the program's umask, set by its
+    /// launcher (a checked node's sessions: `HostServer.Config.checkedSessions`); nil: the host's, as always.
     /// `sandbox`: the box its program is started in (see V2/SessionSandbox.swift); nil: none, as always.
     public static func spawn(_ request: SpawnRequest, shell: String, launcher: String, baseEnvironment: [String: String],
                              ringCapacity: Int, queue: DispatchQueue, parser: ParserOptions = ParserOptions(),
-                             launcherTestDelay: TimeInterval? = nil, sandbox: SessionSandbox.Launch? = nil) throws -> HostedSession {
+                             launcherTestDelay: TimeInterval? = nil, sandbox: SessionSandbox.Launch? = nil, sessionUmask: mode_t? = nil) throws -> HostedSession {
         try spawn(request, shell: shell, launcher: launcher, baseEnvironment: baseEnvironment, ringCapacity: ringCapacity, queue: queue,
-                  parser: parser, timers: .dispatch, launcherTestDelay: launcherTestDelay, sandbox: sandbox)
+                  parser: parser, timers: .dispatch, launcherTestDelay: launcherTestDelay, sandbox: sandbox, sessionUmask: sessionUmask)
     }
 
     /// `timers`: a test's, on its own clock (see `SessionTimers`).
     static func spawn(_ request: SpawnRequest, shell: String, launcher: String, baseEnvironment: [String: String],
                       ringCapacity: Int, queue: DispatchQueue, parser: ParserOptions, timers: SessionTimers,
-                      launcherTestDelay: TimeInterval? = nil, sandbox: SessionSandbox.Launch? = nil) throws -> HostedSession {
+                      launcherTestDelay: TimeInterval? = nil, sandbox: SessionSandbox.Launch? = nil, sessionUmask: mode_t? = nil) throws -> HostedSession {
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: request.cwd, isDirectory: &isDirectory), isDirectory.boolValue else {
             throw Failure.noSuchFolder(request.cwd)
@@ -173,7 +174,7 @@ public final class HostedSession {
         let env = environment(base: baseEnvironment, extra: request.env, id: id)
         var code: Int32 = 0
         guard let child = PTYSpawn.spawn(launcher: launcher, executable: args[0], args: args, env: env, directory: request.cwd, size: &size,
-                                         failure: &code, launcherFlags: SessionIdentityChecks.launcherFlags(testDelay: launcherTestDelay),
+                                         failure: &code, launcherFlags: SessionIdentityChecks.launcherFlags(testDelay: launcherTestDelay, umask: sessionUmask),
                                          sandbox: sandbox) else {
             throw code == 0 ? Failure.spawnFailed : Failure.couldntStart(LaunchPreflight.couldntStart(launcher, in: request.cwd, code: code))
         }

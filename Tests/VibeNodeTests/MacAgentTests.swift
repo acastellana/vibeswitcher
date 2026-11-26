@@ -237,7 +237,7 @@ final class ScratchAgent: @unchecked Sendable {
         let builds = dir + "/builds/" + commit
         folder = builds
         let files = FileManager.default
-        for made in [builds + "/bin", dir + "/home", dir + "/tmp", data] { try files.createDirectory(atPath: made, withIntermediateDirectories: true) }
+        for made in [builds + "/bin", dir + "/home", dir + "/t", data] { try files.createDirectory(atPath: made, withIntermediateDirectories: true) }
         func copied(_ product: String, as name: String, _ identifier: String) throws -> Data {
             let path = builds + "/bin/" + name
             try Self.run("/bin/cp", [builtProducts.appendingPathComponent(product).path, path])
@@ -252,7 +252,7 @@ final class ScratchAgent: @unchecked Sendable {
         job = NodeAgent.Job(label: label, programArguments: [builds + "/bin/" + BuildInfo.host, "--socket", place.socket, "--lock", place.lock,
                                                              "--idle-exit", "600", "--log", data + "/session.log"],
                             environment: ["HOME": dir + "/home", "CFFIXED_USER_HOME": dir + "/home", "VIBESWITCHER_HOME": data,
-                                          "TMPDIR": dir + "/tmp/", "SHELL": "/bin/sh", "PATH": "/usr/bin:/bin"],
+                                          "TMPDIR": dir + "/t/", "SHELL": "/bin/sh", "PATH": "/usr/bin:/bin"],
                             standardErrorPath: place.log, atLogin: false)
         agent = MacAgent(place: place, steps: MacAgent.Steps.system(place: place, pins: { .success(pins) }, say: { _ in },
                                                                      confirm: { _ in .success(()) }, serverStop: {}))

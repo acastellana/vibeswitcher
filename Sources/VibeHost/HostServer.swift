@@ -78,6 +78,11 @@ public final class HostServer {
         /// The Mac: what this host's checked node start found (`HostImages.macNodeStart`), made by `main` only behind
         /// `HostImages.isCheckedMacNode`, by tests through the function. Nil: no node host (every host today).
         public var checkedNode: HostImages.CheckedNode?
+        /// The Mac: what a checked node's sessions are given back of the user's environment, on each spawn only (never
+        /// the server child's): launchd's `SSH_AUTH_SOCK`, the text encoding, the umask 022 (V2/CheckedSessions.swift).
+        /// Set by `main` for a checked node, and for a scratch host shaped as one (`--test-checked-shape`). Nil: none,
+        /// as always.
+        public var checkedSessions: CheckedSessions?
         /// A scratch host's test of the Mac's switch through a keeper (`MacHandoverKeeper`): the host code its test pins
         /// (`--handover-test-keeper HEX`), and the files renamed over the target after the path check, or after the
         /// keeper's proof (`--handover-test-swap-after-check PATH`, `--handover-test-swap-before-exec PATH`). Nil: none
@@ -552,9 +557,11 @@ public final class HostServer {
                 return reply(.error("The session host runs \(max(1, config.maxSessions)) sessions, its limit: end one first."))
             }
             do {
-                let session = try HostedSession.spawn(request, shell: config.shell, launcher: config.launcher, baseEnvironment: config.baseEnvironment,
+                // A checked node's sessions: what it gives them back, on the spawn alone (V2/CheckedSessions.swift).
+                let base = config.baseEnvironment.merging(config.checkedSessions?.environment ?? [:]) { $1 }
+                let session = try HostedSession.spawn(request, shell: config.shell, launcher: config.launcher, baseEnvironment: base,
                                                       ringCapacity: config.ringCapacity, queue: queue, parser: config.parser,
-                                                      launcherTestDelay: config.launcherTestDelay)
+                                                      launcherTestDelay: config.launcherTestDelay, sessionUmask: config.checkedSessions?.umask)
                 // Only once it started: a spawn that fails leaves the ended sessions as they were.
                 for ended in room {
                     log.note("host: at its limit of \(max(1, config.maxSessions)) sessions, forgetting \(Self.short(ended.id)), ended \(Int(-ended.at.timeIntervalSinceNow)) s ago")

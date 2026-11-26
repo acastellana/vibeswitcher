@@ -33,10 +33,16 @@ enum SessionIdentityChecks {
     /// host's tests only: the user's host never passes it.
     static let launcherTestDelayFlag = "--pty-test-delay"
 
-    /// What the launcher is given before the program: the test delay's flag and value, or nothing.
-    static func launcherFlags(testDelay: TimeInterval?) -> [String] {
-        guard let testDelay, testDelay > 0 else { return [] }
-        return [launcherTestDelayFlag, String(testDelay)]
+    /// Before the program in the launcher's arguments, with an octal mask after it: the launcher sets that umask before
+    /// it execs the program (a checked Mac node's sessions, whose host keeps 077: V2/CheckedSessions.swift).
+    static let launcherUmaskFlag = "--pty-umask"
+
+    /// What the launcher is given before the program: the test delay's flag and value, the umask's, or nothing.
+    static func launcherFlags(testDelay: TimeInterval?, umask: mode_t? = nil) -> [String] {
+        var flags: [String] = []
+        if let testDelay, testDelay > 0 { flags += [launcherTestDelayFlag, String(testDelay)] }
+        if let umask { flags += [launcherUmaskFlag, String(umask, radix: 8)] }
+        return flags
     }
 
     /// The launcher's first act, `given` its arguments after `--pty-exec`: it makes its terminal (descriptor 0) its
@@ -49,6 +55,10 @@ enum SessionIdentityChecks {
             let seconds = TimeInterval(program[1]) ?? 0
             program.removeFirst(2)
             if seconds > 0 { Thread.sleep(forTimeInterval: seconds) }
+        }
+        if program.count > 2, program[0] == launcherUmaskFlag {
+            if let mask = mode_t(program[1], radix: 8), mask <= 0o777 { umask(mask) }
+            program.removeFirst(2)
         }
         let made = Platform.Terminals.makeControlling(0)
         guard !Platform.CodeIdentity.isAvailable else { return program }

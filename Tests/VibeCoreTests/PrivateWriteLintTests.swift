@@ -10,6 +10,7 @@ struct PrivateWriteLintTests {
     /// Raw calls per file, and why.
     static let allowed: [String: (count: Int, why: String)] = [
         "Sources/VibeCore/Paths.swift": (2, "the helper itself (ensurePrivate's createDirectory, writePrivate's createFile)"),
+        "Sources/VibeNode/Start/MacAgent.swift": (1, "the Mac's LaunchAgents folder (~/Library/LaunchAgents, a test's scratch one), made 0755 as macOS makes it when absent; the plist in it is written 0644 by open(O_EXCL|O_NOFOLLOW)"),
         "Sources/VibeSwitcher/HangWatchdog.swift": (2, "~/.vibeswitcher/debug hang reports: the user's own area, left for their word (R9); its folder is 0700"),
         // In VibeSwitcher's folders, already private or under a 0700 folder; outside this change's files.
         "Sources/VibeCore/DebugLog.swift": (2, "debug/app.log: its folder is made 0700 and the file 0600 by its own attributes"),

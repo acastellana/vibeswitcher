@@ -16,6 +16,8 @@ enum StartCommand {
         guard let parsed = StartArguments.parse(arguments) else { return Say.usage(StartArguments.usage) }
         let context = NodeContext.current()
         if let unbuilt = context.usersNodeRefusal { return Say.unbuilt(unbuilt) }
+        // The Mac: the user's LaunchAgent (MacAgentCommand.swift), past the refusal above.
+        if Platform.Service.manager == .launchd { return MacAgentCommand.start(parsed, context: context) }
         context.sayScratch()
         let home = VibePaths.accountHome
         let prefix = NodeFolders.defaultPrefix(accountHome: home)

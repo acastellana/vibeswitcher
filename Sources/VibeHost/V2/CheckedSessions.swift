@@ -48,6 +48,47 @@ public struct CheckedSessions: Equatable, Sendable {
         return .success(home)
     }
 
-    /// What a checked node's sessions are given, read at the host's start.
-    public static func read(uid: uid_t, accountHome: String) -> CheckedSessions? { nil }
+    /// What a checked node's sessions are given, read once at the host's start: `SSH_AUTH_SOCK` launchd's own for the
+    /// user's domain (`launchctl getenv`, `variable`), taken only when it is an absolute path to a socket `uid` owns, no
+    /// link (`socketOwner`); `__CF_USER_TEXT_ENCODING` as launchd gives it, from `<accountHome>/.CFUserTextEncoding`
+    /// (`file`); the umask 022. Never a value of this process's environment (its starter's, which the reset dropped).
+    public static func read(uid: uid_t, accountHome: String,
+                            variable: (String) -> String? = launchdVariable,
+                            socketOwner: (String) -> uid_t? = socketOwner,
+                            file: (String) -> String? = { try? String(contentsOfFile: $0, encoding: .utf8) }) -> CheckedSessions {
+        var environment: [String: String] = [:]
+        if let socket = variable("SSH_AUTH_SOCK"), socket.hasPrefix("/"), !socket.contains("\n"), socketOwner(socket) == uid {
+            environment["SSH_AUTH_SOCK"] = socket
+        }
+        environment["__CF_USER_TEXT_ENCODING"] = textEncoding(uid: uid, file: file((accountHome as NSString).appendingPathComponent(".CFUserTextEncoding")))
+        return CheckedSessions(environment: environment, umask: 0o022)
+    }
+
+    /// launchd's value of `name` for the user's domain (`/bin/launchctl getenv NAME`, `Platform.Service.launchctl`),
+    /// nil without one or without launchctl.
+    public static func launchdVariable(_ name: String) -> String? {
+        guard let launchctl = Platform.Service.launchctl, name.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "_") }) else { return nil }
+        let out = Platform.pipeCommand("'\(launchctl)' getenv \(name)", input: Data(), patience: 5, stopSignals: [])
+        let text = String(decoding: out, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? nil : text
+    }
+
+    /// The owner of the socket at `path`, nil when it isn't one (a link isn't followed).
+    public static func socketOwner(_ path: String) -> uid_t? {
+        var status = stat()
+        guard lstat(path, &status) == 0, status.st_mode & S_IFMT == S_IFSOCK else { return nil }
+        return status.st_uid
+    }
+
+    /// `0x<uid>:<encoding>:<region>`, as launchd gives `__CF_USER_TEXT_ENCODING`: the two numbers of the user's
+    /// `.CFUserTextEncoding` (hex with `0x`, or decimal), `0x0:0x0` without a readable one.
+    public static func textEncoding(uid: uid_t, file: String?) -> String {
+        func number(_ text: Substring) -> UInt32? {
+            text.hasPrefix("0x") ? UInt32(text.dropFirst(2), radix: 16) : UInt32(text)
+        }
+        let parts = (file ?? "").trimmingCharacters(in: .whitespacesAndNewlines).split(separator: ":", omittingEmptySubsequences: false)
+        let numbers = parts.count == 2 ? parts.compactMap(number) : []
+        let (encoding, region) = numbers.count == 2 ? (numbers[0], numbers[1]) : (0, 0)
+        return String(format: "0x%X:0x%X:0x%X", uid, encoding, region)
+    }
 }

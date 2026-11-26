@@ -38,7 +38,8 @@ struct MacCheckedSessionsTests {
         #expect(value("__CF_USER_TEXT_ENCODING")?.hasPrefix(String(format: "0x%X:", getuid())) == true,
                 "__CF_USER_TEXT_ENCODING=\(value("__CF_USER_TEXT_ENCODING") ?? "none")")
         #expect(value("SWIFT_BACKTRACE") == "enable=no", "SWIFT_BACKTRACE=\(value("SWIFT_BACKTRACE") ?? "none")")
-        #expect(value("umask") == "0022", "umask=\(value("umask") ?? "none")")
+        // zsh says `022`, sh `0022`: the number.
+        #expect(value("umask").flatMap { Int($0, radix: 8) } == 0o022, "umask=\(value("umask") ?? "none")")
         #expect(value("core")?.hasPrefix("0,") == true, "core=\(value("core") ?? "none")")
         // The host itself: reset as a checked node is (the kernel's copy of its environment is what it was started
         // with, so its log's word is read instead: it started, shaped).

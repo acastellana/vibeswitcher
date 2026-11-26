@@ -120,6 +120,13 @@ var config = HostServer.Config(
                                                  adding: Platform.CodeIdentity.isAvailable ? nil : VibePaths.root.appendingPathComponent("plugins/bin").path),
     hostBuild: build)
 config.checkedNode = checkedStart
+// A checked node's sessions are given back what its reset took, on their spawn alone (V2/CheckedSessions.swift), as are a
+// scratch host's shaped as one; and no Swift child of the node (the server child, the launchers, the parsers) starts the
+// backtracer, as Linux's fixed list gives (the plist's SWIFT_BACKTRACE acted on this process only, before its reset).
+if Platform.CodeIdentity.isAvailable, checkedStart != nil || testShapeHome != nil, let home = testShapeHome ?? HostImages.accountHome {
+    config.checkedSessions = CheckedSessions.read(uid: getuid(), accountHome: home)
+    config.baseEnvironment["SWIFT_BACKTRACE"] = "enable=no"
+}
 if let why = HostImages.checkedNodeRefusal(config.checkedNode, ownsLaunchers: ownsLaunchers) { notStarted(why) }
 // Only a checked node starts on the node's lock, by file (the re-check's I2c): one check, in place of refusing each test
 // flag such a host might be given.
