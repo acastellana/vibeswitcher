@@ -48,10 +48,14 @@ public struct CheckedSessions: Equatable, Sendable {
         return .success(home)
     }
 
-    /// Whether `lock` is `other` by file: the same device and inode when both are there; else the same folder by device
-    /// and inode and the same name; the same text always.
+    /// Whether `lock` is `other` by file, or may become it: a link (dangling or not) always; the same device and inode
+    /// when both are there; else the same folder by device and inode and the same name; the same text always.
     static func isSameLock(_ lock: String, _ other: String) -> Bool {
         if lock == other { return true }
+        // A link is refused as the user's (the re-check's note 5): the host opens `--lock` with no link followed, and a
+        // link to the user's lock before it exists would be it once made.
+        var link = stat()
+        if lstat(lock, &link) == 0, link.st_mode & S_IFMT == S_IFLNK { return true }
         var a = stat(), b = stat()
         if stat(lock, &a) == 0, stat(other, &b) == 0 { return a.st_dev == b.st_dev && a.st_ino == b.st_ino }
         guard (lock as NSString).lastPathComponent == (other as NSString).lastPathComponent,

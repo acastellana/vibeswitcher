@@ -91,16 +91,17 @@ struct MacAgentRecheckTests {
         #expect(loaded == nil, "a refused start left a KeepAlive job loaded: \(String(describing: loaded))")
     }
 
-    /// The stated limit: an ancestor of the plist folder swapped away and back around the bootstrap, the plist launchd
-    /// read carrying a key `print` doesn't show (`Nice` 5): start says the node runs.
+    /// The stated limit (the design's table): an ancestor of the plist folder swapped away and back around the bootstrap,
+    /// the plist launchd read carrying a key this Mac's `print` shows nothing of (`Debug`, measured): start says the node
+    /// runs. (`Nice`, which the re-check used, prints a line: the grammar refuses it now, `anAncestorSwappedAndBack…`.)
     @Test func limitAnAncestorSwappedAndBackWithAnUnshownKey() async throws {
         let agent = try ScratchAgent(scratch)
         defer { agent.tearDown() }
         let place = try lowered(agent)
-        let (started, loaded) = try await wrapped(agent, place: place, { $0["Nice"] = 5 }) { path, folder, aside, bootstrap in
+        let (started, loaded) = try await wrapped(agent, place: place, { $0["Debug"] = true }) { path, folder, aside, bootstrap in
             Self.ancestorSwap(folder: folder, path: path, aside: aside, bootstrap)
         }
-        print("RECHECK ancestor swapped and back, Nice 5: \(started); loaded \(String(describing: loaded))")
+        print("RECHECK ancestor swapped and back, Debug: \(started); loaded \(String(describing: loaded))")
         #expect((try? started.get()) != nil, "the stated limit isn't what happens: \(started)")
         _ = await offPool { MacAgent(place: place, steps: agent.agent.steps).stop() }
     }

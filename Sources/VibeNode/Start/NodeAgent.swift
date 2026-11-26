@@ -72,8 +72,10 @@ public enum NodeAgent {
             if let why = NodeUnit.pathRefusal(dataRoot) {
                 return .failure(StartRefusal("the agent can't hold the node's root \(ConfigSeal.inert(dataRoot, limit: .max)): \(why)"))
             }
-            return .success(Job(label: NodeAgent.label, programArguments: NodeUnit.execStart(prefix: prefix, commit: commit),
-                                environment: ["SWIFT_BACKTRACE": "enable=no"], standardErrorPath: serverLog(nodeRoot: dataRoot), atLogin: atLogin))
+            let job = Job(label: NodeAgent.label, programArguments: NodeUnit.execStart(prefix: prefix, commit: commit),
+                          environment: ["SWIFT_BACKTRACE": "enable=no"], standardErrorPath: serverLog(nodeRoot: dataRoot), atLogin: atLogin)
+            if let why = NodeAgent.unprintable(job) { return .failure(StartRefusal(why)) }
+            return .success(job)
         }
     }
 
@@ -137,8 +139,17 @@ public enum NodeAgent {
         return Job.node(prefix: inputs.prefix, commit: inputs.commit, home: inputs.home, dataRoot: nodeRoot, atLogin: atLogin).map(dictionary)
     }
 
+    /// Why `job` can't be written, or nil: a string of it that isn't printable ASCII (a newline in a variable, a control
+    /// character in an argument, a non-ASCII byte in a path): launchd prints them raw, so they would be lines of its word.
+    public static func unprintable(_ job: Job) -> String? {
+        let strings = [job.label, job.standardErrorPath] + job.programArguments + job.environment.keys.sorted() + job.environment.values.sorted()
+        guard let bad = strings.first(where: { !isPrintable($0) }) else { return nil }
+        return "the agent's job can't hold \(ConfigSeal.inert(bad, limit: 120)): only printable ASCII is written in it (launchd prints it raw)"
+    }
+
     /// The property list for `job` (XML, keys sorted), or why it can't be made.
     public static func plist(_ job: Job) -> Result<Data, StartRefusal> {
+        if let why = unprintable(job) { return .failure(StartRefusal(why, exitCode: 1)) }
         do {
             return .success(try PropertyListSerialization.data(fromPropertyList: dictionary(job), format: .xml, options: 0))
         } catch {
@@ -302,17 +313,148 @@ public enum NodeAgent {
 // MARK: launchd's word, by one grammar
 
 extension NodeAgent {
-    /// Why `launchctl print`'s output couldn't be placed as `job`'s.
+    /// Why `launchctl print`'s output couldn't be placed as `job`'s (the design's "The re-check's round").
     public struct Unplaced: Error, Equatable, Sendable {
         public var description: String
         public init(_ description: String) { self.description = description }
     }
 
-    /// Whether `text` is printable ASCII only.
-    public static func isPrintable(_ text: String) -> Bool { true }
+    /// Whether `text` is printable ASCII only (the job's strings, and launchd's lines once their tabs are dropped).
+    public static func isPrintable(_ text: String) -> Bool { text.utf8.allSatisfy { (0x20...0x7e).contains($0) } }
 
-    /// `launchctl print`'s output read for `job` (the seam: the lenient reading, as before).
+    /// The variables launchd adds to every job's `environment` block (measured, macOS 27.2).
+    public static func launchdVariables(label: String) -> [String: String] { ["OSLogRateLimit": "64", "XPC_SERVICE_NAME": label] }
+
+    /// `launchctl print`'s whole output read against the template derived from `job` (the design's "The re-check's round":
+    /// macOS 27.2's format, every line placed, in launchd's order, nothing searched for): the job loaded from `plistPath`
+    /// (the agent's plist as launchd resolves it) in `gui/<uid>`. What it says of the job, or why it can't be placed.
     public static func placed(_ output: Data, job: Job, plistPath: String, uid: uid_t) -> Result<Printed, Unplaced> {
-        .success(printed(String(decoding: output, as: UTF8.self)))
+        // Bytes: a tab, a newline or printable ASCII, nothing else (no CR, no byte above 0x7E).
+        guard output.allSatisfy({ $0 == 0x09 || $0 == 0x0a || (0x20...0x7e).contains($0) }) else {
+            return .failure(Unplaced("launchd's print holds a byte that isn't printable ASCII"))
+        }
+        let lines = output.split(separator: 0x0a, omittingEmptySubsequences: false).map { String(decoding: $0, as: UTF8.self) }
+        var at = 0
+        var found = Printed()
+        func next() -> String? { at < lines.count ? lines[at] : nil }
+        func fail(_ why: String) -> Result<Printed, Unplaced> {
+            .failure(Unplaced("launchd's print isn't the job start wrote: \(why) (line \(at + 1): \(ConfigSeal.inert(next() ?? "(end)", limit: 200)))"))
+        }
+        func literal(_ line: String) -> Bool {
+            guard next() == line else { return false }
+            at += 1
+            return true
+        }
+        /// `\t<key> = <value>` with `valid(value)`: the value, or nil (nothing taken).
+        func value(_ key: String, _ valid: (String) -> Bool) -> String? {
+            let head = "\t\(key) = "
+            guard let line = next(), line.hasPrefix(head) else { return nil }
+            let rest = String(line.dropFirst(head.count))
+            guard valid(rest) else { return nil }
+            at += 1
+            return rest
+        }
+        func digits(_ text: String) -> Bool { !text.isEmpty && text.utf8.count <= 12 && text.allSatisfy(\.isNumber) && text.allSatisfy(\.isASCII) }
+        func hex(_ text: String) -> Bool { text.hasPrefix("0x") && text.count > 2 && text.count <= 18 && text.dropFirst(2).allSatisfy(\.isHexDigit) }
+        func words(_ text: String) -> Bool { !text.isEmpty && text.count <= 80 && text.allSatisfy { $0 == " " || ($0.isASCII && $0.isLowercase) } }
+        func name(_ text: Substring) -> Bool {
+            guard let first = text.first, first == "_" || (first.isASCII && first.isLetter) else { return false }
+            return text.count <= 200 && text.allSatisfy { $0 == "_" || ($0.isASCII && ($0.isLetter || $0.isNumber)) }
+        }
+        func blank() -> Bool { literal("") }
+        /// A block's `NAME => VALUE` lines up to its `\t}`: each name once.
+        func variables() -> [String: String]? {
+            var read: [String: String] = [:]
+            while let line = next(), line != "\t}" {
+                guard line.hasPrefix("\t\t"), let arrow = line.range(of: " => ") else { return nil }
+                let key = line[line.index(line.startIndex, offsetBy: 2)..<arrow.lowerBound]
+                guard name(key), read[String(key)] == nil else { return nil }
+                read[String(key)] = String(line[arrow.upperBound...])
+                at += 1
+            }
+            return literal("\t}") ? read : nil
+        }
+        let label = job.label
+        guard literal("gui/\(uid)/\(label) = {") else { return fail("its first line") }
+        guard value("active count", digits) != nil else { return fail("active count") }
+        guard literal("\tpath = \(plistPath)") else { return fail("its path isn't the agent's plist") }
+        found.path = plistPath
+        guard literal("\ttype = LaunchAgent") else { return fail("type") }
+        guard let state = value("state", { ["not running", "running", "xpcproxy"].contains($0) }) else { return fail("state") }
+        found.state = state
+        guard blank(), literal("\tprogram = \(job.programArguments[0])"), literal("\targuments = {") else { return fail("its program") }
+        for argument in job.programArguments where !literal("\t\t\(argument)") { return fail("its arguments") }
+        guard literal("\t}") else { return fail("its arguments") }
+        found.program = job.programArguments[0]
+        found.arguments = job.programArguments
+        guard blank(), literal("\tstdout path = /dev/null"), literal("\tstderr path = \(job.standardErrorPath)") else { return fail("its output paths") }
+        found.stdoutPath = "/dev/null"
+        found.stderrPath = job.standardErrorPath
+        guard literal("\tinherited environment = {"), variables() != nil, blank() else { return fail("its inherited environment") }
+        guard literal("\tdefault environment = {"), literal("\t\tPATH => /usr/bin:/bin:/usr/sbin:/sbin"), literal("\t}"), blank() else {
+            return fail("its default environment")
+        }
+        let expected = job.environment.merging(launchdVariables(label: label)) { $1 }
+        guard literal("\tenvironment = {"), let environment = variables(), environment == expected, blank() else {
+            return fail("its environment isn't the job's variables and launchd's two")
+        }
+        found.environment = environment
+        guard value("domain", { text in
+            let head = "gui/\(uid) ["
+            return text.hasPrefix(head) && text.hasSuffix("]") && digits(String(text.dropFirst(head.count).dropLast()))
+        }) != nil else { return fail("domain") }
+        guard value("asid", digits) != nil, literal("\tminimum runtime = 10"), literal("\texit timeout = 5") else { return fail("asid, minimum runtime or exit timeout") }
+        guard let runs = value("runs", digits) else { return fail("runs") }
+        found.runs = Int(runs)
+        // The running group: all of it or none.
+        if let pid = value("pid", digits) {
+            found.pid = pid_t(pid)
+            let reasons = job.atLogin ? ["non-ipc demand", "speculative"] : ["non-ipc demand"]
+            guard value("immediate reason", { reasons.contains($0) }) != nil else { return fail("immediate reason") }
+            for key in ["forks", "execs", "initialized", "trampolined", "started suspended", "proxy started suspended"] where value(key, digits) == nil {
+                return fail(key)
+            }
+            guard value("checked allocations", { text in
+                let parts = text.split(separator: " ", omittingEmptySubsequences: false)
+                return parts.count == 4 && digits(String(parts[0])) && parts[1] == "(queried" && parts[2] == "=" && parts[3].hasSuffix(")")
+                    && digits(String(parts[3].dropLast()))
+            }) != nil, value("checked allocations reason", words) != nil, value("checked allocations flags", hex) != nil else {
+                return fail("checked allocations")
+            }
+        }
+        // One last-exit line.
+        if let code = value("last exit code", { $0 == "(never exited)" || digits($0) }) {
+            found.lastExit = code == "(never exited)" ? nil : "exit code \(code)"
+        } else if let signal = value("last terminating signal", { !$0.isEmpty && $0.count <= 80 }) {
+            found.lastExit = "signal \(signal)"
+        } else if let reason = value("last exit reason", { !$0.isEmpty && $0.count <= 80 && $0.allSatisfy { $0 == "_" || ($0.isASCII && ($0.isUppercase || $0.isNumber)) } }) {
+            found.lastExit = "reason \(reason)"
+        } else {
+            return fail("its last exit")
+        }
+        guard blank() else { return fail("a blank line after its last exit") }
+        // The two coalition blocks: both or neither.
+        if literal("\tresource coalition = {") {
+            for kind in ["resource", "jetsam"] {
+                if kind == "jetsam", !literal("\tjetsam coalition = {") { return fail("its jetsam coalition") }
+                guard value("\tID", digits) != nil, literal("\t\ttype = \(kind)"), value("\tstate", words) != nil,
+                      value("\tactive count", digits) != nil, literal("\t\tname = \(label)"), literal("\t}"), blank() else {
+                    return fail("its \(kind) coalition")
+                }
+            }
+        }
+        guard literal("\tspawn type = interactive (4)") else { return fail("spawn type (ProcessType)") }
+        guard value("jetsam priority", digits) != nil,
+              value("jetsam memory limit (active)", { $0 == "(unlimited)" || digits($0) }) != nil,
+              value("jetsam memory limit (inactive)", { $0 == "(unlimited)" || digits($0) }) != nil,
+              literal("\tjetsamproperties category = daemon"), value("jetsam thread limit", digits) != nil,
+              literal("\tcpumon = default"), value("sanitizer flags", hex) != nil, blank() else { return fail("its jetsam lines") }
+        let properties = job.atLogin ? "runatload | inferred program" : "inferred program"
+        guard literal("\tproperties = \(properties)") else { return fail("properties") }
+        found.properties = properties
+        guard literal("}") else { return fail("its closing line") }
+        // Nothing after it but the output's last newline.
+        guard at == lines.count - 1, lines[at].isEmpty else { return fail("a line after its closing line") }
+        return .success(found)
     }
 }

@@ -78,10 +78,10 @@ struct MacAgentTests {
         agent.loaded.append(pid)
         let started = await offPool { agent.agent.start(agent.job, build: agent.build, folder: agent.folder) }
         guard case .failure(let why) = started else { Issue.record("started over another program"); return }
-        #expect(why.text.contains("isn't the node's host"), "\(why.text)")
+        #expect(why.text.contains("isn't the node's"), "\(why.text)")
         let stopped = await offPool { agent.agent.stop() }
         guard case .failure(let stopWhy) = stopped else { Issue.record("stopped another program"); return }
-        #expect(stopWhy.text.contains("isn't the node's host"), "\(stopWhy.text)")
+        #expect(stopWhy.text.contains("isn't the node's"), "\(stopWhy.text)")
         #expect(agent.printed()?.pid == pid && kill(pid, 0) == 0, "the other program wasn't left alone")
         #expect(!FileManager.default.fileExists(atPath: agent.place.plistPath), "start wrote its plist anyway")
     }
@@ -274,7 +274,9 @@ struct MacAgentTests {
     /// and left loaded; one from the agent's own file is unloaded.
     @Test func aStoppedJobFromAnotherPlistIsLeftAlone() throws {
         let stand = Stand(try scratch.shortFolder("vsmo").path)
-        let other = "gui/501/x = {\n\tstate = not running\n\truns = 1\n\tpath = /elsewhere/x.plist\n}"
+        // launchd's word (this Mac's print, cut) for the agent's job loaded from another file.
+        let other = MacAgentTests.printed(stand.job, place: stand.place, pid: nil)
+            .replacingOccurrences(of: "\tpath = \(MacAgent.canonicalPlistPath(stand.place))", with: "\tpath = /elsewhere/x.plist")
         let log = Recorder()
         guard case .failure(let why) = stand.agent(log: log, printed: { other }).start(stand.job, build: stand.row, folder: "/x") else {
             Issue.record("started over another plist's job"); return
@@ -282,9 +284,7 @@ struct MacAgentTests {
         #expect(why.text.contains("/elsewhere/x.plist") && log.bootouts == 0, "\(why.text) \(log.calls)")
         guard case .failure = stand.agent(log: log, printed: { other }).stop() else { Issue.record("stopped another plist's job"); return }
         #expect(log.bootouts == 0, "\(log.calls)")
-        try FileManager.default.createDirectory(atPath: stand.place.plistFolder, withIntermediateDirectories: true)
-        FileManager.default.createFile(atPath: stand.place.plistPath, contents: Data())
-        let ours = "gui/501/x = {\n\tstate = not running\n\truns = 1\n\tpath = \(stand.place.plistPath)\n}"
+        let ours = MacAgentTests.printed(stand.job, place: stand.place, pid: nil)
         var loaded = true
         let unloads = Recorder()
         _ = stand.agent(log: unloads, printed: { defer { if unloads.bootouts > 0 { loaded = false } }; return loaded ? ours : nil }).stop()

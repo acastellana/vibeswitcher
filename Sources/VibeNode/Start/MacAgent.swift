@@ -161,18 +161,21 @@ public struct MacAgent {
                 return .failure(StartRefusal("\(ConfigSeal.inert(path, limit: .max)) isn't the \(name) the node's record pins for build \(build.commit): nothing was started", exitCode: 1))
             }
         }
-        // A job of the label already there.
-        if let printed = printed() {
+        // A job of the label already there, judged by launchd's whole word (the design's "The re-check's round").
+        switch judge(candidates(pins.builds)) {
+        case .notLoaded: break
+        case .notOurs(let why):
+            return .failure(StartRefusal("a job labelled \(place.label) is loaded that isn't the node's: \(why); it was left as it is", exitCode: 77))
+        case .ours(let printed, let loaded):
             if let pid = printed.pid {
-                switch node(printed, pid: pid, builds: pins.builds) {
+                switch node(pid, builds: pins.builds) {
                 case .success(let host): return .success(say("the node runs already: \(Self.describe(host))"))
                 case .failure(let why):
                     return .failure(StartRefusal("a job labelled \(place.label) runs pid \(pid), which isn't the node's host: \(why.text); it was left as it is", exitCode: 77))
                 }
             }
-            // Nothing of it runs: unloaded, so the checked plist is what launchd loads; only one launchd loaded from the
-            // agent's own file, any other left as it is.
-            if let why = notOurs(printed) { return .failure(why) }
+            // The agent's own job, not running: unloaded, so the plist checked below is what launchd loads.
+            _ = loaded
             if let why = bootout() { return .failure(why) }
         }
         for name in NodeAgent.refusedManagerNames {
@@ -188,91 +191,105 @@ public struct MacAgent {
         }
         defer { Sys.close(held.fd) }
         // A bootstrap that fails loaded nothing of this start's: what is there (another start's job, a login's) is left alone.
-        guard let loaded = steps.launchctl(["bootstrap", place.domain, place.plistPath]), loaded.status == 0 else {
+        guard let bootstrapped = steps.launchctl(["bootstrap", place.domain, place.plistPath]), bootstrapped.status == 0 else {
             return .failure(StartRefusal("launchctl bootstrap \(place.domain) \(ConfigSeal.inert(place.plistPath, limit: .max)) failed (a job of the label may have been loaded meanwhile): nothing of it was touched", exitCode: 1))
         }
         if !job.atLogin, steps.launchctl(["kickstart", place.target])?.status != 0 {
-            _ = bootout()
-            return .failure(StartRefusal("launchctl kickstart \(place.target) failed: the job was unloaded", exitCode: 1))
+            return .failure(StartRefusal("launchctl kickstart \(place.target) failed: \(unloaded(bootout()))", exitCode: 1))
         }
         let deadline = steps.now().addingTimeInterval(steps.patience)
         var last = "no host took a connection"
         while true {
-            if let printed = printed() {
+            switch judge([job], held: held.fd) {
+            case .notLoaded:
+                return .failure(StartRefusal("the job \(place.target) went from launchd while start waited for its host", exitCode: 1))
+            case .notOurs(let why):
+                // Not yet while nothing answers (launchd's transient states are placed, measured); once a host answers at
+                // the socket the job is up, and a word that isn't the job's is refused now. The pid read here decides
+                // only when to stop waiting, never an accept.
+                if let pid = printed()?.pid, case .host = steps.see(place.socket, pid, [build]) {
+                    return .failure(StartRefusal("launchd's word for the job it loaded isn't the job start wrote: \(why); \(unloaded(bootout()))", exitCode: 77))
+                }
+                last = why
+            case .ours(let printed, _):
                 if let pid = printed.pid {
                     switch steps.see(place.socket, pid, [build]) {
                     case .host(let host):
-                        // Its code is the pinned host's. Its command line and its program must be the job's, the file
-                        // launchd read the one start checked, unchanged, and launchd's own word for the job the job's.
-                        // launchd's word for what it loaded, read now that the host runs.
-                        let word: String?
-                        if let now = self.printed() { word = launchdRefusal(now, job: job) } else { word = "launchd shows the job no more" }
-                        if let why = runsTheJob(pid, build: build, switched: false) ?? runsTheProgram(pid, build: build) ?? held.changed(place: place) ?? word {
-                            _ = bootout()
-                            return .failure(StartRefusal("the job's process (pid \(pid)) isn't the host start meant: \(why); the job was unloaded", exitCode: 77))
+                        // Its code is the pinned host's; its command line and program the job's; the file launchd read the
+                        // one start checked and holds, unchanged; launchd's word the job's (placed above).
+                        if let why = runsTheJob(pid, build: build, switched: false) ?? runsTheProgram(pid, build: build) ?? held.changed(place: place) {
+                            return .failure(StartRefusal("the job's process (pid \(pid)) isn't the host start meant: \(why); \(unloaded(bootout()))", exitCode: 77))
                         }
                         return .success(say("the node runs: \(Self.describe(host))"))
                     case .other(let why):
-                        _ = bootout()
-                        return .failure(StartRefusal("the job's process (pid \(pid)) isn't the host start meant: \(why); the job was unloaded", exitCode: 77))
+                        return .failure(StartRefusal("the job's process (pid \(pid)) isn't the host start meant: \(why); \(unloaded(bootout()))", exitCode: 77))
                     case .nothing(let why): last = why
                     }
                 } else if printed.state == "not running", (printed.runs ?? 0) > 0 {
                     let ended = printed.lastExit ?? "it ended"
-                    _ = bootout()
-                    return .failure(StartRefusal("the node's host ended at its start (\(ended)); the job was unloaded. Its log, \(place.log), ends: \(logTail())", exitCode: 1))
+                    return .failure(StartRefusal("the node's host ended at its start (\(ended)); \(unloaded(bootout())). Its log, \(place.log), ends: \(logTail())", exitCode: 1))
                 }
-            } else {
-                return .failure(StartRefusal("the job \(place.target) went from launchd while start waited for its host", exitCode: 1))
             }
             guard steps.now() < deadline else {
-                _ = bootout()
-                return .failure(StartRefusal("no host came within \(Int(steps.patience)) s (\(last)); the job was unloaded", exitCode: 1))
+                return .failure(StartRefusal("no host came within \(Int(steps.patience)) s (\(last)); \(unloaded(bootout()))", exitCode: 1))
             }
             steps.pause()
         }
     }
 
-    /// `stop`: the job's host checked (another program refused and left alone); everything the host started taken
-    /// (its descendants and the sessions they lead); with a server that answers, its own stop asked once, by its rule,
-    /// and its answer kept (refused: nothing is stopped); with none, what ends said and the typed code asked, then the
-    /// bootout; then the wait until no job, none of those processes and no socket is left, or what is left named.
+    /// `stop`: the job of the label judged by launchd's whole word, its host checked (another program refused and left
+    /// alone); everything the host started taken at each look (its descendants, the sessions they lead, the session ids
+    /// they carry); with a server that answers, its own stop asked once, by its rule, and its answer kept (refused:
+    /// nothing is stopped); with none, what ends said and the typed code asked, then the bootout; then the wait until no
+    /// job, none of those processes and no socket is left, or what is left named.
     public func stop() -> Result<String, StartRefusal> {
-        guard let printed = printed() else {
-            return .failure(StartRefusal("the node isn't running: no job labelled \(place.label) is loaded", exitCode: 69))
-        }
-        guard let pid = printed.pid else {
-            if let why = notOurs(printed) { return .failure(why) }
-            if let why = bootout() { return .failure(why) }
-            removeStaleSocket()
-            return .success(say("the node wasn't running (\(printed.lastExit ?? "not started")): its job was unloaded"))
-        }
         let builds: [NodePins.Build]
         switch steps.pins() {
         case .failure(let why): return .failure(StartRefusal("the node's record can't be read: \(why.description); nothing was stopped", exitCode: 1))
         case .success(let read): builds = read.builds
         }
+        let pid: pid_t
+        switch judge(candidates(builds)) {
+        case .notLoaded:
+            return .failure(StartRefusal("the node isn't running: no job labelled \(place.label) is loaded", exitCode: 69))
+        case .notOurs(let why):
+            return .failure(StartRefusal("a job labelled \(place.label) is loaded that isn't the node's: \(why); nothing was stopped", exitCode: 77))
+        case .ours(let printed, _):
+            guard let running = printed.pid else {
+                if let why = bootout() { return .failure(why) }
+                removeStaleSocket()
+                return .success(say("the node wasn't running (\(printed.lastExit ?? "not started")): its job was unloaded"))
+            }
+            pid = running
+        }
         let host: Host
-        switch node(printed, pid: pid, builds: builds) {
+        switch node(pid, builds: builds) {
         case .success(let seen): host = seen
         case .failure(let why):
             return .failure(StartRefusal("a job labelled \(place.label) runs pid \(pid), which isn't the node's host: \(why.text); nothing was stopped", exitCode: 77))
         }
-        // Everything the host started, taken while it runs (and again after the prompts): after the bootout its sessions
+        // Everything the host started, taken while it runs and again after the prompts, with the session ids each look
+        // reads (a process that leaves its session between two looks still carries one): after the bootout its sessions
         // and server are launchd's children, outside the job's group.
-        var processes = descendants(of: pid)
+        var processes: [Platform.Processes.Link] = []
+        var ids = Set<String>()
+        func look() {
+            let found = descendants(of: pid)
+            processes = Self.union(processes, found)
+            ids.formUnion(found.compactMap { steps.sessionID($0.pid) })
+        }
+        look()
         var ordered = false
         var withoutServer: String?
         switch steps.server() {
         case .refused(let why):
-            return .failure(StartRefusal("the node's server answered and refused (\(why.text)): nothing was stopped", exitCode: why.exitCode))
+            return .failure(StartRefusal("the node's server answered and refused (\(why.text)): nothing was stopped; if it is wedged, `launchctl bootout \(place.target)` ends it by hand", exitCode: why.exitCode))
         case .none(let why):
             withoutServer = why
         case .answered(let live):
             let what = "stop ends the node's host (pid \(host.pid), build \(host.commit)), its server and its \(live) session\(live == 1 ? "" : "s") "
                 + "in order, through its server, and unloads \(place.label)"
-            // Taken again just before the server acts: what started while the snapshot above was taken.
-            processes = Self.union(processes, descendants(of: pid))
+            look()
             switch steps.serverStop(what) {
             case .stopped: ordered = true
             case .refused(let why):
@@ -281,15 +298,11 @@ public struct MacAgent {
             }
         }
         if let why = withoutServer {
-            let what = "the node's server didn't answer (\(why)): stop ends the node's host (pid \(host.pid), build \(host.commit)) by launchd's bootout, "
+            let what = "nothing listens at the node's server's socket (\(why)): stop ends the node's host (pid \(host.pid), build \(host.commit)) by launchd's bootout, "
                 + "its sessions lose their terminal (a hangup) and end, and \(place.label) is unloaded"
             if case .failure(let refused) = steps.confirm(what) { return .failure(refused) }
-            // Taken again after the prompt: what started while it waited.
-            processes = Self.union(processes, descendants(of: pid))
+            look()
         }
-        // The sessions' ids, read from the processes' environments where they can be: a survivor whose session leader
-        // and parent ended meanwhile still carries one.
-        let ids = Set(processes.compactMap { steps.sessionID($0.pid) })
         if let why = bootout() { return .failure(why) }
         let deadline = steps.now().addingTimeInterval(steps.patience)
         while true {
@@ -307,19 +320,24 @@ public struct MacAgent {
         }
     }
 
-    /// `status`, from the host itself: not loaded or not running (69, with launchd's last exit), or the job's host
-    /// checked as `node` checks it.
+    /// `status`, from the host itself: not loaded or not running (69, with launchd's last exit), a job of the label that
+    /// isn't the node's (77), or the job's host checked as `node` checks it.
     public func status() -> Result<String, StartRefusal> {
-        guard let printed = printed() else {
-            return .failure(StartRefusal("the node isn't running: no job labelled \(place.label) is loaded", exitCode: 69))
-        }
-        guard let pid = printed.pid else {
-            return .failure(StartRefusal("the node isn't running: its job is loaded and not running (\(printed.lastExit ?? "never started"))", exitCode: 69))
-        }
+        let builds: [NodePins.Build]
         switch steps.pins() {
         case .failure(let why): return .failure(StartRefusal("the node's record can't be read: \(why.description)", exitCode: 1))
-        case .success(let pins):
-            switch node(printed, pid: pid, builds: pins.builds) {
+        case .success(let read): builds = read.builds
+        }
+        switch judge(candidates(builds)) {
+        case .notLoaded:
+            return .failure(StartRefusal("the node isn't running: no job labelled \(place.label) is loaded", exitCode: 69))
+        case .notOurs(let why):
+            return .failure(StartRefusal("a job labelled \(place.label) is loaded that isn't the node's: \(why)", exitCode: 77))
+        case .ours(let printed, _):
+            guard let pid = printed.pid else {
+                return .failure(StartRefusal("the node isn't running: its job is loaded and not running (\(printed.lastExit ?? "never started"))", exitCode: 69))
+            }
+            switch node(pid, builds: builds) {
             case .success(let host): return .success(say("the node runs: \(Self.describe(host))"))
             case .failure(let why):
                 return .failure(StartRefusal("a job labelled \(place.label) runs pid \(pid), which isn't the node's host: \(why.text)", exitCode: 77))
@@ -420,10 +438,14 @@ public struct MacAgent {
         case noHello(String)
     }
 
-    /// What a connection that failed so says of the server before a stop (the seam: every failure is no server).
+    /// What a connection that failed so says of the server before a stop (the re-check's note 6): only no listener at all
+    /// is no server (the typed code and the bootout follow); a listener that fails the server check, or a hello that is
+    /// garbage or late, stops nothing.
     public static func serverSeen(_ failure: ConnectFailure) -> ServerSeen {
         switch failure {
-        case .noListener(let why), .notTheServer(let why), .noHello(let why): return .none(why)
+        case .noListener(let why): return .none(why)
+        case .notTheServer(let why): return .refused(StartRefusal("what listens isn't the node's server (\(why))", exitCode: 77))
+        case .noHello(let why): return .refused(StartRefusal("the node's server sent no hello that could be read (\(why))", exitCode: 1))
         }
     }
 
@@ -434,24 +456,11 @@ public struct MacAgent {
 
     // MARK: Helpers
 
-    /// The node's host in the job of the label running at `pid` (the review's I2), or why not: launchd loaded the job
-    /// from the agent's own plist (by device and inode); that plist is start's bytes for a build the record pins, and
-    /// launchd's word for the job (`launchdRefusal`) that build's job; the process at the socket runs a pinned host by
-    /// token and code (`see`), its command line that build's job's (a switched one with the keeper's two flags after
-    /// it) and its program that job's program by device and inode.
-    func node(_ printed: NodeAgent.Printed, pid: pid_t, builds: [NodePins.Build]) -> Result<Host, StartRefusal> {
-        if let why = notOurs(printed) { return .failure(StartRefusal(why.text)) }
-        guard let data = Self.readPlist(place.plistPath) else { return .failure(StartRefusal("the agent's plist can't be read")) }
-        let candidates = builds.compactMap(steps.job).flatMap { job -> [NodeAgent.Job] in
-            var atLogin = job
-            atLogin.atLogin = !job.atLogin
-            return [job, atLogin]
-        }
-        guard let loaded = candidates.first(where: { NodeAgent.check(data, job: $0) == nil }) else {
-            return .failure(StartRefusal("the agent's plist isn't the one start writes for any build the node's record pins (if it is an earlier install's: "
-                                         + "`launchctl bootout \(place.target)`, remove \(ConfigSeal.inert(place.plistPath, limit: .max)) and run `vibeswitcher start` again)"))
-        }
-        if let why = launchdRefusal(printed, job: loaded) { return .failure(StartRefusal(why)) }
+    /// The node's host in the job of the label running at `pid` (the review's I2, the job already judged ours by
+    /// launchd's whole word): the process at the socket runs a pinned host by token and code (`see`), its command line
+    /// that build's job's (a switched one with the keeper's two flags after it) and its program that job's program by
+    /// device and inode.
+    func node(_ pid: pid_t, builds: [NodePins.Build]) -> Result<Host, StartRefusal> {
         switch steps.see(place.socket, pid, builds) {
         case .nothing(let why), .other(let why): return .failure(StartRefusal(why))
         case .host(let host):
@@ -459,6 +468,61 @@ public struct MacAgent {
             if let why = runsTheJob(pid, build: build, switched: true) ?? runsTheProgram(pid, build: build) { return .failure(StartRefusal(why)) }
             return .success(host)
         }
+    }
+
+    /// What launchd's word for the job of the label came to (the design's "The re-check's round": one reader).
+    enum Judged {
+        /// `print` said "Could not find service" (exit 113, measured): no job of the label.
+        case notLoaded
+        /// The whole output placed as `job`'s, its plist the agent's by `lstat` and file.
+        case ours(NodeAgent.Printed, NodeAgent.Job)
+        /// Loaded, and not placed as any job start writes (or `print` failed otherwise): why.
+        case notOurs(String)
+    }
+
+    /// The jobs a job of the label may be of ours: start's for a pinned build whose bytes the agent's plist on disk is
+    /// (`RunAtLoad` either way); none when the plist is another's or unreadable.
+    func candidates(_ builds: [NodePins.Build]) -> [NodeAgent.Job] {
+        guard let data = Self.readPlist(place.plistPath) else { return [] }
+        return builds.compactMap(steps.job).flatMap { job -> [NodeAgent.Job] in
+            var other = job
+            other.atLogin = !job.atLogin
+            return [job, other]
+        }.filter { NodeAgent.check(data, job: $0) == nil }
+    }
+
+    /// The job of the label judged by launchd's whole word against `candidates`, its plist's path then compared by
+    /// `lstat` (no link followed) with the file `held` (start's descriptor) or the agent's plist, by device and inode.
+    func judge(_ candidates: [NodeAgent.Job], held: Int32? = nil) -> Judged {
+        guard let ran = steps.launchctl(["print", place.target]) else { return .notOurs("launchctl print couldn't run") }
+        if ran.status == 113 { return .notLoaded }
+        guard ran.status == 0 else { return .notOurs("launchctl print exited \(ran.status)") }
+        guard !candidates.isEmpty else { return .notOurs("the agent's plist isn't the one start writes for any build the node's record pins") }
+        let path = Self.canonicalPlistPath(place)
+        var first: String?
+        for job in candidates {
+            switch NodeAgent.placed(Data(ran.output.utf8), job: job, plistPath: path, uid: place.uid) {
+            case .success(let printed):
+                if let why = pathIsTheAgents(path, held: held) { return .notOurs(why) }
+                return .ours(printed, job)
+            case .failure(let why): first = first ?? why.description
+            }
+        }
+        return .notOurs(first ?? "launchd's print isn't the job start wrote")
+    }
+
+    /// Why `path` (launchd's, already the agent's plist's text) isn't the agent's plist file, or nil: by `lstat` (no link
+    /// followed) a regular file, the same device and inode as the descriptor `held` or the agent's plist by `lstat`.
+    func pathIsTheAgents(_ path: String, held: Int32?) -> String? {
+        var named = stat(), ours = stat()
+        guard lstat(path, &named) == 0, named.st_mode & S_IFMT == S_IFREG else { return "launchd's plist \(ConfigSeal.inert(path, limit: .max)) isn't a regular file (a link, or gone)" }
+        if let held {
+            guard fstat(held, &ours) == 0 else { return "the plist start holds can't be read" }
+        } else {
+            guard lstat(place.plistPath, &ours) == 0, ours.st_mode & S_IFMT == S_IFREG else { return "the agent's plist isn't a regular file" }
+        }
+        guard named.st_dev == ours.st_dev, named.st_ino == ours.st_ino else { return "launchd's plist isn't the agent's plist file" }
+        return nil
     }
 
     /// Why `pid` doesn't run the job's command line for `build` (`Steps.job`), or nil: exactly that, or, where it may
@@ -484,49 +548,6 @@ public struct MacAgent {
             return "pid \(pid) runs \(ConfigSeal.inert(running, limit: 512)), not the job's program \(ConfigSeal.inert(expected, limit: 512))"
         }
         return nil
-    }
-
-    /// The variables launchd adds to every job's `environment` block (measured, macOS 27.2).
-    static func launchdVariables(label: String) -> [String: String] { ["OSLogRateLimit": "64", "XPC_SERVICE_NAME": label] }
-
-    /// Why launchd's own word for the job it loaded (`print`) isn't `job`'s, or nil (the review's I1 and I2): its plist
-    /// the agent's by device and inode, its arguments, its `environment` block (the job's variables and launchd's two),
-    /// its output paths and its `properties` (`runatload` with `RunAtLoad`, never `keepalive`). A refusal only: what
-    /// accepts a host is its token.
-    func launchdRefusal(_ printed: NodeAgent.Printed, job: NodeAgent.Job) -> String? {
-        if let why = notOurs(printed) { return why.text }
-        guard printed.arguments == job.programArguments else {
-            return "launchd holds the arguments \(ConfigSeal.inert((printed.arguments ?? []).joined(separator: " "), limit: 512)), not the job's"
-        }
-        guard let shown = printed.environment else { return "launchd shows no environment for the job" }
-        let expected = job.environment.merging(Self.launchdVariables(label: job.label)) { $1 }
-        if let name = Set(shown.keys).union(expected.keys).sorted().first(where: { shown[$0] != expected[$0] }) {
-            return "launchd gives the job \(ConfigSeal.inert(name, limit: 80))=\(ConfigSeal.inert(shown[name] ?? "(none)", limit: 200)), not the job's"
-        }
-        func same(_ shown: String?, _ wanted: String) -> Bool {
-            guard let shown else { return false }
-            if shown == wanted { return true }
-            var a = stat(), b = stat()
-            return stat(shown, &a) == 0 && stat(wanted, &b) == 0 && a.st_dev == b.st_dev && a.st_ino == b.st_ino
-        }
-        guard same(printed.stdoutPath, "/dev/null"), same(printed.stderrPath, job.standardErrorPath) else {
-            return "launchd writes the job's output elsewhere (\(ConfigSeal.inert(printed.stdoutPath ?? "?", limit: 200)), \(ConfigSeal.inert(printed.stderrPath ?? "?", limit: 200)))"
-        }
-        let properties = job.atLogin ? "runatload | inferred program" : "inferred program"
-        guard printed.properties == properties else {
-            return "launchd holds the job as \(ConfigSeal.inert(printed.properties ?? "(no properties)", limit: 200)), not \(properties)"
-        }
-        return nil
-    }
-
-    /// Why a job of the label isn't this agent's, or nil: launchd loaded it from another file than the agent's
-    /// (`print`'s `path`, compared by device and inode), or from none that is there.
-    func notOurs(_ printed: NodeAgent.Printed) -> StartRefusal? {
-        // By file: launchd names the path it resolved (`/private/tmp` for `/tmp`).
-        var loaded = stat(), ours = stat()
-        if let path = printed.path, stat(path, &loaded) == 0, stat(place.plistPath, &ours) == 0,
-           loaded.st_dev == ours.st_dev, loaded.st_ino == ours.st_ino { return nil }
-        return StartRefusal("a job labelled \(place.label) is loaded from \(ConfigSeal.inert(printed.path ?? "an unknown file", limit: .max)), not \(ConfigSeal.inert(place.plistPath, limit: .max)): it was left as it is", exitCode: 77)
     }
 
     /// The host and everything it started, by pid and start: its descendants by parent links, every level, and every
@@ -577,22 +598,30 @@ public struct MacAgent {
         if lstat(place.socket, &status) == 0, status.st_mode & S_IFMT == S_IFSOCK, !listening(), steps.lockFree(place.lock) { unlink(place.socket) }
     }
 
-    /// What launchd says of the job; nil while none of the label is loaded.
+    /// What launchd says of the job read leniently, for what decides nothing (a test's look); nil while none is loaded.
     func printed() -> NodeAgent.Printed? {
         guard let ran = steps.launchctl(["print", place.target]), ran.status == 0 else { return nil }
         return NodeAgent.printed(ran.output)
     }
 
-    /// Boots the job out and waits until launchd has none of the label; why not, or nil.
+    /// Whether launchd holds no job of the label: only `print`'s measured "Could not find service" (exit 113) says so.
+    func notLoaded() -> Bool { steps.launchctl(["print", place.target])?.status == 113 }
+
+    /// Boots the job out and waits until launchd says it has none of the label; why not, or nil.
     func bootout() -> StartRefusal? {
         _ = steps.launchctl(["bootout", place.target])
         let deadline = steps.now().addingTimeInterval(steps.patience)
-        while printed() != nil {
-            guard steps.now() < deadline else { return StartRefusal("launchctl bootout \(place.target) didn't unload it", exitCode: 1) }
+        while !notLoaded() {
+            guard steps.now() < deadline else {
+                return StartRefusal("\(place.target) couldn't be unloaded: launchd still holds a job of the label after \(Int(steps.patience)) s", exitCode: 1)
+            }
             steps.pause()
         }
         return nil
     }
+
+    /// What a refusal says of its bootout: unloaded, or why it couldn't be.
+    func unloaded(_ failed: StartRefusal?) -> String { failed.map { "and the job couldn't be unloaded (\($0.text))" } ?? "the job was unloaded" }
 
     /// The plist `start` checked, its descriptor held open until the host is seen (the review's I1): the file's and its
     /// folder's facts as they were after start's own write and read-back.
@@ -640,8 +669,8 @@ public struct MacAgent {
             try? FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o755])
             guard lstat(folder, &folderStatus) == 0 else { return refused("the agent's folder \(ConfigSeal.inert(folder, limit: .max)) couldn't be made") }
         }
-        guard folderStatus.st_mode & S_IFMT == S_IFDIR, folderStatus.st_uid == place.uid, folderStatus.st_mode & 0o022 == 0 else {
-            return refused("the agent's folder \(ConfigSeal.inert(folder, limit: .max)) isn't a folder of the user's that only the user can write (a link, another owner, or writable by group or others)", 77)
+        guard folderStatus.st_mode & S_IFMT == S_IFDIR, folderStatus.st_uid == place.uid, folderStatus.st_mode & 0o022 == 0, !Self.hasACL(folder) else {
+            return refused("the agent's folder \(ConfigSeal.inert(folder, limit: .max)) isn't a folder of the user's that only the user can write (a link, another owner, writable by group or others, or an access control list)", 77)
         }
         var status = stat()
         if lstat(path, &status) != 0 {
@@ -665,9 +694,9 @@ public struct MacAgent {
             Sys.close(fd)
             return refused("the agent's file \(ConfigSeal.inert(path, limit: .max)) isn't a regular file of at most 64 KiB")
         }
-        guard file.st_uid == place.uid, file.st_mode & 0o022 == 0 else {
+        guard file.st_uid == place.uid, file.st_mode & 0o022 == 0, Platform.Files.hasExtendedACL(fd) == false else {
             Sys.close(fd)
-            return refused("the agent's file \(ConfigSeal.inert(path, limit: .max)) is another user's or writable by group or others (launchd refuses such a plist): `chmod 644` it if it is start's", 77)
+            return refused("the agent's file \(ConfigSeal.inert(path, limit: .max)) is another user's, writable by group or others (launchd refuses such a plist) or carries an access control list: `chmod 644` it if it is start's", 77)
         }
         var read = [UInt8](repeating: 0, count: Int(file.st_size) + 1)
         let got = read.withUnsafeMutableBytes { pread(fd, $0.baseAddress, $0.count, 0) }
@@ -680,11 +709,19 @@ public struct MacAgent {
         // Its folder looked at again, after the write: the same folder as checked, still a real folder of the user's.
         var after = stat()
         guard lstat(folder, &after) == 0, after.st_dev == folderStatus.st_dev, after.st_ino == folderStatus.st_ino,
-              after.st_mode & S_IFMT == S_IFDIR, after.st_uid == place.uid, after.st_mode & 0o022 == 0 else {
+              after.st_mode & S_IFMT == S_IFDIR, after.st_uid == place.uid, after.st_mode & 0o022 == 0, !Self.hasACL(folder) else {
             Sys.close(fd)
             return refused("the agent's folder \(ConfigSeal.inert(folder, limit: .max)) changed while start wrote the plist", 77)
         }
         return .success(HeldPlist(fd: fd, file: file, folder: after, bytes: bytes))
+    }
+
+    /// Whether the folder at `path` carries an extended access control list (or that can't be told): no link followed.
+    static func hasACL(_ path: String) -> Bool {
+        let fd = open(path, O_RDONLY | O_NOFOLLOW | O_DIRECTORY | O_CLOEXEC)
+        guard fd >= 0 else { return true }
+        defer { Sys.close(fd) }
+        return Platform.Files.hasExtendedACL(fd) != false
     }
 
     /// The file at `path` when it is a regular file (no link followed) of at most 64 KiB, read from the descriptor checked.

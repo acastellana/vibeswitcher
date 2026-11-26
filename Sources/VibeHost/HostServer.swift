@@ -213,7 +213,9 @@ public final class HostServer {
 
     public func start() throws {
         queue.setSpecific(key: Self.queueKey, value: true)
-        lockFD = open(config.lockPath, O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
+        // No link followed (the re-check's note 5): a link at the lock's path, dangling or not, refuses the start (ELOOP)
+        // rather than making and holding the file it names.
+        lockFD = open(config.lockPath, O_CREAT | O_RDWR | O_CLOEXEC | O_NOFOLLOW, 0o600)
         guard lockFD >= 0 else { throw Failure.lock(errno) }
         guard flock(lockFD, LOCK_EX | LOCK_NB) == 0 else {
             Sys.close(lockFD)

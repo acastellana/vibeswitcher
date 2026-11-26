@@ -79,7 +79,10 @@ enum MacAgentCommand {
                                           // is a refusal: no bootout then.
                                           server: {
                                               switch NodeClient.connect(context) {
-                                              case .failure(let failure): return .none(failure.message)
+                                              // Only nothing listening is no server (the re-check's note 6).
+                                              case .failure(.notRunning(let why)): return MacAgent.serverSeen(.noListener(why))
+                                              case .failure(.refused(let why)): return MacAgent.serverSeen(.notTheServer(why))
+                                              case .failure(.broken(let why)): return MacAgent.serverSeen(.noHello(why))
                                               case .success(let client):
                                                   switch client.read(WireKinds.Status.self, WireNoArgs()) {
                                                   case .failure(let failure):
