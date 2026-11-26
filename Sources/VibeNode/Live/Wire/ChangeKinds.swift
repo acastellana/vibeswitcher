@@ -665,32 +665,48 @@ extension WireKinds {
 
     public enum SessionReply: WireChangeKind {
         public static let kind = "session.reply"
+        /// `choice` (one option's number, from 1) answers a single choice; `choices` (the options' numbers, from 1, each
+        /// once: every box to be ticked when it is submitted) answers a multi-select (the no-terminal inventory's C5,
+        /// 2026-11-26). One of the two, never both.
         public struct Args: WireArgs, Equatable {
             public var session: String?
             public var choice: Int?
+            public var choices: [Int]?
             public var text: String?
             public var question: String?
             public var options: [String]?
-            public enum CodingKeys: String, CodingKey, CaseIterable { case session, choice, text, question, options }
-            public init(session: String?, choice: Int?, text: String? = nil, question: String?, options: [String]?) {
+            public enum CodingKeys: String, CodingKey, CaseIterable { case session, choice, choices, text, question, options }
+            public init(session: String?, choice: Int?, choices: [Int]? = nil, text: String? = nil, question: String?, options: [String]?) {
                 self.session = session
                 self.choice = choice
+                self.choices = choices
                 self.text = text
                 self.question = question
                 self.options = options
             }
         }
+        /// A single choice's reply has `choice` and `option`; a multi-select's `choices` and `options` (the ticked rows'
+        /// words as its screen showed them, a free-text row's the words typed), in the options' order.
         public struct Result: Codable, Sendable, Equatable {
             public var session: String?
             public var terminal: String?
             public var choice: Int?
             public var option: String?
+            public var choices: [Int]?
+            public var options: [String]?
             public var question: String?
             public init(session: String, terminal: String, choice: Int, option: String, question: String) {
                 self.session = session
                 self.terminal = terminal
                 self.choice = choice
                 self.option = option
+                self.question = question
+            }
+            public init(session: String, terminal: String, choices: [Int], options: [String], question: String) {
+                self.session = session
+                self.terminal = terminal
+                self.choices = choices
+                self.options = options
                 self.question = question
             }
         }

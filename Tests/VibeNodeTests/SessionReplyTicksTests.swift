@@ -14,7 +14,7 @@ struct SessionReplyTicksTests {
     struct Model {
         var labels = ["Cream", "Nuts", "Sprinkles"]
         var checked: Set<Int> = [0]
-        var focus = 3
+        var focus = 4
         var typed = ""
         var submitted: [String]?
         var rows: Int { labels.count + 1 }
@@ -81,14 +81,14 @@ struct SessionReplyTicksTests {
     @Test func aValidSetLeavesExactlyThoseTickedAndSubmits() throws {
         var model = Model()
         let menu = try #require(model.menu)
-        let plan = try plan(model, [2, 4], text: "Honey")
-        #expect(plan.ticked == [1, 3] && plan.words == ["Nuts", "Honey"])
+        let planned = try plan(model, [2, 4], text: "Honey")
+        #expect(planned.ticked == [1, 3] && planned.words == ["Nuts", "Honey"])
         // Up four from Submit to Cream, Enter; down to Nuts, Enter; down two, the words; down to Submit, Enter.
         let up: [UInt8] = [27, 91, 65], down: [UInt8] = [27, 91, 66]
-        #expect(plan.writes.map(\.bytes) == [up, up, up, up, [13], down, [13], down, down, Array("Honey".utf8), down, [13]])
-        #expect(plan.checks == [4: .init(cursor: 0, ticks: [true, false, false, false]), 6: .init(cursor: 1, ticks: [false, false, false, false]),
+        #expect(planned.writes.map(\.bytes) == [up, up, up, up, [13], down, [13], down, down, Array("Honey".utf8), down, [13]])
+        #expect(planned.checks == [4: .init(cursor: 0, ticks: [true, false, false, false]), 6: .init(cursor: 1, ticks: [false, false, false, false]),
                                 9: .init(cursor: 3, ticks: [false, true, false, false]), 11: .init(cursor: 4, ticks: [false, true, false, true])])
-        let ran = model.run(plan, from: menu)
+        let ran = model.run(planned, from: menu)
         #expect(ran && model.submitted == ["Nuts", "Honey"])
         // Choices already ticked as asked: only the arrows to Submit and its Enter.
         var ticked = Model()

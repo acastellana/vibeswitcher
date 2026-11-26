@@ -99,11 +99,15 @@ extension Requests {
             let how = args["hours"]?.int.map { "for \($0) hours" } ?? text("for").map { ConfigSeal.inert($0, limit: 30) } ?? ""
             return .success(("pause the reminders of \(sessionLabel(session)) \(how)".trimmingCharacters(in: .whitespaces), nil))
         case "session.reply":
-            guard let session = text("session"), let choice = args["choice"]?.int else {
+            let several = args["choices"]?.array?.compactMap(\.int) ?? []
+            guard let session = text("session"), args["choice"]?.int != nil || !several.isEmpty else {
                 return .failure(.init(why: "session.reply needs a session and a choice: nothing was asked"))
             }
             let typed = text("text").map { " with the words \(whole($0))" } ?? ""
-            return .success(("answer \(sessionLabel(session))'s question with option \(choice)\(typed)", nil))
+            if let choice = args["choice"]?.int {
+                return .success(("answer \(sessionLabel(session))'s question with option \(choice)\(typed)", nil))
+            }
+            return .success(("answer \(sessionLabel(session))'s question by ticking options \(several.map(String.init).joined(separator: ", "))\(typed)", nil))
         case "tell.retract":
             guard let action = text("action") else { return .failure(.init(why: "tell.retract needs the tell's action: nothing was asked")) }
             return .success(("take back your message (action \(ConfigSeal.inert(action, limit: 40))) before the lead has it", nil))

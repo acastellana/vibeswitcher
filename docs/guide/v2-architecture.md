@@ -223,7 +223,7 @@ taken on the Unix socket.
 | `session.presets` | anyone of the uid |  |  |  | `Requests.act` |  | `WireKinds.Presets` |  |  |  |
 | `session.rename` | the user's terminal | yes | yes |  | `Requests.act` | `name`, `session` | `WireKinds.SessionRename` | its result; done again |  | yes |
 | `session.reopen` | the user's terminal | yes | yes |  | `Requests.act` | `all`, `forget`, `sessions` | `WireKinds.SessionReopen` | its result |  | yes |
-| `session.reply` | the user's terminal | yes | yes |  | `Requests.act` | `choice`, `options`, `question`, `session`, `text` | `WireKinds.SessionReply` | its result |  | yes |
+| `session.reply` | the user's terminal | yes | yes |  | `Requests.act` | `choice`, `choices`, `options`, `question`, `session`, `text` | `WireKinds.SessionReply` | its result |  | yes |
 | `session.resume` | the user's terminal | yes | yes |  | `Requests.act` | `session` | `WireKinds.SessionResume` | its result; done again |  | yes |
 | `session.usage` | anyone of the uid |  |  |  | the live hub |  | the page's (WireSchema) |  |  |  |
 | `set` | the user's terminal | yes | yes |  | `Requests.act` | `folder`, `key`, `value` | `WireKinds.SetSetting` | its result; done again |  | yes |

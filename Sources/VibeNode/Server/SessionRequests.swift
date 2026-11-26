@@ -310,9 +310,24 @@ extension Requests {
     /// (`cursorReaches`), else the unit stops there, nothing chosen. Refused, nothing typed: a session the host didn't start, a shell, no question on its
     /// screen, a question or options other than those shown, a choice it hasn't, a multi-select (its boxes are
     /// ticked one by one: answer it in its terminal), and words for an option that takes none (or none for one that
-    /// does).
+    /// does). With `choices` in place of `choice` (the no-terminal inventory's C5, 2026-11-26): a multi-select's boxes,
+    /// each the screen offers named once, ticked and submitted (`replyTicks`); a single choice is refused them, and a
+    /// multi-select `choice`.
     func replySession(_ request: NodeWire.Request, reply: @escaping (NodeWire.Reply) -> Void) {
-        guard let choice = request.args?["choice"]?.int, choice >= 1 else {
+        var several: [Int]?
+        if let given = request.args?["choices"] {
+            guard request.args?["choice"] == nil else {
+                return reply(.init(re: request.id, error: .init(.badArgs, "session.reply takes choice or choices, not both")))
+            }
+            guard let list = given.array, list.allSatisfy({ $0.int != nil }) else {
+                return reply(.init(re: request.id, error: .init(.badArgs, "session.reply's choices are a list of options' numbers from 1")))
+            }
+            let numbers = list.compactMap(\.int)
+            if let why = SessionReplyTicks.badChoices(numbers) { return reply(.init(re: request.id, error: .init(.badArgs, why))) }
+            several = numbers
+        }
+        let choice = request.args?["choice"]?.int ?? 0
+        guard several != nil || choice >= 1 else {
             return reply(.init(re: request.id, error: .init(.badArgs, "session.reply needs choice, an option's number from 1")))
         }
         let text = request.args?["text"]?.string.flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 }
@@ -342,7 +357,14 @@ extension Requests {
                     return refuse("its options aren't the ones you were shown; they are now: "
                                   + ConfigSeal.inert(menu.options.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: "; "), limit: 400))
                 }
-                guard !menu.multiSelect else { return refuse("its question takes several ticks: answer it in the session's terminal") }
+                if let several {
+                    return Self.replyTicks(menu, choices: several, text: text, session: session, link: link, note: note, refuse: refuse) { result in
+                        reply(.init(re: request.id, typed: result))
+                    } badArgs: { why in
+                        reply(.init(re: request.id, error: .init(.badArgs, why)))
+                    }
+                }
+                guard !menu.multiSelect else { return refuse("its question takes several ticks: give them as choices") }
                 let index = choice - 1
                 guard menu.options.indices.contains(index) else {
                     return refuse("its question has \(menu.options.count) options, not \(choice)")
@@ -393,6 +415,62 @@ extension Requests {
 }
 
 extension Requests {
+    /// `session.reply`'s `choices` on `menu` (a multi-select, read off the session's screen and checked to be the one
+    /// shown): `SessionReplyTicks.plan`'s keys as one unit of the host's, its first key only while the screen still shows
+    /// `menu` as it was, and each of its checked keys only once the screen shows its cursor and ticks (`screenShows`),
+    /// else the unit stops there and nothing is submitted. On the link's queue.
+    static func replyTicks(_ menu: ScreenMenu, choices: [Int], text: String?, session: HostSession, link: HostLink,
+                           note: @escaping (String) -> Void, refuse: @escaping (String) -> Void,
+                           done: @escaping (WireKinds.SessionReply.Result) -> Void, badArgs: @escaping (String) -> Void) {
+        let plan: SessionReplyTicks.Plan
+        switch SessionReplyTicks.plan(menu, choices: choices, text: text) {
+        case .failure(let refusal): return refusal.badArgs ? badArgs(refusal.why) : refuse(refusal.why)
+        case .success(let made): plan = made
+        }
+        let short = String(session.id.uuidString.lowercased().prefix(8))
+        let stopped = Locked<String?>(nil)
+        link.type(plan.writes, into: session.id, gate: { step, go in
+            if step == 0 {
+                return link.screen(session.id) { now in
+                    guard let now, SessionPrompt.menu(on: now) == menu else {
+                        stopped.set("its question changed or was answered meanwhile: nothing typed")
+                        return go(false)
+                    }
+                    go(true)
+                }
+            }
+            guard let check = plan.checks[step] else { return go(true) }
+            Self.screenShows(of: menu, in: session.id, link: link, since: Platform.Clock.steadyDate(), {
+                SessionReplyTicks.shows($0, check, of: menu)
+            }) { shown in
+                if !shown {
+                    stopped.set(check.cursor == menu.options.count
+                                ? "its boxes didn't show the ticks asked before Submit (a key lost?): nothing submitted, answer again"
+                                : "the cursor didn't reach option \(check.cursor + 1) with its ticks as expected (a key lost?): nothing submitted, answer again")
+                }
+                go(shown)
+            }
+        }, confirmed: { typed in
+            let numbers = plan.ticked.map { $0 + 1 }
+            note("session.reply to session \(short): \(typed ? "options \(numbers.map(String.init).joined(separator: ", ")) ticked and submitted" : "not submitted: \(stopped.get() ?? "the host didn't take it")")")
+            guard typed else { return refuse(stopped.get() ?? "the host didn't take all of the keys: the answer may not have gone in") }
+            done(.init(session: NodeIds.session(host: session.id), terminal: session.tty, choices: numbers, options: plan.words, question: menu.question))
+        })
+    }
+
+    /// Reads `id`'s screen until its question (`menu`'s) shows what `wanted` asks (`done(true)`), or `replyCursorWait`
+    /// passes (`done(false)`).
+    static func screenShows(of menu: ScreenMenu, in id: UUID, link: HostLink, since: Date, _ wanted: @escaping (ScreenMenu?) -> Bool,
+                            done: @escaping (Bool) -> Void) {
+        link.screen(id) { screen in
+            if wanted(screen.flatMap(SessionPrompt.menu(on:))) { return done(true) }
+            guard Platform.Clock.steadyDate().timeIntervalSince(since) < replyCursorWait else { return done(false) }
+            link.queue.asyncAfter(deadline: .now() + replyCursorEvery) {
+                screenShows(of: menu, in: id, link: link, since: since, wanted, done: done)
+            }
+        }
+    }
+
     /// How long `session.reply` waits for the screen to show its arrows' cursor on the option, and how often it looks.
     static let replyCursorWait: TimeInterval = 5
     static let replyCursorEvery: TimeInterval = 0.1
