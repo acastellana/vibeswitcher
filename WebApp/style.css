@@ -858,7 +858,7 @@ textarea.answer-input { max-height: 200px; line-height: var(--lh-body); resize: 
 .start-actions .copy-line { width: 100%; }
 .start-actions > .confirm-note { margin: 0; }
 @media (max-width: 760px) {
-  .start-row { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  .start-row { grid-template-columns: minmax(0, 1fr); gap: var(--s-3); }
   .start-label { padding-top: 0; }
   .start-row > .preset-about { grid-column: 1; margin: 0; }
   .start-actions { padding-left: 0; }
@@ -1050,32 +1050,32 @@ kbd { padding: 1px var(--s-3); border-radius: var(--r-1); box-shadow: var(--e-1-
     --t-caption: 12.5px; --t-body: 15px; --t-read: 16px; --t-title: 16px; --t-heading: 18px; --t-code: 13px;
     --lh-read: 1.5;
   }
-  .segment { padding: 0 18px; }
+  .segment { padding: 0 var(--s-6); }
 
-  .head { gap: 8px; padding: calc(8px + env(safe-area-inset-top)) 12px 8px; flex-wrap: wrap; }
-  .head .back { display: inline-flex; margin-left: -4px; }
+  .head { gap: var(--s-4); padding: calc(var(--s-4) + env(safe-area-inset-top)) var(--s-5) var(--s-4); flex-wrap: wrap; }
+  .head .back { display: inline-flex; margin-left: calc(var(--s-2) * -1); }
   .head-agent, .head-place { display: none; }
   .head-line { flex-direction: column; gap: 0; }
   .head .segmented { order: 3; width: 100%; }
   .head .segment { flex: 1; }
   .head-title { max-width: 100%; }
-  .strip { padding: 8px 14px; }
+  .strip { padding: var(--s-4) var(--s-6); }
   .chat-scroll { scrollbar-gutter: auto; }
-  .chat-column { padding: 16px 14px 8px; }
-  .chat-row.prompt { padding-left: 36px; }
+  .chat-column { padding: var(--s-6) var(--s-6) var(--s-4); }
+  .chat-row.prompt { padding-left: var(--s-8); }
   .chat-row.reply { grid-template-columns: var(--s-7) minmax(0, 1fr); }
-  .chat-row.tools, .chat-live { padding-left: 26px; }
+  .chat-row.tools, .chat-live { padding-left: var(--s-7); }
   .chat-row.team { grid-template-columns: var(--s-7) minmax(0, 1fr) auto; }
   .ask-row { margin-left: 0; }
-  .composer { padding: 6px 12px calc(10px + env(safe-area-inset-bottom)); }
-  .composer-hint { padding-bottom: calc(14px + env(safe-area-inset-bottom)); }
-  .latest { right: 14px; }
-  .card { padding: 14px 14px 12px; }
+  .composer { padding: var(--s-3) var(--s-5) calc(var(--s-4) + var(--s-1) + env(safe-area-inset-bottom)); }
+  .composer-hint { padding-bottom: calc(var(--s-6) + env(safe-area-inset-bottom)); }
+  .latest { right: var(--s-6); }
+  .card { padding: var(--s-5) var(--s-5); }
   .facts dl { grid-template-columns: minmax(0, 1fr); gap: 0; }
-  .facts dd { margin-bottom: 6px; }
-  .option { padding: 11px 12px; }
-  .answer-input { padding: 9px 11px; font-size: var(--t-field-touch); }
-  .node-column { padding: 18px 16px 40px; }
+  .facts dd { margin-bottom: var(--s-3); }
+  .option { padding: var(--s-5) var(--s-5); }
+  .answer-input { padding: var(--s-4) var(--s-4); font-size: var(--t-field-touch); }
+  .node-column { padding: var(--s-6) var(--s-6) var(--s-8); }
   /* The inspector: a sheet from the foot of the screen, over everything, its tabs across its top. */
   .inspector, .inspector-sheet .inspector {
     position: fixed; top: auto; left: 0; z-index: 7; width: auto; height: min(78dvh, 640px); padding-bottom: env(safe-area-inset-bottom);
@@ -1083,14 +1083,14 @@ kbd { padding: 1px var(--s-3); border-radius: var(--r-1); box-shadow: var(--e-1-
   }
   .inspector.shown { transform: none; }
   .inspect-scrim { position: fixed; z-index: 6; }
-  .inspect-top { justify-content: flex-start; padding: 12px 50px 6px 12px; }
+  .inspect-top { justify-content: flex-start; padding: var(--s-5) calc(var(--ctl-touch) + var(--s-3)) var(--s-3) var(--s-5); }
   .inspect-top .segmented { flex: 1; }
-  .inspect-top .segment { flex: 1; padding: 0 8px; }
-  .inspect-row { grid-template-columns: 96px minmax(0, 1fr); padding: 5px 20px; }
-  .inspect-says, .inspect-note, .inspect-notice, .ledger { padding-left: 20px; padding-right: 20px; }
-  .task-link { padding: 9px 12px; }
+  .inspect-top .segment { flex: 1; padding: 0 var(--s-4); }
+  .inspect-row { grid-template-columns: 96px minmax(0, 1fr); padding: var(--s-2) var(--s-6); }
+  .inspect-says, .inspect-note, .inspect-notice, .ledger { padding-left: var(--s-6); padding-right: var(--s-6); }
+  .task-link { padding: var(--s-4) var(--s-5); }
   .fact { grid-template-columns: 130px minmax(0, 1fr); }
-  .palette { padding-top: calc(10px + env(safe-area-inset-top)); }
+  .palette { padding-top: calc(var(--s-4) + env(safe-area-inset-top)); }
 }
 
 /* A phone's own (the session's 760 px block under this): Actions… as three dots, Terminal | Chat as one button. Hidden wider. */
@@ -1100,29 +1100,29 @@ kbd { padding: 1px var(--s-3); border-radius: var(--r-1); box-shadow: var(--e-1-
    button only where the node gives a terminal, Actions… as three dots, the inspector); the messages waiting to go in
    and the draft over the box a line each, opening at a touch; the chat gets the rest. ---- */
 @media (max-width: 760px) {
-  .session .head { flex-wrap: nowrap; gap: 0; padding: calc(4px + env(safe-area-inset-top)) 4px 4px; }
+  .session .head { flex-wrap: nowrap; gap: 0; padding: calc(var(--s-2) + env(safe-area-inset-top)) var(--s-2) var(--s-2); }
   .session .head .back { margin-left: 0; }
-  .session .head-text { padding: 0 4px 0 2px; }
+  .session .head-text { padding: 0 var(--s-2) 0 var(--s-1); }
   .session .head .segmented { display: none; }
   .session:not(.no-terminal) .pane-toggle { display: inline-flex; }
   .session .end-button { padding: 0; background: none; box-shadow: none; color: var(--ink-2); }
   .session .end-button > .icon { display: block; }
   .session .end-button > .end-words { display: none; }
-  .composer-draft.queued:not(.open) { display: flex; align-items: baseline; gap: 8px; cursor: pointer; }
+  .composer-draft.queued:not(.open) { display: flex; align-items: baseline; gap: var(--s-4); padding-top: var(--s-5); padding-bottom: var(--s-5); cursor: pointer; }
   .composer-draft.queued:not(.open) > .confirm-label { flex: 0 1 auto; max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .composer-draft.queued:not(.open) > .queued-list { flex: 1; min-width: 0; padding-left: 0; list-style: none; }
   .composer-draft.queued:not(.open) > .queued-list > li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .composer-draft.queued:not(.open) > .queued-list > li + li { display: none; }
   /* The draft folded: its label with Edit and Discard over its words (what Send will do stays said), the words one line
      with Send beside them. */
-  .composer-draft:not(.queued):not(.open):has(.session-send) { grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 0 10px; padding: 2px 4px 4px 12px; cursor: pointer; }
+  .composer-draft:not(.queued):not(.open):has(.session-send) { grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 0 var(--s-4); padding: var(--s-1) var(--s-2) var(--s-2) var(--s-5); cursor: pointer; }
   .composer-draft:not(.queued):not(.open):has(.session-send) > .confirm-head { grid-row: 1; grid-column: 1 / -1; }
   .composer-draft:not(.queued):not(.open):has(.session-send) > .confirm-text { grid-row: 2; grid-column: 1; -webkit-line-clamp: 1; }
   .composer-draft:not(.queued):not(.open):has(.session-send) > div:not(.confirm-head) { grid-row: 2; grid-column: 2; }
   .composer-draft.open { cursor: pointer; }
   .composer-draft.open .confirm-text { -webkit-line-clamp: 8; }
   /* A session's sent answer: its arrow beside its words, the Undo's touch room around the line, not in it. */
-  .card-closed .card-undo { margin-block: -12px; }
+  .card-closed .card-undo { margin-block: calc(var(--s-5) * -1); }
 }
 
 /* ---- A card on a page that only reads: its options as text, and the line that answers it in a terminal ---- */
@@ -1717,16 +1717,16 @@ kbd { padding: 1px var(--s-3); border-radius: var(--r-1); box-shadow: var(--e-1-
   .app[data-drawer="left"] .drawer-scrim, .app[data-drawer="right"] .drawer-scrim { display: block; position: fixed; inset: 0; z-index: 7; background: var(--scrim); }
   .phone-only { display: inline-flex; }
   .app:not(.with-right) .team-button { display: none; }
-  .centre-head { flex-wrap: wrap; gap: 8px 10px; padding: calc(8px + env(safe-area-inset-top)) 12px 8px; }
+  .centre-head { flex-wrap: wrap; gap: var(--s-4) var(--s-4); padding: calc(var(--s-4) + env(safe-area-inset-top)) var(--s-5) var(--s-4); }
   .centre-head .grow { display: none; }
   .head-words { flex: 1 1 60%; flex-direction: column; gap: 0; }
   .team-button { order: 3; }
   .centre-head .segmented { order: 4; width: 100%; }
-  .centre-head .segment { flex: 1; padding: 4px 6px; line-height: var(--lh-caption); text-align: center; white-space: normal; }
+  .centre-head .segment { flex: 1; padding: var(--s-2) var(--s-3); line-height: var(--lh-caption); text-align: center; white-space: normal; }
   .dial { order: 5; }
-  .team-strip, .talk, .composer-lead, .quiet-block { padding-left: 14px; padding-right: 14px; }
+  .team-strip, .talk, .composer-lead, .quiet-block { padding-left: var(--s-6); padding-right: var(--s-6); }
   .quiet-words { display: none; }
-  .composer-lead { flex-wrap: wrap; gap: 6px; }
+  .composer-lead { flex-wrap: wrap; gap: var(--s-3); }
   .to { width: 100%; }
   .line { font-size: var(--t-body); }
   .mine { max-width: 90%; }
@@ -1737,16 +1737,16 @@ kbd { padding: 1px var(--s-3); border-radius: var(--r-1); box-shadow: var(--e-1-
   .col.dated .track { grid-column: 1 / -1; grid-row: 2; }
   .axis-row { grid-template-columns: 0 minmax(0, 1fr) 0 0; gap: 0; padding-left: 0; }
   .road-note { grid-column: 1 / -1; }
-  .screen-col { padding: 14px 14px 40px; }
-  .sheet { width: 100%; padding: calc(20px + env(safe-area-inset-top)) 18px 32px; }
+  .screen-col { padding: var(--s-6) var(--s-6) var(--s-8); }
+  .sheet { width: 100%; padding: calc(var(--s-6) + env(safe-area-inset-top)) var(--s-6) var(--s-8); }
   .tdet { margin-left: 0; }
   /* A banner over the header takes the screen's top inset; the header under it doesn't take it twice. */
-  .centre-wrap > .offline { padding-top: calc(7px + env(safe-area-inset-top)); }
-  .centre-wrap:has(> .offline:not([hidden])) :is(.centre-head, .head, .tc-head, .tc-dhead) { padding-top: 8px; }
+  .centre-wrap > .offline { padding-top: calc(var(--s-3) + env(safe-area-inset-top)); }
+  .centre-wrap:has(> .offline:not([hidden])) :is(.centre-head, .head, .tc-head, .tc-dhead) { padding-top: var(--s-4); }
   /* A note waits in the left column (the connection dropped): a dot on the button that opens it, laid over its corner. */
   :is(.centre-head, .tc-head, .head) > :is(.phone-only, .back):first-child { position: relative; }
   .app.has-note :is(.centre-head, .tc-head, .head) > :is(.phone-only, .back):first-child::after {
-    content: ""; position: absolute; top: 8px; right: 8px; width: 7px; height: 7px; border-radius: 50%; background: var(--ink-3);
+    content: ""; position: absolute; top: var(--s-4); right: var(--s-4); width: 7px; height: 7px; border-radius: 50%; background: var(--ink-3);
   }
 }
 
@@ -1756,8 +1756,8 @@ kbd { padding: 1px var(--s-3); border-radius: var(--r-1); box-shadow: var(--e-1-
    above the screen's foot, one row. With the keyboard up (app.js's `keyboard`) only the header, the scroll and the box. */
 @media (max-width: 760px) {
   .project-view .centre-head {
-    position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr) auto 44px; align-items: center; gap: 4px 6px; height: auto;
-    padding: calc(4px + env(safe-area-inset-top)) 6px 8px 4px;
+    position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr) auto 44px; align-items: center; gap: var(--s-2) var(--s-3); height: auto;
+    padding: calc(var(--s-2) + env(safe-area-inset-top)) var(--s-3) var(--s-4) var(--s-2);
   }
   .project-view .centre-head > :first-child { grid-row: 1; grid-column: 1; }
   .project-view .centre-head .big { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
@@ -1766,36 +1766,36 @@ kbd { padding: 1px var(--s-3); border-radius: var(--r-1); box-shadow: var(--e-1-
   .project-view .centre-head > .head-count:not([hidden]) { grid-row: 1; grid-column: 3; justify-self: end; display: inline-flex; }
   .project-view .centre-head .team-button { grid-row: 1; grid-column: 4; justify-self: end; }
   .project-view .centre-head .grow { display: none; }
-  .project-view .centre-head > .segmented:not(.dial) { grid-row: 2; grid-column: 1 / 3; justify-self: start; width: auto; margin-left: 8px; padding: 2px; }
-  .project-view .centre-head > .segmented:not(.dial) .segment { flex: none; padding: 0 14px; border-radius: calc(var(--r-2) - 2px); white-space: nowrap; }
+  .project-view .centre-head > .segmented:not(.dial) { grid-row: 2; grid-column: 1 / 3; justify-self: start; width: auto; margin-left: var(--s-4); padding: var(--s-1); }
+  .project-view .centre-head > .segmented:not(.dial) .segment { flex: none; padding: 0 var(--s-6); border-radius: calc(var(--r-2) - 2px); white-space: nowrap; }
   .project-view .centre-head.dial-folded > .dial-fold:not([hidden]) { grid-row: 2; grid-column: 2 / 5; justify-self: end; height: auto; min-height: var(--ctl-touch); }
-  .project-view .centre-head.dial-folded > .dial { right: 6px; }
+  .project-view .centre-head.dial-folded > .dial { right: var(--s-3); }
   .project-view .centre-head.dial-folded > .dial .segment { min-height: var(--ctl-touch); }
-  .project-view .team-strip { position: relative; flex-wrap: wrap; align-content: flex-start; gap: 0 14px; max-height: 44px; padding: 0 44px 0 14px; overflow: hidden; cursor: pointer; }
+  .project-view .team-strip { position: relative; flex-wrap: wrap; align-content: flex-start; gap: 0 var(--s-6); max-height: 44px; padding: 0 var(--ctl-touch) 0 var(--s-6); overflow: hidden; cursor: pointer; }
   .project-view .team-strip > :not(.strip-fold) { display: inline-flex; align-items: center; height: 44px; }
-  .project-view .team-strip.open { max-height: none; padding-top: 7px; padding-bottom: 7px; }
+  .project-view .team-strip.open { max-height: none; padding-top: var(--s-3); padding-bottom: var(--s-3); }
   .project-view .team-strip.open > :not(.strip-fold) { height: 30px; }
   .project-view .strip-fold:not([hidden]) { position: absolute; top: 0; right: 0; display: inline-flex; align-items: center; justify-content: center; width: var(--ctl-touch); height: var(--ctl-touch); color: var(--ink-2); }
   .strip-fold .icon { transform: rotate(90deg); transition: transform var(--dur-2) var(--ease-out); }
   .team-strip.open .strip-fold .icon { transform: rotate(-90deg); }
-  .project-view .centre-scroll > .talk { padding: 12px 14px 16px; }
-  .project-view .centre-scroll > .wait-box { order: -1; padding: 10px 14px 14px; border-top: 0; border-bottom: 1px solid var(--line); }
-  .project-view .centre-scroll > .wait-box .asked-title { margin-top: 2px; }
+  .project-view .centre-scroll > .talk { padding: var(--s-5) var(--s-6) var(--s-6); }
+  .project-view .centre-scroll > .wait-box { order: -1; padding: var(--s-4) var(--s-6) var(--s-6); border-top: 0; border-bottom: 1px solid var(--line); }
+  .project-view .centre-scroll > .wait-box .asked-title { margin-top: var(--s-1); }
   .project-view.show-asks .centre-scroll > .wait-box { border-bottom: 0; }
-  .project-view .composer-lead { flex-wrap: nowrap; gap: 8px; padding: 8px 12px calc(8px + env(safe-area-inset-bottom)); }
+  .project-view .composer-lead { flex-wrap: nowrap; gap: var(--s-4); padding: var(--s-4) var(--s-5) calc(var(--s-4) + env(safe-area-inset-bottom)); }
   .project-view .composer-lead:has(> .to.no-lead) { flex-wrap: wrap; }
   .project-view .composer-lead > .to:not(.no-lead) { display: none; }
   /* The keyboard up: the header, what scrolls and the box; the rows that choose what shows wait for it to go down. */
   .app.keyboard { height: var(--vv-height, 100dvh); transform: translateY(var(--vv-top, 0px)); }
   .app.keyboard .project-view :is(.team-strip, .dial-fold, .centre-head > .segmented) { display: none; }
   /* The load's skeleton in the phone's shape: the header's two rows within the width, the gutters a phone's. */
-  :is(.skeleton-head, .skeleton-strip, .skeleton-composer) { padding-left: 14px; padding-right: 14px; }
+  :is(.skeleton-head, .skeleton-strip, .skeleton-composer) { padding-left: var(--s-6); padding-right: var(--s-6); }
   /* Its rows the real header's: a fingertip, then the switch in its track (2 px round it), so the content arrives
      without a jump (109 px at 390). */
   .skeleton-head { display: grid; grid-template-rows: var(--ctl-touch) calc(var(--ctl-touch) + var(--s-1) * 2); gap: var(--s-2); height: auto; padding-top: calc(var(--s-2) + env(safe-area-inset-top)); padding-bottom: var(--s-4); }
   .frame-skeleton .bone:is(.skeleton-switch, .skeleton-dial) { height: var(--ctl-touch); }
   .skeleton-head > .skeleton-row { display: flex; }
-  .skeleton-lines { padding: 16px 14px; }
+  .skeleton-lines { padding: var(--s-6) var(--s-6); }
   .frame-skeleton .bone.skeleton-title { width: 50%; }
   .frame-skeleton .bone.skeleton-switch { width: 30%; }
   .frame-skeleton .bone.skeleton-dial { width: 100%; }
@@ -1906,21 +1906,21 @@ mark.found { padding: 0 1px; border-radius: var(--r-1); background: var(--highli
   .twocol { grid-template-columns: minmax(0, 1fr); }
   .twocol[data-pane="list"] > .tc-detail, .twocol[data-pane="detail"] > .tc-list { display: none; }
   .tc-list { border-right: 0; }
-  .tc-head { padding: calc(8px + env(safe-area-inset-top)) 8px 8px 12px; gap: 6px; }
-  .tc-head .phone-only { margin-right: 2px; }
-  .tc-find { margin: 10px 12px 4px; }
+  .tc-head { padding: calc(var(--s-4) + env(safe-area-inset-top)) var(--s-4) var(--s-4) var(--s-5); gap: var(--s-3); }
+  .tc-head .phone-only { margin-right: var(--s-1); }
+  .tc-find { margin: var(--s-4) var(--s-5) var(--s-2); }
   .tc-find .tc-key { display: none; }
-  .tc-search { padding: 8px 0; }
-  .tc-rows { padding: 4px 6px 16px; }
+  .tc-search { padding: var(--s-4) 0; }
+  .tc-rows { padding: var(--s-2) var(--s-3) var(--s-6); }
   .tc-row { min-height: 44px; }
   .tc-back { display: inline-flex; }
-  .tc-dhead { padding: calc(8px + env(safe-area-inset-top)) 12px 8px; }
-  .tc-dtop { padding: 8px 14px; }
+  .tc-dhead { padding: calc(var(--s-4) + env(safe-area-inset-top)) var(--s-5) var(--s-4); }
+  .tc-dtop { padding: var(--s-4) var(--s-6); }
   .node-verdict-words { white-space: normal; }
   .tc-dwords { flex-direction: column; gap: 0; }
-  .tc-dbody { padding: 16px 14px 40px; }
+  .tc-dbody { padding: var(--s-6) var(--s-6) var(--s-8); }
   /* A fact's name over its value: the value gets the screen's width, its mark beside its words. */
-  .tc-dbody .fact { grid-template-columns: minmax(0, 1fr); gap: 0; padding: 5px 0; }
+  .tc-dbody .fact { grid-template-columns: minmax(0, 1fr); gap: 0; padding: var(--s-2) 0; }
   .tc-dbody .fact dt { font-size: var(--t-caption); }
   .tc-dbody .fact dd { flex-wrap: nowrap; align-items: baseline; }
 }
@@ -1932,7 +1932,7 @@ main.centre-wrap[tabindex="-1"]:focus { outline: none; }
    with their words tappable; text boxes at 16 px, under which a phone's browser zooms the page on focus. ---- */
 @media (hover: none) and (pointer: coarse) {
   .icon-button, .row-action, .send, .composer-attach, .task-more { width: var(--ctl-touch); height: var(--ctl-touch); min-width: var(--ctl-touch); }
-  .head .back, .tc-back { margin-left: -12px; }
+  .head .back, .tc-back { margin-left: calc(var(--s-5) * -1); }
   .segment, .inspect-top .segment { display: inline-flex; align-items: center; justify-content: center; min-width: var(--ctl-touch); min-height: var(--ctl-touch); }
   .button, .button.small, .button.quiet, .copy-button, .confirm-clear, .link, .summary-brief, .summary-count, .take-back, .fold, .code-run,
   .offer button, .attach-choice, .send-way, .road-band-toggle, .brand {
@@ -1942,12 +1942,12 @@ main.centre-wrap[tabindex="-1"]:focus { outline: none; }
   .send-way { display: grid; align-content: center; }
   .records-row > summary, .records-earlier > summary, .facts-files summary, .card-terminal > summary { display: flex; align-items: center; min-height: var(--ctl-touch); }
   .place, .project, .tc-row, .palette-row, .suggestion, .option, .task-link { min-height: var(--ctl-touch); }
-  label:has(> input[type="checkbox"]) { display: flex; align-items: center; gap: 10px; min-height: var(--ctl-touch); }
+  label:has(> input[type="checkbox"]) { display: flex; align-items: center; gap: var(--s-4); min-height: var(--ctl-touch); }
   input[type="checkbox"] { flex: none; width: var(--ctl-s); height: var(--ctl-s); margin: 0; }
   :is(textarea, select, input:not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="range"])) { min-height: var(--ctl-touch); font-size: var(--t-field-touch); }
-  .send-menu { gap: 4px; }
+  .send-menu { gap: var(--s-2); }
   .left-summary { gap: 0; }
-  .tc-links { gap: 0 14px; }
+  .tc-links { gap: 0 var(--s-5); }
   .left-summary .bone:is(.brief-bone, .acts-bone) { height: var(--ctl-touch); }
   .acts-row { min-height: var(--ctl-touch); }
 }

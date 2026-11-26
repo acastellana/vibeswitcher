@@ -208,7 +208,7 @@ test('D16: a setting the node keeps to a terminal shows no control but Change an
   reading.app.leave();
   // On a touch screen the switch is a fingertip wide inside its label, which the touch block makes a fingertip tall.
   assert.match(bareCss, /@media \(hover: none\) and \(pointer: coarse\) \{\s*\.check\.toggle \{ width: var\(--ctl-touch\); height: 28px; \}/);
-  assert.match(bareCss, /label:has\(> input\[type="checkbox"\]\) \{ display: flex; align-items: center; gap: 10px; min-height: var\(--ctl-touch\); \}/);
+  assert.match(bareCss, /label:has\(> input\[type="checkbox"\]\) \{ display: flex; align-items: center; gap: var\(--s-4\); min-height: var\(--ctl-touch\); \}/);
   const { elided } = await import('../js/views/settings.js');
   assert.equal(elided('~/projects/site/.vibeswitcher/workflow.md'), '~/projects/…/.vibeswitcher/workflow.md');
   assert.equal(elided('~/.vibeswitcher/policy.md'), '~/.vibeswitcher/policy.md');

@@ -404,7 +404,7 @@ test('U13 phone: the message waiting to go in is one line, the draft its label o
 
 test('U13 phone: a sent answer’s arrow stays beside “Sending… · Undo”; the Spanish steer fits where “Escribe a” does', () => {
   // Undo keeps a fingertip's room (44 px, the touch block) around its line, not in it, so the line is one text line.
-  assert.equal(under(PHONE, '.card-closed .card-undo')['margin-block'], '-12px');
+  assert.equal(under(PHONE, '.card-closed .card-undo')['margin-block'], 'calc(var(--s-5) * -1)');
   setLanguage('es');
   for (const agent of ['Claude', 'Codex']) {
     assert.ok(t('chSteerShort', { agent }).length <= t('chMessageShort', { agent }).length, t('chSteerShort', { agent }));
