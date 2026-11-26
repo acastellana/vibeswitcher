@@ -89,7 +89,8 @@ public enum WebAuthnRefusal: Error, Sendable, Equatable {
 /// 2. the device's record names this listener's origin, rpId and place (N5);
 /// 3. the assertion's credential id is the device's;
 /// 4. `clientDataJSON` passes WebAuthn L3's limited verification (§5.8.1.2) for `webauthn.get`, the challenge, the
-///    listener's origin and `crossOrigin` false, within 1024 bytes, its tail `}` or `,` … `}` in UTF-8;
+///    listener's origin, then either `}` alone (`crossOrigin` absent, as WebKit sends a same-origin ceremony) or
+///    `crossOrigin` false and a tail `}` or `,"` … `}` in UTF-8, within 1024 bytes;
 /// 5. `authenticatorData` is exactly 37 bytes (rpIdHash, flags, signCount: no attested data, no extensions);
 /// 6. its rpIdHash is SHA-256 of the listener's rpId;
 /// 7. UP set; UV set; AT and ED clear; BS only with BE; BE as the device recorded (the reserved bits ignored);
@@ -403,11 +404,15 @@ enum WebAuthnChecks {
     }
 
     /// WebAuthn L3 §5.8.1.2's limited verification, with no topOrigin (a frame's ceremony is refused): `clientDataJSON`
-    /// begins exactly `{"type":T,"challenge":C,"origin":O,"crossOrigin":false`, T, C (the challenge in unpadded
-    /// base64url) and O built here by CCDToString, and what follows is `}` alone, or `,"` (the next member's name:
-    /// §5.8.1.1 step 14 serializes the rest as JSON members) then anything ending in `}`, in UTF-8. The JSON is never parsed: nothing after the checked prefix can override it. The refusal names the
-    /// first piece that differs when the bytes there begin as that member's value would; anything else is
-    /// `clientDataNotExact`.
+    /// begins exactly `{"type":T,"challenge":C,"origin":O`, T, C (the challenge in unpadded base64url) and O built here
+    /// by CCDToString. Then either exactly `}` and nothing more: `crossOrigin` absent, which §5.8.1.1 step 9 reads as
+    /// false, and which is how WebKit (Safari, every iOS browser) closes a same-origin ceremony (its
+    /// `buildClientDataJson` sets `crossOrigin` only when the scope isn't same-origin); no member at all may follow
+    /// an absent `crossOrigin`, so a later `"crossOrigin":true` or `topOrigin` can't pass as absent. Or
+    /// `,"crossOrigin":false` and then `}` alone, or `,"` (the next member's name: §5.8.1.1 step 14 serializes the
+    /// rest as JSON members) then anything ending in `}`, in UTF-8. The JSON is never parsed: nothing after the
+    /// checked prefix can override it. The refusal names the first piece that differs when the bytes there begin as
+    /// that member's value would; anything else is `clientDataNotExact`.
     static func clientData(_ bytes: Data, type: String, challenge: Data, origin: String) throws(WebAuthnRefusal) {
         guard bytes.count <= clientDataLimit else { throw .clientDataNotExact }
         let data = [UInt8](bytes)
@@ -423,8 +428,11 @@ enum WebAuthnChecks {
             (Array(#","crossOrigin":"#.utf8), nil, nil),
             (Array("false".utf8), .clientDataCrossOrigin, UInt8(ascii: "t")),
         ]
+        // The piece `,"crossOrigin":`, where the bytes left may instead be exactly `}`: `crossOrigin` absent.
+        let absentAt = 6
         var at = 0
-        for (piece, refusal, starts) in pieces {
+        for (index, (piece, refusal, starts)) in pieces.enumerated() {
+            if index == absentAt, data[at...].elementsEqual([0x7D]) { return }
             guard data.count >= at + piece.count, data[at..<(at + piece.count)].elementsEqual(piece) else {
                 if let refusal, let starts, at < data.count, data[at] == starts { throw refusal }
                 throw .clientDataNotExact
