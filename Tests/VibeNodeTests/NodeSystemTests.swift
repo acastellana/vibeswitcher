@@ -54,6 +54,10 @@ struct NodeSystemTests {
         let connect = try #require(client.firstIndex { $0.hasPrefix("static func connect(_ context: NodeContext") })
         #expect(client[connect + 1] == "if let unbuilt = context.usersNodeRefusal { return .failure(.notRunning(unbuilt)) }", "\(client[connect + 1])")
         #expect(client.contains("var usersNodeRefusal: String? { isScratch ? nil : NodeSystem.usersNodeRefusal() }"))
+        // `switch` on the Mac reads the node's record for its own build only past the refusal (its connect says it).
+        let switching = try code("Switch.swift")
+        let own = try #require(switching.firstIndex { $0.contains("MacAgent.ownBuild(") }, "Switch.swift reads no own build")
+        #expect(switching[own - 1].contains("context.usersNodeRefusal == nil"), "Switch.swift: \(switching[own - 1])")
     }
 
     /// The node on the Mac's step 2: `VIBESWITCHER_HOME` naming the node's root, or the account's own `~/.vibeswitcher`,

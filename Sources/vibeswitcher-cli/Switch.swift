@@ -56,7 +56,9 @@ enum SwitchCommand {
            case .failure(let refused) = NodeFolders.installedBuild(executable: "/proc/self/exe", prefix: prefix) {
             return Say.refused("\(command): \(refused.text)")
         }
-        if !context.isScratch, Platform.CodeIdentity.isAvailable,
+        // Only past the Mac's refusal of the user's node (`usersNodeRefusal`, said by `NodeClient.connect` below): before
+        // it nothing is read for the user's node, the record included.
+        if !context.isScratch, Platform.CodeIdentity.isAvailable, context.usersNodeRefusal == nil,
            case .failure(let refused) = MacAgent.ownBuild(own: Platform.CodeIdentity.ownCdhash(), pins: NodePins.read(), prefix: prefix) {
             return Say.refused("\(command): \(refused.text)")
         }
