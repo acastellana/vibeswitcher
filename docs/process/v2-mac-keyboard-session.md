@@ -5,6 +5,11 @@ Mac and `vibeswitcher start`", rows 1 and 2: LA-1 to LA-7, ESC-1 to ESC-3, ANC-1
 of the anchor's record ([the tasks](v2-mac-tasks.md), item 10). About **25 minutes** in all; LA-4 needs an external
 display, LA-5 and ANC-2 need Remote Login on for a few minutes.
 
+**Run so far (2026-11-26, from a shell card):** part A's steps 1, 2 and 4 to 10 (ESC-3, AG-1, LA-1, LA-2, LA-3, LA-6,
+LA-7, ESC-1, ESC-2). What they answered, and the steps still owed in the order worth the user's time (ANC-1 among them),
+are in the measurement record's ["The keyboard session of
+2026-11-26"](v2-mac-measurements.md#the-keyboard-session-of-2026-11-26).
+
 **Where.** A **Terminal.app** window on this Mac (not a shell card: ANC-1 refuses one, and ESC-1/2 compare with
 Terminal.app). Every command runs from this checkout, branch `v2-mac-runbook`, which stays in place until the session
 is done. Start with:

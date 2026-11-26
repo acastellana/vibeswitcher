@@ -48,7 +48,7 @@ Mac) is the one platform fact shared code may read (`PlatformLintTests`), now jo
 | The question post to the server | `NodeQuestionPost.enabled` | off |
 | Host notes, `spawnNeedsLead`, `watchesItsPath` | `HostServer.capabilities`, `vibeswitcher-host/main.swift` | off |
 | The voice rule's cgroup line | `VoiceRule.at`, `Voice.judge`, `Platform.Processes.cgroup` (nil on the Mac) | was the weaker rule; **now closed for the user's server** |
-| The voice rule's environment line (`VIBESWITCHER_SESSION`) | `PeerFacts`, `Platform.Processes.environment` (`KERN_PROCARGS2`) | the hosted runner (SIP off) shows another process's environment; a real Mac with SIP on is expected not to, which fails the line for every peer **(needs a real Mac)** |
+| The voice rule's environment line (`VIBESWITCHER_SESSION`) | `PeerFacts`, `Platform.Processes.environment` (`KERN_PROCARGS2`) | the hosted runner (SIP off) shows another process's environment; a real Mac with SIP on was expected not to. **Measured (2026-11-25, M2): it does**, for every process of the user's but Apple's platform binaries; the peer's line comes back (the rule's lines, below) |
 | The unit, `start`/`stop`, `daemon-reload`, `show` | `NodeUnit`, `NodeStarter`, `NodeStopper`, `StartSequence`, `StopSequence`, `ManagerConfig` | `systemctl` absent; **now refused before any of it** |
 | The detached start (no systemd) | `NodeFolders.mode` (`/run/systemd/system`, `/proc/1/comm`), `NodeRecord` | `mode` said `.noSystemd` on the Mac; `NodeContext.current` and `StopSequence.kind` gated it by `CodeIdentity`, now by `Platform.Service` |
 | The runtime folder | `NodeFolders.runtimeFolder` (`/run/user/<uid>`) | no such folder; `Platform.Service.runtimeFolder` is nil there |
@@ -95,16 +95,26 @@ The other four lines (ancestry, terminal, environment, branch-code runner) are g
 - `setsid` drops its terminal; `script` gives it a new one, as on Linux.
 - Hide its environment from the server, or rather: the server can't read it. With SIP on, `KERN_PROCARGS2` is expected
   not to give another process's environment, so the environment line fails closed for everyone and must go.
+  **Measured otherwise (2026-11-25, the measurement record's M2):** with SIP on, a process of the user's reads
+  another's environment, the user's own builds hardened or not; only Apple's platform binaries (`zsh`, `bash`,
+  `login`) read empty. So the line can be read of the peer, never of its ancestors; a session drops it at will.
 - Leave every trace of the session: `open -a Terminal x.command`, `osascript -e 'tell app "Terminal" to do script …'`
   (Automation consent the first time, often granted already), `launchctl submit`/`bootstrap` of its own agent. A
   Terminal window so opened is a real terminal, indistinguishable by process facts from one the user opened. This is
   where the Mac is weaker than Linux: `systemd-run --user` lands in the user's manager, which the cgroup line refuses;
-  `open -a Terminal` lands in a context that *is* the user's terminal.
+  `open -a Terminal` lands in a context that *is* the user's terminal. **Measured (the user's keyboard session,
+  2026-11-26, from a shell card; the measurement record's K-ESC-1 to K-ESC-3):** `open -a Terminal` and `osascript … do
+  script` from a detached process each gave a shell in Terminal's own coalition, on a fresh terminal of Terminal's,
+  without `VIBESWITCHER_SESSION`, its chain `login` → Terminal → launchd; no consent dialog was reported for the
+  AppleScript one. A job the session bootstrapped itself ran with launchd its parent, no terminal, no variable and a
+  coalition of its own.
 
 **What it can't do.** Forge its audit token (the kernel's, `LOCAL_PEERTOKEN`, `Platform.PeerToken`); pass a cdhash
 check as other code (`Platform.CodeIdentity.runs`, the host's app check today); click a system authentication dialog
 (LocalAuthentication's, drawn by the system: synthetic events need Accessibility consent, which Terminal and Claude
-Code don't have by default **(needs a real Mac)**); read a Hardened Runtime process's memory without
+Code don't have by default; **measured for a process not trusted for Accessibility** (2026-11-26, K-LA-7): an Escape
+it posted while the dialog was frontmost didn't end it, the person's Cancel did 14 s later; a trusted process is not
+measured, and a key can at most cancel or type, never give the finger); read a Hardened Runtime process's memory without
 `get-task-allow`.
 
 **What the Mac app's code identity already gives.** The app's host takes the app as the app's code (cdhash beside the
@@ -118,7 +128,8 @@ it only by changing the app (a main-side change, out of this step).
 | --- | --- | --- | --- |
 | Peer code identity: the server checks the peer's audit token runs the installed `vibeswitcher` (cdhash) | the request came through the node's own command line, so its typed word and confirmation ran | a session runs the same command line | a guard rail; Linux has no equivalent (an exec'd path proves nothing there) |
 | The four non-cgroup lines (ancestry, terminal, branch-code runner; the environment line dropped) | not obviously a session's | passes after double-fork + `setsid` + `script`, or `open -a Terminal` | Linux's weaker rule, minus one line |
-| `responsibility_get_pid_responsible_for_pid` (the responsible process TCC uses) | which app a process is attributed to; inherited across fork, exec, `setsid` | escapes through `open`/AppleScript/launchd into Terminal's own attribution | the nearest thing to a cgroup, but private SPI and escapable: not a rule alone |
+| `responsibility_get_pid_responsible_for_pid` (the responsible process TCC uses) | which app a process is attributed to; inherited across fork, exec, `setsid` | escapes through `open`/AppleScript/launchd into Terminal's own attribution | the nearest thing to a cgroup, but private SPI and escapable: not a rule alone. **Measured (M5, K-ESC-1 to 3): not inherited under the app's session host (each process its own); Terminal's after `open -a Terminal`, each process its own after `osascript` and `launchctl`: no line** |
+| The coalition (`PROC_PIDCOALITIONINFO`, private; launchd's per-job resource coalition) | which launchd job a process descends from: kept through fork, exec, `setsid` and reparenting (M4, K-AG-1) | a session's descendant stays in its host's job's coalition unless it goes through launchd: `open -a Terminal` and AppleScript land in Terminal's, a job of its own in a new one (K-ESC-1 to 3) | the nearest thing to Linux's cgroup for what doesn't go through launchd; escapable through launchd as the Mac is: a guard rail (added, below) |
 | **LocalAuthentication, asked by the server per state change** (Touch ID, else the login password; the prompt's text built by the server from the card) | a person at the Mac agreed to *this* card | can make the prompt appear; can't answer it. The user sees an unexpected prompt naming the card, and declines | **stronger than Linux's cgroup rule against an autonomous session** (it needs the person), weaker against prompt fatigue; S12's signed approvals, early |
 | The app's window (its existing code-identity channel) | the user clicked in the app | can't be the app | the strongest, but changes the app (main) |
 
@@ -129,6 +140,79 @@ code identity (the installed command line's cdhash) and the guard-rail lines. Re
 and code identity as on Linux. Until it is built and measured on a real Mac, the user's server there is on the closed
 rule, and the user's node isn't started at all. Never the weaker rule by default. Later, the app's window as a second
 voice, once main takes the change.
+
+**Since: one Touch ID for the page, a 12-hour unlock (the user, 2026-11-25; device keys, 2026-11-26).** Touch ID per
+state change stays the rule for the command line. For the page the user chose (2026-11-25, their answer 541E258F) **one
+Touch ID** that allows the "page acts for you" mode, opens the page and confirms it, after which the page acts with no
+prompt for **up to 12 hours** on loopback; the user accepted its stated cost, that during those hours anything able to
+read the open page's secrets, a team's session included, could act as them (a design change with a security review).
+The same day the remote-access choices made the unlock the device's: a device is paired once with its own key, and
+opening the page after a while asks Touch ID (Face ID on the phone) for an unlock that lasts 12 hours; each guarded
+change (update and rollback, hooks, a first config accept and changed rails, policy, review floors and models, adding a
+plugin) asks its own Touch ID with the change shown, never by the 12-hour unlock alone (2026-11-25, N1). **The
+device-keys design's review changes how the Mac does it (2026-11-26, I2): the Mac desktop's daily unlock is a browser
+passkey** (still one Touch ID, the browser's prompt), and **the server's own Touch ID dialog, this section's, stays for
+the first enrolment of the desktop's key and for guarded changes only**. So on a Mac node the server's dialog is asked:
+for each state change the command line sends (the rule below), at the first enrolment, and for each guarded change; the
+page's acts inside an unlock ask none. The rule's lines below judge the command line's callers; under the device-keys
+design the page's requests are judged by the device's key, outside them.
+
+### The rule's lines, settled from the measurements (row 3, 2026-11-26)
+
+The measurement record's row 3: whether to add the coalition line (M4) and the peer's environment line (M2), and the
+`approval` mode's guard rails, from [the measurements](../../process/v2-mac-measurements.md): M1 to M14 (2026-11-25, an
+agent's session) and the user's keyboard session of 2026-11-26 (K-LA-1 to K-LA-7, K-ESC-1 to K-ESC-3, K-AG-1; run from a
+VibeSwitcher shell card, not Terminal.app). **Settled, not built**: `ApprovalVoice` has neither new line yet;
+`NodeSystem.approvalMeasured` stays false until the two lines are built, the independent review that precedes any
+switch-on has read them, and the user says go.
+
+**What carries the guarantee: the dialog**, never the guard rails. Every process fact below a session can shed by going
+through launchd: `open -a Terminal`, AppleScript and a job of its own each pass every line (K-ESC-1 to 3), as the design
+said. The lines refuse early and quietly what they can tell, so honest callers that aren't the user never reach the
+dialog; the review counts the dialog (what it shows, that only the person can answer it), the caller's code and the
+Hardened Runtime, and not the lines.
+
+| Line | Refuses (and the record) | Lets through | A legitimate caller refused | Unreadable | Settled |
+| --- | --- | --- | --- | --- | --- |
+| The uid, the installed command line's code (the record's row), the Hardened Runtime | another user; any program but the installed command line; one that could be steered (M6, M7; rows 7, 10) | a session running the command line itself | none | refused | **kept** |
+| Ancestry: no live session's program, the host or the server above the peer | a node session's descendant that didn't detach | a double fork (M3); every escape (K-ESC-1/2: `bash` → `zsh` → `login` → Terminal → launchd; K-ESC-3: launchd); item 11's fallback read the escaped chain whole through root's `login` (K-ESC-1/2, as M8) | a command line typed in a node session (meant) | refused | **kept** |
+| The controlling terminal isn't a live session's | a peer on a session's terminal | `setsid`; an escape, which gets a fresh terminal of Terminal's (K-ESC-1/2: `ttys014`) | none | refused | **kept** |
+| No branch code runner above | a peer under one | (not measured on the Mac) | none | refused | **kept** |
+| **The coalition: the peer isn't in the server's own resource coalition** (the node job's: the host, the server and every session descend from it; the server reads its own once at its start, M4's `self`) | every descendant of a node session that didn't go through launchd, however detached: a process keeps its coalition through fork, exec, `setsid` and reparenting to launchd (M4); a `setsid` child of a LaunchAgent job stays in the job's coalition (K-AG-1, two runs) | the escapes through launchd: a job of its own gets a new coalition (K-ESC-3), `open -a Terminal` and AppleScript land in Terminal's (K-ESC-1/2) | none expected: the user's Terminal is Terminal's coalition (by inference from K-ESC-1, Terminal's process in it; **open**, closed by ANC-1), the app's shell cards the app's (1841, every caller block); a command line typed in a node session is ancestry's already | refused: the installed command line is the user's hardened build, which M4 read detached and hardened; a private read (flavour 20, not in the SDK's headers) a later macOS may change makes every state change refused, loudly, never open | **added** (settled here on the records, for the review) |
+| **The peer's environment: `VIBESWITCHER_SESSION` set on the peer itself** (never an ancestor: Apple's binaries read empty, M2 and K-ESC-1/2's chains) | any process carrying the variable: the Mac app's shell cards and agent sessions (`VIBESWITCHER_SESSION=set` in every caller block, K-ESC-1 to 3), which no other line refuses (not a node session, not the node's coalition: an app agent's Bash tool running the command line would otherwise reach the dialog); a node session's descendant that kept it | anything that dropped it: `env -u`, a re-exec with an environment of its own, a job a session loads itself (K-ESC-3: unset, `ppid=1`), an escape into Terminal (K-ESC-1/2: unset) | **the user's own shell cards in the Mac app**: on a node they make state changes from Terminal or the page; the refusal says so | refused (readable for the user's builds with SIP on, M2) | **added as an early refusal, not a boundary** (the lead's call, 2026-11-26, reversible): the approval's guarantee rests on the dialog (its words, open below; a synthetic key from an untrusted process doesn't answer it, K-LA-7) and on the lines above, never on this one, and the review is not to count it |
+| The responsible process | — | — | — | — | **no line**: after `open -a Terminal` the escaped shell, `bash` and `zsh` name Terminal (K-ESC-1), after AppleScript each names itself (K-ESC-2), a self-loaded job itself (K-ESC-3), and under the app's session host every process names itself (M5, every caller block): no fact to judge by, and private |
+
+**The `approval` mode's guard rails, with the dialog:**
+
+- **The dialog from the server's place** (a LaunchAgent's process in `gui/<uid>`) appears and approves: K-LA-1 (Touch
+  ID, 2.7 s) and K-LA-3 (approved, 3.8 s; the password route by the runbook's instruction, not in the record).
+- **Every end but an approval is a decline**: Cancel (K-LA-2, 1.6 s) and the untouched dialog at the server's 60 s
+  (K-LA-2, 60.0 s, gone from the screen); the command line waits 120 s (M14), so it always hears it. Kept: the 10 s
+  cooldown after a declined, cancelled, timed-out or unavailable dialog; the dialog's text built by the server from the
+  card (the tasks' "Before approvalMeasured flips", items 1, 2, 4).
+- **One dialog at a time on the server** (`Requests.approvalJudgment`, a second refused while one waits): kept; it
+  doesn't depend on the system. **Open**: what the system does with two LocalAuthentication dialogs at once, which is
+  what the user sees when a session's own dialog (M9) comes while the server's is up: K-LA-6's first was cancelled
+  before the second was asked. Closed by LA-6 with the first left up (the measurement record's owed step 3).
+- **No synthetic key answers it**: an Escape posted by a process not trusted for Accessibility, with the dialog
+  frontmost, didn't end it (K-LA-7). Rail: the node's host, server and command line never ask for Accessibility or
+  Automation. **Open**, and left so: a trusted process (an escaped shell is attributed to Terminal, K-ESC-1, so a
+  Terminal holding Accessibility would lend it its trust) can at most cancel the dialog or type into it; approving
+  needs the enrolled finger or the login password.
+- **Open: the dialog's words** (its title, whether the request's word reads first after the program's name). No record
+  holds them; the switch-on's own precondition (the tasks' "Before approvalMeasured flips", item 2). Closed by LA-1 with
+  a screenshot or the words typed (owed step 1).
+- **Open: the lid closed and ssh** (LA-4, LA-5 not run): whether a closed lid changes the route, and that an ssh
+  login's ask is unavailable with nothing on the Mac's screen; `LimitLoadToSessionType Aqua` keeping the node out of an
+  ssh login's `Background` session (ANC-2's `managername`). Owed steps 5 and 6.
+- **Open: anything stronger than the variable to tell the app's sessions from the user's Terminal.** The coalition
+  could: a process of an app session that doesn't go through launchd stays in the app's coalition (1841 in every caller
+  block; M4), and the user's Terminal is in Terminal's (109496, by inference). A second coalition line, "not in the Mac
+  app's coalition" (the app's read from its host, which the node can identify by code), would refuse the app's sessions
+  without leaning on the variable, at the same cost (the user's shell cards) and with the same escape (launchd). Not
+  decided: K-ESC-1/2 ran from a shell card, so no record holds the user's own Terminal shell's coalition and
+  responsible process. ANC-1 in Terminal.app (owed step 2) closes the fact; the review then chooses between the second
+  coalition line and the variable.
 
 ## The service: a LaunchAgent, not the app
 
@@ -142,7 +226,9 @@ What launchd gives less than systemd, said now so later steps don't assume it:
 
 - No cgroup: `launchctl bootout` kills the job's process group, not a session in a POSIX session of its own. So "every
   session ends with the unit" (`KillMode=control-group`) doesn't hold: the host ends its sessions itself on a stop, and a
-  crashed host leaves them running, as the app's host does today (S9's row "A host exit").
+  crashed host leaves them running, as the app's host does today (S9's row "A host exit"). Measured (step 5's "What
+  `bootout` ends", and the user's AG-1, K-AG-1, twice): the job's process and its group end, a `setsid` child runs on,
+  still in the job's coalition.
 - The server check: the listener's audit token, its cdhash against the installed build's server, and its parent the
   job's pid (`launchctl print gui/<uid>/dev.vibeswitcher.node`): stronger than Linux's "non-dumpable, in the unit's
   cgroup" on the code, weaker on containment.
@@ -547,6 +633,10 @@ plists in the clone's `.build`, never `~/Library/LaunchAgents`).**
   session of its own (`sleep 303`, parent pid 1) ran on. A process of the job killed by a signal took its group with it
   too (`sleep 302` gone, `sleep 303` running). So launchd ends the job's process group and nothing outside it: the host's
   sessions (each in a session of its own, `PTYSpawn`) and its server child (a group of its own) are the node's to end.
+  The user's AG-1 (2026-11-26, twice; the measurement record's K-AG-1) gives the same, and adds that the survivor stays
+  in the job's coalition: a process that detached and dropped `VIBESWITCHER_SESSION`, which `stop`'s search by the
+  session ids environments carry misses, is still findable by the job's coalition. A sweep by coalition for `stop` is
+  proposed for this step's review, not decided.
 
 **The plist** (`NodeAgent.Job`, written by `NodeAgent.plist`, the same function `agent-plist` prints for the install):
 
@@ -1057,6 +1147,10 @@ behind a seam (`Platform.Approval`, `ApprovalVoice`) and not wired: step 4 measu
 (`VoiceRule.Mode.approval`, `Requests.approvalJudgment`, the command line asking no code under it) and still off: the
 user's server takes it only once `NodeSystem.approvalMeasured` is turned on, after step 4 and a review. Step 5's agent is built as data (`NodeAgent`: the
 property list, its check, the `launchctl` lines and `print`'s pid), not wired: `start` on the Mac is still refused.
+Step 4 on this Mac (2026-11-25 and 26): the agent's measurements M1 to M14, then the user's keyboard session (part A of
+the runbook, from a shell card: LA-1, 2, 3, 6, 7, ESC-1, 2, 3, AG-1; ANC-1, ANC-2, LA-4, LA-5 and the `sudo` trial not
+run); row 3 settled from them ("The rule's lines, settled from the measurements"), its two lines not built; the page's
+12-hour unlock and the Mac's browser passkey recorded in "The user's voice on the Mac".
 
 ## Open for the user: the Mac's reads
 
@@ -1078,6 +1172,13 @@ app's window carries the voice.
 - **(confirmed by the user, 2026-11-20)** The user's voice on the Mac: LocalAuthentication (Touch ID or the login
   password) asked by the server per state change, with the peer's code identity and the guard rails; the app's window
   later, through main.
+- **(the user, 2026-11-25; the device-keys review, 2026-11-26)** For the page: one Touch ID allows the acting mode,
+  opens and confirms the page, then up to 12 hours with no prompt; the unlock is the device's, and on the Mac desktop a
+  browser passkey (one Touch ID); the server's own dialog stays for the command line's state changes, the first
+  enrolment and guarded changes (each its own Touch ID, never by the unlock alone).
+- **(settled 2026-11-26 on the measurements, for the review; not built)** The rule's lines: the coalition line added;
+  the peer's environment line added as an early refusal, not a boundary (the lead's call, reversible); no
+  responsible-process line; the guard rails kept; what stays open named with its keyboard step.
 - **(call)** The service is a LaunchAgent in `gui/<uid>`, not started by the app.
 - **(call)** Events in the unified log, stderr in a file.
 - **(for the user)** Signing the node's builds with `setup-signing.sh`'s identity, so the vault's Keychain key doesn't
