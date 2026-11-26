@@ -298,3 +298,21 @@ public enum NodeAgent {
         return found
     }
 }
+
+// MARK: launchd's word, by one grammar
+
+extension NodeAgent {
+    /// Why `launchctl print`'s output couldn't be placed as `job`'s.
+    public struct Unplaced: Error, Equatable, Sendable {
+        public var description: String
+        public init(_ description: String) { self.description = description }
+    }
+
+    /// Whether `text` is printable ASCII only.
+    public static func isPrintable(_ text: String) -> Bool { true }
+
+    /// `launchctl print`'s output read for `job` (the seam: the lenient reading, as before).
+    public static func placed(_ output: Data, job: Job, plistPath: String, uid: uid_t) -> Result<Printed, Unplaced> {
+        .success(printed(String(decoding: output, as: UTF8.self)))
+    }
+}

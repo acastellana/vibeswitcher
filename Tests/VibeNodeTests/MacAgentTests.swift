@@ -330,17 +330,27 @@ struct MacAgentTests {
 }
 
 extension MacAgentTests {
-    /// `launchctl print`'s text for a running job of `job` loaded from `place`'s plist, as macOS 27.2 prints it (the
-    /// design's "The review's round", measured): its path, arguments, output paths, environment block with launchd's two
-    /// variables, pid and properties.
-    static func printed(_ job: NodeAgent.Job, place: NodeAgent.Place, pid: pid_t) -> String {
+    /// `launchctl print`'s text for a job of `job` loaded from `place`'s plist, cut from this Mac's captures (macOS 27.2:
+    /// `PrintFixtures`) with the job's own values put in: running at `pid`, or `fixture` (`.loaded`, `.killed`) when not.
+    static func printed(_ job: NodeAgent.Job, place: NodeAgent.Place, pid: pid_t?, fixture: String? = nil) -> String {
         let arguments = job.programArguments.map { "\t\t\($0)\n" }.joined()
-        let environment = job.environment.merging(MacAgent.launchdVariables(label: job.label)) { $1 }.sorted { $0.key < $1.key }
-            .map { "\t\t\($0.key) => \($0.value)\n" }.joined()
-        return "\(place.target) = {\n\tactive count = 1\n\tpath = \(place.plistPath)\n\ttype = LaunchAgent\n\tstate = running\n\n\tprogram = \(job.programArguments[0])\n"
-            + "\targuments = {\n\(arguments)\t}\n\n\tstdout path = /dev/null\n\tstderr path = \(job.standardErrorPath)\n"
-            + "\tinherited environment = {\n\t\tSSH_AUTH_SOCK => /var/run/x/Listeners\n\t}\n\n\tenvironment = {\n\(environment)\t}\n\n"
-            + "\truns = 1\n\tpid = \(pid)\n\tproperties = \(job.atLogin ? "runatload | inferred program" : "inferred program")\n}\n"
+        let environment = (["\t\tOSLogRateLimit => 64\n"] + job.environment.sorted { $0.key < $1.key }.map { "\t\t\($0.key) => \($0.value)\n" }
+                           + ["\t\tXPC_SERVICE_NAME => \(job.label)\n"]).joined()
+        var text = (fixture ?? (pid == nil ? PrintFixtures.loaded : PrintFixtures.running))
+            .replacingOccurrences(of: "{TARGET}", with: place.target)
+            .replacingOccurrences(of: "{PLIST}", with: MacAgent.canonicalPlistPath(place))
+            .replacingOccurrences(of: "{PROGRAM}", with: job.programArguments[0])
+            .replacingOccurrences(of: "{ARGUMENTS}", with: arguments)
+            .replacingOccurrences(of: "{STDERR}", with: job.standardErrorPath)
+            .replacingOccurrences(of: "{ENVIRONMENT}", with: environment)
+            .replacingOccurrences(of: "{PID}", with: pid.map(String.init) ?? "")
+            .replacingOccurrences(of: "{UID}", with: String(place.uid))
+            .replacingOccurrences(of: "{LABEL}", with: job.label)
+        if job.atLogin {
+            text = text.replacingOccurrences(of: "\tproperties = inferred program", with: "\tproperties = runatload | inferred program")
+                .replacingOccurrences(of: "immediate reason = non-ipc demand", with: "immediate reason = speculative")
+        }
+        return text + "\n"
     }
 }
 

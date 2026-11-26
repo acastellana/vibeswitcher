@@ -403,6 +403,30 @@ public struct MacAgent {
         return nil
     }
 
+    /// The agent's plist as launchd prints it: the folder's links resolved (`realpath`), then the file's name.
+    public static func canonicalPlistPath(_ place: NodeAgent.Place) -> String {
+        guard let real = realpath(place.plistFolder, nil) else { return place.plistPath }
+        defer { free(real) }
+        return (String(cString: real) as NSString).appendingPathComponent("\(place.label).plist")
+    }
+
+    /// How a connection to the node's server failed, as the command line's client says it.
+    public enum ConnectFailure: Equatable, Sendable {
+        /// Nothing listens at the server's socket.
+        case noListener(String)
+        /// What listens fails the server check.
+        case notTheServer(String)
+        /// What listens took the connection and sent no hello, or garbage, or one too late.
+        case noHello(String)
+    }
+
+    /// What a connection that failed so says of the server before a stop (the seam: every failure is no server).
+    public static func serverSeen(_ failure: ConnectFailure) -> ServerSeen {
+        switch failure {
+        case .noListener(let why), .notTheServer(let why), .noHello(let why): return .none(why)
+        }
+    }
+
     /// Whether `status` checks the node's host first (the user's node on the Mac, past its refusal), with `--json` too.
     public static func statusChecksHost(onTheMac: Bool, isScratch: Bool, refused: Bool, json: Bool) -> Bool {
         onTheMac && !isScratch && !refused
