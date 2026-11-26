@@ -24,7 +24,9 @@ import VibeNode
 ///    `current` lag behind it (a follow-up a failure left unfinished: `vs switch <target>` again finishes it): on a node
 ///    under systemd `apply` (the unit's `ExecStart`, `daemon-reload`, `current`); on a node started detached
 ///    `applyDetached` (`current` only: its `start` starts the build `vs` runs from). Each checks the host first through
-///    a fresh, checked connection (`hostCheck`). A scratch node has no unit: "scratch node: no unit to rewrite".
+///    a fresh, checked connection (`hostCheck`). A scratch node has no unit: "scratch node: no unit to rewrite". The
+///    Mac's user's node: its LaunchAgent's plist rewritten for the build the host now runs, the host checked by token
+///    and code (`MacAgentCommand.switched`, `MacAgent.switched`); its command line a build the record pins, first.
 /// 6. The host's start line (ST-D24), read back and shown: from the journal (`NodeJournal.events`), or on a node
 ///    started detached from the host's log (`NodeJournal.hostLogStart`).
 enum SwitchCommand {
@@ -49,9 +51,16 @@ enum SwitchCommand {
         context.sayScratch()
         let home = VibePaths.accountHome
         let prefix = NodeFolders.defaultPrefix(accountHome: home)
-        // ST-D3: the user's node's follow-up writes; nothing is asked before this check.
+        // ST-D3: the user's node's follow-up writes; nothing is asked before this check. The Mac's: this command line is a
+        // build the node's record pins, by its own running code (its follow-up rewrites the LaunchAgent's plist).
         if !context.isScratch, !Platform.CodeIdentity.isAvailable,
            case .failure(let refused) = NodeFolders.installedBuild(executable: "/proc/self/exe", prefix: prefix) {
+            return Say.refused("\(command): \(refused.text)")
+        }
+        // Only past the Mac's refusal of the user's node (`usersNodeRefusal`, said by `NodeClient.connect` below): before
+        // it nothing is read for the user's node, the record included.
+        if !context.isScratch, Platform.CodeIdentity.isAvailable, context.usersNodeRefusal == nil,
+           case .failure(let refused) = MacAgent.ownBuild(own: Platform.CodeIdentity.ownCdhash(), pins: NodePins.read(), prefix: prefix) {
             return Say.refused("\(command): \(refused.text)")
         }
         let client: NodeClient
@@ -149,9 +158,13 @@ enum SwitchCommand {
             handedOver = result.outcome == "handed-over"
         }
         if handedOver {
-            // Whatever the wait ends with, the follow-up runs: it checks the host again and says what is owed.
+            // Whatever the wait ends with, the follow-up runs (it checks the host again and says what is owed), but on the
+            // Mac a failed look at the host, which refuses the switch's last steps.
             let due = SwitchSettle.serverDue(installRoot: buildsRoot(context, prefix: prefix, status: status), running: serverBefore.commit, target: target)
-            settle(context, serverBefore: serverBefore, due: due, web: webBefore, target: target, serverWait: serverWait)
+            if let refused = settle(context, serverBefore: serverBefore, due: due, web: webBefore, target: target, serverWait: serverWait) {
+                Say.err("vibeswitcher: \(ConfigSeal.inert(refused.text, limit: .max))")
+                return refused.exitCode
+            }
         }
         if let refused = followUp(context, prefix: prefix, accountHome: home, commit: target, handedOver: handedOver, hostPid: hostPid) {
             Say.err("vibeswitcher: \(ConfigSeal.inert(refused.text, limit: .max))")
@@ -182,9 +195,10 @@ enum SwitchCommand {
     /// (or a listener in `webWait`) is said in a line, and the switch goes on: the handover happened, so it is no
     /// failure (2026-11-24, a loaded machine). The outgoing server, gone or unreadable as it exits, is no answer: looked
     /// at again (2026-11-25, `NodeCheck.unsettled`). A listener that fails the node's check is said, and the follow-up
-    /// still runs (it checks the host again, and says what is owed).
+    /// still runs (it checks the host again, and says what is owed); on the Mac's user's node it is a refusal of the
+    /// switch's last steps (the Mac branch's spec), returned.
     static func settle(_ context: NodeContext, serverBefore: NodeWire.Hello.Server, due: Bool?, web: SwitchSettle.Web?,
-                       target: String, serverWait: TimeInterval = SwitchSettle.serverWait) {
+                       target: String, serverWait: TimeInterval = SwitchSettle.serverWait) -> StartRefusal? {
         switch due {
         case .some(true):
             Say.out("waiting for the new build's server (up to \(Int(serverWait)) s)…")
@@ -197,11 +211,22 @@ enum SwitchCommand {
         switch server {
         case .answered(let pid, let commit):
             if due == true { Say.detail("the new build's server answers: pid \(pid), build \(ConfigSeal.inert(commit, limit: 64))") }
-        case .slow(let line), .refused(let line):
+        case .slow(let line):
             Say.out(line)
-            return
+            return nil
+        case .refused(let line):
+            // The Mac's user's node (origin/v2-mac-anchored-cli, its spec's "one failed look at the host during a
+            // switch's wait"): a refusal (77) of the switch's last steps, the plist's rewrite among them, saying that the
+            // switch again finishes it. Elsewhere it is said, and the follow-up runs (it checks the host again).
+            if Platform.CodeIdentity.isAvailable, !context.isScratch {
+                let refused = line.replacingOccurrences(of: ": the follow-up checks the host again", with: "")
+                return StartRefusal(refused + ". The host has handed over to \(ConfigSeal.inert(target, limit: 64)) already; once that is put right, "
+                                    + "`vibeswitcher switch \(ConfigSeal.inert(target, limit: 64))` again finishes the switch", exitCode: 77)
+            }
+            Say.out(line)
+            return nil
         }
-        guard let web, web.awaited else { return }
+        guard let web, web.awaited else { return nil }
         let waited = Platform.Clock.steadyDate()
         var now: SwitchSettle.Web?
         while true {
@@ -213,11 +238,12 @@ enum SwitchCommand {
             guard Platform.Clock.steadyDate().timeIntervalSince(waited) < SwitchSettle.webWait else {
                 let seen = now.map { $0.listening ? "listening on port \($0.port.map(String.init) ?? "none")" : "not listening" } ?? "not known"
                 Say.out("handed over to \(target); the web listener isn't back on port \(web.port ?? 0) yet (\(seen)): `vibeswitcher web` opens it again if it doesn't come")
-                return
+                return nil
             }
             usleep(250_000)
         }
         Say.detail("the web listener is back on port \(web.port ?? 0): a page paired before the switch reconnects by itself")
+        return nil
     }
 
     /// A connection to the server that stays after a handover: one on its way out, or none answering, is asked again for
@@ -249,7 +275,7 @@ enum SwitchCommand {
     static func rewrites(_ context: NodeContext) -> NodeTexts.SwitchRewrites {
         switch context.mode {
         case .scratch: return .nothing("a scratch node: no unit to rewrite")
-        case .node where Platform.CodeIdentity.isAvailable: return .nothing("the Mac: no unit to rewrite")
+        case .node where Platform.CodeIdentity.isAvailable: return .nothing("the Mac: no unit; the LaunchAgent's plist is rewritten for it once its host runs it")
         case .node: return .unitAndCurrent
         case .detached: return .currentOnly
         }
@@ -272,8 +298,9 @@ enum SwitchCommand {
             Say.detail("scratch node: no unit to rewrite")
             return nil
         case .node where Platform.CodeIdentity.isAvailable:
-            Say.detail("the Mac: no unit to rewrite")
-            return nil
+            // The LaunchAgent's plist rewritten for the build the host now runs, checked by token and code
+            // (`MacAgent.switched`): the next `start` runs it.
+            return MacAgentCommand.switched(commit: commit)
         case .node:
             let tools = NodeStarter.node(accountHome: accountHome, uid: getuid())
             if !handedOver, SwitchFollowUp.isDone(tools: tools, prefix: prefix, commit: commit) { return nil }

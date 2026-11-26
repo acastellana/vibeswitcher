@@ -228,7 +228,10 @@ enum UpdateCommand {
         if handedOver {
             // Whatever the wait ends with, the follow-up runs: it checks the host again and says what is owed.
             let due = SwitchSettle.serverDue(installRoot: prefix, running: serverBefore.commit, target: target)
-            SwitchCommand.settle(context, serverBefore: serverBefore, due: due, web: webBefore, target: target, serverWait: serverWait)
+            if let refused = SwitchCommand.settle(context, serverBefore: serverBefore, due: due, web: webBefore, target: target, serverWait: serverWait) {
+                Say.err("vibeswitcher: \(ConfigSeal.inert(refused.text, limit: .max))")
+                return refused.exitCode
+            }
         }
         if let refused = SwitchCommand.followUp(context, prefix: prefix, accountHome: accountHome, commit: target, handedOver: handedOver, hostPid: hostPid) {
             Say.err("vibeswitcher: \(ConfigSeal.inert(refused.text, limit: .max))")

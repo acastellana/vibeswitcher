@@ -41,8 +41,9 @@ public struct ApprovalVoice: Sendable {
     }
 
     public var authenticator: any Authenticator
-    /// The installed command line's cdhash, read at the server's start from the build's `bin/vibeswitcher`; nil when it
-    /// couldn't be read, and then no peer is the user's.
+    /// The installed command line's cdhash, read once at the server's start from the node's record (`commandLineAnchor`:
+    /// the row whose server is this server's own running code, never a file under the node's root); nil when it
+    /// couldn't be taken, and then no peer is the user's.
     public var commandLine: Data?
     /// Whether a peer's token runs code of a cdhash (`Platform.CodeIdentity.runs(_:cdhash:)`; a test's table).
     public var runs: @Sendable (Platform.PeerToken, Data) -> Bool
