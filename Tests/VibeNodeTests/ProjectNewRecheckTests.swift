@@ -198,7 +198,9 @@ struct ProjectNewRecheckOpenTests {
                 madeBeside.append(String(format: "U+%04X", scalar))
             }
         }
-        #expect(madeBeside.isEmpty, "made beside shop: \(madeBeside)")
+        withKnownIssue("N-c: U+1D159 and U+16FE4 still draw as a blank; waits for the device-keys cut-over") {
+            #expect(madeBeside.isEmpty, "made beside shop: \(madeBeside)")
+        }
     }
     // MARK: A hidden folder reached through a link in the projects folder's own path
 

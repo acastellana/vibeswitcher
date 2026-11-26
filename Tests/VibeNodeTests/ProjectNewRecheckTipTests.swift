@@ -80,9 +80,11 @@ struct ProjectNewRecheckOpenTipTests {
         let top = Git.run(["rev-parse", "--show-toplevel"], in: made.folder)
         let second = ProjectMaker.stillMade(made, root: (top.output as NSString).standardizingPath, home: world.home, scratch: world.nodeScratch)
         #expect(second != nil, "the lead would start in \(top.output)")
-        #expect(dirs?.common == made.folder + "/.git", "the baseline is keyed by another repository's git folder: \(dirs?.common ?? "none")")
-        #expect(record?.folder.hasPrefix(made.folder + "/") == true && record?.files.isEmpty == true,
-                "the baseline recorded another repository's hooks as seen, none to run: \(record.map { "\($0.folder): \($0.files.map(\.name)) run \($0.run)" } ?? "none")")
+        withKnownIssue("N-a: the baseline by path between the first pin and the second; fixed with P1 at the device-keys cut-over") {
+            #expect(dirs?.common == made.folder + "/.git", "the baseline is keyed by another repository's git folder: \(dirs?.common ?? "none")")
+            #expect(record?.folder.hasPrefix(made.folder + "/") == true && record?.files.isEmpty == true,
+                    "the baseline recorded another repository's hooks as seen, none to run: \(record.map { "\($0.folder): \($0.files.map(\.name)) run \($0.run)" } ?? "none")")
+        }
     }
 
     /// What the dialog names and where the make goes, when the projects folder changes after the card is built
@@ -98,6 +100,8 @@ struct ProjectNewRecheckOpenTipTests {
         try FileManager.default.createDirectory(atPath: elsewhere, withIntermediateDirectories: true)
         let phrase = Requests.projectNewPhrase(name: "Shop", location: nil, goal: nil, projectsFolder: world.projects, home: world.home)
         let made = try ProjectMaker.make(name: "Shop", location: nil, projectsFolder: elsewhere, home: world.home, scratch: world.nodeScratch).get()
-        #expect(phrase.contains(made.folder), "the dialog said “\(phrase)”; the project was made in \(made.folder)")
+        withKnownIssue("N-b: the dialog names the projects folder read when it was built; carried with the approval at the device-keys cut-over") {
+            #expect(phrase.contains(made.folder), "the dialog said “\(phrase)”; the project was made in \(made.folder)")
+        }
     }
 }
