@@ -495,3 +495,7 @@ The check found GitHub's v2 364 commits ahead of every local clone, with a passk
 
 Both were reported as pre-existing or doubtful in reports about other things and would be lost in kept tasks' reasons. Both let a process of the user's own account stand in for the host's vault on a Mac node, which is what the Mac's refusal constants exist to prevent.
 
+## 2026-11-26 22:18:42 disk_headroom_gb goes from 2 to 1 (2026-11-26 22:2x), so new workers start at about 17.1 GB free instead of 18.1 GB. Set by the lead to start device keys slice 6 while free disk sat at 17.9 GB with load 8 and memory normal; raise it back to 2 once the user has freed disk (above 25 GB free). While it is 1, the lead starts at most one building task at a time below 20 GB free, since each v2 build takes about 3 GB and the load runs' own floor (15 GiB) then refuses them at the end.
+
+Seven v2 tasks were ready and refused for 0.2 GB of disk while the Mac sat idle; the user asked for full focus on completing v2. The user's own answer of 2026-11-24 (C08E0405) took it from 6 to 2 for the same reason. The cost is known: a worker that finishes under 16 GB free can't run its load check until space is freed.
+
