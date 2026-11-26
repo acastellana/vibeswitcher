@@ -194,6 +194,28 @@ struct MacAgentSwitchTests {
         #expect(pair.onDisk == pair.bytes(pair.a))
     }
 
+    /// A second switch (or a rollback) before its follow-up: launchd's job A's, the plist B's from the first switch's
+    /// rewrite, the host switched in place again (back to A, keeper's flags). The command line's server check
+    /// (`runningHost(afterASwitch:)`) and `stop` still take the node, or the switch's own checks and its follow-up
+    /// couldn't run; `status` refuses naming the remedy. Without the keeper's flags all three refuse.
+    @Test func aSecondSwitchBeforeItsFollowUpIsStillTheNodeToTheServerCheckAndStop() throws {
+        let pair = Pair(try scratch.shortFolder("vsfd").path)
+        try pair.write(pair.b)
+        let log = MacAgentTests.Recorder()
+        let switchedBack = pair.agent(log: log, printed: { pair.print(pair.a) }, runs: pair.a, switched: true)
+        #expect((try? switchedBack.runningHost(afterASwitch: true).get())?.commit == pair.a.commit, "\(switchedBack.runningHost(afterASwitch: true))")
+        guard case .failure(let stopped) = switchedBack.stop() else { Issue.record("stop went on past its prompt"); return }
+        #expect(stopped.text == "not typed", "stop refused the switched host: \(stopped.text)")
+        guard case .failure(let status) = switchedBack.status() else { Issue.record("status passed with the plist B's while A runs"); return }
+        #expect(status.text.contains("vibeswitcher switch \(pair.a.commit)"), "\(status.text)")
+        let unswitched = pair.agent(log: log, printed: { pair.print(pair.a) }, runs: pair.a, switched: false)
+        if case .success = unswitched.runningHost(afterASwitch: true) { Issue.record("A without the keeper's flags under B's plist taken by the server check") }
+        if case .success = unswitched.status() { Issue.record("status took A without the keeper's flags under B's plist") }
+        guard case .failure(let notStopped) = unswitched.stop() else { Issue.record("stop took A without the keeper's flags"); return }
+        #expect(notStopped.text.contains("isn't the node's host"), "\(notStopped.text)")
+        #expect(log.bootouts == 0)
+    }
+
     /// `switched` rewrites nothing unless the job's process is the target's host: the host still A (no handover) leaves
     /// the plist A's; nothing is loaded or unloaded either way.
     @Test func aRewriteIsRefusedUnlessTheHostRunsTheTarget() throws {
