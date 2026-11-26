@@ -477,10 +477,15 @@ struct MacSealVaultTests: LeadTeamFixture {
             // The plist's mode is its folder's row's too.
             let expected: Set<String> = path == plist ? [name, "~/Library/LaunchAgents"] : [name]
             try #require(chmod(path, 0) == 0)
-            #expect(Set(try lead.checkConfig(root: root).held) == expected, "\(name) unreadable")
-            // Put back exactly as sealed, the vault's look takes it as sealed (its rule for every watched thing, Linux's too).
+            let held = Set(try lead.checkConfig(root: root).held)
+            #expect(held == expected, "\(name) unreadable: held \(held.sorted())")
+            // Put back: a file row is as sealed again, but a folder row holding it moved since it was held (the chmod's
+            // ctime), and an accept seals only what was held as it was held: a look holds the folder anew, then the
+            // accept takes it (the vault's rule for every watched thing, Linux's too).
             try #require(chmod(path, mode) == 0)
+            _ = try lead.checkConfig(root: root)
             _ = try vault.checkConfig(root: root)
+            #expect(try lead.checkConfig(root: root).held.isEmpty, "\(name): held after it was put back and accepted")
         }
         let saved = try Data(contentsOf: URL(fileURLWithPath: terminal))
         try FileManager.default.removeItem(atPath: terminal)
