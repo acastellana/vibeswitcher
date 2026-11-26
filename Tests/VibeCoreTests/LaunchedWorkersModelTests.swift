@@ -759,20 +759,30 @@ extension LeadAdvanceTests {
         let toolset = [TestLock.slotsVariable, TestLock.timeoutVariable, TestLock.stallVariable]
         let presets = LaunchPresets.builtIns().presets(for: nil).filter { $0.kind != .shell }.map(\.command)
         #expect(presets == ["claude", "codex"])
+        // Each launch made in a leads' folder reached by a link (the Mac's /var and /tmp are links) and judged as the
+        // bind judges it, from the bind's own facts and the run folder it resolves, its settings inline (Linux) and as a
+        // file (the Mac's, S10) on every platform.
+        let leads = temp.url("builders-leads")
+        let leadsLink = temp.url("builders-leads-link")
+        try FileManager.default.createDirectory(at: leads, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: leadsLink, withDestinationURL: leads)
+        let launches = LeadVault(folder: leadsLink) { _ in .ok }
         for base in ["claude", "'/home/u/.local/share/claude/versions/2.1.332'"] {
             for role in [LeadLaunch.Role.worker, .verifier] {
                 for pins in [false, true] {
-                    let prepared = try LeadLaunch.prepare(role: role, root: root, task: "t", base: base, prompt: "p {x} $HOME ~ [y]", start: "Go on: a; b | c {d} $e",
-                                                          server: "/s", name: "\(role.rawValue)-t-\(pins)", model: "claude-opus-5-5", advisor: "fable",
-                                                          effort: "high", folder: temp.url("run-\(role.rawValue)-\(pins)-\(base.count)"), pinModels: pins)
-                    // Where settings are a file (the Mac's): its folder and digest as the bind finds them, resolved.
-                    let path = RoleLaunchCheck.settingsPath(in: prepared.command)
-                    let folder = temp.url("run-\(role.rawValue)-\(pins)-\(base.count)").path
-                    let why = RoleLaunchCheck.refusal(command: prepared.command, agent: .claude, role: role,
-                                                      environment: Array(prepared.environment.keys) + toolset, settings: settingsRead(prepared),
-                                                      file: .init(digest: prepared.settingsDigest, folder: WorkerLaunch.realPathOf(folder).map { $0 + "/" }),
-                                                      settingsAt: path.flatMap { WorkerLaunch.realPathOf(($0 as NSString).deletingLastPathComponent) })
-                    #expect(why == nil, "\(role) \(base) \(pins): \(why ?? "")")
+                    for inline in [true, false] {
+                        let name = "\(role.rawValue)-t-\(pins)-\(inline)-\(base.count)"
+                        let prepared = try LeadLaunch.prepare(role: role, root: root, task: "t", base: base, prompt: "p {x} $HOME ~ [y]",
+                                                              start: "Go on: a; b | c {d} $e", server: "/s", name: name, model: "claude-opus-5-5",
+                                                              advisor: "fable", effort: "high", folder: launches.runFolder(root: root, name: name),
+                                                              pinModels: pins, inline: inline)
+                        #expect((RoleLaunchCheck.settingsPath(in: prepared.command) == nil) == inline, "\(name): \(prepared.command.prefix(300))")
+                        let facts = WorkerLaunch.bindFacts(seen: .init(command: prepared.command, environmentNames: Array(prepared.environment.keys) + toolset),
+                                                           home: temp.url("builders-home").path, limit: 60)
+                        let why = RoleLaunchCheck.refusal(facts, agent: .claude, role: role, digest: prepared.settingsDigest, root: root, lead: leads,
+                                                          inline: inline)
+                        #expect(why == nil, "\(name): \(why ?? "")")
+                    }
                 }
             }
         }

@@ -1072,13 +1072,9 @@ extension LeadVault {
                 }
                 // Under the floor, a worker's, verifier's or finder's launch carries only what VibeSwitcher's own launch does
                 // (`RoleLaunchCheck`: its flags, its spawn environment's names, its `--settings`).
-                if member.role != .lead, team(root)?.floor?.verifierDifferent == true, let launch, launch.known, let command = launch.command {
-                    if let why = RoleLaunchCheck.refusal(command: command, agent: launch.agent ?? member.agent ?? .claude, role: member.role,
-                                                         environment: launch.environmentNames, settings: launch.settings,
-                                                         file: .init(digest: member.settingsDigest,
-                                                                     folder: LeadVault.resolvedRunFolder(root: root, lead: wallFolder ?? LeadVault.standard.folder)),
-                                                         settingsAt: launch.settingsFolder,
-                                                         inline: settingsInline, full: launch.full) {
+                if member.role != .lead, team(root)?.floor?.verifierDifferent == true, let launch, launch.known {
+                    if let why = RoleLaunchCheck.refusal(launch, agent: launch.agent ?? member.agent ?? .claude, role: member.role, digest: member.settingsDigest,
+                                                         root: root, lead: wallFolder ?? LeadVault.standard.folder, inline: settingsInline) {
                         return .refused(why)
                     }
                     if member.role == .worker, (launch.agent ?? member.agent ?? .claude) == .claude, let why = RoleLaunchCheck.branchRefusal(launch) {

@@ -68,6 +68,18 @@ public enum RoleLaunchCheck {
         }
     }
 
+    /// The bind's judgement of a launch as it found it (`facts`, from `WorkerLaunch.bindFacts`): `refusal` below, its
+    /// settings file looked for under `root`'s run folder in the leads' folder `lead` (`LeadVault.resolvedRunFolder`)
+    /// and compared with `digest`, the one its grant was given (`LeadVault.Member.settingsDigest`). Nil when it passes,
+    /// or when the host told nothing of its command.
+    public static func refusal(_ facts: WorkerLaunch.BindFacts, agent: Agent, role: LeadLaunch.Role, digest: String?, root: String, lead: URL,
+                               inline: Bool = Platform.Tools.roleSettingsInline) -> String? {
+        guard let command = facts.command else { return nil }
+        return refusal(command: command, agent: agent, role: role, environment: facts.environmentNames, settings: facts.settings,
+                       file: .init(digest: digest, folder: LeadVault.resolvedRunFolder(root: root, lead: lead)), settingsAt: facts.settingsFolder,
+                       inline: inline, full: facts.full)
+    }
+
     /// Why a `role` session launched with `command` (its spawn environment's names `environment`, nil: the host didn't
     /// say; `settings`: a `--settings` file as the bind read it; `file`: what that file must be; `settingsAt`: the folder
     /// the bind found that file in, resolved (`WorkerLaunch.BindFacts.settingsFolder`); `inline`: whether this
