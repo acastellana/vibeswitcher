@@ -5,11 +5,12 @@ import Testing
 
 /// What a checked Mac node's sessions are given back of the user's environment (`CheckedSessions`, the node on the Mac's
 /// design, "The LaunchAgent", "Sessions' environment"), on a scratch host shaped as a checked node
-/// (`--test-checked-shape HOME`: the checked start's own reset, `HOME` a scratch home whose `.zprofile` the login
-/// shell reads, never the user's).
+/// (`--test-checked-shape HOME`: the checked start's own reset, `HOME` a scratch home whose login profile the login
+/// shell reads, never the user's: `.zprofile` for zsh, `.bash_profile` for bash, the shell the user database names,
+/// `writeLoginMarker`).
 @Suite(.enabled(if: Platform.CodeIdentity.isAvailable, "the Mac's checked node"))
 struct MacCheckedSessionsTests {
-    /// A session started by a checked-shaped scratch host sees its login shell's `PATH` (the scratch `.zprofile`'s
+    /// A session started by a checked-shaped scratch host sees its login shell's `PATH` (the scratch login profile's
     /// folder), launchd's own `SSH_AUTH_SOCK` (not the starter's), a locale, launchd's text encoding, `SWIFT_BACKTRACE`
     /// off and the umask 022, and doesn't see what the starter planted (its `SSH_AUTH_SOCK`, `LANG` and `SWIFT_BACKTRACE`;
     /// a name no session takes, `PLANTED_BY_STARTER`, would be dropped by the session's list anyway). Red before:
@@ -21,7 +22,7 @@ struct MacCheckedSessionsTests {
                                                 prepare: { dir in
                                                     home = dir + "/shaped"
                                                     try FileManager.default.createDirectory(atPath: home, withIntermediateDirectories: true)
-                                                    try "export PATH=\"$PATH:/vs-login-marker\"\n".write(toFile: home + "/.zprofile", atomically: true, encoding: .utf8)
+                                                    try Self.writeLoginMarker(home: home)
                                                 }, late: { [CheckedSessions.testShapeFlag, home] })
         defer { host.stop() }
         let (client, _, _, _, _, _, _) = try await TestClient.welcomed(host.socket, appKey: host.appKey)
@@ -44,6 +45,19 @@ struct MacCheckedSessionsTests {
         #expect(value("core")?.hasPrefix("0,") == true, "core=\(value("core") ?? "none")")
         #expect(!host.log.contains("not started"), "\(host.log)")
     }
+
+    /// The scratch `home`'s login profiles add `/vs-login-marker` to `PATH`, for whichever login shell the user database
+    /// names (`HostImages`' SHELL, `pw_shell`): zsh reads `.zprofile`, bash `.bash_profile`. GitHub's Mac runner's
+    /// account has bash, where a user's Mac has zsh: with `.zprofile` alone its session never saw the marker
+    /// (v2 macos, host job, 6d606884).
+    static func writeLoginMarker(home: String) throws {
+        for profile in [".zprofile", ".bash_profile"] {
+            try "export PATH=\"$PATH:/vs-login-marker\"\n".write(toFile: home + "/" + profile, atomically: true, encoding: .utf8)
+        }
+    }
+
+    /// The account's login shell, as the user database names it (what a checked node's sessions start).
+    static var accountShell: String? { getpwuid(getuid()).flatMap { $0.pointee.pw_shell }.map { String(cString: $0) } }
 
     /// launchd's own `SSH_AUTH_SOCK` for this user's domain, nil when it has none.
     static func launchdSocket() -> String? {
