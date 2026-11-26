@@ -4667,3 +4667,7 @@ Crashes (reports in ~/Library/Logs/DiagnosticReports):
 - vibeswitcher-host-2026-11-26-045808.ips: vibeswitcher-host  (): EXC_CRASH (SIGKILL (Code Signature Invalid)), Launch Constraint Violation; top frames: none recorded
 Seen again, already reported, so only counted (the daily trend has the counts): a crash like vibeswitcher-host-2026-11-26-045808.ips; a crash like vibeswitcher-host-2026-11-26-045808.ips; a crash like vibeswitcher-host-2026-11-26-045808.ips
 Turn what's a real bug into a task (one already on the board needs nothing); read the reports for the full stacks.
+- 2026-11-26 05:58 Handed the lead over to a fresh session: the last one had been idle 50 minutes with 204k tokens of context, past handover_idle_min 50 and handover_tokens 150k
+- 2026-11-26 06:01 Kept v2-on-the-mac-5 unmerged: By design nothing of it merges into main: its commits are on the local branch v2-mac-agent in its clone (.vibeswitcher/v2-agent), second fix round done (tip 67382c9c: launchd's print read by one whole-output grammar, lstat on the path, notes 1–7), awaiting the independent re-check of that round (re-check-v2-s-3) and then delivery as a branch for v2 at the user's say. No merge and no cleanup until then (decision 2026-11-25 16:27).
+- 2026-11-26 06:02 Planned re-check-v2-s-3: Re-check v2's Mac LaunchAgent wiring after its second fix round (branch v2-mac-agent, the print grammar, A, B and notes 1–7): report only
+- 2026-11-26 06:02 Started a worker on re-check-v2-s-3
