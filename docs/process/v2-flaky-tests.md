@@ -23,6 +23,16 @@ later, never to skip it.
 | `FastExitTests.quickCommandsKeepTheirOutputAndExitCode` | the Mac's CI (`v2 macos`, host job, the run on `568df3b5`; passed on `6d606884`) | one of its 30 sessions started at once failed with `spawnFailed`, which said nothing of why: `PTYSpawn` dropped the terminal's errno when `openpty` failed (the Mac's openpty is serialized for this already, `Terminals+Darwin.swift`). It now says it (`noTerminal(errno)`), so the next one names its cause (out of terminals or descriptors on a 3-core runner with the other suites' sessions) | 2026-11-26 |
 | `TerminalRelayTests.aSlowClientIsResynced` (:78) | the Linux CI's core job (`v2 linux`, 120b0279) | its first step, `node.spawn`, got no answer from the scratch node's host in 60 s ("the session host didn't answer its connector"): the host was starved, not wrong; the core job runs four tests at once on four cores and most of them start a scratch node (54 files, about 500 nodes or hosts made). No test change: what to do about the job's load is proposed separately | 2026-11-26 |
 
+## Under load on the runner
+
+The Linux CI's core job runs `VibeCoreTests` and `VibeNodeTests` on four cores. Most of those tests start a scratch node,
+and five suites run the page checks' Chrome. From 2026-11-26 the job runs three tests at once, not four
+(`SWT_EXPERIMENTAL_MAXIMUM_PARALLELIZATION_WIDTH: 3` in its test step), which leaves a core for the hosts, servers and
+parsers they start. Its runs then were no slower when red than when green (857 to 1,073 s of tests): the waits that
+ran out came from heavy tests overlapping, not from the job growing. If such waits come back within five runs, the
+next step is the five page-check suites in a job of their own (its own build, run beside core). With that, or a runner
+with more cores, the width goes back to four.
+
 ## Under the thread sanitizer
 
 Failing only in `scripts/test.sh --tsan` (the nightly `v2-tsan` workflow), passing in ordinary runs, each with no race
