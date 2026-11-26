@@ -31,6 +31,11 @@ public enum NodeAgent {
                                              "DYLD_FALLBACK_FRAMEWORK_PATH", "DYLD_IMAGE_SUFFIX", "BASH_ENV", "ENV", "VIBESWITCHER_HOME",
                                              "CFFIXED_USER_HOME"]
 
+    /// The two flags a checked node's next image is started with after its command line on an in-place switch, each
+    /// with a number (`HostImages.CheckedCommandLine`, `MacHandoverKeeper.channelFlag` and `pidFlag`; a test holds them
+    /// equal): what `MacAgent` lets a switched job's process run beyond its plist's arguments.
+    public static let keeperFlags = (channel: "--handover-keeper-channel", pid: "--handover-keeper-pid")
+
     /// What the agent's property list holds (the node on the Mac's design, "The LaunchAgent", its table): the job's
     /// label, its program and arguments, the one variable written in it, where its stderr goes, and whether it starts at
     /// the user's login. The user's node's is `node(...)`; a test's scratch job gives its own label, scratch host and
@@ -177,6 +182,8 @@ public enum NodeAgent {
             guard let value = read[key] else { return "the agent's file has no \(key)" }
             guard equal(value, expected[key] as Any) else { return "the agent's \(key) isn't what start wrote" }
         }
+        // And byte for byte (a value of another type that reads back equal, an integer for a boolean, is another plist).
+        guard case .success(let made) = plist(job), made == data else { return "the agent's file isn't byte for byte what start writes" }
         return nil
     }
 

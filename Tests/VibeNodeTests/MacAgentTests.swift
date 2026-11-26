@@ -192,20 +192,134 @@ struct MacAgentTests {
                                  cli: Data(repeating: 3, count: 20))
         let token = ApprovalVoiceTests.token(42)
         let link = Platform.Processes.Link(pid: 42, parent: 1, startTicks: 7, terminal: nil)
-        func see(pid: pid_t = 42, runs: Bool = true, hardened: Bool? = true, changes: Bool = false, welcome: MacAgent.Welcome? = .init(pid: 42, startedAt: nil, sessions: 2)) -> MacAgent.Seen {
+        func see(pid: pid_t = 42, runs: Bool = true, hardened: Bool? = true, changes: Bool = false, welcome: MacAgent.Welcome? = .init(pid: 42, startedAt: nil)) -> MacAgent.Seen {
             var reads = 0
             return MacAgent.see(socket: "/s", pid: pid, builds: [row], connect: { _ in 99 }, token: { _ in token },
                                 link: { _ in reads += 1; return changes && reads > 1 ? Platform.Processes.Link(pid: 42, parent: 1, startTicks: 8, terminal: nil) : link },
                                 runs: { _, cdhash in runs && cdhash == row.host }, hardened: { _ in hardened }, bound: { _, _ in true },
                                 welcome: { _ in welcome }, close: { _ in })
         }
-        #expect(see() == .host(MacAgent.Host(commit: row.commit, pid: 42, startedAt: nil, sessions: 2)))
+        #expect(see() == .host(MacAgent.Host(commit: row.commit, pid: 42, startedAt: nil)))
         for (seen, what) in [(see(pid: 43), "another pid"), (see(runs: false), "no pinned host"), (see(hardened: nil), "not hardened"),
                              (see(changes: true), "changed"), (see(welcome: nil), "no welcome"),
-                             (see(welcome: .init(pid: 7, startedAt: nil, sessions: 0)), "another pid's welcome")] {
+                             (see(welcome: .init(pid: 7, startedAt: nil)), "another pid's welcome")] {
             guard case .other = seen else { Issue.record("\(what) passed: \(seen)"); continue }
         }
         #expect(MacAgent.see(socket: "/s", pid: 42, builds: [row], connect: { _ in nil }, close: { _ in }) == .nothing("nothing takes a connection at /s"))
+    }
+
+    /// Stand-ins for `start`, `stop` and `status` at function level (the blind check's findings): a job of the label at
+    /// `pid` (or loaded from `path` and not running), `see` passing as `row`'s host, `arguments` its command line.
+    struct Stand {
+        let row = NodePins.Build(commit: String(repeating: "d", count: 40), host: Data(repeating: 1, count: 20), server: Data(repeating: 2, count: 20),
+                                 cli: Data(repeating: 3, count: 20))
+        let place: NodeAgent.Place
+        var ran: [[String]] = []
+        var said: [String] = []
+
+        init(_ dir: String) {
+            place = NodeAgent.Place(label: "dev.vibeswitcher.node.test-fn", plistFolder: dir + "/la", dataRoot: dir + "/node",
+                                    lock: dir + "/node/host.lock", uid: getuid(), launchctl: "/bin/launchctl")
+        }
+
+        var job: NodeAgent.Job { NodeAgent.Job(label: place.label, programArguments: ["/x/bin/vibeswitcher-host", "--node"], environment: [:],
+                                               standardErrorPath: place.log, atLogin: false) }
+
+        /// The agent, `launchctl` recording into `log` (print answering `printed`, bootstrap `bootstrap`).
+        func agent(log: Recorder, printed: @escaping () -> String?, bootstrap: Int32 = 0, arguments: [String]? = nil, sessions: Int? = nil) -> MacAgent {
+            let row = self.row, job = self.job
+            let steps = MacAgent.Steps(launchctl: { words in
+                                           log.add(words)
+                                           if words.first == "print" { return printed().map { MacAgent.Ran(status: 0, output: $0) } ?? MacAgent.Ran(status: 113, output: "") }
+                                           if words.first == "bootstrap" { return MacAgent.Ran(status: bootstrap, output: "") }
+                                           return MacAgent.Ran(status: words.first == "getenv" ? 1 : 0, output: "")
+                                       },
+                                       pins: { .success(NodePins(uid: getuid(), builds: [row])) },
+                                       cdhashOf: { $0.hasSuffix("vibeswitcher-host") ? row.host : row.server },
+                                       see: { _, pid, _ in .host(MacAgent.Host(commit: row.commit, pid: pid, startedAt: nil)) },
+                                       say: { log.say($0) }, confirm: { log.say($0); return .failure(StartRefusal("not typed")) }, serverStop: {},
+                                       children: { _ in [] }, alive: { _ in false }, lockFree: { _ in true }, patience: 2,
+                                       arguments: { _ in arguments ?? job.programArguments }, jobArguments: { $0 == row ? job.programArguments : nil },
+                                       liveSessions: { sessions })
+            return MacAgent(place: place, steps: steps)
+        }
+    }
+
+    final class Recorder: @unchecked Sendable {
+        var calls: [[String]] = []
+        var lines: [String] = []
+        func add(_ words: [String]) { calls.append(words) }
+        func say(_ line: String) { lines.append(line) }
+        var bootouts: Int { calls.filter { $0.first == "bootout" }.count }
+    }
+
+    /// A bootstrap that fails loaded nothing of this start's: what is there is left alone (no bootout). The blind
+    /// check's finding 2: two starts at once, the second booting out the first's job.
+    @Test func aFailedBootstrapBootsOutNothing() throws {
+        let stand = Stand(try scratch.shortFolder("vsmb").path)
+        let log = Recorder()
+        let started = stand.agent(log: log, printed: { nil }, bootstrap: 5).start(stand.job, build: stand.row, folder: "/x")
+        guard case .failure(let why) = started else { Issue.record("started"); return }
+        #expect(why.text.contains("bootstrap"), "\(why.text)")
+        #expect(log.bootouts == 0, "\(log.calls)")
+    }
+
+    /// A job of the label loaded and not running from another file than the agent's is refused by `start` and `stop`
+    /// and left loaded; one from the agent's own file is unloaded.
+    @Test func aStoppedJobFromAnotherPlistIsLeftAlone() throws {
+        let stand = Stand(try scratch.shortFolder("vsmo").path)
+        let other = "gui/501/x = {\n\tstate = not running\n\truns = 1\n\tpath = /elsewhere/x.plist\n}"
+        let log = Recorder()
+        guard case .failure(let why) = stand.agent(log: log, printed: { other }).start(stand.job, build: stand.row, folder: "/x") else {
+            Issue.record("started over another plist's job"); return
+        }
+        #expect(why.text.contains("/elsewhere/x.plist") && log.bootouts == 0, "\(why.text) \(log.calls)")
+        guard case .failure = stand.agent(log: log, printed: { other }).stop() else { Issue.record("stopped another plist's job"); return }
+        #expect(log.bootouts == 0, "\(log.calls)")
+        try FileManager.default.createDirectory(atPath: stand.place.plistFolder, withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: stand.place.plistPath, contents: Data())
+        let ours = "gui/501/x = {\n\tstate = not running\n\truns = 1\n\tpath = \(stand.place.plistPath)\n}"
+        var loaded = true
+        let unloads = Recorder()
+        _ = stand.agent(log: unloads, printed: { defer { if unloads.bootouts > 0 { loaded = false } }; return loaded ? ours : nil }).stop()
+        #expect(unloads.bootouts == 1, "\(unloads.calls)")
+    }
+
+    /// The job's process must run the job's command line, not only the pinned host's code (the blind check's finding
+    /// 3: a plist swapped before launchd read it, the pinned host with `--socket` and `--lock` of its own): `start`
+    /// refuses and unloads it, `status` and `stop` refuse it; after a switch the keeper's two flags may follow.
+    @Test func theJobsProcessMustRunTheJobsCommandLine() throws {
+        let stand = Stand(try scratch.shortFolder("vsmc").path)
+        let running = "gui/501/x = {\n\tstate = running\n\tpid = 4242\n\tpath = \(stand.place.plistPath)\n}"
+        let swapped = ["/x/bin/vibeswitcher-host", "--socket", stand.place.socket, "--lock", "/elsewhere/h.lock"]
+        let log = Recorder()
+        // The job appears once start has loaded it.
+        let agent = stand.agent(log: log, printed: { log.calls.contains { $0.first == "bootstrap" } ? running : nil }, arguments: swapped)
+        guard case .failure(let why) = agent.start(stand.job, build: stand.row, folder: "/x") else {
+            Issue.record("a job running other arguments was taken for the node"); return
+        }
+        #expect(why.text.contains("not the job's command line") && log.bootouts >= 1, "\(why.text) \(log.calls)")
+        let fresh = Recorder()
+        if case .success = stand.agent(log: fresh, printed: { running }, arguments: swapped).status() { Issue.record("status took it for the node") }
+        if case .success = stand.agent(log: fresh, printed: { running }, arguments: swapped).stop() { Issue.record("stop took it for the node") }
+        #expect(fresh.bootouts == 0)
+        let switched = stand.job.programArguments + [NodeAgent.keeperFlags.channel, "5", NodeAgent.keeperFlags.pid, "77"]
+        #expect((try? stand.agent(log: fresh, printed: { running }, arguments: switched).status().get()) != nil, "a switched node refused")
+        // The flags are the keeper's own.
+        #expect(NodeAgent.keeperFlags.channel == MacHandoverKeeper.channelFlag && NodeAgent.keeperFlags.pid == MacHandoverKeeper.pidFlag)
+    }
+
+    /// `stop` says how many sessions end from the server's count (the blind check's finding 1: the host's welcome
+    /// lists none of them to the command line), or "every session it runs" with no server.
+    @Test func stopSaysTheServersSessionCount() throws {
+        let stand = Stand(try scratch.shortFolder("vsms").path)
+        let running = "gui/501/x = {\n\tstate = running\n\tpid = 4242\n\tpath = \(stand.place.plistPath)\n}"
+        let counted = Recorder()
+        _ = stand.agent(log: counted, printed: { running }, sessions: 5).stop()
+        #expect(counted.lines.contains { $0.contains("its 5 sessions") }, "\(counted.lines)")
+        let none = Recorder()
+        _ = stand.agent(log: none, printed: { running }).stop()
+        #expect(none.lines.contains { $0.contains("every session it runs") }, "\(none.lines)")
     }
 }
 
@@ -254,8 +368,10 @@ final class ScratchAgent: @unchecked Sendable {
                             environment: ["HOME": dir + "/home", "CFFIXED_USER_HOME": dir + "/home", "VIBESWITCHER_HOME": data,
                                           "TMPDIR": dir + "/t/", "SHELL": "/bin/sh", "PATH": "/usr/bin:/bin"],
                             standardErrorPath: place.log, atLogin: false)
+        let arguments = job.programArguments
         agent = MacAgent(place: place, steps: MacAgent.Steps.system(place: place, pins: { .success(pins) }, say: { _ in },
-                                                                     confirm: { _ in .success(()) }, serverStop: {}))
+                                                                     confirm: { _ in .success(()) }, serverStop: {},
+                                                                     jobArguments: { $0 == build ? arguments : nil }))
     }
 
     static func run(_ program: String, _ arguments: [String]) throws {

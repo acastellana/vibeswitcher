@@ -11,6 +11,11 @@ import VibeNode
 /// or stopped here (its harness's, 69, as on Linux).
 enum MacAgentCommand {
     /// The user's node's place, or nil where there is no launchctl.
+    /// The command line the user's node's job runs for a build: a checked node's (`NodeUnit.execStart`).
+    static func jobArguments(_ build: NodePins.Build) -> [String]? {
+        NodeUnit.execStart(prefix: NodeFolders.defaultPrefix(accountHome: VibePaths.accountHome), commit: build.commit)
+    }
+
     static func place() -> NodeAgent.Place? {
         guard let launchctl = Platform.Service.launchctl else { return nil }
         return .user(home: VibePaths.accountHome, uid: getuid(), launchctl: launchctl)
@@ -33,7 +38,7 @@ enum MacAgentCommand {
         case .success(let made): job = made
         }
         let agent = MacAgent(place: place, steps: .system(place: place, pins: { pins }, say: { Say.out($0) },
-                                                          confirm: { _ in .success(()) }, serverStop: {}))
+                                                          confirm: { _ in .success(()) }, serverStop: {}, jobArguments: jobArguments))
         switch agent.start(job, build: own.build, folder: own.folder) {
         case .success: return 0
         case .failure(let why): return said(why)
@@ -53,8 +58,15 @@ enum MacAgentCommand {
                                               return outcome == .typed ? .success(()) : .failure(StartRefusal(outcome.refusal))
                                           },
                                           serverStop: {
-                                              guard case .answered = StopCommand.server(context, connection), let client = connection.client else { return }
+                                              guard let client = connection.client else { return }
                                               _ = StopCommand.throughServer(context, client, action: action, typed: connection.typed)
+                                          },
+                                          jobArguments: jobArguments,
+                                          // The server's count (`host.liveSessions`), asked before the confirmation; its
+                                          // connection kept for its stop.
+                                          liveSessions: {
+                                              guard case .answered(let live) = StopCommand.server(context, connection) else { return nil }
+                                              return live
                                           })
         switch MacAgent(place: place, steps: steps).stop() {
         case .success: return 0
@@ -67,7 +79,7 @@ enum MacAgentCommand {
     static func status() -> Int32? {
         guard let place = place() else { return Say.unbuilt("this system has no launchctl") }
         let agent = MacAgent(place: place, steps: .system(place: place, pins: { NodePins.read() }, say: { Say.out($0) },
-                                                          confirm: { _ in .success(()) }, serverStop: {}))
+                                                          confirm: { _ in .success(()) }, serverStop: {}, jobArguments: jobArguments))
         switch agent.status() {
         case .success: return nil
         case .failure(let why): return said(why)

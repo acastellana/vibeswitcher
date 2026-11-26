@@ -11,7 +11,8 @@ import Testing
 struct MacCheckedSessionsTests {
     /// A session started by a checked-shaped scratch host sees its login shell's `PATH` (the scratch `.zprofile`'s
     /// folder), launchd's own `SSH_AUTH_SOCK` (not the starter's), a locale, launchd's text encoding, `SWIFT_BACKTRACE`
-    /// off and the umask 022, and doesn't see a variable the starter planted; the host itself keeps 077. Red before:
+    /// off and the umask 022, and doesn't see what the starter planted (its `SSH_AUTH_SOCK`, `LANG` and `SWIFT_BACKTRACE`;
+    /// a name no session takes, `PLANTED_BY_STARTER`, would be dropped by the session's list anyway). Red before:
     /// the session had no `SSH_AUTH_SOCK`, no text encoding, no `SWIFT_BACKTRACE` and the host's umask 077.
     @Test func aCheckedNodesSessionHasTheUsersEnvironmentAndNotTheStarters() async throws {
         var home = ""
@@ -41,9 +42,7 @@ struct MacCheckedSessionsTests {
         // zsh says `022`, sh `0022`: the number.
         #expect(value("umask").flatMap { Int($0, radix: 8) } == 0o022, "umask=\(value("umask") ?? "none")")
         #expect(value("core")?.hasPrefix("0,") == true, "core=\(value("core") ?? "none")")
-        // The host itself: reset as a checked node is (the kernel's copy of its environment is what it was started
-        // with, so its log's word is read instead: it started, shaped).
-        #expect(host.log.isEmpty || !host.log.contains("not started"), "\(host.log)")
+        #expect(!host.log.contains("not started"), "\(host.log)")
     }
 
     /// launchd's own `SSH_AUTH_SOCK` for this user's domain, nil when it has none.
@@ -58,15 +57,5 @@ struct MacCheckedSessionsTests {
         ps.waitUntilExit()
         let text = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
         return text.isEmpty ? nil : text
-    }
-
-    /// A process's environment as the kernel gives it to its own user (`KERN_PROCARGS2`); empty when unreadable.
-    static func environment(_ pid: pid_t) -> [String: String] {
-        var found: [String: String] = [:]
-        for pair in Platform.Processes.environment(pid) ?? [] {
-            guard let equals = pair.firstIndex(of: "=") else { continue }
-            found[String(pair[..<equals])] = String(pair[pair.index(after: equals)...])
-        }
-        return found
     }
 }

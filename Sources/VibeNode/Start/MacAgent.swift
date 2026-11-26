@@ -22,14 +22,11 @@ public struct MacAgent {
         public var commit: String
         public var pid: pid_t
         public var startedAt: Date?
-        /// Its live sessions, from its welcome.
-        public var sessions: Int
 
-        public init(commit: String, pid: pid_t, startedAt: Date?, sessions: Int) {
+        public init(commit: String, pid: pid_t, startedAt: Date?) {
             self.commit = commit
             self.pid = pid
             self.startedAt = startedAt
-            self.sessions = sessions
         }
     }
 
@@ -69,6 +66,14 @@ public struct MacAgent {
         public var now: () -> Date
         /// Between two looks.
         public var pause: () -> Void
+        /// A process's command line as the kernel gives it to its user (`Platform.Processes.arguments`).
+        public var arguments: (pid_t) -> [String]
+        /// The command line the job runs for a build of the record (the user's node: `NodeUnit.execStart`, a checked
+        /// node's; a test's scratch job: its own); nil for a build it has none for.
+        public var jobArguments: (NodePins.Build) -> [String]?
+        /// How many sessions the node's server says the host runs (`status`'s `host.liveSessions`), nil when no server
+        /// answers: the host's own welcome lists only the sessions its caller may end, none for the command line.
+        public var liveSessions: () -> Int?
 
         public init(launchctl: @escaping ([String]) -> Ran?, pins: @escaping () -> Result<NodePins, NodePins.Refused>,
                     cdhashOf: @escaping (String) -> Data?,
@@ -76,7 +81,9 @@ public struct MacAgent {
                     say: @escaping (String) -> Void, confirm: @escaping (_ what: String) -> Result<Void, StartRefusal>,
                     serverStop: @escaping () -> Void, children: @escaping (pid_t) -> [Platform.Processes.Link],
                     alive: @escaping (Platform.Processes.Link) -> Bool, lockFree: @escaping (String) -> Bool,
-                    patience: TimeInterval = 30, now: @escaping () -> Date = Date.init, pause: @escaping () -> Void = { usleep(50_000) }) {
+                    patience: TimeInterval = 30, now: @escaping () -> Date = Date.init, pause: @escaping () -> Void = { usleep(50_000) },
+                    arguments: @escaping (pid_t) -> [String] = Platform.Processes.arguments,
+                    jobArguments: @escaping (NodePins.Build) -> [String]? = { _ in nil }, liveSessions: @escaping () -> Int? = { nil }) {
             self.launchctl = launchctl
             self.pins = pins
             self.cdhashOf = cdhashOf
@@ -90,6 +97,9 @@ public struct MacAgent {
             self.patience = patience
             self.now = now
             self.pause = pause
+            self.arguments = arguments
+            self.jobArguments = jobArguments
+            self.liveSessions = liveSessions
         }
     }
 
@@ -124,24 +134,26 @@ public struct MacAgent {
         // A job of the label already there.
         if let printed = printed() {
             if let pid = printed.pid {
-                switch steps.see(place.socket, pid, pins.builds) {
-                case .host(let host): return .success(say("the node runs already: \(Self.describe(host))"))
-                case .nothing(let why), .other(let why):
-                    return .failure(StartRefusal("a job labelled \(place.label) runs pid \(pid), which isn't the node's host: \(why); it was left as it is", exitCode: 77))
+                switch node(pid, builds: pins.builds, switched: true) {
+                case .success(let host): return .success(say("the node runs already: \(Self.describe(host))"))
+                case .failure(let why):
+                    return .failure(StartRefusal("a job labelled \(place.label) runs pid \(pid), which isn't the node's host: \(why.text); it was left as it is", exitCode: 77))
                 }
             }
-            // Nothing of it runs: unloaded, so the checked plist is what launchd loads.
+            // Nothing of it runs: unloaded, so the checked plist is what launchd loads; only one launchd loaded from the
+            // agent's own file, any other left as it is.
+            if let why = notOurs(printed) { return .failure(why) }
             if let why = bootout() { return .failure(why) }
         }
-        if let why = plistRefusal(job) { return .failure(why) }
         for name in NodeAgent.refusedManagerNames {
             if let ran = steps.launchctl(["getenv", name]), ran.status == 0, !ran.output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 return .failure(StartRefusal("the user's launchd gives every job \(name) (launchctl setenv): `launchctl unsetenv \(name)` first; nothing was started", exitCode: 1))
             }
         }
+        if let why = plistRefusal(job) { return .failure(why) }
+        // A bootstrap that fails loaded nothing of this start's: what is there (another start's job, a login's) is left alone.
         guard let loaded = steps.launchctl(["bootstrap", place.domain, place.plistPath]), loaded.status == 0 else {
-            _ = bootout()
-            return .failure(StartRefusal("launchctl bootstrap \(place.domain) \(ConfigSeal.inert(place.plistPath, limit: .max)) failed: nothing was started", exitCode: 1))
+            return .failure(StartRefusal("launchctl bootstrap \(place.domain) \(ConfigSeal.inert(place.plistPath, limit: .max)) failed (a job of the label may have been loaded meanwhile): nothing of it was touched", exitCode: 1))
         }
         if !job.atLogin, steps.launchctl(["kickstart", place.target])?.status != 0 {
             _ = bootout()
@@ -153,7 +165,14 @@ public struct MacAgent {
             if let printed = printed() {
                 if let pid = printed.pid {
                     switch steps.see(place.socket, pid, [build]) {
-                    case .host(let host): return .success(say("the node runs: \(Self.describe(host))"))
+                    case .host(let host):
+                        // Its code is the pinned host's; its command line must be the one the plist start checked names
+                        // (a plist swapped before launchd read it runs the same code with other arguments).
+                        if let why = runsTheJob(pid, build: build, switched: false) {
+                            _ = bootout()
+                            return .failure(StartRefusal("the job's process (pid \(pid)) isn't the host start meant: \(why); the job was unloaded", exitCode: 77))
+                        }
+                        return .success(say("the node runs: \(Self.describe(host))"))
                     case .other(let why):
                         _ = bootout()
                         return .failure(StartRefusal("the job's process (pid \(pid)) isn't the host start meant: \(why); the job was unloaded", exitCode: 77))
@@ -183,6 +202,7 @@ public struct MacAgent {
             return .failure(StartRefusal("the node isn't running: no job labelled \(place.label) is loaded", exitCode: 69))
         }
         guard let pid = printed.pid else {
+            if let why = notOurs(printed) { return .failure(why) }
             if let why = bootout() { return .failure(why) }
             return .success(say("the node wasn't running (\(printed.lastExit ?? "not started")): its job was unloaded"))
         }
@@ -192,12 +212,13 @@ public struct MacAgent {
         case .success(let read): builds = read.builds
         }
         let host: Host
-        switch steps.see(place.socket, pid, builds) {
-        case .host(let seen): host = seen
-        case .nothing(let why), .other(let why):
-            return .failure(StartRefusal("a job labelled \(place.label) runs pid \(pid), which isn't the node's host: \(why); nothing was stopped", exitCode: 77))
+        switch node(pid, builds: builds, switched: true) {
+        case .success(let seen): host = seen
+        case .failure(let why):
+            return .failure(StartRefusal("a job labelled \(place.label) runs pid \(pid), which isn't the node's host: \(why.text); nothing was stopped", exitCode: 77))
         }
-        let what = "stop ends the node's host (pid \(host.pid), build \(host.commit)), its server and its \(host.sessions) session\(host.sessions == 1 ? "" : "s"), and unloads \(place.label)"
+        let sessions = steps.liveSessions().map { "its \($0) session\($0 == 1 ? "" : "s")" } ?? "every session it runs"
+        let what = "stop ends the node's host (pid \(host.pid), build \(host.commit)), its server and \(sessions), and unloads \(place.label)"
         if case .failure(let why) = steps.confirm(what) { return .failure(why) }
         // The host and its children as they are now (pid and start): after the bootout its sessions and server are
         // launchd's children, outside the job's group, and are waited for by these.
@@ -234,10 +255,10 @@ public struct MacAgent {
         switch steps.pins() {
         case .failure(let why): return .failure(StartRefusal("the node's record can't be read: \(why.description)", exitCode: 1))
         case .success(let pins):
-            switch steps.see(place.socket, pid, pins.builds) {
-            case .host(let host): return .success(say("the node runs: \(Self.describe(host))"))
-            case .nothing(let why), .other(let why):
-                return .failure(StartRefusal("a job labelled \(place.label) runs pid \(pid), which isn't the node's host: \(why)", exitCode: 77))
+            switch node(pid, builds: pins.builds, switched: true) {
+            case .success(let host): return .success(say("the node runs: \(Self.describe(host))"))
+            case .failure(let why):
+                return .failure(StartRefusal("a job labelled \(place.label) runs pid \(pid), which isn't the node's host: \(why.text)", exitCode: 77))
             }
         }
     }
@@ -282,7 +303,7 @@ public struct MacAgent {
         guard let again = link(pid), again == first, bound(again, peer) else { return .other("pid \(pid) changed while it was read") }
         guard let said = welcome(fd) else { return .other("pid \(pid) sent no welcome") }
         if let told = said.pid, told != pid { return .other("pid \(pid)'s welcome names pid \(told)") }
-        return .host(Host(commit: build.commit, pid: pid, startedAt: said.startedAt, sessions: said.sessions))
+        return .host(Host(commit: build.commit, pid: pid, startedAt: said.startedAt))
     }
 
     /// Says hello on `fd` and reads the host's welcome, within 5 s; nil without one.
@@ -310,8 +331,8 @@ public struct MacAgent {
             decoder.append(Data(chunk[0..<got]))
             while let next = try? decoder.next() {
                 guard next.kind == .control, let envelope = try? HostCoding.decode(HostEventEnvelope.self, from: next.payload) else { continue }
-                if case .welcome(_, _, let sessions, _, let pid, let startedAt) = envelope.event {
-                    return Welcome(pid: pid, startedAt: startedAt, sessions: sessions.filter { $0.isLive }.count)
+                if case .welcome(_, _, _, _, let pid, let startedAt) = envelope.event {
+                    return Welcome(pid: pid, startedAt: startedAt)
                 }
             }
         }
@@ -319,6 +340,41 @@ public struct MacAgent {
     }
 
     // MARK: Helpers
+
+    /// The node's host at the job's `pid`: by token and code (`see`) against `builds`, then by its command line
+    /// (`runsTheJob`); or why not.
+    func node(_ pid: pid_t, builds: [NodePins.Build], switched: Bool) -> Result<Host, StartRefusal> {
+        switch steps.see(place.socket, pid, builds) {
+        case .nothing(let why), .other(let why): return .failure(StartRefusal(why))
+        case .host(let host):
+            guard let build = builds.first(where: { $0.commit == host.commit }) else { return .failure(StartRefusal("its build isn't the record's")) }
+            if let why = runsTheJob(pid, build: build, switched: switched) { return .failure(StartRefusal(why)) }
+            return .success(host)
+        }
+    }
+
+    /// Why `pid` doesn't run the job's command line for `build` (`Steps.jobArguments`), or nil: exactly that, or, where
+    /// it may have switched in place, that followed by the keeper's two flags and their numbers (a checked node's next
+    /// image is started so: `NodeAgent.keeperFlags`).
+    func runsTheJob(_ pid: pid_t, build: NodePins.Build, switched: Bool) -> String? {
+        guard let expected = steps.jobArguments(build) else { return "the job has no command line for build \(build.commit)" }
+        let given = steps.arguments(pid)
+        if given == expected { return nil }
+        let rest = Array(given.dropFirst(expected.count))
+        if switched, Array(given.prefix(expected.count)) == expected, rest.count == 4, rest[0] == NodeAgent.keeperFlags.channel,
+           rest[2] == NodeAgent.keeperFlags.pid, [rest[1], rest[3]].allSatisfy({ !$0.isEmpty && $0.allSatisfy(\.isNumber) }) { return nil }
+        return "pid \(pid) runs \(ConfigSeal.inert(given.joined(separator: " "), limit: 512)), not the job's command line"
+    }
+
+    /// Why a job of the label loaded and not running isn't this agent's to unload, or nil: launchd loaded it from
+    /// another file than the agent's (`print`'s `path`, compared by device and inode), or from none that is there.
+    func notOurs(_ printed: NodeAgent.Printed) -> StartRefusal? {
+        // By file: launchd names the path it resolved (`/private/tmp` for `/tmp`).
+        var loaded = stat(), ours = stat()
+        if let path = printed.path, stat(path, &loaded) == 0, stat(place.plistPath, &ours) == 0,
+           loaded.st_dev == ours.st_dev, loaded.st_ino == ours.st_ino { return nil }
+        return StartRefusal("a job labelled \(place.label) is loaded from \(ConfigSeal.inert(printed.path ?? "an unknown file", limit: .max)), not \(ConfigSeal.inert(place.plistPath, limit: .max)): it was left as it is", exitCode: 77)
+    }
 
     /// What launchd says of the job; nil while none of the label is loaded.
     func printed() -> NodeAgent.Printed? {
@@ -400,18 +456,15 @@ public struct MacAgent {
 
     static func describe(_ host: Host) -> String {
         "build \(host.commit), host pid \(host.pid)" + (host.startedAt.map { " since \(ISO8601DateFormatter().string(from: $0))" } ?? "")
-            + ", \(host.sessions) session\(host.sessions == 1 ? "" : "s")"
     }
 
     /// The host's welcome, as `see` reads it.
     public struct Welcome: Equatable, Sendable {
         public var pid: pid_t?
         public var startedAt: Date?
-        public var sessions: Int
-        public init(pid: pid_t?, startedAt: Date?, sessions: Int) {
+        public init(pid: pid_t?, startedAt: Date?) {
             self.pid = pid
             self.startedAt = startedAt
-            self.sessions = sessions
         }
     }
 }
@@ -423,7 +476,8 @@ extension MacAgent.Steps {
     /// file, the host checked by `MacAgent.see`, the process table and the lock; the record (`pins`), what is said, the
     /// confirmation and the server's stop as the caller gives them.
     public static func system(place: NodeAgent.Place, pins: @escaping () -> Result<NodePins, NodePins.Refused>, say: @escaping (String) -> Void,
-                              confirm: @escaping (_ what: String) -> Result<Void, StartRefusal>, serverStop: @escaping () -> Void) -> MacAgent.Steps {
+                              confirm: @escaping (_ what: String) -> Result<Void, StartRefusal>, serverStop: @escaping () -> Void,
+                              jobArguments: @escaping (NodePins.Build) -> [String]?, liveSessions: @escaping () -> Int? = { nil }) -> MacAgent.Steps {
         MacAgent.Steps(
             launchctl: { arguments in
                 NodeStarter.run(place.launchctl, arguments, environment: ["PATH=/usr/bin:/bin"], timeout: 30).map { MacAgent.Ran(status: $0.status, output: $0.output) }
@@ -440,6 +494,6 @@ extension MacAgent.Steps {
                 guard flock(fd, LOCK_EX | LOCK_NB) == 0 else { return false }
                 flock(fd, LOCK_UN)
                 return true
-            })
+            }, jobArguments: jobArguments, liveSessions: liveSessions)
     }
 }

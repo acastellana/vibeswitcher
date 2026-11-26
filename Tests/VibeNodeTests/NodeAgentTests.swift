@@ -50,6 +50,11 @@ struct NodeAgentTests {
         #expect(try check { $0["WatchPaths"] = ["/Users/u"] }?.contains("WatchPaths") == true)
         #expect(try check { $0["Label"] = nil }?.contains("no Label") == true)
         #expect(NodeAgent.check(Data("not a plist".utf8), inputs: Self.inputs, nodeRoot: Self.root, atLogin: false) == "the agent's file isn't a property list")
+        // A value of another type that reads back equal: an integer for KeepAlive's boolean.
+        let text = String(decoding: data, as: UTF8.self)
+        let integer = Data(text.replacingOccurrences(of: "<key>KeepAlive</key>\n\t<false/>", with: "<key>KeepAlive</key>\n\t<integer>0</integer>").utf8)
+        #expect(integer != data)
+        #expect(NodeAgent.check(integer, inputs: Self.inputs, nodeRoot: Self.root, atLogin: false) != nil)
     }
 
     @Test func whatTheUnitRefusesTheAgentRefuses() {
