@@ -212,7 +212,7 @@ function verdictLine(verdict) {
   const parts = verdict.parts.flatMap((part, index) => [index ? ' · ' : '',
     part.group ? h('a', { class: 'link', href: nodeHref(part.group) }, part.words) : part.words]).filter((part) => part !== '');
   return h('p', { class: `node-verdict ${verdict.tone}`, role: 'status' },
-    h('span', { class: verdict.tone === 'calm' ? 'dot tone-done' : verdict.tone === 'asked' ? 'dot tone-needs-you' : 'dot tone-working', 'aria-hidden': 'true' }),
+    h('span', { class: verdict.tone === 'calm' ? 'dot tone-done' : verdict.tone === 'asked' ? 'dot tone-needs-you' : 'dot', 'aria-hidden': 'true' }),
     h('span', { class: 'node-verdict-words' }, h('span', { class: 'node-verdict-head' }, verdict.head), parts.length ? ' ' : null, parts));
 }
 
@@ -316,7 +316,7 @@ export function nodeView(app) {
       // Boost (the node's `boost`): on or off, why, and the limits it raises to.
       node.boost ? { key: 'boost', title: t('noBoost'), meta: node.boost.on ? t('noOn') : t('noOff'), metaTone: '', el: group(t('noBoost'),
         h('dl', { class: 'facts-list' },
-          row(t('noState'), h('span', { class: node.boost.on ? 'dot tone-working' : 'dot', 'aria-hidden': 'true' }), node.boost.on ? t('noBoostOnWhy', { why: nodeWords(node.boost.why) }) : t('noBoostOffWhy', { why: nodeWords(node.boost.why) })),
+          row(t('noState'), h('span', { class: node.boost.on ? 'dot tone-done' : 'dot', 'aria-hidden': 'true' }), node.boost.on ? t('noBoostOnWhy', { why: nodeWords(node.boost.why) }) : t('noBoostOffWhy', { why: nodeWords(node.boost.why) })),
           row(t('noMode'), { on: t('noOn'), off: t('noOff'), automatic: t('noAutomatic') }[node.boost.mode] || node.boost.mode),
           node.boost.on ? row(t('noRaisedLimits'), t('noBoostLimits', { load: node.boost.limits.loadThreshold, sessions: node.boost.limits.maxSessions, workers: node.boost.limits.maxWorkers, slots: node.boost.limits.heavySlots })) : null),
         h('a', { class: 'link', href: settingsHref(null, 'boost') }, t('noChangeItInSettings'))) } : null,

@@ -64,7 +64,8 @@ const bone = (kind = '') => h('span', { class: `bone ${kind}`.trim() });
 export function centreSkeleton() {
   const box = h('div', { class: 'skeleton-composer' }, h('span', { class: 'skeleton-field' }));
   const el = h('section', { class: 'centre screen frame-skeleton', 'aria-busy': 'true', 'aria-label': t('frLoading'), hidden: true },
-    h('div', { class: 'skeleton-head' }, h('span', { class: 'skeleton-row' }, bone('skeleton-title'), bone('skeleton-switch')), h('span', { class: 'skeleton-row' }, bone('skeleton-dial'))),
+    // The header's shape (D11): one row wider, the switch first and the folded dial at its end; a phone's two rows.
+    h('div', { class: 'skeleton-head' }, h('span', { class: 'skeleton-row' }, bone('skeleton-title')), h('span', { class: 'skeleton-row' }, bone('skeleton-switch'), bone('skeleton-dial'))),
     h('div', { class: 'skeleton-strip' }, bone('short'), bone('short'), bone('short')),
     h('div', { class: 'skeleton-lines' }, ...['wide', '', 'wide', 'short', ''].map((kind) => h('span', { class: 'skeleton-line' }, h('span', { class: 'skeleton-mark' }), bone(kind)))),
     box);

@@ -374,11 +374,13 @@ small { font-size: var(--t-caption); }
 /* Until the first snapshot: the lead view's shape (its header's two rows, the strip, the lines, the message box) and
    the right column's, in bars that breathe on the loop (still with reduced motion). */
 .frame-skeleton { flex: 1; display: flex; flex-direction: column; min-height: 0; }
-.skeleton-head { flex: none; display: grid; gap: 8px; padding: 8px 24px; border-bottom: 1px solid var(--line); }
+.skeleton-head { flex: none; display: flex; align-items: center; gap: 14px; height: var(--head); padding: 0 24px; border-bottom: 1px solid var(--line); }
+.skeleton-head > .skeleton-row { display: contents; }
+.frame-skeleton .bone.skeleton-switch { order: -1; }
 .skeleton-row { display: flex; align-items: center; gap: 14px; min-height: var(--ctl-m); }
 .frame-skeleton .bone.skeleton-title { width: 280px; height: 14px; }
 .frame-skeleton .bone.skeleton-switch { width: 150px; height: var(--ctl-m); border-radius: var(--r-2); }
-.frame-skeleton .bone.skeleton-dial { width: 320px; height: var(--ctl-m); border-radius: var(--r-2); }
+.frame-skeleton .bone.skeleton-dial { width: 150px; height: var(--ctl-m); margin-left: auto; border-radius: var(--r-pill); }
 .skeleton-strip { flex: none; display: flex; align-items: center; gap: 14px; min-height: var(--ctl-m); padding: 0 24px; border-bottom: 1px solid var(--line); }
 .skeleton-strip .bone { flex: none; width: 76px; }
 .skeleton-lines { flex: 1; display: grid; align-content: start; gap: 20px; padding: 24px; overflow: hidden; }
@@ -593,6 +595,8 @@ small { font-size: var(--t-caption); }
 .composer-input { flex: 1; min-width: 0; min-height: var(--ctl-l); max-height: 200px; padding: 7px 13px; border: 0; border-radius: var(--r-3); background: var(--raised); box-shadow: var(--e-1); font-size: var(--t-read); line-height: var(--lh-read); resize: none; outline: none; transition: box-shadow var(--dur-1) var(--ease-out); }
 .composer-input:focus-visible { box-shadow: var(--e-focus); }
 .composer-input::placeholder, .answer-input::placeholder { color: var(--ink-3); text-overflow: ellipsis; }
+/* An empty box is one line: its hint never wraps (a phone's Spanish), cut with an ellipsis instead. */
+:is(.composer-input, textarea.answer-input):placeholder-shown { overflow: hidden; white-space: nowrap; }
 .send { flex: none; display: inline-flex; align-items: center; justify-content: center; width: var(--ctl-l); height: var(--ctl-l); border-radius: 50%; background: var(--accent); color: var(--on-accent); transition: background-color var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out); }
 .send:disabled { background: var(--fill-2); color: var(--ink-3); cursor: default; }
 .composer-hint { flex: none; padding: 10px 24px 18px; color: var(--ink-3); font-size: var(--t-caption); text-align: center; }
@@ -1759,7 +1763,8 @@ kbd { padding: 1px 6px; border-radius: var(--r-1); box-shadow: var(--e-1-in); co
   .app.keyboard .project-view :is(.team-strip, .dial-fold, .centre-head > .segmented) { display: none; }
   /* The load's skeleton in the phone's shape: the header's two rows within the width, the gutters a phone's. */
   :is(.skeleton-head, .skeleton-strip, .skeleton-composer) { padding-left: 14px; padding-right: 14px; }
-  .skeleton-head { padding-top: calc(8px + env(safe-area-inset-top)); }
+  .skeleton-head { display: grid; gap: 8px; height: auto; padding-top: calc(8px + env(safe-area-inset-top)); padding-bottom: 8px; }
+  .skeleton-head > .skeleton-row { display: flex; }
   .skeleton-lines { padding: 16px 14px; }
   .frame-skeleton .bone.skeleton-title { width: 50%; }
   .frame-skeleton .bone.skeleton-switch { width: 30%; }

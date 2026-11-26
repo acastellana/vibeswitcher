@@ -401,7 +401,7 @@ export function chatView(app) {
   const nodeNote = h('p', { class: 'confirm-note' }, t('chRunItInATerminal'));
   const nodeImage = h('div', { class: 'node-image', hidden: true },
     h('div', { class: 'node-image-head' }, nodePath,
-      kit.iconButton({ size: 's', title: t('chClose'), 'aria-label': t('chClose'), onclick: () => { nodeImage.hidden = true; input.focus(); } }, icon('close', 12))),
+      kit.iconButton({ title: t('chClose'), 'aria-label': t('chClose'), onclick: () => { nodeImage.hidden = true; input.focus(); } }, icon('close', 12))),
     nodeLine,
     nodeNote);
   // The one message box (views/composer.js): Enter sends, steers or queues where the page acts (`send`), else leaves
@@ -441,9 +441,9 @@ export function chatView(app) {
     autocomplete: 'off', spellcheck: 'false' });
   const findCount = h('span', { class: 'find-count', role: 'status' });
   const findBar = h('div', { class: 'chat-find', role: 'search', hidden: true }, icon('search', 13), findInput, findCount,
-    kit.iconButton({ size: 's', title: t('chPrevious'), 'aria-label': t('chPreviousMatch'), onclick: () => step(-1) }, icon('send', 12)),
-    kit.iconButton({ size: 's', title: t('chNext'), 'aria-label': t('chNextMatch'), onclick: () => step(1) }, icon('down', 12)),
-    kit.iconButton({ size: 's', title: t('chCloseEsc'), 'aria-label': t('chCloseFind'), onclick: () => closeFind() }, icon('close', 12)));
+    kit.iconButton({ title: t('chPrevious'), 'aria-label': t('chPreviousMatch'), onclick: () => step(-1) }, icon('send', 12)),
+    kit.iconButton({ title: t('chNext'), 'aria-label': t('chNextMatch'), onclick: () => step(1) }, icon('down', 12)),
+    kit.iconButton({ title: t('chCloseEsc'), 'aria-label': t('chCloseFind'), onclick: () => closeFind() }, icon('close', 12)));
   const el = h('div', { class: 'chat' }, findBar, scroller, latest, queuedMessages.el, drafted.el, suggestions, attachedEl, notice, attachMenu, nodeImage, form, hint);
 
   const loader = imageLoader((kind, args) => store.read(kind, args));
