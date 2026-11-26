@@ -645,6 +645,54 @@ environment as a fixed value (the server child, the launchers and the parsers ge
 memory into its stderr (the server's is `node.log`). A crash of any of them still goes to the system's crash reporter
 (`~/Library/Logs/DiagnosticReports`), as every process's does.
 
+**What a real Mac proved (2026-11-26, this Mac, macOS 27.2, SIP on; `MacAgentTests`, each red on the seams
+`01d34331` and green from `4c2f76b5`).** With a scratch label in `gui/501`, a scratch plist folder and data root, and a
+scratch record pinning hardened copies of the built host, server and command line: `start` writes and checks the plist,
+loads the job, and its host comes up from the plist's exact arguments (the job's pid's arguments are them), known by its
+socket's audit token and running code; `status` says so with its build; `stop` unloads it and leaves no job, no process
+and no socket (`startLoadsTheJobAndStopLeavesNothing`). A plist that differs (`KeepAlive` true) is refused before any
+load and left as it was (`aChangedPlistIsRefusedBeforeAnyLoad`). A job of the label running `/bin/sleep` is refused by
+`start` and `stop` and runs on (`aJobOfTheLabelRunningAnotherProgramIsLeftAlone`). The job's host passes `see`; the same
+host against a record pinning other code doesn't; a look-alike (`perl` started as `exec -a <the host's path>`, listening,
+its first argument the host's path) doesn't (`theHostIsKnownByTokenAndCodeNotByThePathsText`). A killed host isn't
+started again: launchd says `not running`, `runs = 1`, the signal; `status` says it; `start` loads it afresh
+(`aCrashedHostIsNotStartedAgainByLaunchd`). A scratch host shaped as a checked node (`--test-checked-shape`, the checked
+reset itself) gives its session the login shell's `PATH`, launchd's `SSH_AUTH_SOCK`, `en_US.UTF-8`, the text encoding,
+`SWIFT_BACKTRACE=enable=no` and the umask 022, and not the starter's planted variable, `SSH_AUTH_SOCK`, `LANG` or
+`SWIFT_BACKTRACE` (`MacCheckedSessionsTests`). After an in-place switch through a keeper (a scratch host, the listener
+carried across the exec), a connection made afterwards has a token whose running code is the new image's and not the
+old's, hardened, at the same pid (`MacSwitchedHostTokenTests`): so `see`, and with it `status` and `stop`, know a switched
+host by the build it now runs. No Background Task Management item and no notification came of any of these loads (the
+unified log after the runs).
+
+**What no test reaches while `macUnbuilt` and `isCheckedMacNode` are off, and what only the functions cover.** The
+real plist's program: a `--node` host on the Mac refuses at once (`macNodeRefusal`), and a checked start needs the
+installed root record, which no test chooses; so the plist's checked command line is tested as data (it parses back to
+the build's folder and server, `NodeAgentTests/theProgramArgumentsAreACheckedNodesCommandLine`), and the jobs here run
+a scratch host's arguments with a scratch environment (the real plist's `SWIFT_BACKTRACE` alone would leave the host's
+`HOME`, and so its files, the user's). The command line's Mac arm (`MacAgentCommand`: the build by its own code in the
+installed record, `~/Library/LaunchAgents`, the label `dev.vibeswitcher.node`) runs only past `usersNodeRefusal`, never
+here. The server's stop inside `stop` (no scratch job has a server child: the server needs a checked node's connector
+check) and so a stop that ends sessions through it; with no server, the bootout ends the host and the host's sessions
+lose their terminal (shown for the group and a session-leader child in the measurement above, not with a scratch job's
+own sessions: a launchd job's stdin is `/dev/null`, so no app key reaches it and no session can be spawned there). The
+`launchctl getenv` refusal of a loader variable (no test sets one in the user's launchd: that would reach every job of
+the user's). The plist written at the user's login (`--at-login`, `RunAtLoad`).
+
+**What it doesn't cover** (for the switch-on review):
+
+- *The plist between its check and `bootstrap`* is read again by launchd by path: a file swapped in that gap is started
+  by launchd, then refused by the check after the load and booted out. It ran, as any program of the user's can.
+- *A switch rewrites no plist.* After an in-place switch the job's `ProgramArguments` still name the build it was
+  started as, while another runs; `status` and `stop` check the host against every build the record pins, so they
+  pass, but the next `start` after a `stop` starts the plist's build and refuses the plist once the command line is
+  another build's. The switch (or `start`) must rewrite the plist for the build it goes to: owed with the Mac's switch.
+- *`launchctl getenv SSH_AUTH_SOCK`* is any process of the user's to set (`launchctl setenv`), as for every Terminal
+  opened after it (the Mac seal list, step 8).
+- *Sessions keep a hard core limit of 0* (the reset's): soft-only in the reset would give `ulimit -c` back.
+- *A session that ignores the hangup* outlives a `stop` without the server: `stop` names it by pid and fails after its
+  limit (it doesn't kill what may be the user's own program).
+
 **Where it is built.** `NodeAgent` (the plist as data: `Job`, `Place`, `check`, the `launchctl` lines and `print`'s
 lines), `MacAgent` (VibeNode: `start`, `stop`, `status` with every step injected, and the host check by token and
 code), the command line's Mac arm (`vibeswitcher-cli`, behind `usersNodeRefusal`), `CheckedSessions` (VibeHost: what a

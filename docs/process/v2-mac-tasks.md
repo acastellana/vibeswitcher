@@ -415,7 +415,7 @@ or decided. Done on Linux, tested on both systems (`ApprovalJudgmentTests`, `App
    its default), either refuses with one line on stderr (exit 1) or is the pinned host of its row with that row's server
    as its child, on the job's pid across every switch; a switch never changes the pid; and the job's stderr is where
    each refusal is said. Step 5 still owes the plist, `launchctl`, the command line's start and stop, and the switch-on
-   review with the user's go-ahead.
+   review with the user's go-ahead. (Built since: item 15, with the sessions' environment and `SWIFT_BACKTRACE`.)
 
 14. **(Answered, the re-review questions of 2026-11-22)**
    - *Is `HostImages.macServerRefusal`'s set of the account's locks complete?* It names the app's
@@ -436,6 +436,39 @@ or decided. Done on Linux, tested on both systems (`ApprovalJudgmentTests`, `App
      the checked node host that owns it), passed by the `.seal` and `.verify` hooks and `VaultV2Handler`; the
      process-wide `recordsOnThisHost` is gone (`LeadVaultV2Tests/theRecordIsTheBooksNotTheProcesss`, red on the seam
      `056bd608`, green from `b0a2aa98`).
+15. **(Row 9 of the measurement record's "What stands between this Mac and `vibeswitcher start`": step 5, the
+   LaunchAgent; built 2026-11-26, `v2-mac-agent`, on `v2-mac-checked-start` with `v2-mac-web-port` joined; off: `start`
+   for the user's node is still refused by `NodeSystem.macUnbuilt`; needs a review)**, as the node on the Mac's design's
+   "The LaunchAgent: start, stop and status" says. *Built:* the plist as data (`NodeAgent.Job`, `Place`: label, plist
+   folder, data root and lock injectable; `ProgramArguments` exactly a checked node's command line, `SWIFT_BACKTRACE` its
+   only variable, `KeepAlive` false); `MacAgent`'s `start` (the build by the command line's own code in the record, its
+   host and server files by cdhash; a plist on disk that isn't start's refused before any load and left alone; a job of
+   the label running another program refused and left alone, one loaded and not running unloaded; `bootstrap` and
+   `kickstart` in `gui/<uid>`; the host waited for on its socket and known by the connection's audit token, its pid
+   launchd's, its running code the pinned host, hardened, then its welcome; everything it loaded booted out on any
+   refusal), `stop` (the host checked, what ends said and the typed code asked, the server's stop, the host's children
+   taken, `bootout`, then no job, no process of them and no socket within 30 s, else named) and `status` (from the host
+   itself, its build the record's row its code is); the command line's Mac arm behind `usersNodeRefusal`
+   (`MacAgentCommand`); a checked node's sessions given back launchd's `SSH_AUTH_SOCK` (a socket the user owns), the
+   text encoding and the umask 022 on their spawn alone (`CheckedSessions`, the launcher's `--pty-umask`), the login
+   shell building `PATH`, and its Swift children `SWIFT_BACKTRACE=enable=no`. *Measured first, on this Mac:* a
+   scratch-path job's bootstrap and bootout put no Background Task Management item or notification in the unified log
+   (a plist in `~/Library/LaunchAgents` not tried); `launchctl print`'s `state`, `runs`, `last exit code` and `last
+   terminating signal`; `bootout` (and a killed job process) ends the job's process group and nothing outside it (a
+   session-leader child runs on): AG-1's question, answered from an agent's session with a scratch job. *A real Mac
+   proved* (`MacAgentTests`, `MacCheckedSessionsTests`, `MacSwitchedHostTokenTests`, red on `01d34331` and green from
+   `4c2f76b5`): start, status and stop of a scratch job leaving nothing; a changed plist and another program refused and
+   left alone; the host by token and code and a look-alike with the host's path refused; a killed host not started
+   again by launchd; a session's environment from the login shell and launchd, not the starter; a switched host's new
+   connections' token running the new image. *Not reached while `macUnbuilt` and `isCheckedMacNode` are off:* a real
+   `--node` job (the plist's checked command line is tested as data), the command line's Mac arm, the server's stop
+   inside `stop`, a launchd job's own sessions, `--at-login`. *What the switch-on review can rely on:* the job's host is
+   known by token and code, never by launchctl's text; nothing `start` loaded outlives a refusal; `stop` waits for the
+   host and its children and says what it couldn't end; a crash is never restarted by launchd. *What the installer
+   (step 7) can rely on:* `vibeswitcher agent-plist` prints exactly what `start` writes and checks (the same
+   `NodeAgent.Job.node`), so an installed plist passes `start`'s check for that build, and any other is refused with the
+   key that differs; the plist no longer holds `HOME` or `PATH`. *Owed:* a switch (or `start`) rewriting the plist for
+   the build it goes to; the design's "What it doesn't cover" for step 5.
 
 ## What `v2` found on the Mac and doesn't change
 
