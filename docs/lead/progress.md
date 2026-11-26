@@ -4817,3 +4817,12 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-26 18:47 Pipeline held: a-vault-that-didn ready to merge with none landing; cause: a merge in progress
 - 2026-11-26 18:49 Planned v2-on-the-mac-8: v2 on the Mac: the keyboard session as one clean runbook (the measurement scripts read, checked safe to run at the user's keyboard, and written as exact commands in order)
 - 2026-11-26 18:50 Merged a-vault-that-didn: A vault that didn't open keeps its old sealed file until the user has answered (no overwrite under the current key before the alert) (build dc707f3966c1)
+- 2026-11-26 18:51 Automatically (auto_advance): Merged a-vault-that-didn (A vault that didn't open keeps its old sealed file until the user has answered (no overwrite under the current key before the alert)) into main at 4ee11d5b, on its passing audit and the full test run.
+- 2026-11-26 18:51 Automatically (auto_advance): Cleaned up a-vault-that-didn (freed 1.9 GB of build output and temporary folders). It stays done.
+- 2026-11-26 18:51 Update: The team vault: a sealed file that won't open is kept, not overwritten — **What changed** (on main, `4ee11d5b`). When the team's sealed vault can't be opened with the key in the Keychain (a replaced key, for example) and the vault has to start over, nothing is now saved ov…
+- 2026-11-26 18:51 Audit of the-command-guard-fails: incomplete, clean, round 2: 3 Important (1 open), 1 Nit closed
+- 2026-11-26 18:51 Re-rolled the-command-guard-fails after 2 audit rounds: its branch is kept as archive/the-command-guard-fails-1
+- 2026-11-26 18:52 Started a worker on the-command-guard-fails
+- 2026-11-26 18:52 Started a worker on v2-on-the-mac-8
+- 2026-11-26 18:52 Planned v2-node-kinds-for: v2 node kinds for the page: replies with several choices, a card too large for one frame, and a logs view (no-terminal items C5, C7, C8; in a clone)
+- 2026-11-26 18:52 Started a worker on v2-node-kinds-for
