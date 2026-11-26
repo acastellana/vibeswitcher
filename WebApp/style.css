@@ -480,10 +480,10 @@ small { font-size: var(--t-caption); }
 .prose ol { list-style: decimal; }
 .prose li + li { margin-top: 3px; }
 .prose li::marker { color: var(--ink-3); }
-.prose h3, .prose h4, .prose h5 { font-size: var(--t-title); font-weight: var(--w-strong); }
+.prose h3, .prose h4, .prose h5, .prose h6 { margin: 0; font-size: var(--t-title); font-weight: var(--w-strong); line-height: var(--lh-title); }
 .prose code, .card code, .node code { padding: 1px 4px; border-radius: var(--r-1); background: var(--fill-2); font-size: var(--t-code); }
 .code { border-radius: var(--r-2); background: var(--fill); overflow: hidden; }
-.code figcaption { padding: 5px 12px 0; color: var(--ink-3); font-size: var(--t-caption); display: flex; align-items: center; gap: 8px; }
+.code figcaption { padding: 3px 4px 0 12px; color: var(--ink-3); font-size: var(--t-caption); display: flex; align-items: center; gap: 8px; }
 .code-run { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; height: var(--ctl-s); padding: 0 8px; border: 1px solid var(--line); border-radius: var(--r-2); background: transparent; color: var(--ink-2); font: inherit; cursor: pointer; }
 .code-run:focus-visible { color: var(--ink); border-color: var(--ink-3); }
 .code pre { padding: 8px 12px 10px; overflow-x: auto; font-size: var(--t-code); line-height: var(--lh-code); }
@@ -507,7 +507,7 @@ small { font-size: var(--t-caption); }
 .path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); font-family: var(--mono); font-size: var(--t-caption); }
 .output { padding: 8px 10px; border-radius: var(--r-2); background: var(--fill); color: var(--ink-2); font-size: var(--t-code); line-height: var(--lh-code); overflow-x: auto; }
 .output.failed { color: var(--danger); }
-.diff { border-radius: var(--r-2); box-shadow: var(--e-1-in); font-family: var(--mono); font-size: var(--t-code); line-height: var(--lh-code); overflow-x: auto; }
+.diff { border-radius: var(--r-2); box-shadow: var(--e-1-in); font-family: var(--mono); font-size: var(--t-code); line-height: var(--lh-code); overflow: hidden; }
 .diff-lines { display: inline-block; min-width: 100%; padding: 4px 0; vertical-align: top; }
 .diff-line { display: flex; padding-right: 12px; white-space: pre; }
 .diff-line.added { background: var(--added); }
@@ -588,6 +588,62 @@ small { font-size: var(--t-caption); }
 .send:disabled { background: var(--fill-2); color: var(--ink-3); cursor: default; }
 .send .icon { stroke-width: 1.8; }
 .composer-hint { flex: none; padding: 10px 24px 18px; color: var(--ink-3); font-size: var(--t-caption); text-align: center; }
+
+/* The chat's writing drawn (js/text.js, D7): headings on the type scale and never past the reading size and two steps
+   (# at --t-heading, ## at --t-title, ### and smaller at the reading size), all at 600 with 16 px above and 6 below;
+   quotes with a hairline edge; rules; links in the accent, opening apart. Text blocks keep a readable measure on a wide
+   window (68 characters, D27); code and tables take the column's width. */
+.prose h3 { font-size: var(--t-heading); line-height: var(--lh-heading); }
+.prose h5, .prose h6 { font-size: var(--t-read); line-height: var(--lh-read); }
+.prose h6 { color: var(--ink-2); }
+.prose > :is(h3, h4, h5, h6):not(:first-child) { margin-top: 16px; }
+.prose > :is(h3, h4, h5, h6) + * { margin-top: 6px; }
+.prose strong { font-weight: var(--w-strong); }
+.prose em { font-style: italic; }
+.prose del { color: var(--ink-3); }
+.prose a { color: var(--accent); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px; overflow-wrap: anywhere; }
+.prose blockquote { margin: 0; padding: 0 0 0 12px; border-left: 2px solid var(--line); color: var(--ink-2); }
+.prose blockquote > * + * { margin-top: 6px; }
+.prose hr { height: 0; margin: 14px 0; border: 0; border-top: 1px solid var(--line); }
+.prose li > * + * { margin-top: 4px; }
+.prose li > :is(ul, ol) { margin-top: 3px; }
+.prose ul ul { list-style: circle; }
+.prose ul ul ul { list-style: square; }
+.chat-row .prose > :is(p, ul, ol, blockquote, h3, h4, h5, h6) { max-width: 68ch; }
+.table th.align-center, .table td.align-center { text-align: center; }
+.table th.align-right, .table td.align-right { text-align: right; font-variant-numeric: tabular-nums; }
+.bubble.prose > * + * { margin-top: 6px; }
+.bubble.prose a { color: inherit; }
+/* Copy over a block of code, a diff or a tool's output (D9): on hover or focus with a pointer, always on a touch screen.
+   Its row is kept either way, so nothing under it moves when it shows. */
+.code-lang { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.block-actions { display: flex; justify-content: flex-end; gap: 2px; padding: 3px 4px 0; }
+.diff > .block-actions { box-shadow: 0 1px 0 var(--line); } /* a hairline under the actions, drawn as an edge, not an elevation */
+.diff-scroll { overflow-x: auto; }
+.output-box { border-radius: var(--r-2); background: var(--fill); }
+.output-box > .output { background: none; }
+@media (hover: hover) {
+  .block-copy { opacity: 0; }
+  :is(.code, .diff, .output-box):is(:hover, :focus-within) .block-copy, .block-copy:focus-visible { opacity: 1; }
+}
+/* One failure in a run of tools: only its count in the failure's colour (D13). */
+.fold.failed > .fold-text { color: var(--ink-2); }
+.fold-failed:empty { display: none; }
+/* A tool whose title is words (a thought, a plan, a to-do list), not a command or a path (D27). */
+.tool-title.words { font-family: var(--sans); font-size: var(--t-caption); }
+/* A reply's time, as a prompt's: quiet under it, on hover with a pointer (D23). */
+.reply-body { min-width: 0; }
+.reply-time:empty { display: none; }
+@media (hover: hover) {
+  .reply .reply-time { opacity: 0; transition: opacity var(--dur-1) var(--ease-out); }
+  .reply:hover .reply-time { opacity: 1; }
+}
+/* Still arriving: a soft caret after the last words (D20); reduced motion holds it still. */
+.chat-row.reply.streaming .prose > :is(p, h3, h4, h5, h6):last-child::after,
+.chat-row.reply.streaming .prose > :is(ul, ol):last-child > li:last-child::after {
+  content: ""; display: inline-block; width: 7px; height: 1em; margin-left: 2px; vertical-align: -0.15em; border-radius: var(--r-1);
+  background: var(--ink-3); animation: pulse var(--loop) ease-in-out infinite;
+}
 
 /* ---- Cards ---- */
 

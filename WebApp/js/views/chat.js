@@ -25,6 +25,7 @@ import { h, keyed, setText, setClass, framed } from '../dom.js';
 import { agentMark, statusMark, setMark, icon } from '../marks.js';
 import { since, short, clock, plural, tilde, stateOf, AGENTS, STATES, KEY } from '../words.js';
 import { markdown, diffView, codeBlock } from '../text.js';
+import { copyButton } from '../copying.js';
 import { runnable } from '../runnable.js';
 import { summaryOf, newSince, sinceSummary, chatMarkdown, exportName, findIn, fold, openingPlace } from '../chatops.js';
 import { imageLoader } from '../images.js';
@@ -73,11 +74,11 @@ const keyOf = (item) => (item.action ? 'pending:' + item.action : item.id);
 const seconds = (tool) => (tool.result?.at && tool.at ? Math.max(0, (Date.parse(tool.result.at) - Date.parse(tool.at)) / 1000) : 0);
 const TOOL_ICON = { command: 'terminal', edit: 'pencil', write: 'pencil', read: 'file', thought: 'note', todos: 'check', plan: 'note' };
 
-// A tool's output: the first lines, and a button for the rest.
+// A tool's output: the first lines, and a button for the rest; Copy takes all of it, shown or not.
 function outputView(output, failed, truncated) {
   const lines = output.split('\n');
   const pre = h('pre', { class: failed ? 'output failed' : 'output', tabindex: 0 }, lines.length > 14 ? lines.slice(0, 12).join('\n') : output);
-  const parts = [pre];
+  const parts = [h('div', { class: 'output-box' }, h('div', { class: 'block-actions' }, copyButton(() => output, t('txCopyOutput'))), pre)];
   if (lines.length > 14) {
     const more = h('button', { class: 'link', type: 'button', onclick: () => { pre.textContent = output; more.remove(); } }, t('chShowAll', { n: lines.length }));
     parts.push(more);
@@ -141,7 +142,9 @@ function runButton(view, code, language) {
 function toolView(tool, home, view) {
   const took = seconds(tool);
   const detail = tool.detail || {};
-  const head = h('div', { class: 'tool-head' }, icon(TOOL_ICON[detail.type] || 'tool', 13), h('span', { class: 'tool-title' }, tool.title),
+  // A command's or a file's title is code; a thought's, a plan's or a to-do list's is words (D27).
+  const words = !['command', 'edit', 'write', 'read', 'patch'].includes(detail.type);
+  const head = h('div', { class: 'tool-head' }, icon(TOOL_ICON[detail.type] || 'tool', 13), h('span', { class: words ? 'tool-title words' : 'tool-title' }, tool.title),
     took >= 1 ? h('span', { class: 'tool-time' }, short(took)) : null,
     tool.result ? null : h('span', { class: 'running', role: 'status', 'aria-label': t('chRunning') }));
   const body = [];
@@ -158,13 +161,13 @@ function toolView(tool, home, view) {
   } else if (detail.type === 'command' && detail.command !== tool.title) {
     body.push(codeBlock(detail.command));
   } else if (detail.type === 'thought' || detail.type === 'plan') {
-    body.push(h('div', { class: 'prose quiet' }, markdown(detail.text || '')));
+    body.push(h('div', { class: 'prose quiet' }, markdown(detail.text || '', { links: true })));
   } else if (detail.type === 'todos') {
     body.push(h('ul', { class: 'todos' }, (detail.todos || []).map((todo) => h('li', { class: 'todo ' + todo.status }, todo.text))));
   } else if (detail.type === 'patch') {
     body.push(codeBlock(detail.text || ''));
   } else if (detail.type === 'agent') {
-    body.push(h('div', { class: 'prose quiet' }, markdown(detail.prompt || '')));
+    body.push(h('div', { class: 'prose quiet' }, markdown(detail.prompt || '', { links: true })));
   } else if (detail.type === 'questions') {
     for (const question of detail.questions || []) body.push(h('div', { class: 'prose quiet' }, question.question, h('ul', null, (question.options || []).map((option) => h('li', null, option)))));
   } else if (detail.type === 'fields') {
@@ -187,7 +190,9 @@ function patchChildren(el, next) {
 
 function makeRow(view, first) {
   if (first.type === 'prompt') {
-    const text = h('div', { class: 'bubble' });
+    // Your words as you typed them (their lines kept), with the same marks a reply has.
+    const text = h('div', { class: 'bubble prose' });
+    let drawnText = null;
     const images = h('div', { class: 'row-images' });
     const note = h('div', { class: 'row-note' });
     let row = first;
@@ -208,7 +213,10 @@ function makeRow(view, first) {
       el,
       update(item) {
         row = item;
-        setText(text, item.text);
+        if (item.text !== drawnText) {
+          drawnText = item.text;
+          text.replaceChildren(markdown(item.text || '', { links: true, breaks: true }));
+        }
         text.hidden = !item.text;
         actions.hidden = !item.text || !!item.pending;
         look();
@@ -226,27 +234,37 @@ function makeRow(view, first) {
   }
   if (first.type === 'reply') {
     const body = h('div', { class: 'prose' });
+    // When it was said, quiet: on hover with a pointer, beside it on a touch screen; the whole date as its title (D23).
+    const time = h('time', { class: 'row-note reply-time' });
     let shown = null;
+    let wasStreaming = null;
     const actions = rowActions(rowButton(t('chCopyAsMarkdown'), 'copy', (event) => view.copy(shown || '', event.currentTarget)));
-    const el = h('div', { class: 'chat-row reply' }, actions, agentMark(view.agent(), 18), body);
+    const el = h('div', { class: 'chat-row reply' }, actions, agentMark(view.agent(), 18), h('div', { class: 'reply-body' }, body, time));
     return {
       el,
       update(item) {
         setClass(el, 'streaming', !!item.streaming);
-        if (item.text === shown) return;
+        setText(time, item.streaming ? '' : clock(item.at));
+        if (item.at) time.setAttribute('datetime', item.at);
+        time.title = item.at && !item.streaming ? new Date(item.at).toLocaleString() : '';
+        if (item.text === shown && !!item.streaming === wasStreaming) return;
         const grew = shown !== null && item.text.startsWith(shown);
         shown = item.text;
-        const next = h('div', null, markdown(item.text, { codeAction: (code, language) => runButton(view, code, language) }));
+        wasStreaming = !!item.streaming;
+        // Still arriving, a marker waits for its other half (text.js), so nothing flickers between typed and drawn.
+        const next = h('div', null, markdown(item.text, { links: true, streaming: !!item.streaming, codeAction: (code, language) => runButton(view, code, language) }));
         if (grew) patchChildren(body, next); else body.replaceChildren(...next.childNodes);
       },
     };
   }
   if (first.type === 'tools') {
     const text = h('span', { class: 'fold-text' });
+    // How many failed, alone in the failure's colour: the rest of the line stays quiet (D13).
+    const failedText = h('span', { class: 'fold-failed' });
     const time = h('span', { class: 'fold-time' });
     const running = h('span', { class: 'running', role: 'status', 'aria-label': t('chRunning'), hidden: true });
     const body = h('div', { class: 'fold-body', hidden: true });
-    const toggle = h('button', { class: 'fold', type: 'button', 'aria-expanded': 'false' }, text, running, time, icon('chevron', 10));
+    const toggle = h('button', { class: 'fold', type: 'button', 'aria-expanded': 'false' }, text, failedText, running, time, icon('chevron', 10));
     const el = h('div', { class: 'chat-row tools' }, toggle, body);
     let row = first;
     let drawn = '';
@@ -270,7 +288,8 @@ function makeRow(view, first) {
         row = next;
         const tools = row.tools || [];
         const failed = tools.filter((tool) => tool.result?.failed).length;
-        setText(text, (row.summary || summaryOf(tools)) + (failed ? t('chFailed', { n: failed }) : ''));
+        setText(text, row.summary || summaryOf(tools));
+        setText(failedText, failed ? t('chFailed', { n: failed }) : '');
         setClass(toggle, 'failed', failed > 0);
         running.hidden = tools.every((tool) => tool.result);
         const total = tools.reduce((sum, tool) => sum + seconds(tool), 0);

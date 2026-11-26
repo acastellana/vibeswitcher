@@ -46,7 +46,9 @@ Screenshots of each main state, light and dark, wide and at 390 px, are in `shot
   a string as HTML. `index.html`'s content policy allows the page's own scripts and styles only, with Trusted Types and
   no policy, so the browser refuses it too. `tests/lint.test.mjs` holds the source and the policy to this.
 - **Nothing remote.** No image, font or script from another origin; the icons are drawn in `js/marks.js`. A link in
-  an agent's text is shown as text.
+  the chat (`[words](address)`, `<address>` or a bare one) is an anchor only for http, https and mailto, from the
+  address as the browser's URL parser reads it, opening in a new tab with `noopener`; any other is shown as typed, and
+  the page fetches nothing a message names. What the node made inert (a board's, a card's words) keeps its links as text.
 - **The Mac app is the reference** for words, status colours and layout. Where they pull apart, this leans calmer.
 
 ## Files
@@ -65,7 +67,8 @@ Screenshots of each main state, light and dark, wide and at 390 px, are in `shot
 | `js/conversation.js` | The redesign's reads of the board and cards, no page in them: the lead conversation's lines and the dial's counts, a question's head line, a task's five steps and colour, whom a blocked task waits on, the projects and which opens first. |
 | `js/i18n.js`, `js/i18n-es.js` | Every view's own words: the English with the keys and `t(key, values)` (the browser's language chosen once), and the Spanish, a file a language. |
 | `js/words.js` | The vocabulary: state words, durations, a task's words (from `VibeCore`). |
-| `js/dom.js`, `js/marks.js`, `js/text.js` | Building nodes; status marks, agent badges, icons; markdown and diffs as nodes. |
+| `js/dom.js`, `js/marks.js`, `js/text.js` | Building nodes; status marks, agent badges, icons; markdown and diffs as nodes (`parseMarkdown` reads text into a plain tree, then `h` builds it: emphasis, strikethrough, code, links, quotes, nested lists, headings, tables, rules, fenced code; a marker that doesn't close is shown as typed; `tests/markdown.test.mjs` is its corpus). |
+| `js/copying.js` | Copy on a block of the chat (fenced code, a diff, a tool's output): exactly its text, "Copied" for a moment. |
 | `js/terminal.js` | A session's terminal over the socket (the contract's §9): the binary frames, and the stream's life (open, the replay drawn whole, live, resync, reconnect, close). |
 | `vendor/` | xterm.js and its fit add-on, at the versions and hashes `vendor/README.md` records; nothing else is vendored. |
 | `js/viewport.js` | A phone's on-screen keyboard: while a box is being typed in, the page keeps to the visible part above the keyboard (`keyboard`, `--vv-height`, `--vv-top` on the root, style.css's 760 px blocks) and the box stays in sight. |

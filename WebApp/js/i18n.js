@@ -1366,6 +1366,13 @@ const EN = {
   dpAProgram: "a program",
   drNameLabel: "Name",
   drModelPlaceholderCodex: "Codex’s default",
+  txTable: "Table",
+  txCopyCode: "Copy the code",
+  txChanges: "Changes",
+  txCopyDiff: "Copy the change as a diff (each line after its sign)",
+  txCopyDiffWord: "Copy diff",
+  txCopyNew: "Copy the new text (the file’s lines after the edit, no signs)",
+  txCopyOutput: "Copy the whole output",
 };
 
 

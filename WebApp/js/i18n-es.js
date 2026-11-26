@@ -1353,4 +1353,11 @@ export const ES = {
   dpAProgram: "un programa",
   drNameLabel: "Nombre",
   drModelPlaceholderCodex: "El que use Codex por defecto",
+  txTable: "Tabla",
+  txCopyCode: "Copiar el código",
+  txChanges: "Cambios",
+  txCopyDiff: "Copiar el cambio como diff (cada línea tras su signo)",
+  txCopyDiffWord: "Copiar diff",
+  txCopyNew: "Copiar el texto nuevo (las líneas del archivo tras el cambio, sin signos)",
+  txCopyOutput: "Copiar toda la salida",
 };
