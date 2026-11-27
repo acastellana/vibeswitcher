@@ -5194,3 +5194,5 @@ That freeze looks like starvation (the Mac loaded or paging), not the app's work
 - 2026-11-27 14:15 Automatically (auto_advance): Couldn't send why-a-heavy-slot's worker its open Important findings (why-a-heavy-slot:F1, why-a-heavy-slot:F2, why-a-heavy-slot:F3, why-a-heavy-slot:F4): 7 workers already run (max_workers is 7 while boosted (4 in workflow.md)). Wait for one to finish; you'll get a message.
 - 2026-11-27 14:17 Pipeline held: fix-the-flaky-test-29 ready to merge with none landing; cause: every test slot held
 - 2026-11-27 14:19 Merged fix-the-flaky-test-29: Fix the flaky test pastedImagesAndTheirTextArriveOnce(_:) (build c08b3a3f8520)
+- 2026-11-27 14:19 Automatically (auto_advance): Merged fix-the-flaky-test-29 (Fix the flaky test pastedImagesAndTheirTextArriveOnce(_:)) into main at 8ac260e8, on its passing audit and the full test run.
+- 2026-11-27 14:19 Automatically (auto_advance): Cleaned up fix-the-flaky-test-29 (freed 1.8 GB of build output and temporary folders). It stays done.
