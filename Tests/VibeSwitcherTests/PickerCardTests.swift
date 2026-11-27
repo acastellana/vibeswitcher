@@ -460,7 +460,7 @@ while True:
         keyStore = AppProof.MemoryStore(key: appKey)
         host = HostClient(socketPath: socket, appKey: { [keyStore] in keyStore.key() })
         chat = ChatModel(outbox: ComposerOutbox(url: home.appendingPathComponent("outbox.json")), home: home.path,
-                         steerRoot: home.appendingPathComponent("vibeswitcher"))
+                         steerRoot: home.appendingPathComponent("vibeswitcher"), defaults: temp.defaults("picker-replay-defaults"))
         sync = ChatSync(chat: chat, host: host)
         let capture = Self.capture.path
         command = "exec /usr/bin/python3 -I -u '\(script.path)' '\(capture).raw' '\(capture).marks.json' '\(control.path)' '\(keysFile.path)'"

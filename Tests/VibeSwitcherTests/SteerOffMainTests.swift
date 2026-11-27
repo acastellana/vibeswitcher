@@ -22,7 +22,8 @@ struct SteerOffMainTests {
         let root = home.appendingPathComponent("vibeswitcher")
         let folder = root.appendingPathComponent("steer")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-        let chat = ChatModel(outbox: ComposerOutbox(url: home.appendingPathComponent("outbox.json")), home: home.path, steerRoot: root)
+        let chat = ChatModel(outbox: ComposerOutbox(url: home.appendingPathComponent("outbox.json")), home: home.path, steerRoot: root,
+                             defaults: temp.defaults("steer-off-main-defaults"))
         let sync = ChatSync(chat: chat, host: HostClient(socketPath: home.appendingPathComponent("no-host.sock").path, appKey: { nil }))
         return (chat, sync, folder.appendingPathComponent("\(tty).jsonl"))
     }
@@ -189,13 +190,15 @@ struct SteerOffMainTests {
         let folder = root.appendingPathComponent("steer")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         let outboxFile = home.appendingPathComponent("outbox.json")
+        // The app's defaults, the same for both launches.
+        let defaults = temp.defaults("steer-crash-defaults")
         // Held through the test (ended with it): the next launch comes before the post got through.
         let holder = try holdLock(folder.appendingPathComponent("\(tty).jsonl"), for: 60)
         defer { holder.process.terminate() }
         weak var gone: ChatModel?
         let entry: OutboxEntry
         do {
-            let chat = ChatModel(outbox: ComposerOutbox(url: outboxFile), home: home.path, steerRoot: root)
+            let chat = ChatModel(outbox: ComposerOutbox(url: outboxFile), home: home.path, steerRoot: root, defaults: defaults)
             let sync = ChatSync(chat: chat, host: HostClient(socketPath: home.appendingPathComponent("no-host.sock").path, appKey: { nil }))
             entry = send("deploy to staging", chat: chat, sync: sync)
             #expect(chat.steerSending.count == 1)
@@ -204,7 +207,7 @@ struct SteerOffMainTests {
         #expect(gone == nil, "the first launch's model is still alive")
         // The next launch, before the post got through.
         #expect(SteerInbox.pending(tty: tty, root: root).isEmpty)
-        let relaunched = ChatModel(outbox: ComposerOutbox(url: outboxFile), home: home.path, steerRoot: root)
+        let relaunched = ChatModel(outbox: ComposerOutbox(url: outboxFile), home: home.path, steerRoot: root, defaults: defaults)
         let restored = relaunched.outbox.outbox.needsYou(key: key)
         #expect(restored.map(\.id) == [entry.id])
         #expect(restored.map(\.message) == ["deploy to staging"])

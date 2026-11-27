@@ -62,7 +62,7 @@ struct ChatKeyViewLoopTests {
         let path = projects.appendingPathComponent("lead.jsonl")
         try Self.transcript(turns: 60).write(to: path)
 
-        let chat = ChatModel()
+        let chat = ChatModel(defaults: scratch.defaults("key-view-loop"))
         chat.show(path: path.path)
         // The read lands through the main queue, and the rows are staged in over a few turns: let them run. Each wait
         // ends on its event, with its own hang guard: in a full suite other main-actor tests hold the main thread for

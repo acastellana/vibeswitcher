@@ -40,7 +40,7 @@ struct TerminalNeedsYouSnapshots {
         let other = try #require(ChatSync.terminalMenu(TerminalAnswerTests.other))
         let row = WindowRow(content: .agent(Self.session), project: "acme-site")
         for scheme in [NSAppearance.Name.aqua, .darkAqua] {
-            let chat = ChatModel()
+            let chat = ChatModel(defaults: temp.defaults("needs-you-chat"))
             chat.show(path: path.path)
             let deadline = Date().addingTimeInterval(10)
             while chat.state != .ready, Date() < deadline { try await Task.sleep(for: .milliseconds(50)) }

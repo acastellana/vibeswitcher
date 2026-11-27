@@ -81,7 +81,7 @@ struct TeamMessageSnapshots {
         },
                                          run: { $0() }, deliver: { $0() }, perform: { $0() })
         for scheme in [NSAppearance.Name.aqua, .darkAqua] {
-            let chat = ChatModel()
+            let chat = ChatModel(defaults: scratch.defaults("team-message-chat"))
             chat.show(path: path.path)
             let deadline = Date().addingTimeInterval(10)
             // The read lands through the main queue: let it run.

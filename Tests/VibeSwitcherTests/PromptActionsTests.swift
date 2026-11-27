@@ -139,7 +139,8 @@ struct PromptActionsTests {
     @Test func theCardSaysWhenTheHostDidntTakeItsKeys() async throws {
         let socket = try temp.shortFolder("vsh-dead") + "/none.sock"
         let dead = HostClient(socketPath: socket, appKey: { SymmetricKey(size: .bits256) })
-        let chat = ChatModel(outbox: ComposerOutbox(url: temp.url("outbox.json")), home: temp.url("home").path, steerRoot: temp.url("steer"))
+        let chat = ChatModel(outbox: ComposerOutbox(url: temp.url("outbox.json")), home: temp.url("home").path, steerRoot: temp.url("steer"),
+                             defaults: temp.defaults("prompt-actions-defaults"))
         let sync = ChatSync(chat: chat, host: dead)
         sync.write([HostInput.Write(bytes: [13], delay: 0)], to: UUID())
         #expect(await until(timeout: 30) { chat.answerNotice != nil })

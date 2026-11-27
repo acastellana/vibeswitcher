@@ -25,7 +25,7 @@ struct LeadChatQuestionTests {
             data.append(0x0A)
         }
         try data.write(to: path)
-        let chat = ChatModel()
+        let chat = ChatModel(defaults: scratch.defaults("lead-chat-question"))
         chat.show(path: path.path)
         let deadline = Date().addingTimeInterval(hangGuard)
         // The read lands through the main queue: let it run.
