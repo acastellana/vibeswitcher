@@ -116,7 +116,6 @@ struct GuardedKindsTests {
         let home = scratch.url("home-refused")
         try FileManager.default.createDirectory(at: home.appendingPathComponent(".claude"), withIntermediateDirectories: true)
         try #"{"model": "opus"}"#.write(to: home.appendingPathComponent(".claude/settings.json"), atomically: true, encoding: .utf8)
-        let journal = ScratchJournal(scratch.url("journal-refused"))
         var session = Self.user
         session.sessionMarker = true
         var another = Self.user
@@ -132,13 +131,12 @@ struct GuardedKindsTests {
             requests.home = home.path
             requests.installRoot = world.prefix
             requests.updateInstaller = .test(program: world.installer)
-            requests.journalWriter = journal.writer
             for name in Self.kinds {
                 let reply = try #require(await ask(requests, name, Self.args(name), from: facts))
                 #expect(!reply.ok && reply.error?.code == NodeWire.Code.voice.rawValue, "\(name) from \(facts): \(reply)")
             }
         }
-        #expect(!world.ran && journal.entries.isEmpty)
+        #expect(!world.ran)
         #expect(try String(contentsOf: home.appendingPathComponent(".claude/settings.json"), encoding: .utf8) == #"{"model": "opus"}"#)
     }
 
@@ -330,36 +328,35 @@ struct GuardedKindsTests {
 
     // MARK: journal.ack
 
-    /// The acknowledgment's entry, through the command line's writer: the same fields `status --ack` writes, under the
-    /// request's action. Written by the server, today's reader doesn't count it (it isn't a terminal's), and the reply
-    /// says so; the same entry from a terminal's scope counts.
-    @Test func theServersAckIsTheCommandLinesEntryAndTodaysReaderDoesntCountIt() async throws {
-        let journal = ScratchJournal(scratch.url("journal"))
+    /// The ack's record is the vault's record of the `journal.ack` action (`voiced` writes it before the act): the act
+    /// writes no journal entry, and its reply says the marks stay until slices 14–15 change the reader.
+    @Test func theServersAckIsTheVaultsRecordAndWritesNoJournalEntry() async throws {
         let requests = requests()
-        requests.journalWriter = journal.writer
         let reply = try #require(await act(requests, "journal.ack") { $0.journalAck($1, reply: $2) })
         let result = try #require(try? (reply.result ?? .null).wire(WireKinds.JournalAck.Result.self), "\(reply)")
-        #expect(result.written == "recorded" && result.counts == false && result.said == JournalAck.serverSaid, "\(result)")
-        let written = try #require(journal.entries.first)
-        #expect(journal.entries.count == 1 && written.event == "ack" && written.identifier == NodeJournal.identifier && written.action != nil)
-        let action = try #require(written.action)
-        #expect(JournalAck.entry(action: action).allSatisfy { written.fields[$0.name] == $0.value })
-        let rule = VoiceRule(mode: .systemd, scopes: VoiceRule.terminalScopes, uid: getuid(), says: "a test's")
-        let event = NodeJournal.Event(kind: .start, at: Date(timeIntervalSince1970: 1_000))
-        #expect(!NodeJournal.acknowledged(event, entries: journal.entries, rule: rule), "the node unit's ack counted")
-        var fromTerminal = written
-        fromTerminal.fields["_SYSTEMD_CGROUP"] = "/init.scope"
-        #expect(NodeJournal.acknowledged(event, entries: [fromTerminal], rule: rule), "a terminal's ack didn't count")
+        #expect(result.recorded == "vault" && result.counts == false && result.said == JournalAck.serverSaid, "\(result)")
+        #expect(JournalAck.serverSaid.contains("vibeswitcher status --ack"))
     }
 
-    /// No journal on this server: refused, nothing written; a datagram that didn't go: said, never "acknowledged".
-    @Test func anAckWithNoJournalIsRefused() async throws {
-        let requests = requests()
-        let none = await act(requests, "journal.ack") { $0.journalAck($1, reply: $2) }
-        #expect(none?.error?.code == NodeWire.Code.refused.rawValue, "\(String(describing: none))")
-        requests.journalWriter = JournalWriter(send: { _ in false }, read: { _ in [] }, patience: 1, pause: 0.01)
-        let lost = await act(requests, "journal.ack") { $0.journalAck($1, reply: $2) }
-        #expect(lost?.ok == false, "\(String(describing: lost))")
+    /// Why the server never writes the ack's journal entry (the blind check's 2): written from the node's unit, today's
+    /// reader doesn't count it, and `marks` says it came from somewhere not a terminal's, a line no ack clears. The same
+    /// entry from a terminal's scope counts and marks nothing: the command line's (`status --ack`) stays the one that
+    /// clears the marks.
+    @Test func anAckEntryFromTheNodesUnitWouldBeAFalseAlarm() throws {
+        let action = UUID().uuidString.lowercased()
+        var fields = Dictionary(JournalAck.entry(action: action).map { ($0.name, $0.value) }, uniquingKeysWith: { $1 })
+        fields["_UID"] = String(getuid())
+        fields["__REALTIME_TIMESTAMP"] = String(Int(Date().timeIntervalSince1970 * 1_000_000))
+        var unit = fields
+        unit["_SYSTEMD_CGROUP"] = "/user.slice/user-\(getuid()).slice/user@\(getuid()).service/app.slice/\(VoiceRule.nodeUnit)"
+        var terminal = fields
+        terminal["_SYSTEMD_CGROUP"] = "/init.scope"
+        let rule = VoiceRule(mode: .systemd, scopes: VoiceRule.terminalScopes, uid: getuid(), says: "a test's")
+        let event = NodeJournal.Event(kind: .start, at: Date(timeIntervalSince1970: 1_000))
+        #expect(!NodeJournal.acknowledged(event, entries: [JournalEntry(unit)], rule: rule))
+        #expect(NodeJournal.marks(accepted: [], entries: [JournalEntry(unit)], rule: rule).count == 1)
+        #expect(NodeJournal.acknowledged(event, entries: [JournalEntry(terminal)], rule: rule))
+        #expect(NodeJournal.marks(accepted: [], entries: [JournalEntry(terminal)], rule: rule).isEmpty)
     }
 
     // MARK: claude.autoupdate
@@ -417,27 +414,5 @@ struct GuardedKindsTests {
         let result = try #require(try? (reply.result ?? .null).wire(WireKinds.ClaudeAutoUpdateSwitch.Result.self), "\(reply)")
         #expect(result.on == false && result.changed == true && result.config == settings.path, "\(result)")
         #expect(ClaudeAutoUpdate.isOn(home: home.path) == false)
-    }
-}
-
-/// A scratch journal: each datagram the writer sends becomes an entry stamped as journald stamps one from the node's
-/// unit (the user's uid, the unit's cgroup, now), read back by its nonce.
-final class ScratchJournal: @unchecked Sendable {
-    private let lock = NSLock()
-    private var kept: [JournalEntry] = []
-    let folder: URL
-    init(_ folder: URL) { self.folder = folder }
-
-    var entries: [JournalEntry] { lock.withLock { kept } }
-
-    var writer: JournalWriter {
-        JournalWriter(send: { [self] fields in
-            var entry: [String: String] = Dictionary(fields.map { ($0.name, $0.value) }, uniquingKeysWith: { $1 })
-            entry["_UID"] = String(getuid())
-            entry["_SYSTEMD_CGROUP"] = "/user.slice/user-\(getuid()).slice/user@\(getuid()).service/app.slice/\(VoiceRule.nodeUnit)"
-            entry["__REALTIME_TIMESTAMP"] = String(Int(Date().timeIntervalSince1970 * 1_000_000))
-            lock.withLock { kept.append(JournalEntry(entry)) }
-            return true
-        }, read: { [self] nonce in entries.filter { $0.fields[NodeJournal.entryField] == nonce } }, patience: 10, pause: 0.01)
     }
 }
