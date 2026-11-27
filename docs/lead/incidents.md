@@ -179,3 +179,10 @@ Evidence: Task the-app-s-keychain, 2026-11-26 about 08:45–09:20. New worker se
 Task: the-app-s-keychain
 Check: task turn-this-incident-into-21 turns it into a check that runs before merge.
 
+## 2026-11-27 11:28:33 After a power-loss restart the session host's vault started over, and the next install's host handover was refused ("this host has no vault key to check its proof with"), leaving the user on the old host build
+
+Evidence: 2026-11-27. host.log: "the vault started over: the app key on stdin waits for your confirmation" (host started 10:05:39 UTC), "pid 728 didn't prove it's the app" ×3; then at the 11:17 install "couldn't take over: handover refused: this host has no vault key to check its proof with", "going back to …/host/launcher-1795728984". app.log 11:05:41 "host: proof refused: The team's vault could not be opened and was started again…"; 11:17:57.685 "host: handover failed: the old build answered (pid 1293, build 1795728984; asked for 1795774651)". Reboot at 11:01 after the battery ran flat (hold at 09:57).
+
+Task: find-why-the-team
+Check: task turn-this-incident-into-22 turns it into a check that runs before merge.
+

@@ -5085,3 +5085,8 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-27 11:21 Planned the-mac-s-load: The Mac's load gate: backtest better rules against the recorded load samples and recommend one (report only)
 - 2026-11-27 11:21 Started a worker on the-mac-s-load
 - 2026-11-27 11:21 Automatically (auto_advance): Started a worker on the-mac-s-load (The Mac's load gate: backtest better rules against the recorded load samples and recommend one (report only)).
+- 2026-11-27 11:27 App health: VibeSwitcher's own logs show something new (read by VibeSwitcher itself, no model; only names, numbers and function names, never what a message or transcript says):
+Error lines in app.log within 10 min, by kind: host: failed ×1
+Seen again, already reported, so only counted (the daily trend has the counts): error kind app: failed ×1
+Turn what's a real bug into a task (one already on the board needs nothing); read the reports for the full stacks.
+- 2026-11-27 11:28 Incident: After a power-loss restart the session host's vault started over, and the next install's host handover was refused ("this host has no vault key to check its pro… (in find-why-the-team); planned turn-this-incident-into-22 to turn it into a check
