@@ -26,7 +26,9 @@ struct HostRoleTests {
         let made = temp.url("host-role")
         try FileManager.default.createDirectory(at: made, withIntermediateDirectories: true)
         // As the kernel resolves it (/tmp is /private/tmp), as the host compares folders.
-        base = URL(fileURLWithPath: try #require(HostRole.resolved(made.path)), isDirectory: true)
+        let real = try #require(realpath(made.path, nil))
+        defer { free(real) }
+        base = URL(fileURLWithPath: String(cString: real), isDirectory: true)
         account = base.appendingPathComponent("account")
         try FileManager.default.createDirectory(at: account.appendingPathComponent(".vibeswitcher"), withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: base.appendingPathComponent("theirs/.vibeswitcher"), withIntermediateDirectories: true)
