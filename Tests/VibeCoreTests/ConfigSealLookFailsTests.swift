@@ -105,6 +105,12 @@ struct ConfigSealLookFailsTests: LeadTeamFixture {
             #expect(result.isError, "\(gate) passed on a look that failed (\(shape)): \(result.text)")
             if shape != .recordUnread {
                 #expect(result.text.contains("couldn't say whether the agents' config is as sealed"), "\(gate): \(result.text)")
+                // In plain words: nothing was checked, why that's likely, and what to do.
+                for words in ["so it couldn't be checked", "nothing starts or merges until it can", "Likely causes:",
+                              "the session host is busy, restarting or not running", "many or very large files", "What to do: try again",
+                              "tell the user to open VibeSwitcher"] {
+                    #expect(result.text.contains(words), "\(gate) doesn't say \"\(words)\": \(result.text)")
+                }
             }
         }
         #expect(runtime.spawned.count == spawned, "a session started on a look that failed")

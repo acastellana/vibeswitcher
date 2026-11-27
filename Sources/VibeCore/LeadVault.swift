@@ -667,8 +667,57 @@ extension LeadVault {
         var hashLook: @Sendable (_ home: String, _ root: String?) -> [String: String] = { home, root in
             root.map { ConfigSeal.hashes(home: home, root: $0) } ?? ConfigSeal.hashes(of: ConfigSeal.homeWatched(home: home))
         }
-        /// The looks waiting for another's hashing to end before theirs (none: each look hashes at once).
-        var looksWaiting: Int { 0 }
+        /// The looks waiting for another's hashing to end before theirs (`lookGate`).
+        var looksWaiting: Int { lookGate.waiting }
+        private let lookGate = LookGate()
+
+        /// One look's hashing at a time (2026-11-27): a slow one (a watched folder big to read) never has others
+        /// hashing beside it, so looks a client gave up on can't pile up in the host. One that asks while another
+        /// hashes waits for it to end, then takes the first look made after it asked: those that waited together
+        /// share one, and none takes hashes made before it asked (what changed just before is seen). By `key`: what
+        /// was hashed (the team's root, or your home's alone).
+        final class LookGate: @unchecked Sendable {
+            private let condition = NSCondition()
+            private var hashing = false
+            /// Looks begun so far: each one's number, in order.
+            private var begun = 0
+            /// The last look of each key with someone waiting on it when it ended, by its number.
+            private var ended: [String: (number: Int, hashes: [String: String])] = [:]
+            private var parked = 0
+
+            var waiting: Int {
+                condition.lock()
+                defer { condition.unlock() }
+                return parked
+            }
+
+            func hashes(_ key: String, _ hash: () -> [String: String]) -> [String: String] {
+                condition.lock()
+                let asked = begun
+                while true {
+                    if let look = ended[key], look.number > asked {
+                        condition.unlock()
+                        return look.hashes
+                    }
+                    guard hashing else { break }
+                    parked += 1
+                    condition.wait()
+                    parked -= 1
+                }
+                hashing = true
+                begun += 1
+                let number = begun
+                condition.unlock()
+                let hashes = hash()
+                condition.lock()
+                hashing = false
+                // Kept only for whoever waits now: they asked before it began, or they'd be the next to begin one.
+                ended[key] = parked > 0 ? (number, hashes) : nil
+                condition.broadcast()
+                condition.unlock()
+                return hashes
+            }
+        }
 
         /// A vault as it was saved (`saved`, from `onChange` or `serialized`), or a new one when there's none or it
         /// doesn't read. `startingOver`: a new one stands in for one that was kept but couldn't be read.
@@ -776,10 +825,12 @@ extension LeadVault {
             var config: [String: String]?
             if case .setGuarded(let root, let hashes) = request {
                 // A branch run's end is a look as well (`sealConfig`).
+                // One look hashes at a time: one that asks meanwhile waits, and shares the next (`LookGate`).
+                let home = configHome, hashLook = hashLook
                 if hashes[ConfigSeal.checkKey] != nil || hashes[ConfigSeal.runEndKey] != nil {
-                    config = hashLook(configHome, root)
+                    config = lookGate.hashes("team\0" + root) { hashLook(home, root) }
                 } else if hashes[ConfigSeal.wroteKey] != nil {
-                    config = hashLook(configHome, nil)
+                    config = lookGate.hashes("home") { hashLook(home, nil) }
                 }
             }
             let (reply, skills): (Reply, (hash: String, entries: String)?) = {
@@ -1508,12 +1559,16 @@ extension LeadVault {
             // A plugin whose version folder moved (`ConfigSeal.isUpdate`: Claude Code's update, or a shell's forged one,
             // alike on disk) is new code: it waits for your click like other code, whoever made it, quiet or not.
             let updates = Set(differ.keys.filter { ConfigSeal.isUpdate(key: $0, recorded: recorded, now: hashes) })
+            // Something past a bound (`ConfigSeal.pastKey`: told by metadata, or cut) the first time it's seen so waits
+            // for your click too, quiet or not: what it holds wasn't read.
+            let past = Set(differ.keys.filter { ConfigSeal.newlyPast(key: $0, recorded: recorded, now: hashes) })
             // Something already held is never the lead's look's to seal, quiet or not: only your click clears it. Your
             // click seals what its card showed (`shown`), held anew by a look since or not; a click that says nothing
             // of that (an older app) what's held.
             let unseen = caller == .app ? differ.filter { key, value in (shown != nil ? shown?[key] : before[key]?.hash) != value }
                 : differ.filter { key, _ in
                     !quiet || !ConfigSeal.sealsWhenQuiet(key: key) || before[key] != nil || returned.contains(key) || updates.contains(key)
+                        || past.contains(key)
                 }
             // Held, and not told now (`~/.claude.json` read mid-write, a plugin no settings enable now): still held, as
             // it was, until it's told again. A plugin may never be: your click seals it as its card showed it, so it
@@ -1567,8 +1622,10 @@ extension LeadVault {
             seal(sealed.keys, from: hashes, into: &recorded)
             for key in now.keys where recorded[key] == now[key] {
                 recorded[ConfigSeal.goneKey(of: key)] = nil
-                // Found as sealed: its bookkeeping as it is now, so a round only it saw isn't taken for the next one's.
+                // Found as sealed: its bookkeeping as it is now, so a round only it saw isn't taken for the next one's;
+                // and what's past a bound in it, as sealed (a seal made before the bounds named none).
                 recorded[ConfigSeal.bookkeepingKey(of: key)] = hashes[ConfigSeal.bookkeepingKey(of: key)]
+                recorded[ConfigSeal.pastKey(of: key)] = hashes[ConfigSeal.pastKey(of: key)]
             }
             held = ConfigSeal.heldValue(holding.merging(unread.mapValues(\.hash)) { $1 }, outside: outside.union(unread.filter(\.value.outside).keys),
                                         changes: changes.merging(unread.mapValues(\.changes)) { $1 },
@@ -1666,6 +1723,7 @@ extension LeadVault {
                 guarded[key] = now[key]
                 guarded[ConfigSeal.keysKey(of: key)] = now[ConfigSeal.keysKey(of: key)]
                 guarded[ConfigSeal.bookkeepingKey(of: key)] = now[ConfigSeal.bookkeepingKey(of: key)]
+                guarded[ConfigSeal.pastKey(of: key)] = now[ConfigSeal.pastKey(of: key)]
             }
         }
 

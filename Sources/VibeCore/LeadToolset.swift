@@ -6101,10 +6101,21 @@ public final class LeadToolset: MCPToolset {
     /// The agents' config (`ConfigSeal`), looked at by the vault: a change made while the team's sessions ran holds new
     /// workers, verifiers and merges (`not` says what didn't happen) until the user accepts it in the app; one made
     /// while the team was quiet is the user's, sealed as it is and noted in the progress log.
+    /// What every gate says when the look at the agents' config didn't complete (`checkConfig(not:)`): that nothing
+    /// was checked, why that's likely, and what to do. It holds as a change does: nothing passes on an older look.
+    static func configUnchecked(not: String, _ error: Error) -> String {
+        "\(not): the session host couldn't say whether the agents' config is as sealed (\(error)), so it couldn't be checked, "
+            + "and nothing starts or merges until it can. Likely causes: the session host is busy, restarting or not running "
+            + "(VibeSwitcher was quit, or is updating), or it's still reading a watched folder (~/.claude/skills, commands, "
+            + "hooks, agents) that a session filled with many or very large files. What to do: try again in a minute; if it "
+            + "keeps failing, tell the user to open VibeSwitcher (it starts the session host) and to look in those folders "
+            + "for files no one meant to put there."
+    }
+
     func checkConfig(not: String) throws {
         let found: LeadVault.ConfigCheck
         do { found = try vault.checkConfig(root: root) } catch {
-            throw Problem(text: "\(not): the session host couldn't say whether the agents' config is as sealed (\(error)).", sealHeld: true)
+            throw Problem(text: Self.configUnchecked(not: not, error), sealHeld: true)
         }
         if !found.resealed.isEmpty {
             try? store.appendProgress("Agents' config changed while no worker or verifier ran (the user's), sealed as they are: \(ConfigSeal.list(found.resealed))")
