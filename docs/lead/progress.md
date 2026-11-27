@@ -5094,3 +5094,13 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-27 11:56 Planned review-v2-s-mac-7: Review v2's Mac approval lines (branch v2-mac-approval-lines, row 3: the coalition line and the peer's environment line) as an independent security reviewer: report only
 - 2026-11-27 11:56 Started a worker on review-v2-s-mac-7
 - 2026-11-27 11:56 Started a worker on re-check-v2-s-7
+- 2026-11-27 12:00 Automatically (auto_advance): Started the audit of find-why-the-team at de1e6557 (Its review is audit).
+- 2026-11-27 12:00 Released find-why-the-team's worker (idle since its done report on de1e6557) while its audit runs
+- 2026-11-27 12:00 Automatically (auto_advance): Released find-why-the-team's worker, idle since its done report on de1e6557, while its audit runs (ended pid 7961 (Worker: Find why the team's vault could not be opened after the Mac's restart on 2026-11-27 (it started over and asked for confirmation))): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-27 12:00 Exception on find-why-the-team by lead of vibeswitcher: edits to Sources/VibeSwitcher/HostClient.swift, Sources/VibeSwitcher/Sandbox.swift, Sources/VibeHost/HostRole.swift, Sources/VibeHost/HostServer.swift accepted. Reason: The lead accepts these edits outside the listed vault files: the goal (a key that can't be read holds instead of starting over, and the user is told honestly) needs the app's alert branch for the new …
+- 2026-11-27 12:01 Raised the-mac-s-load to audit (the risk check, at 06e1ba94): it changes 912 lines outside tests, over risk_lines (400)
+- 2026-11-27 12:01 Automatically (auto_advance): Started the audit of the-mac-s-load at 06e1ba94 (The risk check raised it to audit: it changes 912 lines outside tests, over risk_lines (400)).
+- 2026-11-27 12:01 Released the-mac-s-load's worker (idle since its done report on 06e1ba94) while its audit runs
+- 2026-11-27 12:01 Automatically (auto_advance): Released the-mac-s-load's worker, idle since its done report on 06e1ba94, while its audit runs (ended pid 15984 (Worker: The Mac's load gate: backtest better rules against the recorded load samples and recommend one (report only))): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-27 12:02 Planned the-load-gate-reads: The load gate reads the 1-minute average alone while nothing heavy runs: no lockout after a restart (rule cG of the load-gate review) (review audit)
+- 2026-11-27 12:04 Audit of find-why-the-team: complete, clean, round 1: 3 Nit open
