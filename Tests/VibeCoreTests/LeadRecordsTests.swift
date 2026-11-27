@@ -7,7 +7,7 @@ import Testing
 func underRecords(_ ref: String, in root: String) -> String {
     let subject = Git.run(["log", "-1", "--format=%s", ref], in: root).output
     let files = Set(Git.run(["diff-tree", "--no-commit-id", "--name-only", "-r", ref], in: root).output.split(separator: "\n").map(String.init))
-    let records = subject == LeadRecords.subject && !files.isEmpty && files.isSubset(of: ["docs/lead/decisions.md", "docs/lead/progress.md"])
+    let records = LeadRecords.isSubject(subject) && !files.isEmpty && files.isSubset(of: ["docs/lead/decisions.md", "docs/lead/progress.md"])
     return Git.run(["rev-parse", records ? "\(ref)~1" : ref], in: root).output
 }
 
@@ -19,7 +19,7 @@ func onlyRecords(on ref: String, since: String, in root: String) -> Bool {
     let commits = Git.run(["rev-list", "\(since)..\(ref)"], in: root).output.split(separator: "\n").map(String.init)
     return commits.allSatisfy { commit in
         let files = Git.run(["diff-tree", "--no-commit-id", "--name-only", "-r", commit], in: root).output.split(separator: "\n")
-        return Git.run(["log", "-1", "--format=%s", commit], in: root).output == LeadRecords.subject
+        return LeadRecords.isSubject(Git.run(["log", "-1", "--format=%s", commit], in: root).output)
             && files.allSatisfy { LeadRecords.paths("docs/lead").contains(String($0)) }
     }
 }
@@ -140,11 +140,12 @@ struct LeadRecordsTests: LeadTeamFixture {
         #expect(head("main", root) == commit)
         #expect(head("\(commit)^@", root) == parent)
         #expect(files(of: commit, root) == Self.logs)
-        #expect(Git.run(["log", "-1", "--format=%s", commit], in: root).output == LeadRecords.subject)
+        // Named by what it adds, a count of each kind (`LeadRecords.subject(adding:)`).
+        #expect(Git.run(["log", "-1", "--format=%s", commit], in: root).output == "Lead: 1 decision, 1 progress line")
         // No trailer of any kind (a workflow may refuse them: project-c's regression_command does).
         let body = Git.run(["log", "-1", "--format=%B", commit], in: root).output
         #expect(Git.run(["log", "-1", "--format=%(trailers)", commit], in: root).output.isEmpty, "\(body)")
-        #expect(!body.lowercased().contains("co-authored-by") && body == LeadRecords.message("docs/lead"), "\(body)")
+        #expect(!body.lowercased().contains("co-authored-by") && body == LeadRecords.message("docs/lead", adding: [.decisions: 1, .progress: 1]), "\(body)")
         #expect(Git.run(["show", "\(commit):docs/lead/decisions.md"], in: root).output.contains("Use SQLite"))
         #expect(Git.run(["show", "\(commit):docs/lead/progress.md"], in: root).output.contains("Update: Plan"))
         // None of the user's changes went in, and every one is where it was.
@@ -164,38 +165,104 @@ struct LeadRecordsTests: LeadTeamFixture {
         #expect(head("main", root) == commit)
     }
 
-    @Test func commitsAreBatched() throws {
+    /// 2026-11-26: 11 records commits in a row on main with nothing between them, about 120 of the 140 commits that
+    /// day: the timer (`tick`, every 5 minutes) committed whatever the lead had written since its last pass, with no
+    /// merge to need them. A day's record-writing calls with no merge between them, the timer passing between each as
+    /// it does, commit nothing now; the merge that follows commits all of them first, as one commit named by what it
+    /// adds, and nothing after it.
+    @Test func aDaysRecordsMakeOneCommitAtTheMergeThatNeedsThem() throws {
         let root = try repo()
         let runtime = FakeRuntime()
         let lead = try lead(root, runtime)
-        let start = Date()
-        let records = LeadRecords(store: BoardStore(root: root), vault: vault(for: runtime), now: start)
-        records.interval = 300
         let first = head("main", root)
-        for number in 1...3 { #expect(!lead.call("record_decision", ["decision": "Decision \(number)", "why": "w"]).isError) }
-        // Each line on its own commits nothing.
-        #expect(head("main", root) == first)
-        #expect(records.tick(base: "main", now: start.addingTimeInterval(60)) == nil)
-        #expect(head("main", root) == first)
-        // Due: one commit with all three.
-        guard case .committed(let batch)? = records.tick(base: "main", now: start.addingTimeInterval(301)) else { Issue.record("not committed"); return }
-        #expect(head("\(batch)~1", root) == first)
-        let committed = Git.run(["show", "\(batch):docs/lead/decisions.md"], in: root).output
+        var now = Date()
+        // The timer's pass, 5.5 minutes after the last (its 30-second ticks past the 5-minute interval).
+        func pass() {
+            now = now.addingTimeInterval(330)
+            lead.records.tick(base: "main", now: now)
+        }
+        for number in 1...3 {
+            #expect(!lead.call("record_decision", ["decision": "Decision \(number)", "why": "w"]).isError)
+            pass()
+            #expect(!lead.call("post_update", ["title": "Update \(number)", "body": "b"]).isError)
+            pass()
+        }
+        #expect(!lead.call("record_incident", ["what": "A hang", "evidence": "the log"]).isError)
+        pass()
+        // A task's whole round: planned, a worker started, its report, an audit and its verdict, the timer between.
+        _ = lead.call("add_task", ["title": "add-b", "goal": "g", "acceptance": ["a"]])
+        pass()
+        #expect(!lead.call("start_worker", ["task": "add-b"]).isError)
+        pass()
+        let worktree = Worktrees.path(root: root, slug: "add-b")
+        try "add-b\n".write(toFile: worktree + "/b.txt", atomically: true, encoding: .utf8)
+        Git.run(["add", "b.txt"], in: worktree)
+        Git.run(["commit", "-q", "-m", "add b.txt"], in: worktree)
+        _ = try seat("worker-add-b", runtime).call("report", doneReport("added"))
+        pass()
+        _ = lead.call("audit", ["task": "add-b"])
+        pass()
+        _ = try seat("verify-add-b", runtime).call("submit_audit", ["completion": "complete", "integrity": "clean", "summary": "checked"])
+        pass()
+        // All of it on disk, none of it committed.
+        #expect(Git.run(["rev-list", "--count", "\(first)..main"], in: root).output == "0")
+        #expect(read(root + "/docs/lead/decisions.md").contains("Decision 3") && read(root + "/docs/lead/progress.md").contains("Started a worker on add-b"))
+        #expect(!Git.run(["status", "--porcelain", "--", "docs/lead"], in: root).output.isEmpty)
+        #expect(lead.call("status", [:]).text.contains("Records:") == false)
+
+        // The merge: one records commit before its code, and nothing after it.
+        let merged = lead.call("merge", ["task": "add-b"])
+        #expect(!merged.isError, "\(merged.text)")
+        let landed = Git.run(["log", "--reverse", "--format=%s", "\(first)..main"], in: root).output.split(separator: "\n").map(String.init)
+        #expect(landed.count == 2, "\(landed)")
+        let records = try #require(BoardStore(root: root).load().task("add-b")?.merged?.onto)
+        #expect(head("\(records)~1", root) == first)
+        #expect(head("main", root) == BoardStore(root: root).load().task("add-b")?.merged?.commit)
+        let subject = Git.run(["log", "-1", "--format=%s", records], in: root).output
+        #expect(LeadRecords.isSubject(subject) && subject.hasPrefix("Lead: 3 decisions, ") && subject.hasSuffix(" progress lines, 1 incident"), "\(subject)")
+        let committed = Git.run(["show", "\(records):docs/lead/decisions.md"], in: root).output
         for number in 1...3 { #expect(committed.contains("Decision \(number)")) }
-        #expect(!lead.call("record_decision", ["decision": "Decision 4", "why": "w"]).isError)
-        #expect(records.tick(base: "main", now: start.addingTimeInterval(400)) == nil)
-        #expect(head("main", root) == batch)
-        #expect(records.tick(base: "main", now: start.addingTimeInterval(602)) == .committed(head("main", root)))
+        #expect(Git.run(["show", "\(records):docs/lead/incidents.md"], in: root).output.contains("A hang"))
+        // The merge's own lines and the cleanup's wait on disk too, the timer passing.
+        _ = lead.call("cleanup", ["task": "add-b"])
+        pass()
+        pass()
         #expect(Git.run(["rev-list", "--count", "\(first)..main"], in: root).output == "2")
+        #expect(read(root + "/docs/lead/progress.md").contains("Merged add-b"))
     }
 
-    /// The timer's commit runs as the tool server's background work: a new build's switch waits for one under way,
-    /// so it's never cut between the branch's update and the vault's head (a move "outside the lead" for the next merge).
+    /// The timer's pass rolls progress.md's earlier months over on disk and commits nothing of it.
+    @Test func theTimersPassCommitsNothingButAWaitingRedaction() throws {
+        let root = try repo()
+        let lead = try lead(root, FakeRuntime())
+        let start = Date()
+        let records = LeadRecords(store: BoardStore(root: root), vault: vault(for: FakeRuntime()), now: start)
+        let first = head("main", root)
+        #expect(!lead.call("record_decision", ["decision": "One", "why": "w"]).isError)
+        #expect(records.tick(base: "main", now: start.addingTimeInterval(60)) == nil)
+        #expect(records.tick(base: "main", now: start.addingTimeInterval(301)) == nil)
+        #expect(records.tick(base: "main", now: start.addingTimeInterval(3600)) == nil)
+        #expect(head("main", root) == first)
+        // A redaction whose commit had to wait: the next pass commits it (and the records with it).
+        let line = try #require(read(root + "/docs/lead/decisions.md").components(separatedBy: "\n").first { $0.contains("One") })
+        try LeadRedaction.save([LeadRedaction(file: "docs/lead/decisions.md", old: line + " (before)", new: line, lints: ["PrivateNamesLint"])], lead.store)
+        #expect(records.tick(base: "main", now: start.addingTimeInterval(3700)) == nil)
+        guard case .committed(let commit)? = records.tick(base: "main", now: start.addingTimeInterval(4000)) else { Issue.record("not committed"); return }
+        #expect(head("\(commit)~1", root) == first)
+        #expect(Git.run(["log", "-1", "--format=%B", commit], in: root).output.contains("Redacted by the lead (redact_record)"))
+        #expect(LeadRedaction.pending(lead.store).isEmpty)
+    }
+
+    /// The timer's commit (a redaction's that had to wait) runs as the tool server's background work: a new build's
+    /// switch waits for one under way, so it's never cut between the branch's update and the vault's head (a move
+    /// "outside the lead" for the next merge).
     @Test func anInstallsSwitchWaitsForACommitUnderWay() async throws {
         let root = try repo()
         let runtime = FakeRuntime()
         let lead = try lead(root, runtime)
         #expect(!lead.call("record_decision", ["decision": "Keep it", "why": "w"]).isError)
+        let line = try #require(read(root + "/docs/lead/decisions.md").components(separatedBy: "\n").first { $0.contains("Keep it") })
+        try LeadRedaction.save([LeadRedaction(file: "docs/lead/decisions.md", old: line + " (before)", new: line, lints: ["PrivateNamesLint"])], lead.store)
         let first = head("main", root)
         let records = LeadRecords(store: BoardStore(root: root), vault: vault(for: runtime), now: .distantPast)
         // Due once: the ticks after the commit find nothing to do.
@@ -331,10 +398,12 @@ struct LeadRecordsTests: LeadTeamFixture {
         #expect(store.decisions().map(\.text) == ["Old one", "Old two", "New one", "New two"])
         #expect(read(root + "/docs/lead/progress.md").components(separatedBy: "Planned two tasks").count == 2)
 
-        // The lead's first commit carries them.
+        // The lead's first commit carries them: its start, a new lead (`LeadToolset.introduceLead`).
+        let before = head("main", root)
         let lead = try lead(root, FakeRuntime())
-        guard case .committed(let commit) = lead.records.flush(base: "main") else { Issue.record("not committed"); return }
-        #expect(Git.run(["show", "\(commit):docs/lead/decisions.md"], in: root).output.contains("Old one"))
+        #expect(head("main~1", root) == before)
+        #expect(Git.run(["show", "main:docs/lead/decisions.md"], in: root).output.contains("Old one"))
+        #expect(lead.records.flush(base: "main") == .unchanged)
     }
 
     @Test func aMoveOnTheFirstCommitWithNothingNewWritten() throws {
@@ -342,9 +411,12 @@ struct LeadRecordsTests: LeadTeamFixture {
         try workflow(root, "---\nrecords_dir:\n---")
         try BoardStore(root: root).appendDecision("Old one", why: "first")
         try workflow(root, "---\n---")
+        let before = head("main", root)
+        // The lead's start, a new lead, commits the move (`LeadToolset.introduceLead`).
         let lead = try lead(root, FakeRuntime())
-        guard case .committed(let commit) = lead.records.flush(base: "main") else { Issue.record("not committed"); return }
-        #expect(Git.run(["show", "\(commit):docs/lead/decisions.md"], in: root).output.contains("Old one"))
+        #expect(head("main~1", root) == before)
+        #expect(Git.run(["show", "main:docs/lead/decisions.md"], in: root).output.contains("Old one"))
+        #expect(lead.records.flush(base: "main") == .unchanged)
         #expect(!FileManager.default.fileExists(atPath: root + "/.vibeswitcher/decisions.md"))
     }
 
@@ -362,7 +434,9 @@ struct LeadRecordsTests: LeadTeamFixture {
         _ = try seat("verify-\(slug)", runtime).call("submit_audit", ["completion": "complete", "integrity": "clean", "summary": "checked"])
     }
 
-    @Test func eachMergeIsFollowedByARecordsCommitTheNextMergeTakes() throws {
+    /// Until 2026-11-27 each merge was followed by a records commit of its own lines; they wait on disk now, and the
+    /// next merge commits them before its rebase, on top of the last merge's code.
+    @Test func aMergesRecordsWaitForTheNextMergeToCommitThemFirst() throws {
         let root = try repo()
         let runtime = FakeRuntime()
         let lead = try lead(root, runtime)
@@ -370,21 +444,23 @@ struct LeadRecordsTests: LeadTeamFixture {
         let merged = lead.call("merge", ["task": "add-b"])
         #expect(!merged.isError, "\(merged.text)")
         let records = head("main", root)
-        // No decision was recorded: the progress log alone.
-        #expect(files(of: records, root) == ["docs/lead/progress.md"])
-        #expect(underRecords("main", in: root) == BoardStore(root: root).load().task("add-b")?.merged?.commit)
-        #expect(Git.run(["show", "main:docs/lead/progress.md"], in: root).output.contains("Merged add-b"))
+        // Nothing after the merge: main is its code, its lines on disk.
+        #expect(records == BoardStore(root: root).load().task("add-b")?.merged?.commit)
+        #expect(read(root + "/docs/lead/progress.md").contains("Merged add-b"))
+        #expect(!Git.run(["show", "main:docs/lead/progress.md"], in: root).output.contains("Merged add-b"))
         #expect(try vault.head(root: root, branch: "main") == records)
         // The next merge goes on top: the records commit is the lead's own, not a move to ask about.
         _ = lead.call("cleanup", ["task": "add-b"])
         try audited(lead, runtime, root: root, slug: "add-d", file: "d.txt")
         let next = lead.call("merge", ["task": "add-d"])
         #expect(!next.isError, "\(next.text)")
-        // The records add-d's report and audit wrote went in first (`LeadRecords.commitBeforeMerge`), on top of these.
+        // add-b's lines, and those add-d's report and audit wrote, went in first (`LeadRecords.commitBeforeMerge`), on
+        // top of add-b's code.
         let onto = try #require(BoardStore(root: root).load().task("add-d")?.merged?.onto)
-        #expect(Git.run(["log", "-1", "--format=%s", onto], in: root).output == LeadRecords.subject)
+        #expect(LeadRecords.isSubject(Git.run(["log", "-1", "--format=%s", onto], in: root).output))
         #expect(head("\(onto)~1", root) == records)
-        #expect(head("\(underRecords("main", in: root))~1", root) == onto)
+        #expect(Git.run(["show", "\(onto):docs/lead/progress.md"], in: root).output.contains("Merged add-b"))
+        #expect(head("main~1", root) == onto)
         #expect(Git.run(["rev-list", "--merges", "main"], in: root).output.isEmpty)
     }
 
@@ -412,7 +488,7 @@ struct LeadRecordsTests: LeadTeamFixture {
         // While its tests run, a batch is due: it waits for the merge.
         #expect(await eventually { FileManager.default.fileExists(atPath: started) })
         let committedFirst = head("main", root)
-        #expect(Git.run(["log", "-1", "--format=%s", committedFirst], in: root).output == LeadRecords.subject)
+        #expect(LeadRecords.isSubject(Git.run(["log", "-1", "--format=%s", committedFirst], in: root).output))
         #expect(head("\(committedFirst)~1", root) == before)
         try lead.store.appendDecision("During the merge's tests", why: "a batch is due")
         #expect(lead.records.flush(base: "main") == .waiting("a merge into main is running."))
@@ -420,8 +496,10 @@ struct LeadRecordsTests: LeadTeamFixture {
         FileManager.default.createFile(atPath: release, contents: nil)
         #expect(await offPool { done.wait(timeout: .now() + hangGuard) } == .success)
         #expect(box.result?.isError == false, "\(box.result?.text ?? "")")
-        // Then right after it: the tested commit is what landed, the records on top.
-        #expect(underRecords("main", in: root) == BoardStore(root: root).load().task("add-b")?.merged?.commit)
+        // The tested commit is what landed; the line written meanwhile waits on disk for what next needs it in git.
+        #expect(head("main", root) == BoardStore(root: root).load().task("add-b")?.merged?.commit)
+        #expect(read(root + "/docs/lead/decisions.md").contains("During the merge's tests"))
+        guard case .committed = lead.records.flush(base: "main") else { Issue.record("records not committed"); return }
         #expect(Git.run(["show", "main:docs/lead/decisions.md"], in: root).output.contains("During the merge's tests"))
     }
 

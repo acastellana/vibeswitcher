@@ -543,9 +543,12 @@ named once an hour as stranded.
 ## The records
 
 The lead's reasoning lives in the repository, in `records_dir` (`docs/lead` by default): `decisions.md`,
-`progress.md`, `incidents.md` and `decisions-archive.md`. The lead can't commit, so its tool server commits these files
-to the lead's branch, after each merge and at most every 5 minutes, as "Lead: decisions and progress". Your staged and
-unstaged changes are left alone. `archive_decisions` moves old entries to `decisions-archive.md` unchanged. Workers may
+`progress.md`, `incidents.md` and `decisions-archive.md`. The lead can't commit, so its tool server writes them to disk
+at once and commits them to the lead's branch only when something needs them in git: before a merge's rebase and tests,
+before a push request records the head, at a lead handover, for a `redact_record`, and when merge_remote brings the other
+Mac's records. One commit carries everything written since the last, named by what it adds ("Lead: 3 decisions, 41
+progress lines"); a merge that changes the product inventory commits it with them. Your staged and unstaged changes are
+left alone. `archive_decisions` moves old entries to `decisions-archive.md` unchanged. Workers may
 not edit that folder. The lead's recording tools refuse text the repository's lints would fail on there (another
 project's name, a credential's shape), and `redact_record` replaces one existing line that fails them; the records
 commit carries that before the next merge, naming it in its message.
@@ -605,7 +608,7 @@ Each value as the code sets it today. Paths are under `Sources/VibeCore/` unless
 | Usage back-off | 80 % of a limit on the model | `AccountUsage.swift` |
 | Stall: silent, idle, compacted | 15, 10, 5 min | `LeadStall.swift` |
 | Verifier ends after its verdict | 20 s | `Sources/VibeHost/HostServer.swift` |
-| Records commit | after each merge, at most every 5 min | `LeadRecords.swift` |
+| Records commit | before a merge, a push request, a handover; a redaction | `LeadRecords.swift` |
 
 The rules the lead itself follows (when to audit, when to ask) are in its prompt (`LeadWorkflow.swift`) and in
 [docs/process/lead-rules.md](../process/lead-rules.md).

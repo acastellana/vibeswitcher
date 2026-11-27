@@ -389,8 +389,10 @@ extension LeadRemoteTests {
         let month = String(LeadDecision.stamp(Date()).prefix(7))
         try commit("docs/lead/progress.md", "# Progress\n\n- first\n- 2026-09-01 10:00 An earlier month's line\n- \(month)-01 10:00 This month's line\n",
                    in: scene.root, message: LeadRecords.subject)
+        // The lead's start, a new lead, commits the roll (`LeadToolset.introduceLead`).
         let lead = try lead(scene.root, FakeRuntime())
-        guard case .committed = lead.records.flush(base: "main") else { Issue.record("the roll didn't land: \(lead.records.statusLine ?? "")"); return }
+        #expect(lead.records.statusLine == nil, "the roll didn't land: \(lead.records.statusLine ?? "")")
+        #expect(lead.records.flush(base: "main") == .unchanged)
         #expect(!Git.run(["show", "main:docs/lead/progress.md"], in: scene.root).output.contains("An earlier month's line"))
         #expect(Git.run(["show", "main:docs/lead/progress-archive.md"], in: scene.root).output.contains("An earlier month's line"))
     }

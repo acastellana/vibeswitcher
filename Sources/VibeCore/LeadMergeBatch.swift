@@ -705,10 +705,10 @@ extension LeadToolset {
         return MCPToolResult(text: result.text, isError: !merged)
     }
 
-    /// auto_advance's batch step: `mergeBatch`, with the records flushed after.
+    /// auto_advance's batch step: `mergeBatch`, with the product inventory committed after when it changed.
     func advanceMergeBatch(_ slugs: [String], locked: (() -> Void)? = nil) throws -> BatchResult {
         let result = try mergeBatch(slugs, locked: locked)
-        records.flush(base: base)
+        records.commitInventory(base: base)
         return result
     }
 }

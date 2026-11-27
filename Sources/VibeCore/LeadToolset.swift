@@ -643,14 +643,21 @@ public final class LeadToolset: MCPToolset {
         guard !introduced, let me = runtime.currentAgent() else { return }
         introduced = true
         try? store.prepare()
-        try? store.update { board in
+        // Another agent than the one the board names (or none): a handover, or a new lead. A restarted tool server of
+        // the same agent (an install) is none.
+        let handedOver = (try? store.update { board -> Bool in
+            let other = board.leadPid != me.pid
             board.leadPid = me.pid
             board.leadTTY = me.tty
             board.leadSession = me.session ?? board.leadSession
-        }
+            return other
+        }) ?? false
         noteLeadModel()
         let base = self.base
         if vault.noHeadRecorded(root: root, branch: base), let head = branchHead(base) { try? vault.setHead(head, root: root, branch: base) }
+        // At a handover the records the leads before wrote go in as one commit (`LeadRecords`); one that waits or
+        // fails shows in status and goes with the next.
+        if handedOver { records.flush(base: base, inventory: false) }
     }
 
     /// Notes on the board the model this lead's session was started on (`leadLaunchedModel`): a refusal its session
@@ -660,8 +667,9 @@ public final class LeadToolset: MCPToolset {
         try? store.update { board in board.leadModel = model }
     }
 
-    /// The lead's server commits the decision and progress logs every few minutes while it holds the role
-    /// (`LeadRecords`), besides after each merge, and polls its already-pinned remote (`LeadRemotePoller`).
+    /// The lead's server keeps the decision and progress logs while it holds the role (`LeadRecords`: their timer rolls
+    /// progress.md over and retries a redaction's commit; the records are committed only when something needs them in
+    /// git), and polls its already-pinned remote (`LeadRemotePoller`).
     public func keepRecords(run: @escaping (@escaping () -> Void) -> Bool = { $0(); return true }) {
         guard role == .lead else { return }
         if remotePolling == nil {
@@ -930,20 +938,20 @@ public final class LeadToolset: MCPToolset {
                 }
                 if let batch = arguments["tasks"] as? [String], !batch.isEmpty {
                     let merged = try mergeTool(batch: batch)
-                    records.flush(base: base)
+                    records.commitInventory(base: base)
                     return withGitNotice(merged)
                 }
                 let merged = try merge(try taskSlug(arguments), acceptStale: Self.staleReason(arguments))
-                records.flush(base: base)
+                records.commitInventory(base: base)
                 return withGitNotice(merged)
             case "revert":
                 let reverted = try revert(try taskSlug(arguments), reason: arguments["reason"] as? String ?? "")
-                records.flush(base: base)
+                records.commitInventory(base: base)
                 return withGitNotice(reverted)
             case "fetch_remote": return withGitNotice(try fetchRemote())
             case "merge_remote":
                 let merged = try mergeRemote()
-                records.flush(base: base)
+                records.commitInventory(base: base)
                 return withGitNotice(merged)
             case "push_remote": return withGitNotice(try pushRemote())
             case "cleanup": return withGitNotice(try cleanup(try taskSlug(arguments), force: arguments["force"] as? Bool ?? false,
@@ -4595,7 +4603,7 @@ public final class LeadToolset: MCPToolset {
         guard head != red.onto else { return false }
         let log = Git.run(["log", "--format=%s", "\(red.onto)..\(head)"], in: root)
         guard log.ok, Git.run(["merge-base", "--is-ancestor", red.onto, head], in: root).ok else { return true }
-        return log.output.split(separator: "\n").contains { $0 != Substring(LeadRecords.subject) }
+        return log.output.split(separator: "\n").contains { !LeadRecords.isSubject($0) }
     }
 
     /// A merge's run passed on the base at `onto`, first time or on its rerun (`plan`'s, which shows each test it was
@@ -7922,7 +7930,7 @@ extension LeadToolset {
     /// `locked`: called once the merge holds its locks and is past its refusals, about to wait for its tests.
     func advanceMerge(_ slug: String, locked: (() -> Void)? = nil) throws -> MCPToolResult {
         let merged = try merge(slug, locked: locked)
-        records.flush(base: base)
+        records.commitInventory(base: base)
         return merged
     }
     func advanceCleanup(_ slug: String) throws -> MCPToolResult { try cleanup(slug, force: false) }

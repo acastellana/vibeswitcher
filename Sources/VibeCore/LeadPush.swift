@@ -271,7 +271,7 @@ extension LeadToolset {
         let label = "\(remote)/\(base)"
         guard LeadPush.isBranchName(base) else { throw Problem(text: "\(not): the base branch \"\(base)\" isn't a branch's name a push can take.") }
         let url = try pinnedURL(remote, not: not, first: false).url
-        guard let head = branchHead(base) else { throw Problem(text: "\(not): there's no branch \(base) to push.") }
+        guard var head = branchHead(base) else { throw Problem(text: "\(not): there's no branch \(base) to push.") }
         try checkBaseMoves(base: base, current: head)
         // The remote's tip as fetch_remote fetched it, as the vault keeps it.
         let ref = LeadRemote.trackingRef(remote: remote, branch: base)
@@ -285,10 +285,15 @@ extension LeadToolset {
         guard Git.run(["merge-base", "--is-ancestor", fetched, head], in: root).ok else {
             throw Problem(text: "\(not): \(label) (\(fetched.prefix(8))) has commits \(base) lacks, so the push wouldn't be a fast-forward. Run merge_remote first (after fetch_remote), then push_remote.")
         }
-        let ahead = Int(Git.run(["rev-list", "--count", "\(fetched)..\(head)"], in: root).output) ?? 0
-        guard ahead > 0 else {
+        // Nothing of the base's own to push: refused before the records are committed, so no commit is made only to
+        // have something to push.
+        guard (Int(Git.run(["rev-list", "--count", "\(fetched)..\(head)"], in: root).output) ?? 0) > 0 else {
             throw Problem(text: "Nothing to push: \(base) (\(head.prefix(8))) has nothing \(label) hasn't, as fetch_remote last fetched it.")
         }
+        // The records written since the last commit go in first, as one commit on top, so the head the request records
+        // carries them (`LeadRecords`); one that waits or fails shows in status, and the push goes without them.
+        if case .committed(let commit) = records.flush(base: base) { head = commit }
+        let ahead = Int(Git.run(["rev-list", "--count", "\(fetched)..\(head)"], in: root).output) ?? 0
         let log = Git.run(["log", "--format=%h %s", "--max-count=\(LeadPush.subjectLimit)", "\(fetched)..\(head)"], in: root)
         let subjects = log.output.split(whereSeparator: \.isNewline).map { Self.clip(String($0), 200) }
         let replaced: LeadPush.Request?
