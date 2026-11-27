@@ -429,6 +429,29 @@ update it rewrote (KP6a, accepted); send the keeper messages of its own, every o
 name in its own domain, or give a host it starts a bootstrap port of its own, which the host's check of the reply
 refuses (a denial at most: the host sends that port an `open`, which holds nothing); kill the keeper's clients. It
 can no longer get a request served through anything it holds: no socket end, of any pair, reaches the keeper.
+
+*What the proof assumes, stated* (this round's blind check, given only the measured facts and the order above, found
+the channel sound and named these; each is the host's own code or signature, outside the message):
+**(A) The host's memory isn't handed to a session through exception or corpse ports.** A session can start the
+genuine host with exception ports of its own (`posix_spawnattr_setexceptionports_np`, or its own task's before an exec)
+and then crash it or force a fault; if the kernel's exception message to such a port carries the host's task, thread
+or corpse port, the session reads the key the host got from `open`, or drives the host's thread to send a `swap` that
+names the genuine host. Not measured: **K-M16** (owed before K4 is offered; it takes another process's port, so with
+you at the keyboard, K7, never an agent's run). The rule meanwhile, in K4: the checked start clears every exception
+port of its task (`task_set_exception_ports` to `MACH_PORT_NULL`) as its first act, before its first keeper message,
+and a fault forced before that point is K-M16's to bound. This is the threat table's "a program that takes the host's
+task port" (S1, S11), not the proof's: the pair proof had it too. **(B) Only the pinned code runs in the host.** The
+keeper pins the main executable's cdhash; the entitlements are inside it, so the pins step and K2 refuse a host whose
+signature carries `get-task-allow`, `disable-library-validation` or `allow-dyld-environment-variables`, and K2
+requires library validation in the token's dynamic status (`CS_REQUIRE_LV`) beside `CS_RUNTIME` (the app's images
+refuse `DYLD` injection with valid hardened signatures, the record's test run; for the node's ad hoc host: K-M16's
+second part). **(C) The checked start isn't a deputy** (KP12): what it sends the keeper is `open` and the journal's
+next `{record, seq, bind}`, computed from the sealed vault under the key, never a value a caller or a file of yours
+supplies; the command line's requests reach it only through the server's own rules and, for a guarded change, the
+Touch ID dialog (the Mac spec: the dialog carries the guarantee). A socket's token, which a session can make name a
+genuine command line (K-M1 (j), (g4)), is a guard rail there, never what the keeper's property rests on. And the
+client accepts only a reply of the exact form on its reply port: a send-once notification (the kernel's, when the
+keeper destroys a refused request) is "no answer".
 *Cost:* one message and one reply per request (the pair's way was a connect, a `sendmsg`, a write and a read); in
 the root keeper, a check-in, one receive loop with its trailer, `mach_msg_destroy` for what it refuses, and none of
 the socket's code (no `0666` socket, no `getpeereid`, no `SCM_RIGHTS`, no pair checks, no 1 s and 2 s limits per
@@ -1165,6 +1188,7 @@ Anything unusual on any of them is a refusal, never a case to handle.
 | KP10c | **The reply taken:** a session reads what the keeper answers a genuine host | the reply goes only to the send-once right the accepted request carried, whose receive right its sender made; a refused message gets no reply | `.theReplyGoesToTheRequestsOwnReplyPort`, `.aRefusedMessageGetsNoReply` |
 | KP7 | Another uid's process sends | the trailer's effective and real uid must be the keeper's uid, else the message is destroyed unanswered (K-M6's access entry no longer needed: there is no socket) | `KeeperProofTests.anotherUidsMessageIsDestroyed` (uid injected) |
 | KP7a | A process of yours removes, `chmod`s or takes over the keeper's way in | no socket and no file of the keeper's in your reach: the port is the system domain's, named by root's plist; your account can't check in for a system daemon's name (K-M15) | K-M15 |
+| K-M16 | **The proof's assumptions A and B** (this round's blind check): (A) whether exception ports a session sets on a hardened host it spawns (`posix_spawnattr_setexceptionports_np`, `EXCEPTION_DEFAULT`, `EXC_CRASH`, `EXC_CORPSE_NOTIFY`, `EXC_BAD_ACCESS`), or on its own task before an exec, survive into the host, whether the message on a crash or fault carries a task, thread or corpse port that reads the host's memory, and whether clearing them at the checked start's first act ends it; (B) whether the node's ad hoc, hardened host runs with library validation (`CS_REQUIRE_LV`) and refuses an injected library and `DYLD_` variables | the interface's assumptions A and B; K4's first act | trial (K7), at your keyboard: it takes another process's port |
 | KP8 | A process of yours sends a message of another shape: another size, a complex one (ports or memory), no send-once reply port, another prefix, verb or slot, more than one request (the old KP8, KP16 and KP16a: a hello carrying many descriptors) | destroyed with `mach_msg_destroy` (every right and every memory region it brought released in the root process, F7's rule in Mach's form), nothing answered | `KeeperProofTests.aMessageWithoutTheExactFormIsDestroyed`, `.everyRightAComplexMessageBringsIsReleased` (2, 64 and the most a message carries) |
 | KP9 | It sends a request of its own | its trailer names its own code: no pinned host row | `KeeperProofTests.aSessionsRequestIsRefused` |
 | KP9a | **The socket forms** (a pair of its own, an end that isn't a pair's, a keeper-made end, a nonce round: candidates A and B) | none is taken: the keeper has no socket; K-M1 (g) to (m) are why | — |
