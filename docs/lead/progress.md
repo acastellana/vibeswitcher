@@ -4945,3 +4945,10 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-27 00:49 Started a worker on v2-device-keys-slice-7
 - 2026-11-27 01:08 Pipeline held: the-session-host-s ready to merge with none landing; cause: a merge in progress
 - 2026-11-27 01:09 Merged the-session-host-s: The session host's --handover can't be used by another process to get a vault of its own sealed under the real key (build 335cc1521a43)
+- 2026-11-27 01:09 Automatically (auto_advance): Planned tasks wait to start: the Mac has only 14.3 GB of disk free, under the 16.1 GB a new worker waits for: the load runs' floor (floor_gb=15 in scripts/test-under-load.sh, in GiB: 16.1 GB) plus disk_headroom_gb (0 GB in workflow.md), the room the tasks in flight still need to run their load check. They start by themselves once there's room again; meanwhile merge and cleanup finished tasks (cleanup frees their worktrees). Freeing other space on the disk is the user's call: tell them if it stays this full.
+- 2026-11-27 01:09 Automatically (auto_advance): Merged the-session-host-s (The session host's --handover can't be used by another process to get a vault of its own sealed under the real key) into main at b804c67c, on its passing audit and the full test run.
+- 2026-11-27 01:09 Automatically (auto_advance): Cleaned up the-session-host-s (freed 2.2 GB of build output and temporary folders). It stays done.
+- 2026-11-27 01:09 Started a worker on a-host-started-on
+- 2026-11-27 01:09 Automatically (auto_advance): Started a worker on a-host-started-on (A host started on another home can't seal a vault under the real key (the fresh-start variant of the handover gap)), its after tasks done (the-session-host-s).
+- 2026-11-27 01:09 Started a worker on v2-on-the-mac-12
+- 2026-11-27 01:10 Update: Session host: a handover is accepted only from the running host it replaces (in main; read the install note before installing) — **What changed** (on main, `b804c67c`). At an install the running session host hands its state, including the opened team vault, to the new host process. Until now the receiving host accepted that sta…
