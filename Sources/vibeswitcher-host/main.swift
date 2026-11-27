@@ -16,7 +16,10 @@ func value(after flag: String) -> String? {
     guard let index = arguments.firstIndex(of: flag), arguments.indices.contains(index + 1) else { return nil }
     return arguments[index + 1]
 }
-// Which host this is (see `HostRole`): its folder, its lock, and whether it's the account's own host.
+// Made first: which host this is is asked of the folder as it is on disk.
+VibePaths.ensurePrivateDirectories()
+// Which host this is (see `HostRole`): its folder, its lock, and whether it's the account's own host (its folder the
+// account's real home, from the user database, and that folder's lock): only that one uses the vault's Keychain key.
 let role = HostRole(environment: ProcessInfo.processInfo.environment, fallbackHome: NSHomeDirectory(),
                     lockArgument: value(after: "--lock"), accountHome: HostRole.accountHome)
 let lockPath = role.lockPath
@@ -30,7 +33,6 @@ HostHandover.probeIfAsked(arguments) { role.vaultKey { VaultStorage.keychainKey(
 signal(SIGPIPE, SIG_IGN)
 signal(SIGHUP, SIG_IGN)
 
-VibePaths.ensurePrivateDirectories(root: role.root)
 let environment = ProcessInfo.processInfo.environment
 // What a fresh Terminal session would inherit from launchd; the login shell adds the rest.
 let inherited = ["HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "PATH", "LANG", "LC_ALL", "LC_CTYPE", "SSH_AUTH_SOCK",
@@ -112,6 +114,20 @@ func goBack(_ statePath: String, _ error: Error) -> Never {
 // The build before handed its sessions over, by executing this one in its place (same process). Read before the
 // server is made: what it kept in memory (`HostServer.secretsForHandover`) can go into this one's config.
 let handoverPath = value(after: "--handover")
+// A fresh start takes its lock first, before the vault's key or file is read: another host holding it, this one
+// exits having read neither. A handover inherits the lock of the build before (checked by `HostHandover.receive`).
+var heldLock: Int32 = -1
+if handoverPath == nil {
+    do {
+        heldLock = try HostServer.takeLock(at: lockPath)
+    } catch HostServer.Failure.alreadyRunning {
+        HostServer.note("host: another host holds the lock; this one (build \(build)) exits", logPath: config.logPath)
+        exit(0)
+    } catch {
+        log("\(error)")
+        exit(1)
+    }
+}
 // The vault's Keychain key, for the account's host only, read once and only when first asked.
 var vaultKeyRead: SymmetricKey??
 func vaultKey() -> SymmetricKey? {
@@ -142,7 +158,7 @@ config.appExecutable = (restoring != nil ? value(after: "--app-executable") : ni
 // The lead's vault: the account's host keeps it sealed under ~/.vibeswitcher/lead with its Keychain key; any other host
 // keeps one in memory only, never touching the account's (see `HostRole.vault`).
 // After a handover, the vault is the one the build before held in memory (its secrets), not what's on disk.
-config.vault = role.vault(lockFD: -1, key: vaultKey(), handedOver: restoredSecrets, logPath: config.logPath)
+config.vault = role.vault(lockFD: restoring?.lockFD ?? heldLock, key: vaultKey(), handedOver: restoredSecrets, logPath: config.logPath)
 // The app that started this host gives it its key on stdin (see `AppProof`), and says so: taken while the vault
 // holds none, but not by a vault that started over (its file no longer opens under the Keychain key): that one waits
 // for your confirmation through the app (`LeadVault.Book.awaitsAppKey`).
@@ -202,10 +218,7 @@ if let handoverPath, let state = restoring {
     }
 } else {
     do {
-        try server.start()
-    } catch HostServer.Failure.alreadyRunning {
-        server.note("host: another host holds the lock; this one (build \(build)) exits")
-        exit(0)
+        try server.start(holdingLock: heldLock)
     } catch {
         log("\(error)")
         exit(1)

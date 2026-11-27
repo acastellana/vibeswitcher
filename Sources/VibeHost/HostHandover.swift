@@ -194,14 +194,19 @@ public enum HostHandover {
 
     /// The lock a handover inherits.
     enum Lock {
+        /// Whether `fd` is open on the file at `path` (a regular file, not a link): not one removed or replaced since.
+        static func names(_ fd: Int32, path: String) -> Bool {
+            var held = stat()
+            var there = stat()
+            guard fd >= 0, fstat(fd, &held) == 0, lstat(path, &there) == 0 else { return false }
+            return (there.st_mode & S_IFMT) == S_IFREG && held.st_dev == there.st_dev && held.st_ino == there.st_ino
+        }
+
         /// Why `fd` isn't the lock at `path` held through this very descriptor; nil when it is.
         static func notHeld(_ fd: Int32, path: String) -> String? {
             var held = stat()
-            var there = stat()
             guard fd >= 0, fstat(fd, &held) == 0 else { return "its lock descriptor \(fd) isn't open" }
-            guard lstat(path, &there) == 0, (there.st_mode & S_IFMT) == S_IFREG, held.st_dev == there.st_dev, held.st_ino == there.st_ino else {
-                return "its lock descriptor isn't the lock file"
-            }
+            guard names(fd, path: path) else { return "its lock descriptor isn't the lock file" }
             // Whether anyone holds it, asked through a description of its own: nobody, and the descriptor handed on
             // wasn't holding it.
             let probe = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)

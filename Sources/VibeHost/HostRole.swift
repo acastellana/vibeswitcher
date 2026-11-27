@@ -18,13 +18,34 @@ public struct HostRole {
 
     /// `environment` and `fallbackHome`: as `VibePaths.root(environment:fallbackHome:)` takes them. `lockArgument`:
     /// `--lock`'s value. `accountHome`: the account's home from the user database (`accountHome`).
+    ///
+    /// The account's host is the one whose folder is the account's own `~/.vibeswitcher` (the user database's home,
+    /// which no variable moves, as the kernel resolves both paths: a link into another folder is that folder), on that
+    /// folder's own lock. Its folder and lock are then that resolved folder's. Every other host (VIBESWITCHER_HOME,
+    /// HOME or CFFIXED_USER_HOME on another folder, a `--lock` of its own, the account's home unknown) is a scratch
+    /// host for the vault: it never reads the Keychain's key, and keeps its vault in memory only.
     public init(environment: [String: String], fallbackHome: String, lockArgument: String?, accountHome: String?) {
-        let root = VibePaths.root(environment: environment, fallbackHome: fallbackHome)
-        let rootLock = root.appendingPathComponent("host.lock").path
-        self.root = root
-        lockPath = lockArgument ?? rootLock
+        let given = VibePaths.root(environment: environment, fallbackHome: fallbackHome)
+        let rootLock = given.appendingPathComponent("host.lock").path
+        let lockPath = lockArgument ?? rootLock
         holdsRootLock = lockPath == rootLock
-        isAccountHost = holdsRootLock
+        if holdsRootLock, let accountHome, let own = Self.resolved(accountHome + "/.vibeswitcher"), Self.resolved(given.path) == own {
+            root = URL(fileURLWithPath: own, isDirectory: true)
+            self.lockPath = root.appendingPathComponent("host.lock").path
+            isAccountHost = true
+        } else {
+            root = given
+            self.lockPath = lockPath
+            isAccountHost = false
+        }
+    }
+
+    /// `path` as the kernel resolves it (links followed, `..` after a link being its target's parent); nil when it
+    /// isn't there.
+    static func resolved(_ path: String) -> String? {
+        guard let real = realpath(path, nil) else { return nil }
+        defer { free(real) }
+        return String(cString: real)
     }
 
     /// The account's home from the user database, which no environment variable moves; nil when it can't be read.
@@ -40,10 +61,15 @@ public struct HostRole {
     }
 
     /// The vault this host starts with. The account's host keeps it sealed under `key` in its root's `lead/vault.sealed`
-    /// (see `VaultStorage`), as the build before handed it over (`handedOver`) or as saved; any other host keeps one in
-    /// memory only, never touching a vault file. `lockFD`: the descriptor this host holds its lock through.
+    /// (see `VaultStorage`), as the build before handed it over (`handedOver`) or as saved, and only while it holds its
+    /// lock: `lockFD` must be the descriptor holding the lock file at `lockPath` (taken before the vault is read), and
+    /// each save first checks the file there is still that one (a lock file removed or replaced lets a second host start
+    /// on the same folder: from then on that one keeps the vault, and this one saves nothing). Any other host, or one
+    /// whose descriptor doesn't hold its lock, keeps a vault in memory only, never touching a vault file.
     public func vault(lockFD: Int32, key: SymmetricKey?, handedOver: Data?, logPath: String?) -> LeadVault.Book {
-        guard isAccountHost else { return LeadVault.Book(restoring: handedOver) }
-        return VaultStorage(file: root.appendingPathComponent("lead/vault.sealed"), key: key, logPath: logPath).book(handedOver: handedOver)
+        guard isAccountHost, HostHandover.Lock.notHeld(lockFD, path: lockPath) == nil else { return LeadVault.Book(restoring: handedOver) }
+        let lockPath = lockPath
+        return VaultStorage(file: root.appendingPathComponent("lead/vault.sealed"), key: key, logPath: logPath,
+                            holdsLock: { HostHandover.Lock.names(lockFD, path: lockPath) }).book(handedOver: handedOver)
     }
 }

@@ -246,6 +246,9 @@ public final class HostServer {
     /// A line in the session log (see `HostLog`).
     public func note(_ text: String) { log.note(text) }
 
+    /// `text` in the host's log at `logPath` (none: nowhere), before there's a server to note it.
+    public static func note(_ text: String, logPath: String?) { HostLog(path: logPath).note(text) }
+
     /// Closes everything. `terminateSessions`: also end the programs (tests); otherwise they lose their terminal anyway.
     public func stop(terminateSessions: Bool) {
         let work = {

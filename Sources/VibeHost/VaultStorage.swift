@@ -17,19 +17,22 @@ public struct VaultStorage {
     private let sync: (Int32) -> Bool
     /// How a failed save's next try is timed; a test's own instead.
     private let retryLater: (TimeInterval, @escaping () -> Void) -> Void
+    /// Whether the host still holds its lock (see `HostRole.vault`), asked before each save: false saves nothing more.
+    private let holdsLock: () -> Bool
 
-    public init(file: URL, key: SymmetricKey?, logPath: String? = nil) {
-        self.init(file: file, key: key, logPath: logPath, sync: VibePaths.syncToDisk) {
+    public init(file: URL, key: SymmetricKey?, logPath: String? = nil, holdsLock: @escaping () -> Bool = { true }) {
+        self.init(file: file, key: key, logPath: logPath, sync: VibePaths.syncToDisk, holdsLock: holdsLock) {
             DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + $0, execute: $1)
         }
     }
 
     init(file: URL, key: SymmetricKey?, logPath: String? = nil, sync: @escaping (Int32) -> Bool = VibePaths.syncToDisk,
-         retryLater: @escaping (TimeInterval, @escaping () -> Void) -> Void) {
+         holdsLock: @escaping () -> Bool = { true }, retryLater: @escaping (TimeInterval, @escaping () -> Void) -> Void) {
         self.file = file
         self.key = key
         self.logPath = logPath
         self.sync = sync
+        self.holdsLock = holdsLock
         self.retryLater = retryLater
     }
 
@@ -118,6 +121,8 @@ public struct VaultStorage {
         /// A vault was seen that doesn't wait for your answer: none waits after it (the app's key is never taken out).
         private var answered = false
         private var toldHeld = false
+        /// The lock was seen lost: nothing is saved from then on.
+        private var lockLost = false
 
         init(storage: VaultStorage, log: HostLog, later: @escaping (TimeInterval, @escaping () -> Void) -> Void, setAside: Bool) {
             self.storage = storage
@@ -141,7 +146,15 @@ public struct VaultStorage {
         }
 
         private func attempt() {
-            guard let data = unsaved else { return }
+            guard let data = unsaved, !lockLost else { return }
+            // A host that no longer holds its lock (its lock file removed or replaced, and maybe a second host started
+            // on this folder, which keeps the vault from then on) seals nothing more.
+            guard storage.holdsLock() else {
+                lockLost = true
+                unsaved = nil
+                log.note("vault: \(name) not saved: this host no longer holds its lock (its lock file was removed or replaced); it saves nothing more")
+                return
+            }
             if !answered {
                 guard !LeadVault.Book.awaitsAppKey(data) else {
                     if !toldHeld { log.note("vault: \(name) didn't open; kept as it is, nothing saved until you answer") }
