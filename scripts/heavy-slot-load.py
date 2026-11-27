@@ -424,9 +424,9 @@ def analyse(data):
     lr_min = sum(data.samples[i].weight for ep in data.load_run_episodes for i in ep["samples"])
     lr_over = sum(data.samples[i].weight for ep in data.load_run_episodes for i in ep["samples"]
                   if data.samples[i].known and data.samples[i].one > data.samples[i].threshold)
-    # Alone: the load run the only holder and the 1-minute over T. Decided by its busy loops: over T, but under it
-    # once its target's worth above B (--load 2 x cores, less what the Mac had anyway) is taken out.
-    lr_alone = lr_loops = 0.0
+    # Alone: the load run the only holder and the 1-minute over T. Its busy loops only fill the load up to their
+    # target (2 x cores, under the boosted T of 36) and stand down above it, so over T they aren't what's adding.
+    lr_alone = 0.0
     for ep in data.load_run_episodes:
         for i in ep["samples"]:
             s = data.samples[i]
@@ -434,10 +434,8 @@ def analyse(data):
                 continue
             if len(data.holders[i]) == 1:
                 lr_alone += s.weight
-            if s.one - max(0.0, 2 * s.cores - data.baseline) <= s.threshold:
-                lr_loops += s.weight
     out["load_runs"] = {"episodes": len(data.load_run_episodes), "minutes": lr_min, "over_limit": lr_over,
-                        "alone_over": lr_alone, "loops_decide": lr_loops}
+                        "alone_over": lr_alone}
     # Episodes by kind: count and median length in minutes, the time a hold takes.
     eps = {}
     for ep in data.episodes():
@@ -466,7 +464,8 @@ def analyse(data):
             for g in s.top:
                 ph = phase_of(g)
                 ft = folder_type(g.get("project"))
-                inside = (ft in ("merge-*", "merge-batch") and merge_held) or (ft == "audit-*") or (g.get("project") in holder_projects)
+                inside = (ft in ("merge-*", "merge-batch") and merge_held) or (ft == "audit-*" and any(k in ("lead-other", "merge") for k, _ in data.holders[i])) \
+                    or (g.get("project") in holder_projects)
                 if ph in ("build", "test") and not inside:
                     refused["held_top_outside"] += s.weight
                     break
@@ -547,7 +546,7 @@ def report(data, out=sys.stdout):
     lr = a["load_runs"]
     p(f"load runs by signature (lower bound: top groups exist only above load 48): {lr['episodes']} holds, "
       f"{lr['minutes']:.0f} min, {lr['over_limit']:.0f} of them with the 1-minute over T, {lr['alone_over']:.0f} of those "
-      f"with no other slot held, {lr['loops_decide']:.0f} under T once its busy loops' target above B is taken out")
+      f"with no other slot held (its loops fill only up to 2 x cores, so over T they aren't the ones adding)")
     p()
     p(f"top groups (samples over load 48: {a['with_top']}): CPU by phase, in cores (summed % / 100, x the samples)")
     tot = sum(a["phase_cpu"].values()) or 1
@@ -570,7 +569,7 @@ def report(data, out=sys.stdout):
         p(f"    {held}{'+' if held == 3 else ''} held ({row['n']:3d} samples): 1-minute {row['load'] / n:5.1f}; " + ", ".join(
             f"{k} {row[k] / n:.1f}" for k in ("in slot", "ours outside", "sessions", "other of ours", "not ours")))
     o = a["outside"]
-    p(f"  ours outside any slot (build or test groups whose folder's project holds no slot): {o['samples']} samples, "
+    p(f"  build or test work outside any slot (any project's build or test commands in a folder whose project holds no slot; a bare build in one of our worktrees reads as our project and can't be told from its slot's run): {o['samples']} samples, "
       f"{o['minutes']:.0f} min, {o['cpu'] / 100:.0f} core-samples ({o['build_cpu'] / 100:.0f} of them building); by command, "
       f"group leader and folder type:")
     for (command, leader, ft), cpu in sorted(a["outside_by"].items(), key=lambda kv: -kv[1])[:8]:
@@ -579,7 +578,7 @@ def report(data, out=sys.stdout):
     r = a["refused"]
     p(f"the gate's refusals (max(1, 5) > T): {r['all']:.0f} min; no slot held {r['no_slot']:.0f}; a slot held "
       f"{r['held']:.0f} (the 1-minute itself over T at {r['held_one_over']:.0f}); with top groups named "
-      f"{r['held_top']:.0f}, of which {r['held_top_outside']:.0f} show build or test work of ours outside the slots")
+      f"{r['held_top']:.0f}, of which {r['held_top_outside']:.0f} show build or test work (any project's) outside the slots")
     p()
     p("slot-minutes by slot number (a bare scripts/test.sh takes only slots 1 and 2):")
     for k in ("worker", "worker-v2", "merge", "lead-other", "other-project"):
@@ -642,9 +641,8 @@ def selftest():
         ("over-T held", a["over_limit_held"], 4.0),
         ("over-T with load run", a["over_limit_with"]["load-run"], 2.0),
         ("load-run episodes", a["load_runs"]["episodes"], 1),
-        # 10:06 (60) and 10:08 (40), alone both; 40 - (24 - 5) = 21 <= 36 is the loops' doing, 60 - 19 = 41 isn't.
+        # 10:06 (60) and 10:08 (40), the load run alone at both.
         ("load-run alone over T", a["load_runs"]["alone_over"], 2.0),
-        ("load-run loops decide", a["load_runs"]["loops_decide"], 1.0),
         ("single merge mean", round(a["single"]["merge"]["mean"], 6), 17.0),
         ("refused", a["refused"]["all"], 4.0),
         ("refused held", a["refused"]["held"], 4.0),

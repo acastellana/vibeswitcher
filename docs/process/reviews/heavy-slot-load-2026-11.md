@@ -2,12 +2,12 @@
 
 **Top fix 1: a worker's test run gets the share of 2 slots, not 3.** scripts/test.sh moves VIBESWITCHER_HOME to its scratch
 home before it calls vs-heavy, so vs-heavy reads neither Settings nor Boost: it counts 2 slots, gives the run 6 cores
-instead of 4, and lets it take only slots 1 and 2. Workers' runs hold 77% of the slot-minutes. **You get:** three slots
-that add up to 12 cores of work, not the 16 seen today (6 + 6 + 4), and no worker run waiting in line while slot 3 is free.
-**Top fix 2: record what the load is made of.** Each minute's sample adds the CPU's idle share and the runnable threads
-inside the slots' processes. **You get:** a number for the load outside any slot. In two live looks it was 64–70% of
-the runnable threads: another project's runtime, Spotlight, short-lived processes. The 10 days of samples can't
-see it at all. With it, the gate can judge contention instead of a count, and "a start waits only for a slot" can be judged.
+instead of 4, and lets it take only slots 1 and 2. Workers' runs hold 77% of the slot-minutes. **You get:** a worker's
+run floored at 4 cores, not 6 (today three slots gave 6 + 6 + 4 = 16 on 12), and no worker run waiting while slot 3 is
+free. **Top fix 2: record what the load is made of.** Each minute's sample adds the CPU's idle share and the runnable
+threads inside the slots' processes. **You get:** a number for the load outside any slot: in two live looks 73–77% of the
+runnable threads (another project's runtime, Spotlight, the system checking new processes). The 10 days of samples
+can't see it. With it the gate can judge contention, and "a start waits only for a slot" can be judged.
 
 Written by a worker (task why-a-heavy-slot) on 2026-11-27. Reproduce the numbers with
 `python3 -I scripts/heavy-slot-load.py --until 2026-11-27T11:28`, the data the load review saw
@@ -21,8 +21,8 @@ is checked on a hand-made fixture ([scripts/fixtures/heavy-slot](../../../script
 A slot's own processes mostly stay inside its width. Measured with `ps`, a build at VS_HEAVY_CORES 4 ran 2.8 runnable
 threads on average (at most 5). A full suite's test phase ran 1.2 (at most 12), because the tests wait on their
 subprocesses. Three things push the Mac past the slots' shares. (1) **Load outside any slot:** in two live looks with
-all three slots held, the holders' process trees held 7.2 of 26.6 and 7.8 of 33.2 runnable threads; the rest ran outside
-any slot.
+all three slots held, the holders' process trees held 7.2 of 26.6 and 7.8 of 33.2 runnable threads (73–77% outside any
+slot).
 (2) **Slots wider than their share:** a worker's run gets 6 cores because of the scratch home (fix 1), and vs-heavy
 widens the first run to every free core. Neither leaves room for the Mac's own load (4.6 with no slot held). Live: 6 + 6
 + 4 = 16 cores given on 12. (3) **Saturation:** once demand passes 12 cores the CPU is 0–8% idle, threads queue, and the
@@ -61,9 +61,11 @@ share.
   worker runs it. A first launch failed at once with exit 127 (vs-heavy wasn't on this shell's PATH) and ran nothing,
   so it isn't counted. A separate shell sampled `ps` every 3 seconds: thread states from `ps -AM`, the run's process
   tree, the other holders' trees by their .holder notes, new processes, and `iostat`'s CPU idle beside it. No other
-  tool looked at any process. **The Mac wasn't calm for runs 1 and 2:** two other slots were held throughout, and the CPU
-  was 0–25% idle. Run 3's build and tests ran on a calmer Mac (load 4–6, CPU 33–64% idle). The runs' own counts don't
-  depend on that; the Mac's counts do.
+  tool looked at any process. **The contract's calm Mac wasn't met for runs 1 and 2:** two other slots were held
+  throughout, and the CPU was 0–25% idle; all three runs allowed are spent. On a saturated Mac a run's runnable count
+  includes its threads queued for a core, so its 2.8 and 1.2 are upper bounds on what it asks for (it stays under its
+  width all the same), and its durations (384 s, 914 s) are a busy Mac's. Run 3's build and tests ran on a calmer Mac
+  (load 4–6, CPU 33–64% idle).
 - **Passive looks:** two looks of 3 minutes each, with no run of mine. They sampled the three live holders' trees the
   same way: test.sh at 6 cores, a v2 clone's test.sh at 6, and a load run at 4.
 
@@ -106,7 +108,7 @@ doesn't load the Mac; the run's neighbours do.
 
 **Above load 48 the recorder sees only a fraction.** At the 562 samples that name top groups, those groups use a median
 of 2.7–3.4 cores, while the load is 48–248. With 3 slots held, the named CPU is 2.5 cores of build and test work inside
-slots, 0.1 ours outside, 0.1 sessions, 0.2 other of ours and 0.8 not ours, against a mean load of 99.9. The rest of
+slots, 0.1 in a folder whose project held no slot, 0.1 sessions, 0.2 other of ours and 0.8 not ours, against a mean load of 99.9. The rest of
 the load is in processes the recorder can't name:
 - other users' (root) processes: `LoadRecorder.processes` skips a pid whose `proc_pidinfo(PROC_PIDTASKALLINFO)` fails,
   and Spotlight's mds_stores, logd and syspolicyd are root's;
@@ -147,7 +149,7 @@ processes make. The live looks below can.
 | Web and security tests | scripts/test.sh `run_web_tests`, after the slot is let go | one node at a time | run 2: 0.5 runnable | Outside the slot, but tiny |
 | scripts/test-under-load.sh | :64 sets each run's Swift Testing width to the cores (12) for 3 runs; its busy loops fill the load to --load (2 × cores = 24) | its build uses VS_HEAVY_CORES; its tests use 3 × 12 = 36 wide; its loops make up to 24 runnable by design | live: the load run's tree 1.5 runnable while the Mac was over 24 (its loops stood down, as designed) | **No, by design:** it adds load up to 24 whatever its share. Its tests ignore VS_HEAVY_CORES |
 | worktree-init.sh | scripts/worktree-init.sh | builds nothing: it writes .sourcekit-lsp/config.json and exits | — | Not a load |
-| Outside slots: SourceKit-LSP and bare builds | sessions | — | top groups: swift-frontend groups leading themselves in no project folder, 24.8 core-samples in 10 days; swift-frontend in ours with no slot held, 5.5; swift-package led by zsh (a session's bare command), 0.9 | Small: 54 of the 562 named samples show build or test work of ours outside any slot |
+| Outside slots: SourceKit-LSP and bare builds | sessions | — | top groups: swift-frontend groups leading themselves in no project folder, 24.8 core-samples in 10 days; swift-frontend in ours with no slot held, 5.5; swift-package led by zsh (a session's bare command), 0.9 | Small where it can be seen: 54 of the 562 named samples show build or test work (any project's) in a folder whose project held no slot. A bare build in one of our worktrees beside a slot of ours can't be seen (it reads as our project) |
 
 ## The causes, ranked by the load they account for, and the fixes
 
@@ -155,7 +157,7 @@ Each fix is written to become a task. "Expected load" says what should change. N
 no code. Cause 1 accounts for the most load, but the samples can't size any of its fixes, so its first fix is to record
 it (top fix 2). Fix 2a removes the most load that is certain, at the least cost (top fix 1).
 
-### 1. Load outside any slot (the largest share: 64–70% of the runnable threads in the live looks)
+### 1. Load outside any slot (the largest share: 73–77% of the runnable threads in the live looks)
 
 - **Evidence:** the two passive looks above. The slot holders' trees held 7.2 of 26.6 and 7.8 of 33.2 runnable
   threads. Outside them:
@@ -173,9 +175,10 @@ it (top fix 2). Fix 2a removes the most load that is certain, at the least cost 
   - Expected load after: none removed. It names the part to remove, and it tells a gate refusing on contention (CPU
     idle near 0) from one refusing on a count (the restart).
   - Cost: two host calls a minute, about 0.1 ms each, plus walking the holders' trees (about 20 processes).
-- **Fix 1b, task "a heavy job with no slot is named".** When the recorder's top groups show a group of build or test
-  commands (BUILD and TEST in the script) using 200% or more for 3 samples, in a project whose holders hold no slot,
-  the Team view's load line and the lead's status say so: "another project runs a heavy job outside the slots".
+- **Fix 1b, task "a heavy job with no slot is named".** When the recorder's top groups show a group in a project
+  folder, whatever its command (a compiler, a test runner, a VM such as beam.smp), using 200% or more for 3 samples
+  while that project holds no slot, the Team view's load line and the lead's status say so: "another project runs a
+  heavy job outside the slots". It can't see one of our own worktrees: they all read as our project's name.
   Every project's policy already asks for vs-heavy.
   - Expected load after: what that project's jobs then take through a slot, up to one share each (today's beam.smp:
     7.6–9.0 runnable on average in the looks, 21 at one moment, down to one share, 4).
@@ -192,13 +195,15 @@ it (top fix 2). Fix 2a removes the most load that is certain, at the least cost 
   Workers' and v2 runs hold 5,669 of the 7,391 slot-minutes (77%). The live .cores notes read 6, 6 and 4.
   Separately, give_width widens a run to every free core: 44 of 114 merges were given 5–10 cores. A run given 10
   on a calm Mac keeps 10 when two more start beside it.
-- **Fix 2a (top fix 1), task "test.sh counts the Mac's slots".** In scripts/test.sh, call Resources/bin/vs-heavy with
-  the real VibeSwitcher folder: pass `VIBESWITCHER_HOME` as it was before line 298 to the vs-heavy call only, so vs-heavy
-  reads mac-limits.json and boost.json; the command inside still gets the scratch home. The same check goes in
+- **Fix 2a (top fix 1), task "test.sh counts the Mac's slots".** In scripts/test.sh, work out the real VibeSwitcher
+  folder before line 298 moves the homes, as vs-heavy does (`${VIBESWITCHER_HOME:-$HOME/.vibeswitcher}`; in a session
+  VIBESWITCHER_HOME is usually unset, so passing it as it was isn't enough), and give that to the vs-heavy call only, so
+  it reads mac-limits.json and boost.json; the command inside still gets the scratch home. The same check goes in
   scripts/build-app.sh. scripts/test-under-load.sh already execs vs-heavy before it moves HOME.
   - Test: TestScriptWidthTests on a scratch home whose boost.json gives 3 slots: the run gets 4 and can take slot 3.
-  - Expected load after: at most 4 + 4 + 4 = 12 cores given at three slots, not 16 (6 + 6 + 4) or 18 (6 + 6 + 6).
-    A build's runnable threads follow its width (2.8 on average at 4, measured), so each worker build overlapping others
+  - Expected load after: the floor at three slots is 4 + 4 + 4 = 12, not 16 (6 + 6 + 4) or 18 (6 + 6 + 6). Widening
+    stays (fix 2b): a run that starts on a calm Mac still takes every free core and keeps them, so 12 is the floor's
+    sum, not a cap. A build's runnable threads follow its width (2.8 on average at 4, measured), so each worker build overlapping others
     runs about a third fewer: about 1.4 on average, 2 at its peak.
   - Cost: a worker's build at 4 cores instead of 6 while other slots are held. A full suite's test phase at width 4,
     not 6: about 1009 s instead of 680 s (2026-11-18). Fix 4 gives that back.
@@ -206,8 +211,11 @@ it (top fix 2). Fix 2a removes the most load that is certain, at the least cost 
     other bare test.sh runs). In the samples, slots 1 and 2 were held and slot 3 free for 1,564 of the 12,250 minutes
     with 3 slots in force: an upper bound on that wait. Workers did hold slot 3 for 550 minutes, through runs wrapped in
     vs-heavy on the real home and load runs.
-  - What it changes besides: slot 3 fills more often, so more minutes have three slots held. They hold 4 + 4 + 4, the
-    same 12 cores that two bare runs hold today (6 + 6). So the third slot no longer adds a third job on top.
+  - What it changes besides, a risk: slot 3 fills more often, so more minutes have three slots held, which is where
+    the Mac saturates today. The floors add up to the 12 that two bare runs hold today (6 + 6), but part of the load
+    follows the number of jobs, not their width: each job's spawns and the system daemons checking them (run 3). So
+    a third job at 4 may cost more than the 4 it is given. Watch the three-held minutes with fix 1a's fields after it
+    lands; fix 2c is the lever if they rise.
 - **Fix 2b, not recommended now: stop widening.** give_width can't narrow a widened run when others start beside it.
   So the only way to hold the sum to 12 is to never widen past `ncpu − share × (slots − 1)`, which is 4 at three slots:
   no widening at all.
@@ -225,10 +233,12 @@ it (top fix 2). Fix 2a removes the most load that is certain, at the least cost 
 ### 3. The load runs (by design; small in the data)
 
 - **Evidence:** 15 holds and 73 minutes by signature in 10 days, a lower bound. 45 of those minutes had the 1-minute
-  over T. **12 minutes had the load run as the only holder and the Mac over T: 1.2 minutes a day.** All 12 are under T
-  once its busy loops' target above B (24 − 4.6) is taken out. Its loops fill the load to 24 whatever else runs: on a
-  calm Mac they *are* the load, and on a busy one they stand down (live: 1.5 runnable in its tree at load 27). Its 3
-  suites run 12 wide each (scripts/test-under-load.sh:64), not at VS_HEAVY_CORES.
+  over T. **12 minutes had the load run as the only holder and the Mac over T: 1.2 minutes a day.** Its loops can't
+  have done that alone: they start only as many as the others' load leaves short of 24 (2 × cores, under the boosted T
+  of 36), and stand down above it (live: 1.5 runnable in its tree at load 27). So by design **its loops alone put the
+  Mac over the limit 0 minutes a day**. Over T, the load came from its 3 suites, run 12 wide each
+  (scripts/test-under-load.sh:64, not at VS_HEAVY_CORES), and from outside the slot. The signature needs a sample over
+  load 48, so the holds found are biased toward heavy ones, and its "7 × its share" above is an upper figure.
 - **Fix 3, task "a load run's tests at its slot's width".** scripts/test-under-load.sh:64 sets
   SWT_EXPERIMENTAL_MAXIMUM_PARALLELIZATION_WIDTH to VS_HEAVY_CORES inside the slot, not the cores.
   - Expected load after: its 3 suites at 3 × 4 tests instead of 3 × 12. Their load is mostly waiting, so the gain is
@@ -277,20 +287,24 @@ it (top fix 2). Fix 2a removes the most load that is certain, at the least cost 
 1. **Gate less.** Of the 1,158 minutes the gate refused:
    - 49 had no slot held;
    - 1,108 had a slot held. At 817 of them the 1-minute itself was over T.
-   - 549 of the 1,108 had top groups named. At 497 of those 549 (91%), every build or test of ours that the recorder
-     could see was inside a slot. The other 559 minutes can't be told, because nothing is named under load 48.
+   - 549 of the 1,108 had top groups named. At 497 of those 549 (91%), no build or test group sat in a folder whose
+     project held no slot. That doesn't clear our own bare builds: every worktree, v2 clone and the main checkout reads
+     as our project's name, so a worker's bare `swift build` beside any slot of ours looks like that slot's run. The other
+     559 minutes can't be told, because nothing is named under load 48.
    - What runs outside slots: worktree-init.sh builds nothing. Over 10 days the named samples show 30 core-samples of
      swift-frontend outside a project or slot (SourceKit-LSP or a bare build) and 0.9 of a session's bare
      `swift package`.
 
-   **So "a start waits only for a free session and memory, its heavy work waits for a slot" would have been safe for
-   our own work.** What breaks it is load outside the slots that isn't ours (cause 1). Starting workers on a Mac whose
-   load is someone else's adds sessions, not compile threads. **But it is safe only once fix 2a holds the slots to their
-   share, and fix 1a can see the outside load.** Until then, a start on a saturated Mac queues heavy work behind three
-   slots that already over-give. Recommended order: 2a, 1a, then the gate rule.
-2. **The load runs:** 1.2 minutes a day alone over the limit, and its loops decide all of them. 73 minutes held in 10 days
-   by signature, a lower bound. Leaving its loops out of the gate isn't a fix (they are real contention). Running it
-   exclusively helps only the 45 shared over-T minutes, which fix 1a can attribute first. Fix 3 sizes its tests.
+   **Whether "a start waits only for a free session and memory, its heavy work waits for a slot" would have been safe:
+   not measurable from the samples.** They can't see our own bare builds (above), nor root's or short-lived processes.
+   What is known: worktree-init.sh builds nothing, and no build or test of another folder's project ran outside a slot
+   at 91% of the named minutes. Fix 1a's `slot_runnable` makes it measurable: it counts the slot holders' trees, so a
+   bare build in a worktree lands in "outside". Recommended order: 2a, 1a, a week of samples, then the gate rule.
+2. **The load runs:** its loops alone put the Mac over the limit 0 minutes a day by design (they fill only up to 24).
+   With the load run the only holder the Mac was over the limit 1.2 minutes a day (12 in 10 days), from its suites and
+   from outside the slot. 73 minutes held in 10 days by signature, a lower bound. Leaving its loops out of the gate
+   isn't a fix: below 24 they are real contention, 24 runnable threads on 12 cores. Running it exclusively helps only
+   the 45 over-T minutes it shared with other slots, which fix 1a can attribute first. Fix 3 sizes its suites.
 3. **Builds avoided:**
    - about a quarter of the slot-minutes (about 1,790 of 7,391) are cold builds, and they are most of the slots' CPU;
    - per worktree: 148 tasks with a hold, one cold build each, about 5.5 min at width 4;
@@ -328,6 +342,8 @@ it (top fix 2). Fix 2a removes the most load that is certain, at the least cost 
 
 ## What was not measurable
 
+- **Our own bare builds outside a slot.** A worktree's processes read as our project, so the samples can't tell a
+  bare `swift build` from a slot's run. Fix 1a's `slot_runnable` can.
 - **Who makes the load above 48 over the 10 days.** The recorder names under a third of the cores in use there. It
   doesn't see root's processes (Spotlight, logd, syspolicyd) or short-lived ones. Fix 1a records the split from now on.
 - **The holder's command.** The samples never record it. Load runs are found only by a signature above load 48, and a
@@ -337,7 +353,7 @@ it (top fix 2). Fix 2a removes the most load that is certain, at the least cost 
 - **What `checkout`, `clone` and `repo` are.** They are other folders' holders with no task. Their slot time, part of
   the 3,199 other-project and 366 no-project minutes, is unattributable.
 - **Spotlight's cause** (fix 1c's experiment) and **whether a cloned .build builds incrementally** (fix 4a's).
-- **A calm-Mac full suite.** Runs 1 and 2 had two other slots held throughout. The runs' own thread counts stand;
-  their durations are those of a busy Mac.
+- **A calm-Mac filter run and full suite (an acceptance check not met).** Runs 1 and 2 had two other slots held
+  throughout. Their thread counts are upper bounds; their durations are a busy Mac's.
 - **Uninterruptible waits.** ps state U averaged 0.0–2.6 threads across the looks. Whether the load average counts
   them on this kernel wasn't verified: they were too few to matter here.
