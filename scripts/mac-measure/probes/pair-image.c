@@ -10,8 +10,9 @@
 //   pair-image mach [FD]    its own pid and pidversion written on FD (if given), then one Mach message sent to its
 //                           bootstrap special port (the probe's port, which the probe gave it), then it sleeps 30 s
 //   pair-image sleep        sleeps 30 s
-//   pair-image limit NAME VALUE PATH [ARGS…]   a launcher, as a session's would be: sets its own RLIMIT_NAME (STACK,
-//                           NOFILE, DATA, CPU) to VALUE, says so on descriptor 3, then execs PATH with ARGS
+//   pair-image limit NAME VALUE PATH [ARGS…]   a launcher, as a session's would be: moves descriptor 98 to 99 (the
+//                           target's marker), sets its own RLIMIT_NAME (STACK, NOFILE, DATA, CPU) to VALUE, says so on
+//                           descriptor 3, then execs PATH with ARGS
 //   pair-image ports FD     K-M16's here part (assumption A, 2026-11-27): what this image finds on itself at its first
 //                           statement, written as lines on FD: its task's and its main thread's exception ports for
 //                           each mask group (EXC_MASK_ALL, EXC_MASK_CRASH, EXC_MASK_CORPSE_NOTIFY; a set handler, its
@@ -167,8 +168,13 @@ static void read_ports(look_t *look) {
     mach_port_deallocate(mach_task_self(), thread);
 }
 
+// The marker: one unbuffered write on descriptor 99, which only part three's cases open (a high number no other
+// part's pipes reach); elsewhere the write fails with EBADF and nothing happens. So a case can tell an image that
+// reached main from one that ended before it, whatever it wrote later through stdio's buffer.
 static void first_look(void) {
     first_time = mach_absolute_time();
+    static const char marker[] = "  main's first statement reached (an unbuffered write on descriptor 99)\n";
+    (void)!write(99, marker, sizeof marker - 1);
     read_ports(&first);
 }
 
@@ -239,6 +245,9 @@ static int limit_then_exec(char **argv) {
     const struct { const char *name; int which; } names[] = {
         {"STACK", RLIMIT_STACK}, {"NOFILE", RLIMIT_NOFILE}, {"DATA", RLIMIT_DATA}, {"CPU", RLIMIT_CPU},
     };
+    // The probe hands the target's marker descriptor in as 98: moved to 99 before the limit (a descriptor at or above a
+    // lowered RLIMIT_NOFILE can't be made), so this launcher's own first statement found none to write on.
+    if (dup2(98, 99) == 99) close(98);
     int which = -1;
     for (size_t i = 0; i < sizeof names / sizeof names[0]; i++)
         if (strcmp(argv[2], names[i].name) == 0) which = names[i].which;

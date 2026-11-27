@@ -1409,9 +1409,10 @@ static void image_lines(int from, pid_t pid, uint64_t before) {
     char *line = NULL;
     size_t size = 0;
     unsigned long long first = 0;
-    int lines = 0;
+    int lines = 0, marked = 0;
     while (getline(&line, &size, in) > 0) {
         lines++;
+        if (strstr(line, "main's first statement reached")) marked = 1;
         printf("%s", line);
         const char *mark = strstr(line, "first statement at ");
         if (mark) first = strtoull(mark + strlen("first statement at "), NULL, 10);
@@ -1421,6 +1422,7 @@ static void image_lines(int from, pid_t pid, uint64_t before) {
     int status = 0;
     waitpid(pid, &status, 0);
     if (first && before) printf("  the window, from just before the spawn or exec to its first statement: %.0f us\n", micros(before, first));
+    printf("  its main's first statement: %s\n", marked ? "reached (the marker came)" : "never reached (no marker on descriptor 99)");
     if (WIFEXITED(status)) printf("  it exited %d%s\n", WEXITSTATUS(status), lines ? "" : ", having written nothing");
     else if (WIFSIGNALED(status)) printf("  it was ended by signal %d (%s)%s\n", WTERMSIG(status), strsignal(WTERMSIG(status)), lines ? "" : " before its first statement wrote anything");
 }
@@ -1437,6 +1439,7 @@ static void ports_case(const char *title, const char *img, enum route route, siz
         posix_spawn_file_actions_t actions;
         posix_spawn_file_actions_init(&actions);
         posix_spawn_file_actions_adddup2(&actions, lines[1], 3);
+        posix_spawn_file_actions_adddup2(&actions, lines[1], 99);
         posix_spawnattr_t attributes;
         posix_spawnattr_init(&attributes);
         if (route == SPAWN_ATTR) {
@@ -1471,7 +1474,7 @@ static void ports_case(const char *title, const char *img, enum route route, siz
                 for (int m = 0; m < 3; m++) results[m] = thread_set_exception_ports(thread, set_masks[m], e, behavior, behaviours[b].flavor);
             }
             put(report[1], results, sizeof results);
-            if (dup2(lines[1], 3) != 3) _exit(126);
+            if (dup2(lines[1], 3) != 3 || dup2(lines[1], 99) != 99) _exit(126);
             close(lines[1]);
             uint64_t t = mach_absolute_time();
             put(report[1], &t, sizeof t);
@@ -1507,15 +1510,25 @@ static void limit_case(const char *title, const char *name, const char *value, c
     printf("== %s\n", title);
     int lines[2];
     if (pipe(lines)) die("pipe");
+    lines[0] = high(lines[0]);
+    lines[1] = high(lines[1]);
+    // The launcher starts with descriptors 0 to 3 and the marker's 98 alone (POSIX_SPAWN_CLOEXEC_DEFAULT), so under a
+    // limit of 4 none is free below it and under 5 one is.
     posix_spawn_file_actions_t actions;
     posix_spawn_file_actions_init(&actions);
+    for (int fd = 0; fd <= 2; fd++) posix_spawn_file_actions_addinherit_np(&actions, fd);
     posix_spawn_file_actions_adddup2(&actions, lines[1], 3);
+    posix_spawn_file_actions_adddup2(&actions, lines[1], 98);
+    posix_spawnattr_t limited;
+    posix_spawnattr_init(&limited);
+    posix_spawnattr_setflags(&limited, POSIX_SPAWN_CLOEXEC_DEFAULT);
     char *with_ports[] = {(char *)image, "limit", (char *)name, (char *)value, (char *)target, "ports", "3", NULL};
     char *bare[] = {(char *)image, "limit", (char *)name, (char *)value, (char *)target, NULL};
     extern char **environ;
     pid_t pid;
-    if (posix_spawn(&pid, image, &actions, NULL, target == image ? with_ports : bare, environ) != 0) die("posix_spawn");
+    if (posix_spawn(&pid, image, &actions, &limited, target == image ? with_ports : bare, environ) != 0) die("posix_spawn");
     posix_spawn_file_actions_destroy(&actions);
+    posix_spawnattr_destroy(&limited);
     close(lines[1]);
     image_lines(lines[0], pid, 0);
 }
@@ -1528,6 +1541,7 @@ static void window_case(const char *title, const char *img) {
     posix_spawn_file_actions_t actions;
     posix_spawn_file_actions_init(&actions);
     posix_spawn_file_actions_adddup2(&actions, lines[1], 3);
+    posix_spawn_file_actions_adddup2(&actions, lines[1], 99);
     char *args[] = {(char *)img, NULL};
     extern char **environ;
     pid_t pid;
@@ -1566,8 +1580,8 @@ static void a_routes(void) {
     limit_case("(q1) the launcher lowers RLIMIT_STACK to 64 KiB, then execs IMAGE", "STACK", "65536", image);
     limit_case("(q2) the launcher lowers RLIMIT_STACK to 16 KiB, then execs IMAGE", "STACK", "16384", image);
     limit_case("(q3) the launcher lowers RLIMIT_STACK to 16 KiB, then execs WINDOW (Swift, Foundation)", "STACK", "16384", image_window);
-    limit_case("(q4) the launcher lowers RLIMIT_NOFILE to 4 (descriptors 0 to 3 open), then execs IMAGE", "NOFILE", "4", image);
-    limit_case("(q5) the launcher lowers RLIMIT_NOFILE to 5, then execs IMAGE", "NOFILE", "5", image);
+    limit_case("(q4) the launcher lowers RLIMIT_NOFILE to 4 (descriptors 0 to 3 open, none free below the limit), then execs IMAGE", "NOFILE", "4", image);
+    limit_case("(q5) the launcher lowers RLIMIT_NOFILE to 5 (one free below the limit), then execs IMAGE", "NOFILE", "5", image);
     limit_case("(q6) the launcher lowers RLIMIT_NOFILE to 4, then execs WINDOW (Swift, Foundation)", "NOFILE", "4", image_window);
     limit_case("(q7) the launcher lowers RLIMIT_NOFILE to 5, then execs WINDOW (Swift, Foundation)", "NOFILE", "5", image_window);
     limit_case("(q8) the launcher lowers RLIMIT_DATA to 1 MiB, then execs IMAGE", "DATA", "1048576", image);
@@ -1712,7 +1726,8 @@ static void d1_timing(void) {
         close(in);
         close(out);
         if (rename(swap, image_big) != 0) die("rename");
-        printf("  a copy of IMAGE renamed over BIG's path; BIG still runs (pid %d)\n", pid);
+        printf("  a copy of IMAGE renamed over BIG's path; BIG (pid %d) %s\n", pid,
+               kill(pid, 0) == 0 && waitpid(pid, NULL, WNOHANG) == 0 ? "still runs (kill 0 and waitpid WNOHANG checked)" : "is gone");
         d1_checks("BIG, its path now IMAGE's copy", token, big_cdhash, image_cdhash);
         kill(pid, SIGTERM);
         waitpid(pid, NULL, 0);
@@ -1739,7 +1754,10 @@ static void d1_timing(void) {
         if (errno != EINTR) break;
     }
     close(ex[0]);
-    printf("  the child exec'd IMAGE (its close-on-exec pipe ended)\n");
+    char path[PROC_PIDPATHINFO_MAXSIZE] = "";
+    proc_pidpath(c, path, sizeof path);
+    int alive = kill(c, 0) == 0 && waitpid(c, NULL, WNOHANG) == 0;
+    printf("  the child's close-on-exec pipe ended; it %s\n", alive ? (strstr(path, "pair-image") ? "runs IMAGE (alive, its path IMAGE's)" : "is alive, its path not IMAGE's") : "is gone");
     if (receive_token(port, &token)) {
         printf("  the message read after the exec, its trailer's pid=%d pidversion=%d:\n", (int)token.val[5], (int)token.val[7]);
         kernel_identity(token, image_cdhash);
