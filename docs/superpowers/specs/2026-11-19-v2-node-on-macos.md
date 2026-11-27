@@ -1417,6 +1417,34 @@ Each step is small, keeps the app unchanged, and says what it needs from a real 
 7. **install-node.sh's Mac arm** and the signing decision. Needs: a real Mac with Xcode.
 8. **The Mac seal list**, measured. Needs: a real Mac.
 9. **Coexistence**: `lead` refusing an app-led project; the hooks decision. Needs: a real Mac with the app.
+10. **Every spawn names what it keeps** (the keeper design's K4a-i, [2026-11-27-v2-mac-keeper-design.md](2026-11-27-v2-mac-keeper-design.md),
+    "The host's side"; homed here by the re-check of 2026-11-27, its question 3): every `Platform.Spawn` in the host
+    image and in the server names `keep` (`POSIX_SPAWN_CLOEXEC_DEFAULT`), its in-place forms too, with a lint over
+    their targets. Behaviour-preserving; safe to build now; its own review. Needs: the hosted Mac for the tests.
+11. **The host image's children prove themselves** (the keeper design's K4a-ii): the parser and the server child
+    spawned with only a channel, proving their code with a fresh pair before they get a link (hardened exactly when the
+    image is, in the handover keeper's `refusal` and `parentRefusal` too; the proof waited off the host's queue, at
+    most 10 s, its spawn off that queue as well, the child at the limit reaped by an exit source, no thread held per
+    proof, and a proof that only timed out told so, never that something replaced the helper: the narrow re-check's
+    N4 (b)); the launcher written afresh at each host start; a
+    pinned image gives pair ends only to its own code, its row's server, or across the checked node's own switch a
+    target the record pins, with its test flags and by-path handover refused (the re-check's N1). Every session's start
+    on the Mac changes, the app's host included, with or without the keeper. After step 10 and the keeper design's
+    K-M1 row, which must also confirm the by-path handover's end dead after the in-place exec (else this step isn't
+    offered); its cost measured first (K-M14, extended: the spawn's own time, a quarantined or stalled launcher, a
+    burst of never-proving history reads); a hardened image that isn't pinned starts no server child and takes no
+    test keeper or secret (its KP20f), and keeps its by-path handover, so the app's own host (hardened, never pinned)
+    keeps its sessions at every app update (`theAppsHostStillHandsOverByPathAtAnAppUpdate`), with no exemption keyed
+    on `ownsLaunchers`; `MacKeeperHandoverTests`' hardened arm moves to function level and to the keeper's K7; its own
+    review; the app and its update checked in the sandbox. The keeper's K4 waits on steps 10 and 11. Then, once
+    step 11 is on v2, the pins record's `format 2` (the keeper design's K4b), whose own install script refuses,
+    unconditionally, any commit that doesn't contain step 11's commit (the floor: a build from before it is never
+    served or installed again). Needs: this Mac's real signed hardened images.
+12. **The node's removal** (the keeper design's answer to its re-check's question 2): an `install-node-mac.sh` remove
+    form that stops the node's agent first, then runs the keeper step's `--remove`, or `--remove --forget-store` when
+    you ask it to forget the node's record, said before the password (`KeeperStepTests.theNodesRemovalRemovesTheKeeper`
+    is this step's). After the keeper's K5. The switch-on review checks that nothing removes the node without the
+    keeper's removal. Needs: a real Mac, your `sudo` line for its real use.
 
 Progress (2026-11-20, on Linux, checked on the hosted Mac only when pushed; each commit and what a real Mac must run are
 in [the Mac's tasks](../../process/v2-mac-tasks.md)): step 2 is built (`Platform.Service.nodeRoot`; `--node` still

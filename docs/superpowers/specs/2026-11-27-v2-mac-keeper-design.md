@@ -13,6 +13,21 @@ are). The user chose this keeper on 2026-11-27 (question 9CDB5A99): one more `su
 is down the node refuses the changes that ask for Touch ID. The user then took the journal design's three smaller
 recommendations (90BBAD80); this document says which of them the keeper makes moot and which remain.
 
+**Second fix round** (2026-11-27, branch `v2-mac-keeper-design-fix2` off `v2-mac-keeper-design-fix` `8a2f13ea`): the
+re-check of `8a2f13ea` (`RECHECK-keeper-design.md`: "ready with fixes"; F2, F3, F4 closed, F1 narrowed to N1 and N2;
+2 Important, 2 Doubt, 4 Nit, N1 to N8, and answers to the design's four open questions) is answered here as the
+lead's rulings of 2026-11-27 decided them. [Re-check of 2026-11-27: the answers](#re-check-of-2026-11-27-the-answers),
+at the end, lists each and where the body now says it. Still documents only: no code, no measurement run, no
+refusal constant touched.
+
+**Third edit** (2026-11-27, branch `v2-mac-keeper-design-fix3` off `v2-mac-keeper-design-fix2` `654c241c`): the
+narrow re-check of `654c241c` (`RECHECK2-keeper-design.md`: KP20e closed, KP20f and N4 (b) closed with changes, KP6b
+not closed) is answered with its four changes, as the lead's ruling of 2026-11-27 ("v2 keeper design, after its
+narrow re-check") adopted them; there is no further design re-check, and each slice's own security review judges its
+code against this design (K4b's checks the floor, K4a-ii's the proof's waits). [Narrow re-check of 2026-11-27: the
+answers](#narrow-re-check-of-2026-11-27-the-answers), at the end, lists each change and where it is. Still documents
+only.
+
 **Two things called "keeper".** In this document **the keeper** is the new root-owned process,
 `vibeswitcher-keeper`. The process a switch already parks its state with (`MacHandoverKeeper`,
 `--handover-keeper`, the Mac spec's "A switch") is always called **the handover keeper** here. They share a proof
@@ -21,7 +36,7 @@ pattern (a fresh socket pair, below) and nothing else.
 Read with the [journal design](2026-11-27-v2-mac-journal-design.md) (its threat table, "One writer", "Fail closed",
 P30 to P42, "For the reviewer: the keeper", the build order J0a to J11), [the node on macOS](2026-11-19-v2-node-on-macos.md)
 ("The anchor: a root-owned record of the builds", "The checked node start", "Rows 7 and 10") and the measurement
-record ([v2-mac-measurements](../../process/v2-mac-measurements.md), newest copy on `v2-mac-runbook`; M7, M13, rows 4,
+record (v2-mac-measurements (`docs/process/v2-mac-measurements.md`, not on this branch), newest copy on `v2-mac-runbook`; M7, M13, rows 4,
 5, 7, 10, 12). Code is read at this branch's base (`v2-mac-anchored-cli` `b15e0052`): `NodePins.swift`,
 `RootRecord.swift`, `CodeIdentity+Darwin.swift`, `Sockets+Darwin.swift`, `SocketMaking+Darwin.swift`,
 `Spawn+Darwin.swift`, `MacHandoverKeeper.swift`, `VaultStorage.swift`, `scripts/node-pins-mac.sh`,
@@ -44,7 +59,10 @@ node's build: see "What it doesn't" below.
 
 - **Setup:** the install asks your password once more, to put the keeper in place. The system builds the keeper's
   program itself, from the commit's own source checked piece by piece, so nothing of yours can rewrite that program on
-  the way (what a program of yours can still choose is below, in "What it doesn't"). Updates ask once, as today; a second time only in an update that changes the keeper's own source.
+  the way (what a program of yours can still choose is below, in "What it doesn't"). Older builds of your node are
+  dropped at setup, so only the build you install is served, and builds older than the keeper's fixes can't be
+  installed afterwards. Updates ask once, as today; a second time only in an update that changes the keeper's own
+  source.
 - **Day to day:** nothing. Locking your login keychain no longer pauses anything of the node, and nothing of the node
   is in your login keychain any more.
 - **If the keeper isn't answering** (it is being updated, it broke, or a program of yours keeps it busy, as one could
@@ -52,8 +70,9 @@ node's build: see "What it doesn't" below.
   say so. If it isn't answering when your node starts, the node waits a minute, then doesn't start, and says why. That
   is stricter than what you chose (that the node refuse the changes that ask for Touch ID): it was chosen so that no
   half-working node is ever left running, and you were told (the lead, 2026-11-27). The words send you to your
-  password only for something nothing of yours can cause: the keeper not installed at all, or its own store damaged
-  (both the system's files); when it is installed but busy or not running, they never do, since a program of yours
+  password only for something nothing of yours can cause: the keeper not installed at all, its own store damaged, or
+  your install's record of builds missing or refused (each a system file found missing, or read whole and refused;
+  never a read that merely failed, which gets the same words as busy); when it is installed but busy or not running, they never do, since a program of yours
   could cause those to lead you there.
 - **If its store is ever lost** (a disk fault, a new Mac without it): your node's record begins again with a notice,
   and each setting the node checks waits for your accept once, as after any record that begins again.
@@ -71,7 +90,8 @@ of the node to undo a change of yours.
   checks: it can read every secret in your node's record and rewrite the record without a notice. The key never
   changes, so a key read once keeps opening your node's record until you make a new one. **You accepted this limit on
   2026-11-27 (question 8B298106).** Closing it would need every program of the node built by the system, which isn't
-  proposed. If you ever suspect it happened: install afresh, run `node-pins-mac.sh --keep 1` so only that fresh build
+  proposed. If you ever suspect it happened: first stop your sessions and what they started (a session still
+  running would rewrite the fresh install's build too, and the remedy would pin it again); then install afresh, run `node-pins-mac.sh --keep 1` so only that fresh build
   is served, then run the keeper's `--remove --forget-store` and its setup line again for a new key; your node's record
   then begins again with a notice.
 - **The keeper's own program has a smaller window.** A program of yours that rewrites the build or your checkout can't
@@ -82,7 +102,9 @@ of the node to undo a change of yours.
 - A program of yours can still kill the node, delete or put back its record file (each shows as a notice and holds the
   devices, as today), keep the keeper busy so that your node can't start or make guarded changes, and run your node's
   own genuine program; the keeper can't tell that program's modes apart, and the node's own code is what keeps its
-  other modes away from the keeper.
+  other modes away from the keeper: an installed build of your node takes no test flag, starts no server but the one
+  your install lists for it, and hands its connections to no program of yours, in any mode, not even in the moment
+  before your install's password, when its new build isn't listed yet.
 
 ## What the keeper anchors, and how
 
@@ -117,11 +139,11 @@ each, with the keeper:
 | **Edits files** under the node's root: deletes, truncates, rewrites or puts back `vault.sealed`; deletes or replaces `host.lock`; edits the plist or `bin/` | rewriting or forging the vault's contents (no key); putting an older vault back with a matching check (the slot is root's): P13, P29, P34's rollback form | a deleted, truncated, older or ahead file (journal "Fail closed" rows 2 to 7a: open, first looks and devices held); a replaced lock (`lock.lost`); a plist or `bin/` change (rows 7 and 10, the checked start) | devices held at will by putting an older copy back (90BBAD80 (2), below); `lock.lost` at will by replacing the lock (same); uncounted vault changes lost to a same-seq put-back (P28) |
 | **Rewrites Keychain items**, deletes and plants them, locks the login keychain, puts `login.keychain-db` back | everything it did to the node: the node keeps **no** Keychain item (the key and checks are the keeper's), so P34, P35 and the planted item of the journal's Open for the user 4 no longer reach the record; locking the keychain refuses nothing | — | the Mac app's own vault (`lead-vault`, main's) is still in the login Keychain: the app's concern, not this design's |
 | **Kills the node** (the host, its server child), or keeps killing it | — | each end is an open entry (journal P6, P11); a kill between a raise and its seal reads as `older` (P18) | a denial (journal P32, accepted) |
-| **Copies the node**: copies its files, or runs its genuine pinned host beside it (a second checked start, journal P40), or in another mode (the deputy, P33), or an older pinned build (P41) | a copied vault file is ciphertext under a key it can't get; two checked hosts can't both continue the record: the keeper's swap is one atomic compare-and-set, so the loser's raise fails and it writes nothing (P40, its residue included) | the second host's start (open), the loser's `lock.lost`; an older pinned build's start (the unswitched-build rule, P41) | the keeper can't tell the genuine host's modes apart: only J0a's rule 2 (only the checked start calls the keeper) keeps the other modes away, as it keeps them from the Keychain today; every pinned build is served (the `--keep 1` lever, the Mac spec's F8) |
+| **Copies the node**: copies its files, or runs its genuine pinned host beside it (a second checked start, journal P40), or in another mode (the deputy, P33), or an older pinned build (P41) | a copied vault file is ciphertext under a key it can't get; two checked hosts can't both continue the record: the keeper's swap is one atomic compare-and-set, so the loser's raise fails and it writes nothing (P40, its residue included) | the second host's start (open), the loser's `lock.lost`; an older pinned build's start (the unswitched-build rule, P41) | the keeper can't tell the genuine host's modes apart: only J0a's rule 2 (only the checked start calls the keeper) keeps the other modes away, as it keeps them from the Keychain today, and N1's rule keeps a pinned image's other modes from handing its pair ends to a session's code (KP20d); every pinned build is served (the `--keep 1` lever, the Mac spec's F8), and every pinned build is one at or after the floor (N2: the record's format 2, KP6b) |
 | **Signs itself with the local identity** (holder (4) of the journal's table), or is a program you once clicked Always Allow for (holder (5)) | P30 for the node's record: the keeper serves by the cdhash of the code running, pinned by the install's administrator step, never by a signing identity, team or designated requirement; a program of its own code has another cdhash. The genuine host signed again is either other code, with another cdhash (refused), or the same cdhash, which is the genuine code (served, harmlessly). Which of the two it is (the code directory carries the requirements' hash) is K-M11, kept as information: it gates nothing | — | none for the record |
-| **Talks to the keeper** itself: connects, sends requests, sends a pair it made, sends an end of a connection that isn't a pair, writes a request then execs the pinned host, points the host's `--handover-keeper-channel` at the keeper, or holds an end of a pair the genuine host made (by replacing the host's parser launcher, the review's F1) | getting the key or moving a slot: only an end of a socket pair (unnamed on both sides) made by a pinned, hardened host of your uid, which also sent the proof, is served; the maker is proven by the pair's token, fixed when the pair was made (the Mac spec's result, kept there only as a sentence: K-M1 reruns it in KP10's order and keeps the probe, F6; telling a pair's end from a connection's: K-M1 (d)); and the host gives no end of a pair it writes on to code that hasn't proven itself, in any mode (KP20, K4a) | — | **keeping the keeper busy** (a flood of connections) is a denial your account can cause at will, as it could lock the login keychain before: guarded changes refused, a node that doesn't start while it lasts, and the journal's at-will levers through a failed raise (P36's uncounted revocation, P42's file ahead) reachable through it as they were through the locked keychain ([While the keeper is down](#while-the-node-is-down-and-while-the-keeper-is-down)) |
+| **Talks to the keeper** itself: connects, sends requests, sends a pair it made, sends an end of a connection that isn't a pair, writes a request then execs the pinned host, points the host's `--handover-keeper-channel` at the keeper, or holds an end of a pair the genuine host made (by replacing the host's parser launcher, the review's F1) | getting the key or moving a slot: only an end of a socket pair (unnamed on both sides) made by a pinned, hardened host of your uid, which also sent the proof, is served; the maker is proven by the pair's token, fixed when the pair was made (the Mac spec's result, kept there only as a sentence: K-M1 reruns it in KP10's order and keeps the probe, F6; telling a pair's end from a connection's: K-M1 (d)); and the host gives no end of a pair it writes on to code that hasn't proven itself, in any mode (KP20, K4a), and a pinned image expects only its own code, its row's server, or across the checked node's own switch a target the record pins, so a host a session starts with its own `--server` or `--handover-test-keeper` gives the session nothing (KP20d, KP20e: the re-check's N1) | — | **keeping the keeper busy** (a flood of connections) is a denial your account can cause at will, as it could lock the login keychain before: guarded changes refused, a node that doesn't start while it lasts, and the journal's at-will levers through a failed raise (P36's uncounted revocation, P42's file ahead) reachable through it as they were through the locked keychain ([While the keeper is down](#while-the-node-is-down-and-while-the-keeper-is-down)) |
 | **Impersonates the keeper** (a socket of its own, a listener elsewhere) | the keeper's folder is root's (the host walks it as `readRootRecord` walks the pins'), and the host requires the listener at its socket to be root (K-M2) | — | — |
-| **Edits the build during an install or update you run** (the node's programs are built and signed under your account; the keeper's program is built by root) | for **the keeper's program**: any rewrite of the build, the checkout or the build's output, since root builds the keeper alone from the commit's objects, every hash recomputed in a root-owned folder, with root's toolchain and nothing of your account's (KP21); and forcing the keeper step at a node update by rewriting the build, since the step runs only when the commit's keeper source tree differs from the one root recorded (KP23a) | — | **for the node's programs (KP6a, the review's F3): an update during which a session rewrote the host's build pins that host, and the keeper then serves it the key and both slots**: it reads every secret of the vault and can seal any vault and swap either slot, for as long as its row stays (`--keep 1` keeps only the build just installed, which is this one); the key never rotates, so one success lasts until a new key (F17). The install's window (the Mac spec's S9) gave a session nothing P34 didn't before the keeper; with it, this is the route to everything the keeper closes, at every update. **Accepted by the user, 2026-11-27 (8B298106)**, stated, not closed (closing it would need every program built as root). The remedy after a suspected compromise: a fresh install, `node-pins-mac.sh --keep 1`, then the keeper step's `--remove --forget-store` and `--install` for a new key; the record begins again. **For the keeper's program, what remains:** the choice of commit (bounded by the install's provenance check: on v2, both runners passed), and a session that rewrites the install script itself, which can then hand root a self-consistent commit of its own making (root checks the objects' hashes, not who wrote them): S1's class ("root is one password away"), as a faked `sudo` prompt is |
+| **Edits the build during an install or update you run** (the node's programs are built and signed under your account; the keeper's program is built by root) | for **the keeper's program**: any rewrite of the build, the checkout or the build's output, since root builds the keeper alone from the commit's objects, every hash recomputed in a root-owned folder, with root's toolchain and nothing of your account's (KP21); and forcing the keeper step at a node update by rewriting the build, since the step runs only when the commit's keeper source tree differs from the one root recorded (KP23a) | — | **for the node's programs (KP6a, the review's F3): an update during which a session rewrote the host's build pins that host, and the keeper then serves it the key and both slots**: it reads every secret of the vault and can seal any vault and swap either slot, for as long as its row stays (`--keep 1` keeps only the build just installed, which is this one); the key never rotates, so one success lasts until a new key (F17). The install's window (the Mac spec's S9) gave a session nothing P34 didn't before the keeper; with it, this is the route to everything the keeper closes, at every update. **Accepted by the user, 2026-11-27 (8B298106)**, stated, not closed (closing it would need every program built as root). The remedy after a suspected compromise: first stop your sessions and what they started (the re-check's N8: one still running rewrites the fresh install's build too), then a fresh install, `node-pins-mac.sh --keep 1`, then the keeper step's `--remove --forget-store` and `--install` for a new key; the record begins again. **For the keeper's program, what remains:** the choice of commit (bounded by the install's provenance check: on v2, both runners passed), and a session that rewrites the install script itself, which can then hand root a self-consistent commit of its own making (root checks the objects' hashes, not who wrote them): S1's class ("root is one password away"), as a faked `sudo` prompt is |
 | **Another uid's process** | getting anything: the keeper closes any connection whose `getpeereid` isn't its uid before reading a byte | — | it can keep the keeper busy too (a denial, fail closed), unless K-M6 shows an access entry for your account alone on the socket is honoured by `connect` |
 | **Root**, or a program that takes the host's task port (the Developer Tools dialog first) | out of scope (S1), as today; and S11 item 3 (becoming the host), accepted | — | a Time Machine restore of the keeper's store (an administrator's act) rolls it back: [Open questions](#open-questions-for-the-lead-or-the-user) 2 |
 
@@ -148,9 +170,11 @@ already writes:
 
 `installed` is two lines, `tree <40 lowercase hex>` (the keeper's source tree id at the commit root built it from,
 `git rev-parse <commit>:Keeper`) and `cdhash <40 lowercase hex>` (the program root built and signed from it). Any
-account can read it; only the keeper step writes it. **One keeper process per store:** at its start the keeper opens
-`store/lock` (`O_CREAT|O_NOFOLLOW`, `0600`) and takes an exclusive `flock` on it without waiting, held for its life;
-a lock already held and it exits, having served nothing (the review's F8: two keepers on one store would each read a
+account can read it; only the keeper step writes it. **One keeper process per store:** at its start, **before it touches anything else in its folder** (the re-check's
+N5: no unlink or bind of `keeper.sock`, no read of the store), the keeper opens `store/lock` (`O_CREAT|O_NOFOLLOW`,
+`0600`) and takes an exclusive `flock` on it without waiting, held for its life; a lock already held and it exits,
+having touched nothing else and served nothing, so a second keeper (root's acts: a `bootout` that returned early)
+never orphans the first one's listener by binding the socket over it (the review's F8: two keepers on one store would each read a
 slot as X and each answer `ok` to a swap from X, P40's residue back). No process of your account can open that file.
 
 One keeper per account that runs a node (label `dev.vibeswitcher.keeper.<uid>`), so one account's keeper serves one
@@ -186,11 +210,25 @@ path that let a request through would move it at will (the vault's epoch then mi
 handed to slice 20's reviewer with K4's seam; until it is settled, this design cites `expected`'s secrecy for the
 `journal` slot alone.
 
-**A store it can't read** (it doesn't parse, its folder or file isn't root's alone, its uid isn't the keeper's): the
-keeper answers `damaged` to every request and changes nothing, never making a new key over it. Only the keeper step's
-`--start-over` (your `sudo`) moves it aside, renamed `node.keep.set-aside-<date>`, never deleted, and the next open
-makes a new key. **A store that isn't there** (only root can delete one): the next open makes a key, and the node's
-file then doesn't open (`unreadable`, open, first looks and devices held).
+**What a failed read of the store is** (the re-check's N3: `readRootRecord` returns one refusal for every errno,
+`RootRecord.swift:29-50`, so a keeper built on it as it is would call `EMFILE`, `ENFILE`, `EIO` or `ENOMEM` damage).
+K1 gives the walk's refusal a kind, its words unchanged, and the store, the pins record's read (`NodePins.read`) and
+K6's look all classify by it, three ways and no other:
+
+- **`damaged`: read whole, and refused.** The store was opened and read to its end, and it doesn't parse, or its
+  folder or file isn't root's alone (owner, mode, an ACL, a link where the walk allows none), or its uid isn't the
+  keeper's. The keeper answers `damaged` to every request and changes nothing, never making a new key over it. Only
+  the keeper step's `--start-over` (your `sudo`) moves it aside, renamed `node.keep.set-aside-<date>`, never deleted,
+  and the next open makes a new key.
+- **Missing: `ENOENT` alone**, for `node.keep` in a `store/` folder that is there and root's alone. Only root can
+  delete one: the next open makes a key, and the node's file then doesn't open (`unreadable`, open, first looks and
+  devices held). For K6, `ENOENT` alone for the plist or the program is "not installed".
+- **A read error: every other failure** (`EMFILE`, `ENFILE`, `EIO`, `ENOMEM`, `EINTR` past its retries, a short read,
+  anything not above). It is neither `damaged` nor missing: the keeper answers `readError` to that request, changes
+  nothing, **never makes a key**, and reads the store again at the next request. Its words are worded like "busy" and
+  never mention a password, the setup line or an install, since whether a process of your account can make a root
+  process's `open` fail (a full system file table, `ENFILE`) is not measured (K-M10 (d)) and the design assumes it
+  can.
 
 ### What it does, and what it never does
 
@@ -202,7 +240,8 @@ swap is atomic without another lock):
   read-back below. **The key never rotates** (the review's F17): a key read once (through KP6a, through a bug in a
   pinned build fixed later, or from a backup: [Open questions](#open-questions-for-the-lead-or-the-user) 2) opens and
   forges every later vault file until the record begins again under a new key. The remedy, beside the Mac spec's F8
-  lever (`--keep 1`, which drops older builds from the keeper's service): `node-pins-mac.sh --keep 1`, then the keeper
+  lever (`--keep 1`, which drops older builds from the keeper's service): first stop your sessions and what they
+  started (N8), then `node-pins-mac.sh --keep 1`, then the keeper
   step's `--remove --forget-store` and `--install` again; the next `open` makes a new key, and the node's file then
   doesn't open (`unreadable`, open, first looks and devices held), so its record begins again.
 - **`swap(slot, expected, new)`**: if the slot holds `expected` (absent counts as a value), it becomes `new`, written
@@ -226,7 +265,11 @@ the real store or the real pins record, and the program takes no path from anyon
 so it is **a package of its own with no dependency**, decided before K0 (the lead, 2026-11-27, Open questions 7): the
 folder `Keeper/` at the repository's top, one tree object at any commit (`<commit>:Keeper`, whose id is what root
 records), holding its own `Package.swift` that names no package, the library target `VibeKeep`, the executable target
-`vibeswitcher-keeper` (linking `VibeKeep` alone) and their tests (`Keeper/Tests/VibeKeepTests`). Its sources import
+`vibeswitcher-keeper` (linking `VibeKeep` alone), and **no test target** (the re-check's N7: `swift test` runs only
+the root package's test targets, so a test placed in `Keeper/Tests` would never run in `scripts/test.sh` and a
+regression in the store's parse would merge green). The keeper's tests stay in the root package's test targets, as
+[Every path to the property](#every-path-to-the-property) plans them (`Tests/VibePlatformTests/Keeper*Tests.swift` and
+the rest, which import `VibeKeep` through the root package's dependency on it). Its sources import
 only `Foundation`, `Security` and the C library. The repository's own package names it by path (`.package(path:
 "Keeper")`, in the Mac's half and the Linux half of `Package.swift`), and `VibePlatform` and `VibeCore` depend on
 `VibeKeep`, so each moved part has one implementation. **What moves into `VibeKeep`, unchanged**, each old name kept
@@ -248,8 +291,8 @@ proves it by building `VibeKeep` with no import of either module, and any helper
 again small in `VibeKeep`, listed in K0's commit. **New in `VibeKeep`:** the
 store's format and its write, the wire's (hello, request, answer), and the keeper's own receive of one descriptor,
 whose rules are the keeper's (exactly one, every other closed: F7), not `SocketDescriptors+Darwin.swift`'s. Two lints
-(K0): `KeeperLintTests.theKeeperPackageNamesNoDependency` (its manifest names no package, its sources import only
-`Foundation`, `Security` and the C library) and `KeeperLintTests.theKeeperLinksOnlyVibeKeep`. The less a root process
+(K0): `KeeperLintTests.theKeeperPackageNamesNoDependency` (its manifest names no package and no test target, its
+sources import only `Foundation`, `Security` and the C library) and `KeeperLintTests.theKeeperLinksOnlyVibeKeep`. The less a root process
 links, and the less root compiles, the less there is to review.
 
 ### The interface: how the keeper knows the caller is the genuine node
@@ -307,8 +350,10 @@ narrowing check (step 2: the sender is the pair's maker); alone it proves nothin
    the candidate, measured in the same probe), and K2 waits on that answer. Then the keeper acts and answers on the
    pair:
    `open`: status, the key, each slot's presence and value (163 bytes); `swap`: status. Statuses: `ok`, `moved`,
-   `damaged`, `unwritable` (the store's write failed), and the refusals `noRecord` (the pins record refused, with its
-   reason's code), `notPinned`, `notHardened`, `wrongUid`, so the host's words can say why. A refusal carries nothing of
+   `damaged` (the store read whole and refused), `readError` (the store or the pins record couldn't be read: N3's
+   third kind, which names which), `unwritable` (the store's write failed), and the refusals `noRecord` (the pins
+   record missing, or read whole and refused, with its reason's code; a read error is `readError`, never
+   `noRecord`), `notPinned`, `notHardened`, `wrongUid`, so the host's words can say why. A refusal carries nothing of
    the store.
 
 **Why a pair and not the connection's own token.** The connection's token isn't fixed: on the Mac it is "whichever
@@ -338,7 +383,9 @@ start (rows 4, 5), the server's anchor for the command line (row 7) and the host
 it takes only the `host` column. So the install's one administrator step stays the only writer of code fingerprints:
 an update's pins step is all the keeper needs to serve the new build, a rollback's build is served while the record
 keeps it, and `node-pins-mac.sh --keep 1` drops older builds from the keeper's service at their next request (the Mac
-spec's F8 lever reaches the record too). The signing identity plays no part: the record pins cdhashes, and unsigned
+spec's F8 lever reaches the record too). Beside that lever, the general rule (the re-check's N2): a fix to the image's
+pair rules reaches the keeper's service only once older rows are dropped, which for K4a the setup's `--fresh`, the
+floor and the record's `format 2` do ([Install, update and removal](#install-update-and-removal)). The signing identity plays no part: the record pins cdhashes, and unsigned
 (ad hoc) builds work, since a build's key no longer follows its signature.
 
 ### The host's side
@@ -352,7 +399,8 @@ client. There is no Keychain store and no fallback to one. The client's rules, e
 - **It makes its own connection and pair, for one request, and keeps neither**: no keeper descriptor outlives its
   request, so none can be in a handover parcel, inherited, or reached later. It never takes a descriptor from its
   arguments, its environment or a parcel.
-- **Every spawn sets `POSIX_SPAWN_CLOEXEC_DEFAULT`, in every mode of the image** (the review's F1 (b); KP20b).
+- **Every spawn sets `POSIX_SPAWN_CLOEXEC_DEFAULT`, in every mode of the image** (the review's F1 (b); KP20b; slice
+  K4a-i, safe to build now).
   `Platform.Sockets.pair` sets close-on-exec after `socketpair` (`SocketMaking+Darwin.swift`: macOS has no flag for it
   at creation), so a spawn on another thread in between inherits whatever isn't close-on-exec yet, **both ends** of a
   pair being made included; and a holder of both ends of a genuine pair writes the request and reads the answer
@@ -374,12 +422,14 @@ client. There is no Keychain store and no fallback to one. The client's rules, e
   at `b15e0052` it spawns with no `keep`, so without `CLOEXEC_DEFAULT`: `codex app-server`
   (`VibeNode/Server/NodeCodexTrust.swift:221`) and `git` (`VibeNode/Start/LeadInit.swift:124`). A `codex` your account
   rewrote, or a program git runs, would then inherit a genuine host's pair end (the blind check of this fix round). So
-  K4a makes every spawn of `vibeswitcher-server` name what it keeps too, and the lint's scope adds the server's targets
+  K4a-i makes every spawn of `vibeswitcher-server` name what it keeps too, and the lint's scope adds the server's targets
   (`vibeswitcher-server`, `VibeNode`); the class of a pair end given to the server is **given only to proven code
   whose own spawns close what they don't name**. Not "or the client's lock around its spawn": that lock covers only
   `NodeAnchor`'s own pairs, and a spawn racing any other pair's making inherits both of its ends.
-- **No end of a pair the host writes on reaches code that hasn't proven it runs the image's code, in any mode** (KP20;
-  the review's F1 (a)). The keeper sees the image, not its mode (KP12), and reads as a request whatever the holder of
+- **No end of a pair the host writes on reaches code that hasn't proven it runs the code the host expected, in any
+  mode, and a pinned image expects only its own code, its row's pinned server, or, across the checked node's own
+  switch, a host the same record pins** (KP20; the review's F1 (a); the second half is the re-check's N1, the next
+  rule). The keeper sees the image, not its mode (KP12), and reads as a request whatever the holder of
   a pair's other end writes; so a process a session chose, holding one end while the host writes bytes the session
   chooses on the other, could ask the keeper in the host's name. **At `b15e0052` this doesn't hold, the checked node
   included** (KP20a): on the Mac every host's parser launcher, the checked node's too, is a copy of the image at
@@ -390,7 +440,11 @@ client. There is no Keychain store and no fallback to one. The client's rules, e
   `HistoryRead.swift:24`) with the parser link's end as its descriptor 0, while writing the session's terminal output
   in frames on the other end (`SessionParser.swift:262-275`, `:143-148`). The same launcher starts every session's
   program (`PTYSpawn`); a session's program is your account's code anyway, and holds no pair end, so only the parser
-  matters here. **The change, slice K4a, the handover keeper's way:**
+  matters here. **The change, K4a, the handover keeper's way**, in two slices (the re-check's answer to its question 3,
+  both homed in the Mac node spec's order of work, steps 10 and 11, since they change every session's start on the
+  Mac with or without the keeper, and K4 waits on both): **K4a-i** is the `CLOEXEC_DEFAULT` rule above with its lint,
+  behaviour-preserving; **K4a-ii** is the child proof below (steps 1 to 3), with N4's three statements and N1's
+  rule. Each gets its own review.
   1. **A child the image gives a pair end to is spawned holding no end of a pair the host writes data on.** It
      inherits one descriptor for its proof, its **channel**: an end of a fresh stream pair on which the host writes
      nothing but the handshake's one fixed byte (`holding`, `0x67`, once it holds the child's pair), exactly as
@@ -401,34 +455,113 @@ client. There is no Keychain store and no fallback to one. The client's rules, e
      that pair's token to be **the spawned pid, running the code it started for that child, with the Hardened
      Runtime** (`MacHandoverKeeper.refusal`'s three checks): for a parser, the pinned host's cdhash, which on a checked
      node is the image's own (`Platform.CodeIdentity.ownCdhash`), and in every other mode the image's own; for the
-     server child, the cdhash the host read from its `--server` file (on a checked node, the pinned server's). Anything
-     else: the child is ended and reaped, nothing is written, and what needed it is refused with words (below).
+     server child, in a **pinned** image (N1's rule, below) the `server` of its own row, in every mode, whatever its
+     `--server` file is, and only in an image that isn't pinned the cdhash the host read from its `--server` file.
+     Anything else: the child is ended and reaped, nothing is written, and what needed it is refused with words
+     (below).
   3. **Only then does the host give it the link**: a pair the host makes after the proof, one end sent over the proven
      pair (whose other end the proven child made and holds) and the other kept. The child, in any mode, writes on its
      channel and its own proof pair nothing but the handshake's fixed bytes (the descriptor message's one byte, `d`,
      `0x64`; `holding`, `0x67`), so its proof pair's other end, wherever a session that started it sent it, carries no
      request either.
   
+  **Three things the child proof states before it is built** (the re-check's N4, the lead's ruling of 2026-11-27):
+  - **(a) What "hardened" is keyed on: the code's own signature, never a flag the caller sets.** The child must be
+    hardened exactly when the image itself is: the image reads its own code's flags (`CS_RUNTIME`, no
+    `get-task-allow`: `isHardened` on its own token) and requires the same of the child's token. Never an argument
+    (not `--parser-test-hooks`, nor any new one), never the environment, never a parcel: a flag is something a session
+    passes to a pinned image, which would reopen F1. The same holds for the handover keeper's proof: it requires the
+    keeper hardened exactly when the old image is (KP20f's cost). So the host suite's ordinary test hosts, the debug build signed
+    without the runtime, keep passing their parsers' proofs (unhardened image, unhardened child), and the keeper
+    refuses every pair such an image makes at step 3 anyway (the handover keeper's own `parentRefusal` follows the
+    same rule: it requires its parent hardened exactly when it is itself, KP20f's cost); the Mac's own tests that re-sign a copy with `-o runtime`
+    (`MacKeeperHandoverTests.swift:18-23`) prove the hardened arm. Test:
+    `HostChildProofTests.aChildIsHardenedExactlyWhenTheImageIs` (both arms, no argument or variable read).
+  - **(b) The proof's time limit, and the queue it waits off.** The host waits for a child's proof **off its queue**,
+    then comes back on the host's queue with the result, as `handOverThroughKeeper` does for the handover keeper's,
+    though without its blocking wait on a global-queue thread (sentence 3 below), and **at most 10 s** (`HostChildProof.limit`; the handover keeper's 180 s, `HostHandover.probeLimit`,
+    is for a whole new build's start, not a parser's); K-M14 measures the proof's time, and a limit it shows too short
+    under load is raised there, never removed. Meanwhile only what needs that child waits: the session start or the
+    history read that asked for the parser, or the server child's start; every other session and connection of that
+    host is served. At the limit the child is ended and reaped (sentence 2 below) and what needed it is refused with
+    the timeout's words (sentence 4 below). So a
+    program at the launcher path that never proves itself costs each session start or history read it holds 10 s,
+    never the host's queue. Test: `HostChildProofTests.aProofThatNeverComesHoldsNothingElse` (an injected clock and a
+    child that never proves: another session's input and a client's request are served meanwhile, and the refusal
+    comes at the injected limit).
+
+    **Four more sentences, the narrow re-check's (the lead's ruling of 2026-11-27),** since the wait is not the only
+    part of a proof that can hold a queue:
+    1. **The spawn runs off the host's queue too.** At `b15e0052` `ParserLink.start` calls `spawn.start()` on its
+       caller's queue, the host's (`vibeswitcher.host`, `HostServer.swift:122`) for a session's parser start and for
+       `longView` → `HistoryRead.init` (`HostedSession.swift:726`), and `posix_spawn` returns only once the exec's
+       image is activated: it reads the file at the launcher path (a file in your folder) and waits for the system's
+       look at a new file, which a launcher replaced by a quarantined copy, or by a link to a file on a volume a
+       program of yours mounted and then stalled, can hold for a time nothing bounds. So the parser's spawn, with its
+       proof's wait, runs **on a queue of its own** for a session start and **on the history read's own queue** for a
+       read; only the result (the proven link, or the refusal) comes back to the host's queue. The ruling allows a
+       bound on the spawn instead; this design takes the move off the queue, since `posix_spawn`'s own wait has no
+       limit to set. The server child's spawn runs off the host's queue the same way.
+    2. **The reap at the limit is bounded.** A child ended at the limit is ended off the host's queue (`SIGKILL`) and
+       reaped by a process-exit source on its pid, as `ServerChild` watches its child, never by a blocking `waitpid`
+       with no limit (`MacHandoverKeeper.end`, `MacHandoverKeeper.swift:427-431`, is not the pattern here).
+    3. **A proof holds no thread while it waits.** Not one blocking `poll` on `DispatchQueue.global()` per proof (the
+       handover keeper's way, which a burst of history reads would multiply until GCD's bounded pool is full and every
+       later proof, a switch's keeper start and the server child's restart proof wait for a thread before their own
+       10 s begins): the proof's wait is a read source on the channel and a timer on the steady clock, on the queue of
+       sentence 1, holding no thread between events. (The re-check's other form, a cap on proofs in flight per host,
+       isn't taken; K-M14's burst of never-proving history reads shows whether the no-thread form is enough.)
+    4. **A proof that only ran out of time accuses nothing.** A child that didn't prove itself within the limit (a
+       loaded Mac, the system's first look at a new launcher, a stalled volume, or a program that never proves) gets
+       words of its own, never the failed proof's "something on your Mac replaced it": "Your node didn't start a
+       helper program it needs, because the helper didn't answer in time. Try again; if it keeps happening, your Mac
+       may be very busy, or something is holding the helper's file." Like every refusal a program of yours can cause,
+       it never sends you to a password or an install. A proof that came and named other code keeps the failed
+       proof's words (below).
+
+    Tests: `HostChildProofTests.aSpawnThatBlocksHoldsNotTheHostsQueue` (a spawn seam that blocks until released: a
+    client's request and another session's input are served meanwhile), `.theReapAtTheLimitNeverBlocksTheHost` (a
+    child that ignores everything until `SIGKILL`, reaped by its exit source), `.proofsInFlightHoldNoThreadEach` (more
+    proofs pending on an injected clock than GCD's pool has threads: a global-queue task still runs at once, and each
+    proof is refused at its own limit), `.aProofThatOnlyTimedOutAccusesNothing` (the timeout's words, not the failed
+    proof's).
+  - **(c) Its cost per session start, measured before it is offered.** The proof adds Security's dynamic check by
+    token to every session start and every history read on the Mac (the user's app host included), the launcher
+    written afresh at each host start may take amfid's first look at its first exec, and N1's rule adds a read of the
+    pins record before each app connection and each server child start in a pinned image. **Not measured: K-M14**,
+    a session start, a history read and an app connection, calm and under `scripts/test-under-load.sh`, before and
+    after K4a-ii; K4a-ii waits on it before it is offered.
+
   **The image's pairs, every call site at `b15e0052`, and their class after K4a** (K4's lint,
   `KeeperLintTests.everyPairTheHostImageMakesIsClassified`, holds this list, so a new call fails until it is
   classified; the classes are the review's three, **kept**, **given only to proven code** and **seqpacket**, with a
-  fourth added here, **a channel or a proof pair**, on which the image writes only the handshake's fixed bytes):
+  fourth added here, **a channel or a proof pair**, on which the image writes only the handshake's fixed bytes; in a
+  pinned image, "proven code" is only what the next rule allows: its own, its row's server, or across the checked
+  switch a target host the same record pins). **The fourth class's property is held by a type, not by the lint** (the
+  re-check's answer to its question 4: a lint that classifies `pair` call sites can't show that nothing else ever
+  writes on those descriptors): `HandshakeEnd`, which K4a-ii adds beside `MacHandoverKeeper`, owns each channel's and
+  each proof pair's end and exposes it only through `sayHolding` (`holding`, `0x67`) and `sendDescriptor` (`d`,
+  `0x64`, with its one `SCM_RIGHTS`), with the waits that read them, never as a raw descriptor; any other fixed byte a
+  handshake needs is a method of the type too. The lint then checks that every channel and proof pair is made through
+  `HandshakeEnd` (`KeeperLintTests.everyChannelAndProofPairIsAHandshakeEnd`). No alignment of `0x64` and `0x67` forms
+  the 8-byte `vskeep1\n` prefix, and the `d` byte carries control data, which step 4 refuses on the pair anyway:
 
   | Call site | The pair | Where its ends go | Class |
   | --- | --- | --- | --- |
   | `SessionParser.swift:262` | the parser link (stream) | today the launcher's descriptor 0, unproven (KP20a) | after K4a: a channel, then the link given only to the proven parser |
-  | `AppConnector.swift:123` | the server child's connector (`connectorType`, a **stream** on the Mac: `SocketDescriptors+Darwin.swift:11`) | today kept across the server child's spawn from its `--server` path, checked by cdhash before the spawn and named after it (`ServerChild.swift:549-582`), so a file swapped between the check and the spawn holds it unproven | after K4a: a channel, then the connector given only to the proven server child |
-  | `AppConnector.swift:286` | one per app connection (stream) | one end sent over the connector, in answer to a request whose sender Security checked (`setAppConnectorChild`) | given only to proven code whose own spawns close what they don't name, once the connector is proven and the server's spawns name what they keep (K4a) |
-  | `HostHandover.swift:315` | the secrets' channel (stream; the host writes the secrets, then closes its writer) | the reading end parked with the proven handover keeper (`MacHandoverSwitch.swift:91`), which gives it only to the new image it proved | given only to proven code |
+  | `AppConnector.swift:123` | the server child's connector (`connectorType`, a **stream** on the Mac: `SocketDescriptors+Darwin.swift:11`) | today kept across the server child's spawn from its `--server` path, checked by cdhash before the spawn and named after it (`ServerChild.swift:549-582`), so a file swapped between the check and the spawn holds it unproven; and in a host a session starts, `--server` is the session's own file (the re-check's N1) | after K4a: a channel, then the connector given only to the proven server child, which in a pinned image must run its row's server (N1's rule) |
+  | `AppConnector.swift:286` | one per app connection (stream) | one end sent over the connector, in answer to a request whose sender Security checked (`setAppConnectorChild`) | given only to proven code whose own spawns close what they don't name, once the connector is proven and the server's spawns name what they keep (K4a); in a pinned image only to a server child running its row's server, checked against the record read afresh at each connection (N1) |
+  | `HostHandover.swift:315` | the secrets' channel (stream; the host writes the secrets, then closes its writer) | the reading end parked with the proven handover keeper (`MacHandoverSwitch.swift:91`), which gives it only to the new image it proved; in a host a session starts, `--handover-test-keeper` names that keeper's code and `--handover-test-secret` the bytes (the re-check's N1, its second leg) | given only to proven code; in a pinned image only across the checked node's own switch, to a target host the same record pins (N1's one extension); the test flags and the by-path handover refused in a pinned image; in a hardened image not pinned (the Mac app's own host) the by-path handover kept, its end crossing an exec in place at the maker's pid, so dead to the keeper (KP10, K-M1's row: KP20f) |
   | `MacHandoverKeeper.swift:96` | the handover keeper's channel | the keeper child's descriptor before its proof | a channel |
-  | `MacHandoverKeeper.swift:141` | the parcel's pair (`park`) | one end sent over the proven keeper's pair | given only to proven code |
+  | `MacHandoverKeeper.swift:141` | the parcel's pair (`park`) | one end sent over the proven keeper's pair | given only to proven code; in a pinned image, as the secrets' channel (N1's one extension) |
   | `MacHandoverKeeper.swift:200` | the keeper mode's proof pair | one end sent over its inherited channel | a proof pair |
   | `MacHandoverKeeper.swift:227` | the keeper mode's pair to the new image | one end sent over the new image's proven pair | given only to proven code |
   | `MacHandoverKeeper.swift:276` | the new image's proof pair (`take`) | one end sent over its inherited channel | a proof pair |
   | `EgressChild.swift:95` | the egress proxy's control pair (`seqpacket`) | the proxy child | seqpacket: on the Mac `pair` of that type fails (`EPROTONOSUPPORT`, `SocketMaking.swift:3-5`), so it is never made there, and the keeper takes only `SOCK_STREAM` ends anyway |
   | `NodeAnchor` (new, K4) | one per keeper request | both ends kept, closed after the request | kept |
 
-  **A parser or server child that fails its proof** is a refusal the user can meet: the session doesn't start, or its
+  **A parser or server child that fails its proof** (its proof came and named other code; one that only ran out of
+  time gets N4 (b)'s timeout words, sentence 4, which accuse nothing) is a refusal the user can meet: the session doesn't start, or its
   history isn't read, or the server isn't started, with words in `status` and the session's own line: "Your node
   didn't start a helper program it needs, because the file in that helper's place isn't your node's own code:
   something on your Mac replaced it. Restart your node (`vibeswitcher stop`, then `vibeswitcher start`), which puts
@@ -440,9 +573,132 @@ client. There is no Keychain store and no fallback to one. The client's rules, e
   `HostChildProofTests.aParserThatIsntTheImagesCodeGetsNoLink`, `.aServerChildThatIsntItsCodeGetsNoConnector`,
   `.aChannelCarriesOnlyTheHandshakesBytes`, `.aProofPairsOtherEndCarriesNoRequest` (the keeper's own reader run on it).
   F1's (c), the request's own half-close as a second barrier (step 5 refusing a closed other end, with a lint that
-  nothing else in the image half-closes a Unix stream end: `EgressProxy.swift:418` half-closes the sockets it relays
-  and would need classifying), is **a candidate, not a closing**: it rests on K-M1 (e), and doesn't help against a
-  holder of both ends, so (b) is needed either way.
+  nothing else in the image half-closes a Unix stream end: `EgressProxy.swift:418` half-closes the sockets it relays,
+  and `TCP.swift:144` (`shutdown(SHUT_WR)`) beside it, and each would need classifying), is **a candidate, not a
+  closing**: it rests on K-M1 (e), and doesn't help against a holder of both ends, so (b) is needed either way.
+- **A pinned host image never gives an end of a pair it writes on to code other than its own or its row's pinned
+  server, in any mode; the one extension is the checked node's own switch; and a hardened image not yet pinned gives
+  none outside its own code** (the re-check's N1, the lead's ruling of
+  2026-11-27; KP20d, KP20e). K4a's proof shows that a child runs the code the host expected; this rule fixes what a
+  pinned image may expect, since in a host a session starts the session chooses it. Read at `b15e0052`, two legs:
+  - **The server child.** A session runs the pinned image from the node's builds folder (your files) as a scratch host,
+    its own `--lock` and `--socket`, with `--server` naming a program of its own signed ad hoc with the Hardened
+    Runtime. `HostImages.macServerRefusal` refuses a server child only on the account's own locks
+    (`HostImages.swift:558-574`), so the scratch host starts that program (`ServerChild.swift:549-582`) and, with
+    K4a alone, proves it against that same file's cdhash and gives it the connector; each request it sends then gets
+    an app connection, a pair the genuine, pinned, hardened host made, the host serving its client protocol on the
+    other end (`AppConnector.swift:286-305`), and it sends its end to the keeper.
+  - **The test keeper.** On the Mac every host takes test flags (`HostHardening.takesTestFlags`,
+    `HostHardening.swift:208`), so `--handover-test-keeper <a cdhash of the session's>` makes the session's program
+    the switch's "proven" handover keeper (`main.swift:138-142`, `MacHandoverSwitch.swift:36-40`) and
+    `--handover-test-secret <bytes>` makes the session's bytes the secret (`main.swift:299-301`); `park` sends that
+    keeper the secrets channel's reading end (`MacHandoverKeeper.swift:148`, `HostHandover.swift:98`), half of a pair
+    the genuine host made, holding exactly the session's bytes and then the end of file.
+
+  What stood between either leg and a served request was only the host's bytes on its end and step 5's refusal of a
+  closed other end (F1 (c), on K-M1 (e)), which this design doesn't count as a barrier. **The rule, part of K4a-ii:**
+  1. **Pinned, read as the keeper reads it.** An image is pinned when it runs hardened (its own code's flags) and its
+     own cdhash (`Platform.CodeIdentity.ownCdhash`) is the `host` of a row of the account's pins record, read through
+     `NodePins.read` (the walk from `/`, the record's fixed path, `Platform.Service.nodePinsRecord`): nothing from its
+     arguments, its environment or a parcel. It reads the record **afresh before each handout**: each server child
+     start, each app connection, each switch, since an install can pin a running image's cdhash. No record
+     (`ENOENT`) is "not pinned", and the keeper then serves nothing either; any other failure to read it (N3's split:
+     a record read whole and refused, or a read error) refuses the handout, never reads as "not pinned".
+  2. **What a pinned image gives ends to.** A parser: its own cdhash (K4a, in every image). The server child: its own
+     row's `server`, in every mode; a `--server` file whose cdhash isn't that is refused before the spawn, and the
+     proof requires the row's cdhash, not the file's. An app connection: only to a server child proven against its
+     row's server at its start and found still its row's in the record read afresh; an image pinned since its server
+     child started against another server ends that child and refuses the connection, with words.
+  3. **The one extension: the checked node's own switch.** The parcel's pair and the secrets channel's reading end go
+     to the handover keeper, which is started from the target build's path and proven by its token to run the
+     target's cdhash; that cdhash is the `host` of a row of the same record, with that row's server checked
+     (`keeperTarget`, `MacHandoverSwitch.swift:12-40`: a checked node host's alone). The handover keeper gives the
+     secrets end only to the new image it proved, at that same cdhash. **Both rows' commits, this image's and the
+     target's, contain K4a-ii** (N2 and the narrow re-check's KP6b: every row of a format-2 record does, [Install,
+     update and removal](#install-update-and-removal), "Rows a format-2 record can hold"), and the target is itself a pinned image
+     under this rule. Code the keeper would serve anyway gets nothing it couldn't ask the keeper for.
+  4. **In the modes a session starts, a pinned image refuses:** a `--server` whose cdhash isn't its row's server;
+     `--handover-test-keeper` and `--handover-test-secret` (at its start, exit 64 with words, and again at a switch,
+     since it may be pinned since its start); and the Mac's by-path handover (`HostServer.swift:886-903`), which hands
+     the secrets channel to an unproven target. So **in a pinned image's non-checked modes every switch form is
+     refused**, and it switches only through the checked node's switch.
+  5. **Images that aren't pinned:** an unhardened one (the test suite's debug builds) keeps its modes and flags, and
+     the keeper refuses its every pair (step 3); **a hardened one** (a build before its pins step, a copy of one, and
+     the Mac app's own host) **starts no server child and takes no test keeper or test secret**, as below (KP20f). It
+     **keeps the by-path handover** (the narrow re-check of 2026-11-27, the lead's ruling): that form gives the
+     secrets channel only across an exec in place at the maker's own pid (`HostServer.swift:886-903`), so the end's
+     maker has exec'd before anything else can hold it, and the keeper refuses it at step 3 (Security, after the exec)
+     and step 2 (the hello's sender isn't the maker as it was): KP10, resting on K-M1's row. The keeper serves none of
+     them (KP6: host rows only).
+
+  **An image pinned while it runs, and why the rule is keyed on "hardened"** (this round's blind check; KP20f; the
+  lead's choice (A), 2026-11-27). Keyed on "pinned" alone, the rule left one path: an end handed out before the image
+  was pinned isn't revoked. During an install or update you run, the new build is signed in the builds folder (yours),
+  its cdhashes read, and the pins step then waits for your password (`install-node-mac.sh:614-621`; the keeper's
+  setup, whose `--fresh` pins the build being installed, alike). A session that ran that genuine build in the window as
+  a scratch host, with `--server` naming a hardened program of its own, would get its server child proven against its
+  own file, the connector and an app connection per request; once you typed the password, an end it already held
+  would be a live, pinned, hardened maker's, its other end open. **So the rule is keyed on "hardened":** the keeper
+  refuses every unhardened maker at step 3, so only hardened images matter, and **a hardened image that isn't pinned
+  starts no server child and takes no `--handover-test-keeper` or `--handover-test-secret`** (exit 64 at its start,
+  or a refusal at the act, with words), the record read as in 1 before each. Before its pinning it hands out no end to
+  anything but its own code except the by-path form's, whose maker has exec'd (next), so nothing live is held over
+  it. **Its by-path handover
+  stays** (the narrow re-check of 2026-11-27, the lead's ruling): that form hands the secrets channel's end across an
+  exec in place at the maker's own pid (`HostServer.swift:886-903`), so by the time any other process can hold that
+  end its maker has exec'd, and the keeper refuses a pair whose maker exec'd (KP10: Security's check after the exec,
+  and the hello's sender not the maker as it was). That end is dead **only as K-M1's row shows** ((a) to (c), the
+  token asked after the maker's exec), so **K4a-ii is not offered until K-M1's row confirms it**; were K-M1 to show
+  otherwise, the by-path form's secrets end comes back to the lead before K4a-ii is built, never as a refusal that
+  ends the app's sessions. Unhardened images (the test suite's debug builds) keep their modes and flags.
+
+  **Its cost, stated:** **the Mac app's own host** is a hardened image that is never pinned (`scripts/build-app.sh:239`
+  signs it `--options runtime`, its entitlements only `audio-input`: `Resources/VibeSwitcherHost.entitlements`; it is
+  no row of the node's record), and it keeps its sessions at **every app update** through the by-path handover
+  (`keeperTarget` is nil for a host neither checked nor a test, `MacHandoverSwitch.swift:8-10`, `:36`, so
+  `handOver(to:)` takes the by-path form, `HostServer.swift:862-905`), whether or not a node is installed. **That
+  handover must keep working** under this rule: nothing here refuses it, and K4a-ii's test
+  `HostChildProofTests.theAppsHostStillHandsOverByPathAtAnAppUpdate` (a hardened scratch copy that no record pins,
+  started as the app starts its host, hands over by path to another hardened copy, and its sessions survive) holds it,
+  with the app's update checked in the sandbox. **No exemption is keyed on `ownsLaunchers`**, here or anywhere in
+  this design: on the Mac that flag is decided by the lock's path against `VIBESWITCHER_HOME` (`main.swift:73-78`),
+  which a session sets for a host it starts, so an exemption keyed on it would be a session's to claim. The Mac's own
+  tests that re-sign a copy with `-o runtime` and start it as a scratch host with
+  `--server` and `--handover-test-keeper` (`MacKeeperHandoverTests.swift:20`, `:93-133`) lose that hardened arm on this
+  Mac without `sudo`. The switch's logic (the path check, the swaps after the check and before the exec, the keeper's
+  limit, a server child ended and started again) is tested on **unhardened** scratch hosts, since N4 (a)'s "hardened
+  exactly when the image is" extends to the handover keeper's proof, **in both of its hardened checks**:
+  `MacHandoverKeeper.refusal`'s (the old image requires the keeper hardened exactly when the old image is) and
+  `parentRefusal`'s (`MacHandoverKeeper.swift:173`: the keeper requires its parent hardened exactly when the keeper
+  itself is, not always), so an unhardened old host's unhardened keeper takes it and those tests can run; a hardened
+  keeper still requires a hardened parent, so this opens nothing (K4a-ii's test
+  `HostChildProofTests.aHandoverKeeperRequiresItsParentHardenedExactlyWhenItIs`). The hardened arm moves **to function level**, with
+  the record injected as `keeperTarget`'s tests inject it and this Mac's real hardened images and tokens, and **to
+  K7**. **What this Mac no longer runs end to end until K7:** a hardened host's switch through a proven handover
+  keeper to a hardened target, with a hardened server child ended and started again, under real tokens (the
+  hardened half of `MacKeeperHandoverTests`), since only the real record can pin a build and the image takes no record
+  path. K7's list carries it: the first update after the setup pins two real builds, and the switch between them is
+  run and watched end to end at your keyboard.
+
+  **Considered and rejected, (B): the keeper serves a maker only if its process started after its row was written**
+  (each row carrying root's write time; the start from `proc_pidinfo` against the token's pidversion). Rejected
+  because the checked node's switch execs the new image in place (`MacHandoverSwitch.swift:108`): the new image runs
+  in a process that started before its row, so the keeper would refuse the node after every update. macOS gives a
+  process's start, not its exec, so (B) would need the switch itself changed.
+
+  The words, for a server child refused: "Your node didn't start its server, because the program named as its
+  server isn't the one your install lists for this build." For a test flag: "This build of your node is installed,
+  so it doesn't take test flags." For a switch: "This build of your node is installed, so it switches only as your
+  node." A program of yours causes each at will, so none mentions a password or an install. Tests (K4a-ii), with the
+  record injected at function level as `keeperTarget`'s tests inject it (`pins:`) and the image's own cdhash and
+  hardened flags this Mac's real signed hardened images' (as `MacKeeperHandoverTests`); the program takes no record
+  path, and the real record's arm is K7's: `HostChildProofTests.aPinnedImageGivesNoPairEndToCodeASessionNamed` (the
+  server child leg: a scratch host of a pinned image with `--server` naming other code starts no server child and
+  gives no connector and no app connection), `.aPinnedImageRefusesTheTestKeeperAndItsSecret` (the
+  `--handover-test-keeper` leg: refused at the start and at a switch, nothing parked),
+  `.aPinnedImageRefusesTheByPathHandover`, `.anImagePinnedWhileRunningGivesNoConnectionToAServerItsRowDoesntPin`,
+  `.aPinsReadThatFailsRefusesTheHandout`, `.theCheckedSwitchGivesItsEndsOnlyToATargetTheRecordPins` (the extension: a
+  target that is no row's host, or whose row's server isn't the build's, gets no parcel and no secrets end).
 - **Its connect has its own deadline** (the review's F9): a non-blocking `connect` waited on with `poll` against the
   request's own limit, a pause of 250 ms between tries (never a loop that spins), and the start's 60 s counted on the
   steady clock across tries, so a full backlog that makes `connect` wait, or one that refuses it at once (which of the
@@ -481,22 +737,28 @@ anyway by killing the node (P32). It is stricter than the user's words in 9CDB5A
 refuses the changes that ask for Touch ID"), and the user has been told.
 
 **What the words may say** (the review's F4): only a fact your account can't cause sends you to your password. The
-keeper's plist and program are root's files in root's folders (KP7a), so their **absence**, found by the root walk, is
-such a fact, and so is a **`damaged`** store (root's file in root's `0700` folder, which nothing of yours can write):
-these two alone point to the keeper's setup line (`--install`, or `--start-over` for `damaged`). A keeper **installed but busy** (a root
+keeper's plist and program are root's files in root's folders (KP7a), so their **absence**, found by the root walk as
+`ENOENT` alone, is such a fact, and so is a **`damaged`** store (root's file in root's `0700` folder, which nothing of
+yours can write, read whole and refused); a walk or a read that fails any other way is neither (N3's split, [What it
+stores](#what-it-stores-and-where)), and has words like "busy". These two alone point to the keeper's setup line
+(`--install`, or `--start-over` for `damaged`); a `noRecord` that is the pins record missing or read whole and refused
+keeps the checked start's words (an install of a newer commit), root's file too. A keeper **installed but busy** (a root
 listener at the socket that doesn't answer the proof's first step within the limit) or **installed but not running**
 (no root listener there) can be a program of yours at work (a flood, KP19; Login Items, K-M12), so their words never
 mention the password, the setup line or an install: a session would otherwise choose the moment you type your
 password. K6's `start` and `status` look themselves, in that order: the plist and the program (walked from `/`, root's
-alone), then a root listener at the socket (`getpeereid` 0: K-M2), then whether it answers within 2 s (F9's
+alone; `ENOENT` alone is "not installed", any other failure a read error, worded as in the table), then a root
+listener at the socket (`getpeereid` 0: K-M2), then whether it answers within 2 s (F9's
 deadline): the command line connects and sends nothing, and a keeper that serves the connection closes it within its
 1 s limit for the proof's message, which the command line sees as the end of file; no end of file within 2 s is
 "busy". **If K-M10 (c) shows that a full backlog refuses `connect` at once** (`ECONNREFUSED`, as when nothing listens:
 read in XNU's source, not measured), a refused connect can't tell busy from not running, and the host and K6 then use
 one state for both, **"installed, not answering"**, worded "Your node's keeper isn't answering, so your node can't
-start: either a program on your Mac keeps it busy, or it stopped. Installing the keeper again won't help. Try
-`vibeswitcher start` in a minute; if it goes on, restart your Mac; if it goes on after a restart, something that
-starts when you log in is doing it." (still no password); the two rows below stay as two only if K-M10 (c) shows a
+start: either a program on your Mac keeps it busy, or it keeps stopping. Installing the keeper again won't help. Try
+`vibeswitcher start` in a minute; if it goes on, restart your Mac." (still no password, and no claim about login items:
+a keeper that crashes at every start, a bug or launchd's throttle, gives this state after a restart too, so the
+login-item sentence would send you hunting for a keeper fault: the re-check's N6; it stays only on the busy row, where
+a root listener was seen); the two rows below stay as two only if K-M10 (c) shows a
 full backlog makes `connect` wait instead.
 
 | When | What the node does | Its words | The way out |
@@ -504,8 +766,9 @@ full backlog makes `connect` wait instead.
 | **At the host's start, the keeper not installed** (no plist or no program in root's folders) | the host exits 78 (`notStarted`) at once, having read no secret and written nothing; no host runs without its record, so the journal's start-time `noKeychain` reason doesn't arise | "Your node's keeper isn't installed, so your node can't start. Run the keeper's setup line (it asks your password)." | the keeper step's `--install` |
 | **At the host's start, the keeper installed but busy** (a root listener that doesn't answer within the limit) | the host holds its lock, reads no file and asks again as F9's loop allows, up to 60 s (the start's limit, on the steady clock; a test's injected one); then exits 78 | "Your node's keeper is running, but a program on your Mac keeps it busy, so your node can't start. Installing the keeper again won't help. Try `vibeswitcher start` in a minute; if it goes on, restart your Mac; if it starts again after a restart, something that starts when you log in is doing it." | the flood ending, then `vibeswitcher start` |
 | **At the host's start, the keeper installed but not running** (no root listener at its socket: crashed and throttled, being updated, or switched off) | as for busy: up to 60 s, then exit 78 | "Your node's keeper is installed but isn't running, so your node can't start. Try `vibeswitcher start` in a minute; if it still doesn't start, restart your Mac, which starts the keeper." Once K-M12 shows your account can switch the keeper off in Login Items: "…if it still doesn't start after a restart, see whether VibeSwitcher's keeper was turned off in System Settings › General › Login Items." | macOS starting it (at boot, or launchd's restart after a crash), then `vibeswitcher start` |
-| **At the host's start, the keeper refused or damaged** (`noRecord`, `notPinned`, `notHardened`, `wrongUid`, `damaged`) | the same exit, at once: waiting changes nothing | for `damaged` (root's store, which nothing of yours can damage): "Your node's keeper can't read its store. Run the keeper's setup line with --start-over (it asks your password); your node's record then begins again." For the others, the checked start's own words (the record names no such build: the Mac spec's remedy, an install of a newer commit, through root's own pins record, which nothing of yours can change) | `damaged`: your `sudo` line; nothing deletes the store by itself (the decided (3)'s principle, below) |
-| **While the host runs, no answer** (busy, not running, or `unwritable`) | the journal's failed-raise rule (its "When a raise fails", I2), keyed on the keeper instead of the keychain: a guarded act acts only once its entry is counted (`recordUncounted` otherwise); the raise tried again at each later append and at the host's end; one open `record.begins` with `reason: noKeeper` per run of failed raises; revocations and the acknowledgement still taken; a device's removal refused and retried by itself; the file sealed meanwhile runs ahead (`ahead` at a restart before a raise succeeds) | "Your node can't keep its record right now: its keeper isn't answering. Try again in a minute; if it goes on, restart your Mac." For a removal: "Your node can't remove a device while its keeper isn't answering. Lock the device now, which always works and ends what it can do; it will be removed once the keeper answers." Never the password | the keeper back (launchd restarts it; an update takes seconds) |
+| **At the host's start, a read error** (`readError`, from the store or the pins record; or K6's walk failing other than `ENOENT`) | as for busy: asked again as F9's loop allows, up to 60 s, then exit 78 | "Your node's keeper couldn't read its files just now, so your node can't start. Installing the keeper again won't help. Try `vibeswitcher start` in a minute; if it goes on, restart your Mac." Never the password, the setup line or an install | the read succeeding, then `vibeswitcher start` |
+| **At the host's start, the keeper refused or damaged** (`noRecord`, `notPinned`, `notHardened`, `wrongUid`, `damaged`: each a file read whole and refused, or missing) | the same exit, at once: waiting changes nothing | for `damaged` (root's store, which nothing of yours can damage): "Your node's keeper can't read its store. Run the keeper's setup line with --start-over (it asks your password); your node's record then begins again." For the others, the checked start's own words (the record names no such build: the Mac spec's remedy, an install of a newer commit, through root's own pins record, which nothing of yours can change) | `damaged`: your `sudo` line; nothing deletes the store by itself (the decided (3)'s principle, below) |
+| **While the host runs, no answer** (busy, not running, `unwritable`, or `readError`) | the journal's failed-raise rule (its "When a raise fails", I2), keyed on the keeper instead of the keychain: a guarded act acts only once its entry is counted (`recordUncounted` otherwise); the raise tried again at each later append and at the host's end; one open `record.begins` with `reason: noKeeper` per run of failed raises; revocations and the acknowledgement still taken; a device's removal refused and retried by itself; the file sealed meanwhile runs ahead (`ahead` at a restart before a raise succeeds) | "Your node can't keep its record right now: its keeper isn't answering. Try again in a minute; if it goes on, restart your Mac." For a removal: "Your node can't remove a device while its keeper isn't answering. Lock the device now, which always works and ends what it can do; it will be removed once the keeper answers." Never the password | the keeper back (launchd restarts it; an update takes seconds) |
 | **While the host runs, a refusal** (`notPinned`: a pinned older build running when you ran `--keep 1`, P41; `noRecord`; `damaged`; `notHardened`; `wrongUid`) | the same failed-raise rule (nothing guarded acts uncounted) | **the start's words for that status** (the review's F14), never "isn't answering": e.g. `notPinned`, "Your node is running a build its install no longer lists, so it can't keep its record. Stop it and start your node again (`vibeswitcher stop`, then `start`), which starts the build your install lists." | as at the start, for that status |
 
 A process of your account **can't stop the keeper** (only root can stop, unload or signal a root daemon: K-M9; and
@@ -560,13 +823,17 @@ alone, no link, no ACL. `--dry-run` prints and writes nothing. Its forms:
      a bare repository of root's own making, which recomputes every object's hash from its bytes, requires the commit
      object's id to be `COMMIT`, walks the commit's tree to `Keeper`, requires that tree and everything under it to be
      present and to hold only regular files (`100644`, `100755`) and folders (no link, no submodule: anything else is
-     refused), and writes those files out into `build/src/`. The candidate tool is root's own `git` (`index-pack
-     --strict`, then `archive`), run only in that repository, with `GIT_CONFIG_NOSYSTEM=1`, `GIT_CONFIG_GLOBAL=/dev/null`
-     and no template's hooks; the other candidate, should that `git` refuse a pack whose commit's parents and top
-     tree's other entries are absent and a whole bundle be unwanted, is a small reader in the root half's text that
-     recomputes each object's hash itself. Which one, and whether it detects a SHA-1 collision attack (git's
-     `sha1dc`), is K-M13 and K5's review, since the objects' hashes are all that ties them to `COMMIT`
-     ([Doubts](#open-doubts) 14).
+     refused), and writes those files out into `build/src/`. The tool is root's own `git` (`index-pack --strict`, then
+     `archive`), run only in that repository, with `GIT_CONFIG_NOSYSTEM=1`, `GIT_CONFIG_GLOBAL=/dev/null` and no
+     template's hooks; if it refuses a pack whose commit's parents and top tree's other entries are absent, `STAGED`
+     is the commit's whole history as a bundle (K-M13). **There is no other reader** (the re-check's answer to its
+     question 1): a reader in the root half's text could only recompute hashes, never detect a collision attack. The
+     objects' hashes are all that ties them to `COMMIT` ([Doubts](#open-doubts) 14), so root's `git` must detect a
+     SHA-1 collision attack (git's `sha1dc`), which K-M13 measures with the exact `git` root runs under `env -i`: its
+     `git version --build-options` names its SHA-1 backend, and its `index-pack --strict` refuses a published colliding
+     pair. **If it doesn't detect, the step refuses**, installing nothing: "Your Mac's git can't detect a forged
+     commit, so your node's keeper wasn't installed. Nothing was changed." K5's real use then waits; nothing falls
+     back.
   2. **Root never runs `git`, `swift` or anything else in your repository or under its configuration** (a repository's
      config names programs git runs: `core.fsmonitor`, filters, hooks). The user half alone runs `git` in your
      repository, to write `STAGED`; nothing it writes is run as root.
@@ -623,15 +890,84 @@ that changes the keeper's source twice. sudo's own five-minute timestamp may spa
 on it. A rewritten install that runs the step anyway gets root's own trigger above. Folding the keeper into the pins
 step's one `sudo` (one password at setup) is [Open questions](#open-questions-for-the-lead-or-the-user) 3.
 
-**The node's removal runs the keeper's** (the review's F18). At `b15e0052` there is no node removal
-(`install-node-mac.sh` has no remove form); whichever slice adds one runs the keeper step's `--remove` (the store kept,
-said: a later install opens the record again) or, when you ask the removal to forget the node's record, its
-`--remove --forget-store`, said before the password. Without it, a removed node would leave a root daemon serving
-every build still pinned, with the key to a vault file that may still be in your home. K5's test
-`KeeperStepTests.theNodesRemovalRemovesTheKeeper` holds it once the removal exists.
+**Only builds at or after the floor are ever served** (the re-check's N2, the lead's ruling of 2026-11-27; KP6b). An
+install at a commit before K4a writes the real record (`install-node-mac.sh` passes no `--record`, so
+`node-pins-mac.sh` writes `/Library/Application Support/VibeSwitcher/node-<uid>.pins`: `install-node-mac.sh:619-621`,
+`node-pins-mac.sh:80-82`) and carries every earlier row forward. Such a build still has the parser launcher checked by
+its modification time, no child proof, spawns without `CLOEXEC_DEFAULT` and no N1 rule, so a session that starts it in
+any mode holds the parser link's end: the review's F1, whole. The keeper serves every host row of the record, so three
+rules keep those rows out of its service:
 
-**Order at setup.** The keeper is installed before any node host can start (the node is refused today by
-`macUnbuilt` and `isCheckedMacNode`), so no record ever begins under the login Keychain: there is nothing to migrate,
+1. **The setup keeps only the build it installs.** The keeper's setup comes with an install of a commit at or after
+   K5 (installing a commit already installed is refused, so it is the first such install, or a later one of a newer
+   commit). The install that sets the keeper up (no `installed` yet) runs the
+   pins step in its existing `--build COMMIT HOST SERVER CLI --fresh` form, within the pins step's own one `sudo`: the
+   record it writes holds only this build's row, **the same record `--keep 1` leaves just after**, with no third
+   password. Said before the password: "Older builds of your node are dropped, so only this build is served."
+2. **The floor, in the install, from K4b's own commit on** (the narrow re-check of 2026-11-27, KP6b, the lead's
+   ruling). **K4b's install script itself refuses, unconditionally** (a keeper installed or not, at any install or
+   update), **a commit that doesn't contain K4a-ii's commit on v2**: `git merge-base --is-ancestor <K4a-ii's commit>
+   <commit>` in its fresh fetch, beside step 6's check that the commit is on v2, with the words "This commit of your
+   node is older than its keeper allows: it lacks a fix the keeper needs. Nothing was installed. Install a newer
+   commit." **The floor is K4a-ii's commit**, an ancestor K4b can name (K4a-ii is on v2 before K4b is written; a
+   commit can't name itself); K5 may later raise it to K4b's commit. So **the floor check lands in the same commit
+   as the format's bump** (rule 3): every install script whose pins step writes `format 2` refuses a commit without
+   K4a-ii. Why it can't wait for K5, as the second fix round had it: an install runs the **installed build's** copy
+   of the script and its pins step, for whatever commit it installs (`install-node-mac.sh` step 5:
+   `expected=${current_commit:-$commit}`, `:362`; the pins step is `expected`'s blob, `:383-386`, run at `:621`), so a
+   script from K4b's commit up to K5's, with a format-2 pins step and no floor check, installed after the keeper's
+   setup (a rollback to K4b's commit is enough; or `current` pointed at a folder a program of yours made from such a
+   commit's public files, which step 3 and step 5 accept, `:310-324`), would install a pre-floor commit into the
+   format-2 record, and the keeper would serve its row (KP6c). With the check in K4b's commit, every update runs a
+   script that checks the floor or a pins step that refuses the record (rule 3), an update to an older commit
+   included.
+3. **The record's format is 2 from K4b's commit on.** K4b's `NodePins` reads only `format 2`, and its pins step
+   writes only `format 2`: a record it finds in format 1 isn't carried (its rows are builds from before K4b), so its
+   first write keeps only the build it installs, said before the password as in rule 1. The keeper is built from a
+   commit at or after K4b (K5 waits on K4b) and reads only `format 2`. A commit before K4b has a pins step that parses
+   only `format 1`, so its `--build` form, the only form an install passes, refuses a format-2 record whole (exit 65,
+   "a line this step doesn't write") and installs nothing; its `--fresh` form, run by hand with your password, would
+   write a format-1 record, which the keeper refuses (below). **This closes what rule 2 alone
+   can't:** a first-form install of a pre-floor commit (the builds folder's `current` deleted, which a program of
+   yours can do, so the install runs that old commit's own script, which has no floor check) writes no row the keeper
+   serves. Were the record gone (only root can remove it) and an old step wrote a format-1 record, the keeper and every
+   build from K4b on refuse it (`noRecord`: the node doesn't start, fail closed). The record has one path per account
+   (and the trial's, which only a trial keeper reads), so no old-format record can stand beside it.
+
+**Rows a format-2 record can hold.** With rules 2 and 3 together, every install script whose pins step writes
+`format 2` refuses a commit without K4a-ii, and every older script's pins step refuses a format-2 record, so **every
+row of a format-2 record is a commit that contains K4a-ii**. A commit between K4a-ii and K4b can be one: its image
+has K4a's proof and N1's rule, and its own `NodePins` reads only `format 1`, so it refuses every handout (N1's rule
+1: a record read whole and refused refuses the handout) and can't start as your node; the keeper serves its row, and
+nothing of its code hands a session an end. Wherever this design says a row is "at or after the floor", it means
+this: its commit contains K4a-ii.
+
+**What it costs:** once the record is format 2, no build from before the floor can be installed or started as your
+node, and none is a rollback; going back to one needs the record removed by an administrator, which is intended.
+**What isn't closed, under "the choice of commit":** any commit at or after the floor that is on v2 and passed both
+runners can be installed, and is then served (bounded as before); and a session that rewrites the install script
+itself, or has you run a pins step of its own making with your password, can write any row (S1's class, as for the
+keeper's program). **The general rule**, beside the `--keep 1` lever: a fix to the image's pair rules reaches the
+keeper's service only once older rows are dropped. The floor and the format do it for K4a; a later fix of the same
+kind needs a later floor and the format bumped again, **the format's bump and the install's floor check landing in
+one commit, the floor naming an ancestor** (the narrow re-check's KP6b), so that no install script whose pins step
+writes the new format lacks the check (or your `--keep 1` at once, which drops every older row but doesn't stop an
+older commit's later install).
+
+**The node's removal runs the keeper's** (the review's F18). At `b15e0052` there is no node removal
+(`install-node-mac.sh` has no remove form). **The slice that adds it owns the call** (the re-check's answer to its
+question 2): an `install-node-mac.sh` remove form, step 12 of the Mac node spec's order of work ([the node on
+macOS](2026-11-19-v2-node-on-macos.md), "The order of work"), which stops the node's agent first, then runs the keeper
+step's `--remove` (the store kept, said: a later install opens the record again) or, when you ask the removal to
+forget the node's record, its `--remove --forget-store`, said before the password; its test,
+`KeeperStepTests.theNodesRemovalRemovesTheKeeper`, is that slice's. **K5 owns `--remove` and its own tests**
+(`removeKeepsTheStore`, `forgettingTheStoreThenInstallingMakesANewKey`), not the node's removal. **The switch-on
+review checks that nothing removes the node without the keeper's removal.** Without it, a removed node would leave a
+root daemon serving every build still pinned, with the key to a vault file that may still be in your home.
+
+**Order at setup.** The install that sets the keeper up runs the pins step with `--fresh` first (rule 1 above: only
+this build's row, at or after the floor), then the keeper step. The keeper is installed before any node host can start
+(the node is refused today by `macUnbuilt` and `isCheckedMacNode`), so no record ever begins under the login Keychain: there is nothing to migrate,
 and the journal's Keychain arm is never built ([What changes in the journal design](#what-changes-in-the-journal-design)).
 
 **A Mac restart.** The keeper is a LaunchDaemon, started at boot from its root-owned plist; the node is a LaunchAgent,
@@ -656,11 +992,13 @@ Anything unusual on any of them is a refusal, never a case to handle.
 | KP1 | The checked host seals `vault.sealed` | raise first, then seal (journal I6 order), under the keeper's key; only the checked start holds that key | the journal's J3a tests, on `NodeAnchor`'s in-memory store and then the keeper's |
 | KP2 | A process of yours deletes, truncates, rewrites or puts back `vault.sealed` | can't seal (no key); the `journal` slot: "Fail closed" rows 2 to 7a, open, first looks and devices held | the journal's P4, P12, P13, P42 tests |
 | KP3 | The keeper's swap moves a slot | only on a proven pair (KP8 to KP15), atomic by the serial loop of the one keeper that holds `store/lock`, on disk before the answer | `KeeperTests.aSwapIsAnAtomicCompareAndSet`, `KeeperTests.twoHostsRacingASwapLeaveOneValue`, `KeeperStoreTests.aSwapIsOnDiskBeforeItIsAnswered` |
-| KP3a | **A second keeper process on the same store** (an update whose `bootout` returned before the old process exited; a trial keeper on the real paths): both read X, both answer `ok` to swaps from X (the review's F8) | the store's `flock`, taken at the start and held for life: a second keeper exits having served nothing; `bootout` waited on until the process exits (K-M9); a trial keeper's paths are its own folder's (F16). Not reachable by your account (it needs root's acts) | `KeeperStoreTests.aSecondKeeperOnOneStoreExits`, `KeeperTests.theTrialKeeperNeverOpensTheRealStore` |
-| KP4 | The key is made | by the keeper at its store's first `open`, from `SecRandomCopyBytes`; never taken from a caller, never remade over a store it can't read | `KeeperStoreTests.theKeyIsMadeOnceAndNeverTakenFromACaller`, `KeeperStoreTests.anUnusualStoreIsDamagedAndNeverReplaced` |
+| KP3a | **A second keeper process on the same store** (an update whose `bootout` returned before the old process exited; a trial keeper on the real paths): both read X, both answer `ok` to swaps from X (the review's F8) | the store's `flock`, taken at the start and held for life: a second keeper exits having served nothing; `bootout` waited on until the process exits (K-M9); a trial keeper's paths are its own folder's (F16). Not reachable by your account (it needs root's acts) | `KeeperStoreTests.aSecondKeeperOnOneStoreExits`, `KeeperTests.aSecondKeeperLeavesTheFirstsSocketAlone`, `KeeperTests.theTrialKeeperNeverOpensTheRealStore` |
+| KP4 | The key is made | by the keeper at its store's first `open`, from `SecRandomCopyBytes`; never taken from a caller, never remade over a store it can't read: only on `ENOENT` for `node.keep`, never on a read error (N3) | `KeeperStoreTests.theKeyIsMadeOnceAndNeverTakenFromACaller`, `KeeperStoreTests.anUnusualStoreIsDamagedAndNeverReplaced`, `KeeperStoreTests.aReadErrorMakesNoKey` |
 | KP5 | The store started over or forgotten | only the keeper step's `--start-over` or `--remove --forget-store`, under your `sudo` (root: S1) | `KeeperStepTests.startOverIsRefusedForAStoreThatParses` |
-| KP6 | Which hosts are served | the pins record, written only by the pins step (root); read afresh per request | `KeeperProofTests.anUnpinnedOrDroppedBuildIsRefused` |
-| KP6a | **The pins' host rows at every node update** (writer, trust on first use; the review's F3): a session rewrites the host's build or source before the install signs it and reads its cdhash (the Mac spec's S9); the pins step writes that cdhash as the new build's host row; the node switches to it; it passes the keeper's proof and gets the key and both slots, for as long as its row stays; the key never rotates (F17), so one success lasts | **none at your account's level: a stated limit, accepted by the user on 2026-11-27 (8B298106)**. Closing it would need every program built as root, not proposed. The remedy after a suspected compromise: a fresh install, `node-pins-mac.sh --keep 1`, the keeper step's `--remove --forget-store` and `--install` for a new key; the record begins again (`unreadable`, open, first looks and devices held) | `KeeperStepTests.forgettingTheStoreThenInstallingMakesANewKey` (the remedy works); the limit itself has no test |
+| KP6 | Which hosts are served | the pins record, written only by the pins step (root); read afresh per request; `format 2` only (N2, KP6b) | `KeeperProofTests.anUnpinnedOrDroppedBuildIsRefused`, `KeeperProofTests.aFormat1RecordServesNothing` |
+| KP6a | **The pins' host rows at every node update** (writer, trust on first use; the review's F3): a session rewrites the host's build or source before the install signs it and reads its cdhash (the Mac spec's S9); the pins step writes that cdhash as the new build's host row; the node switches to it; it passes the keeper's proof and gets the key and both slots, for as long as its row stays; the key never rotates (F17), so one success lasts | **none at your account's level: a stated limit, accepted by the user on 2026-11-27 (8B298106)**. Closing it would need every program built as root, not proposed. The remedy after a suspected compromise: first stop your sessions and what they started (the re-check's N8), then a fresh install, `node-pins-mac.sh --keep 1`, the keeper step's `--remove --forget-store` and `--install` for a new key; the record begins again (`unreadable`, open, first looks and devices held) | `KeeperStepTests.forgettingTheStoreThenInstallingMakesANewKey` (the remedy works); the limit itself has no test |
+| KP6b | **Rows of builds from before K4a** (the re-check's N2): an install at an older commit wrote a host row whose code has no child proof, no `CLOEXEC_DEFAULT` and no N1 rule; the keeper serves every host row, so a session that starts that build in any mode holds the parser link's end (F1, whole); later, an install of an older commit, or a first-form one run by that commit's own script once `current` was deleted | the setup's pins step in its `--fresh` form (the same record `--keep 1` leaves), said before the password; the floor (K4a-ii's commit) refused, unconditionally, by K4b's own install script and every later one (the narrow re-check: KP6c); the record's `format 2` from K4b on, which older pins steps refuse whole and the keeper alone reads; so every row of a format-2 record contains K4a-ii. What remains: the choice among commits at or after the floor, and a rewritten install script (S1's class) | `KeeperStepTests.everyInstallThatWritesFormat2RefusesACommitWithoutK4a` (K4b's), `.theSetupKeepsOnlyTheBuildItInstalls`, `.theSetupSaysOlderBuildsAreDroppedBeforeThePassword`, `.anInstallRefusesACommitBeforeTheFloor` (at the setup and once a keeper is installed, an update to an older commit included), `NodePinsTests.onlyFormat2IsRead`, `.theFloorsPinsStepDoesntCarryAFormat1Record`, `.aPreFloorPinsStepRefusesAFormat2Record` (the older commit's step's text, run as the user against a scratch record as the pins step's root half can be), `KeeperProofTests.aFormat1RecordServesNothing`; K7's read-only look at this Mac's real record |
+| KP6c | **An install script from K4b up to K5 installing a pre-floor commit** (the narrow re-check of 2026-11-27, KP6b not closed by the second fix round): (1) the keeper is set up, the record `format 2`; (2) you install a commit M from K4b's commit up to, not including, K5's (allowed: on v2, both runners, it contains the floor; a rollback to K4b's commit is enough), or a program of yours points `current` at a folder `$prefix/M/` it made from M's public files (`build-info`, `Resources/install-node-mac.sh`, `lib/*.sh`, `node-pins-mac.sh`), which step 3 and step 5 accept; (3) you install a pre-floor commit Y: M's script runs, with M's pins step, which reads the format-2 record, carries its rows, adds Y's and writes `format 2`; (4) the keeper serves Y's `host` row, Y having no child proof, no `CLOEXEC_DEFAULT` and no N1 rule: F1, whole | **K4b's own install script refuses, unconditionally, any commit that doesn't contain K4a-ii's commit** (`git merge-base --is-ancestor`, in its fresh fetch, beside step 6), so no install script whose pins step writes `format 2` lacks the floor check; M's script refuses Y before its pins step and nothing is written. K5 may raise the floor to K4b's commit later | `KeeperStepTests.aPreFloorCommitInstalledAfterAK4bToK5CommitWritesNoRow` (K4b's script text in its test form, as the installed build's copy, against a scratch format-2 record: an install of a commit without K4a-ii is refused before the pins step, the record byte for byte unchanged), `.currentPointedAtAFolderOfSuchACommitsPublicFilesChangesNothing` (`current` pointed at a folder made from a K4b-to-K5 commit's public files: the same install refused, nothing written), `.everyInstallThatWritesFormat2RefusesACommitWithoutK4a` (keeper installed or not) |
 | **Channels to the keeper** | | | |
 | KP7 | Another uid's process connects | `getpeereid` checked before a byte is read; an access entry for your account alone if K-M6 says `connect` honours it; else its flood is a denial (KP19) | `KeeperProofTests.anotherUidIsClosedAtAccept` (uid injected) |
 | KP7a | A process of yours `chmod`s or removes the socket | root's file in root's folder: it can't | `KeeperTests.theSocketIsRootsAndNotTheAccounts` |
@@ -671,7 +1009,7 @@ Anything unusual on any of them is a refusal, never a case to handle.
 | KP11 | **Cross-protocol:** it starts the genuine pinned host as a switch's new image with `--handover-keeper-channel FD`, FD a connection to the keeper, so the host sends a pair of its own making there | the handover handshake's data is one byte (`SocketDescriptors+Darwin.swift`'s `sendDescriptors`), not the proof's 23 (closed at step 2); were it, the genuine host would write no request on that pair (its handover code writes none) and the 2 s limit closes it; nothing is answered | `KeeperProofTests.aHandoverHandshakeSentToTheKeeperGetsNothing` |
 | KP12 | **The deputy:** the genuine pinned host in another mode (a scratch home, a test host, `--handover`, `--test-checked-shape`) | the keeper can't tell modes; J0a's rule 2: no other mode's code calls `NodeAnchor` | `HostJournalTests.noOtherModeTouchesTheNodesItems` (its keeper arm) |
 | KP13 | **A second checked host** beside the node (journal P40), its timing driven, its lock swapped | the swap is atomic: one raise from each value succeeds; the loser writes nothing more (`lock.lost`) | `HostJournalTests.aLockSwappedBetweenTwoHostsChecksNeedsAnAtomicCompareAndSet` on the keeper's seam, `KeeperTests.twoHostsRacingASwapLeaveOneValue` |
-| KP14 | **A pinned older build** started by a session (journal P41) | served (it is pinned); its `host.start` is open by the unswitched-build rule; `--keep 1` drops it | `HostJournalTests.anUnswitchedBuildChangeIsOpen` |
+| KP14 | **A pinned older build** started by a session (journal P41) | served (it is pinned), and at or after the floor (KP6b); its `host.start` is open by the unswitched-build rule; `--keep 1` drops it | `HostJournalTests.anUnswitchedBuildChangeIsOpen` |
 | KP15 | A pinned server's or command line's code, or a host that isn't hardened | host rows only; `isHardened` | `KeeperProofTests.aServerOrCommandLineRowIsRefused`, `KeeperProofTests.anUnhardenedHostIsRefused` |
 | KP16 | A malformed proof or request (other data, two descriptors, none, a non-socket, a datagram socket, control data on the pair, another length, an unknown verb or slot, a second request) | exact forms; close, nothing answered | `KeeperProofTests.aHelloWithoutExactlyOneEndIsClosed`, `KeeperTests.anUnknownVerbOrLengthClosesThePair` |
 | KP16a | **A hello carrying many descriptors**, or more than the control buffer holds (the review's F7): leaked into the root process until its table fills, which `KeepAlive` wouldn't end | the control buffer sized for the most one message carries; `MSG_CTRUNC` refused; every received descriptor closed but the one taken, on a refusal too; K-M10 (b) | `KeeperProofTests.everyDescriptorAHelloBringsIsClosed` (2, 64 and the most possible); K-M10 (b) |
@@ -679,23 +1017,26 @@ Anything unusual on any of them is a refusal, never a case to handle.
 | KP18 | The keeper's own inputs: arguments, environment, working folder, signals, `launchctl` on its job | its plist is root's; one argument, no variable read; its paths from its own executable's folder (F16); stopping or signalling it is root's (K-M9) | `KeeperTests.theKeeperTakesOneArgumentAndNoVariable`, `KeeperTests.theTrialKeeperNeverOpensTheRealStore` |
 | KP18a | **The keeper switched off in Login Items** (System Settings › General › Login Items › Allow in the Background, since macOS 13; the review's F10): if your account can do it, or script the window to, the keeper stays down at will, past reboots | **not measured**, K-M12 (trial): whether an ad hoc LaunchDaemon runs at boot without your approval, how the list names it, whether turning it off needs an administrator, whether macOS shows a notice naming it. If your account can turn it off, it is one more at-will denial, stated as KP19's, and the "installed but not running" words name the list (above); fail closed either way (no start, guarded changes refused) | K-M12 |
 | KP19 | A flood of connections, idle ones, or a proven host stopped mid-request (`SIGSTOP`) | 1 s for the proof's message, 2 s for the request; serial; nothing kept per connection; the host's connect with its own deadline and a pause between tries (F9). **A stated limit:** a denial your account can cause at will, through which the journal's P31, P36 and P42 stay reachable as they were through the locked keychain (each fails closed and shows), and the read-back and a removal's retry wait | `KeeperTests.anIdleConnectionDelaysOthersByItsLimitOnly`, `NodeAnchorTests.aFullBacklogCostsTheStartItsLimitOnly`; K-M10 |
-| KP19a | **The busy keeper's words leading you to the install's window** (the review's F4): a flood, restarted after each login, makes the start's words send you to the setup line and your password at a moment a session chose | only facts your account can't cause mention the password or the setup line: "not installed" (root's plist or program absent) and `damaged` (root's store); "installed but busy", "installed but not running" and the merged "installed, not answering" never do; the running host's words alike | `KeeperStatusTests.startSaysTheKeeperIsntInstalled`, `.startSaysTheKeeperIsBusyAndNeverMentionsThePassword`, `.startSaysTheKeeperIsntRunningAndNeverMentionsThePassword` |
-| KP20 | The host's end of a pair reaching another process, or a session holding an end of a pair the host writes on | one keeper pair per request, both ends kept, no descriptor kept after; nothing from arguments or parcels; every spawn in the image `CLOEXEC_DEFAULT` (KP20b); a child given a pair end proves its code first (KP20a); every pair call site classified | `NodeAnchorTests.noKeeperEndOutlivesItsRequest`, `NodeAnchorTests.aSpawnDuringARequestInheritsNoEnd`, `NodeAnchorTests.theAnchorTakesNoDescriptorFromItsArguments`, `KeeperLintTests.everyPairTheHostImageMakesIsClassified` |
+| KP19a | **The busy keeper's words leading you to the install's window** (the review's F4): a flood, restarted after each login, makes the start's words send you to the setup line and your password at a moment a session chose | only facts your account can't cause mention the password or the setup line: "not installed" (root's plist or program absent: `ENOENT` alone) and `damaged` (root's store read whole and refused); "installed but busy", "installed but not running", the merged "installed, not answering" and a read error (`readError`, a walk failing other than `ENOENT`: the re-check's N3) never do; the running host's words alike | `KeeperStatusTests.startSaysTheKeeperIsntInstalled`, `.startSaysTheKeeperIsBusyAndNeverMentionsThePassword`, `.startSaysTheKeeperIsntRunningAndNeverMentionsThePassword`, `.theMergedStateNamesNoLoginItem`, `.aWalkThatFailsOtherThanENOENTIsntNotInstalled`; `KeeperStoreTests.aReadErrorIsNeitherDamagedNorMissing`; `NodeAnchorTests.aPinsReadErrorIsNotNoRecordAndNeverMentionsAnInstall` |
+| KP20 | The host's end of a pair reaching another process, or a session holding an end of a pair the host writes on | one keeper pair per request, both ends kept, no descriptor kept after; nothing from arguments or parcels; every spawn in the image `CLOEXEC_DEFAULT` (KP20b); a child given a pair end proves its code first (KP20a), and a pinned image expects only its own code, its row's server, or across the checked switch a target the record pins (KP20d, KP20e); every pair call site classified, every channel and proof pair a `HandshakeEnd` (the fourth class held by a type) | `NodeAnchorTests.noKeeperEndOutlivesItsRequest`, `NodeAnchorTests.aSpawnDuringARequestInheritsNoEnd`, `NodeAnchorTests.theAnchorTakesNoDescriptorFromItsArguments`, `KeeperLintTests.everyPairTheHostImageMakesIsClassified`, `KeeperLintTests.everyChannelAndProofPairIsAHandshakeEnd` |
 | KP20a | **The checked node's own parser launcher** (the review's F1): `<node root>/host/launcher-<build>`, in your folder, checked only by its modification time; a program of yours put there holds the parser link's end while the host writes a session's terminal output on the other; likewise the server child's connector across a `--server` file swapped between its check and its spawn | K4a: the child is spawned with only a channel (the host writes nothing on it but the handshake's fixed byte), proves its code with a fresh pair of its own (the spawned pid, the expected cdhash: the pinned host's for a parser, hardened), and only then gets the link, a pair the host makes after the proof; the host writes its launcher afresh at each start | `HostChildProofTests.aParserThatIsntTheImagesCodeGetsNoLink`, `.aServerChildThatIsntItsCodeGetsNoConnector`, `.aChannelCarriesOnlyTheHandshakesBytes`, `.aProofPairsOtherEndCarriesNoRequest` |
 | KP20b | **A spawn without `CLOEXEC_DEFAULT` racing a pair's making** inherits both its ends, so the child writes the request and reads the answer itself (the review's F1 (b)); likewise a spawn of the server child's while it takes an app connection's end (`NodeCodexTrust.swift:221`, `LeadInit.swift:124`) | every spawn in the image, and in the server it gives ends to, names what it keeps (`CLOEXEC_DEFAULT`), its in-place form too; the client's lock is no substitute | `KeeperLintTests.everySpawnInTheImageClosesWhatItDoesntName`, `NodeAnchorTests.aSpawnDuringARequestInheritsNoEnd` |
 | KP20c | **A genuine end whose holder closes after writing** (the parser link's `end()`), the request served on a token only re-validated (the review's F5) | step 5 reads the token afresh from the received end, requires it equal to the first, and refuses a pair whose other end is closed (how it is told: K-M1 (e)) | `KeeperProofTests.aPairWhoseOtherEndClosedIsRefused`; K-M1 (e) |
+| KP20d | **A host a session starts, of a pinned image** (the re-check's N1): its `--server` naming a program of the session's, which K4a alone would prove against that file's own cdhash and give the connector and every app connection; or `--handover-test-keeper` naming the session's program as the switch's handover keeper, with `--handover-test-secret` the session's bytes, so `park` sends it the secrets channel's reading end | a pinned image (hardened, its own cdhash a `host` row of the record read afresh before each handout, nothing from its arguments or environment) gives pair ends only to its own code or its row's server, in every mode: a `--server` that isn't its row's refused before the spawn and the proof against the row's cdhash; each app connection checked against the record again; the test flags refused at the start and at a switch; the by-path handover refused; a read of the record that fails other than `ENOENT` refuses the handout | `HostChildProofTests.aPinnedImageGivesNoPairEndToCodeASessionNamed`, `.aPinnedImageRefusesTheTestKeeperAndItsSecret`, `.aPinnedImageRefusesTheByPathHandover`, `.anImagePinnedWhileRunningGivesNoConnectionToAServerItsRowDoesntPin`, `.aPinsReadThatFailsRefusesTheHandout` |
+| KP20e | **The one extension: the checked node's own switch** (N1's rule, 3): the parcel's pair and the secrets channel's reading end go to a handover keeper and a new image that run another build's code, the target's | the target's cdhash is the `host` of a row of the same record with that row's server checked (`keeperTarget`), proven by the handover keeper's token and again by the new image's; both rows' commits contain K4a-ii (every row of a format-2 record does: N2, KP6b, KP6c); the target is a pinned image under the same rule; in a pinned image's other modes every switch form is refused (KP20d) | `HostChildProofTests.theCheckedSwitchGivesItsEndsOnlyToATargetTheRecordPins`; `MacKeeperHandoverTests` (the switch's own proofs, unchanged) |
+| KP20f | **A hardened image not yet pinned** (this round's blind check): a session runs the new build in the install window, before its pins step, as a scratch host with its own `--server` (or `--handover-test-keeper`); keyed on "pinned" alone, the image would hand it the connector and app connections, and once pinned an end already held is a live, pinned maker's | N1's rule keyed on "hardened" (the lead's choice (A)): a hardened image that isn't pinned starts no server child and takes no test keeper or test secret; so it hands out no live end before its pinning. Its by-path handover is **not** refused (the narrow re-check, the lead's ruling): that end crosses an exec in place at its maker's pid, so its maker has exec'd and the keeper refuses it (KP10, on K-M1's row; K4a-ii isn't offered until that row confirms it); refusing it would end the Mac app's own host's sessions (hardened, never pinned) at every app update. No exemption keyed on `ownsLaunchers` (a session sets `VIBESWITCHER_HOME`). Both of the handover keeper's hardened checks (`refusal`, `parentRefusal`) "exactly when". Cost: the switch's logic tested on unhardened scratch hosts, its hardened arm at function level and in K7. (B), the keeper serving only a maker started after its row, rejected: the checked switch execs in place | `HostChildProofTests.aHardenedImageNotYetPinnedGivesNoPairEnd` (a genuine, hardened, not-yet-pinned build started with `--server` gives no pair end to anything: no server child, no connector, no app connection; and with `--handover-test-keeper`, nothing parked), `.theAppsHostStillHandsOverByPathAtAnAppUpdate`, `.aHandoverKeeperRequiresItsParentHardenedExactlyWhenItIs`; `KeeperProofTests.aPairWhoseMakerExecdIsRefused` and K-M1's row (the by-path end); K7's switch run |
 | **Trust on first use, and the other moments** | | | |
 | KP21 | **Install** | the key made by the keeper, nothing of the store taken from your account; the node's first record `begins`, open, first looks held. **The program is root's build** from the commit's objects, every hash recomputed in root's folder, root's toolchain, no dependency (the five conditions); what remains is the choice of commit (bounded by the provenance check) and a session that rewrites the install script itself, which can hand root a self-consistent commit of its own (S1's class): stated, accepted | `KeeperStepTests.theRootHalfRefusesObjectsThatDontHashToTheCommit`, `.theRootHalfRefusesALinkOrSubmoduleInTheTree`, `.theRootBuildReadsNothingOfTheAccount` (its environment and paths, against a scratch tree); K-M13; `HostJournalTests.noFileAndNoCounterIsOpenToo` |
-| KP22 | **A node update** (or a rollback) | the pins step alone; the new host served at once; the vault carried by the handover keeper; the next swap from the value it carried. A host pinned through a rewritten build is KP6a | `HostJournalTests.aSwitchHoldsTheLockBeforeItReadsTheRecord`; K7 |
+| KP22 | **A node update** (or a rollback) | the pins step alone, refusing a commit before the floor (KP6b); the new host served at once; the vault carried by the handover keeper; the next swap from the value it carried. A host pinned through a rewritten build is KP6a | `HostJournalTests.aSwitchHoldsTheLockBeforeItReadsTheRecord`; K7 |
 | KP23 | **A keeper update** | as KP21 for the program; the store kept; down for seconds (KP29); `bootout` waited on until the old process exits (KP3a) | `KeeperStepTests.anUpdateKeepsTheStore` |
 | KP23a | **The keeper step forced at a node update** by a rewritten build (the review's F2) | the step runs only when the commit's `Keeper` tree id differs from the one root recorded in `installed`, read by root from the verified objects; for the recorded tree, a build with another cdhash is refused with the review's words, installing nothing; and root builds from the objects anyway, so a rewritten build has nothing to install | `KeeperStepTests.theInstallRunsTheStepOnlyWhenTheKeeperSourceChanged`, `.anUnchangedSourceBuiltDifferentlyIsRefused` |
 | KP24 | **A record that begins again** | the host swaps from what it read (absent included) to the new record's value; the key unchanged; open `record.begins`, first looks and devices held; the file that didn't open set aside, never sealed over (K8) | `HostJournalTests.everyReasonHoldsItsFirstLooks`, `HostJournalTests.aStartedOverNodeVaultSavesAndSetsTheOldFileAside` |
-| KP25 | **A keeper restart** | the store read again; `damaged` refuses every request; a missing store makes a new key (only root deletes it), so the node's file is `unreadable`, open | `KeeperStoreTests.aMissingStoreGetsANewKey`, `KeeperStoreTests.anUnusualStoreIsDamagedAndNeverReplaced` |
+| KP25 | **A keeper restart** | the store read again; `damaged` (read whole and refused) refuses every request; a missing store (`ENOENT` alone) makes a new key (only root deletes it), so the node's file is `unreadable`, open; a read error makes no key and answers `readError` (N3) | `KeeperStoreTests.aMissingStoreGetsANewKey`, `KeeperStoreTests.anUnusualStoreIsDamagedAndNeverReplaced`, `KeeperStoreTests.aReadErrorMakesNoKey` |
 | KP26 | **A Mac restart** | the keeper at boot (K-M3), the node at login, open (the decided (1)); the host's start waits up to 60 s | `NodeAnchorTests.theStartWaitsForTheKeeperThenExitsHavingReadNothing` (an injected clock) |
-| KP27 | **Removal** | bootout; program, plist and socket removed; the store kept unless `--forget-store`, said before the password | `KeeperStepTests.removeKeepsTheStore` |
+| KP27 | **Removal** | bootout; program, plist and socket removed; the store kept unless `--forget-store`, said before the password; the node's removal (the Mac spec's step 12) stops the node's agent, then runs it | `KeeperStepTests.removeKeepsTheStore`, `KeeperStepTests.theNodesRemovalRemovesTheKeeper` (the removal slice's) |
 | KP28 | The keeper down at the host's start | the host reads no file; exit 78 after 60 s (busy, or installed but not running), or at once (not installed, or a refusal); decided (Open questions 1) | `NodeAnchorTests.theStartWaitsForTheKeeperThenExitsHavingReadNothing` |
 | KP29 | The keeper down while the host runs | the journal's failed-raise rule, `noKeeper` | the journal's `aFailedRaiseRefusesAGuardedActAndStillTakesAnAck`, on the keeper's seam |
-| KP29a | **A refusal arriving on a running host** (`notPinned` after your `--keep 1` dropped its build, P41; `noRecord`; `damaged`; `notHardened`; `wrongUid`; the review's F14) | the failed-raise rule as KP29, with the start's words for that status, never "isn't answering" | `NodeAnchorTests.aRefusalOnARunningHostHasTheStartsWords` |
+| KP29a | **A refusal arriving on a running host** (`notPinned` after your `--keep 1` dropped its build, P41; `noRecord`; `damaged`; `notHardened`; `wrongUid`; the review's F14) | the failed-raise rule as KP29, with the start's words for that status, never "isn't answering"; a `readError` is no refusal: it is KP29's "no answer", its words never naming an install (N3) | `NodeAnchorTests.aRefusalOnARunningHostHasTheStartsWords` |
 | KP30 | A swap whose answer was lost | read back with `open` (above) | `NodeAnchorTests.aDroppedSwapIsReadBack` |
 | KP31 | A copy of the store elsewhere (Time Machine, Migration Assistant) | an administrator's restore is root's (S1); a backup holds the key: [Open questions](#open-questions-for-the-lead-or-the-user) 2 | K-M8 |
 
@@ -773,33 +1114,44 @@ in the test process or as a child of it on a scratch folder, a scratch pins reco
 
 | # | Slice | Tests | Proven | After | Review |
 | --- | --- | --- | --- | --- | --- |
-| K0 | The `Keeper/` package (no dependency): `VibeKeep` with what moves into it unchanged (`NodePins` from `VibeCore`; the root walk, the dynamic code check by token, `peerUID` and `peerToken` from `VibePlatform`: [Its program](#what-it-does-and-what-it-never-does)), each old name a one-line call into it; the `vibeswitcher-keeper` target; the repository's package naming it by path in both halves | `NodePinsTests`, `RootRecordTests` and the code identity tests unchanged; `KeeperLintTests.theKeeperPackageNamesNoDependency`, `.theKeeperLinksOnlyVibeKeep` | here | this design's re-check (the layout is decided: Open questions 7) | no |
-| K1 | The store: format, strict parse, root-only walk, the write discipline, `damaged`, the key's making, the store's `flock` (F8) | `KeeperStoreTests.aStoreParsesOnlyItsOwnForm`, `.anUnusualStoreIsDamagedAndNeverReplaced`, `.aSwapIsOnDiskBeforeItIsAnswered` (a crash injected between each step), `.theKeyIsMadeOnceAndNeverTakenFromACaller`, `.aMissingStoreGetsANewKey`, `.aSecondKeeperOnOneStoreExits` | here | K0 | with K2 |
+| K0 | The `Keeper/` package (no dependency, no test target: N7): `VibeKeep` with what moves into it unchanged (`NodePins` from `VibeCore`; the root walk, the dynamic code check by token, `peerUID` and `peerToken` from `VibePlatform`: [Its program](#what-it-does-and-what-it-never-does)), each old name a one-line call into it; the `vibeswitcher-keeper` target; the repository's package naming it by path in both halves; the keeper's tests in the root package's test targets | `NodePinsTests`, `RootRecordTests` and the code identity tests unchanged; `KeeperLintTests.theKeeperPackageNamesNoDependency` (no package, no test target), `.theKeeperLinksOnlyVibeKeep` | here | none (the re-check of 2026-11-27 cleared it; N7's sentence is written here) | no |
+| K1 | The store: format, strict parse, root-only walk, the write discipline, the three kinds of a failed read (N3: `damaged` only when read whole and refused, `ENOENT` alone missing, every other failure `readError`, which makes no key; the walk's refusal given a kind, its words unchanged), the key's making, the store's `flock` (F8) | `KeeperStoreTests.aStoreParsesOnlyItsOwnForm`, `.anUnusualStoreIsDamagedAndNeverReplaced`, `.aReadErrorIsNeitherDamagedNorMissing` (`EMFILE`, `ENFILE`, `EIO`, `ENOMEM` injected), `.aReadErrorMakesNoKey`, `.aSwapIsOnDiskBeforeItIsAnswered` (a crash injected between each step), `.theKeyIsMadeOnceAndNeverTakenFromACaller`, `.aMissingStoreGetsANewKey`, `.aSecondKeeperOnOneStoreExits` | here | K0; K-M4 before it is offered | with K2 |
 | K-M1 | The measurement the proof rests on (below): (a) to (d) asked after the maker's exec (F6), (e) and (f), kept as a row with its probe and output | the probe's record | here (no dialog, no `sudo`) | none | no |
-| K2 | The proof: the connection's one message, every received descriptor closed but one (F7), the pair, the token, uid, the host row, the Hardened Runtime, the token read afresh after the request and a closed other end refused (F5); the `peerToken` comment corrected to K-M1's row | `KeeperProofTests.aPinnedHardenedHostsPairIsTaken`, `.aPairWhoseMakerExecdIsRefused`, `.aSessionsPairIsRefused`, `.aServerOrCommandLineRowIsRefused`, `.anUnhardenedHostIsRefused`, `.anUnpinnedOrDroppedBuildIsRefused`, `.anotherUidIsClosedAtAccept`, `.aHelloWithoutExactlyOneEndIsClosed`, `.everyDescriptorAHelloBringsIsClosed`, `.aConnectedEndThatIsntAPairIsRefused`, `.aHelloWhoseSenderIsntThePairsMakerIsRefused`, `.aPairWhoseOtherEndClosedIsRefused`, `.aRequestOnTheConnectionGetsNothing`, `.aHandoverHandshakeSentToTheKeeperGetsNothing` | here | K1; K-M1 (a) to (f) as measured and kept as a row (else the XPC form is designed first); K-M10 (b) for F7's buffer | **yes** |
-| K3 | The program: the serial loop, `open` and `swap`, the request's prefix, the limits, its one argument, its paths from its own executable's folder (F16), the socket made root's, `0666` | `KeeperTests.aSwapIsAnAtomicCompareAndSet`, `.twoHostsRacingASwapLeaveOneValue` (two real processes), `.anIdleConnectionDelaysOthersByItsLimitOnly`, `.anUnknownVerbOrLengthClosesThePair`, `.theKeeperTakesOneArgumentAndNoVariable`, `.theTrialKeeperNeverOpensTheRealStore`, `.aDamagedStoreRefusesEveryRequest`, `.theSocketIsRootsAndNotTheAccounts` (its mode and owner as made; root's part in K7) | here (as the user; root's part in K7) | K2; K-M10 (with (b) and (c)) and K-M5 before it is offered | **yes**, with K2 |
-| K4a | **The host image's children prove themselves** (F1 (a)): the parser and the server child spawned with only a channel, proving their code with a fresh pair (the spawned pid, the expected cdhash, hardened) before the host gives them the link; the host's launcher written afresh at each start; the words for a child that fails its proof; every spawn in the image `CLOEXEC_DEFAULT` with its lint (F1 (b)). In every mode of the image, since the keeper can't tell them apart; it touches every session's start on the Mac | `HostChildProofTests.aParserThatIsntTheImagesCodeGetsNoLink`, `.aServerChildThatIsntItsCodeGetsNoConnector`, `.aChannelCarriesOnlyTheHandshakesBytes`, `.aProofPairsOtherEndCarriesNoRequest`; `KeeperLintTests.everySpawnInTheImageClosesWhatItDoesntName`; the parser's and the server child's existing tests unchanged in what they see | here | K-M1 (the proof pair's token, as the handover keeper's) | **yes** |
-| K4 | The host's client in `NodeAnchor`: the walk, the root listener, one pair per request with both ends kept, the connect's deadline and pause (F9), every pair the image makes classified (the four classes), the read-back, the start's three states (not installed: exit at once; busy or not running: 60 s, then exit 78), the running host's refusals with the start's words (F14), no Keychain store; J0a's test gains the keeper arm | `NodeAnchorTests.aListenerThatIsntRootIsRefused`, `.noKeeperEndOutlivesItsRequest`, `.aSpawnDuringARequestInheritsNoEnd`, `.theAnchorTakesNoDescriptorFromItsArguments`, `.aDroppedSwapIsReadBack`, `.theStartWaitsForTheKeeperThenExitsHavingReadNothing`, `.aFullBacklogCostsTheStartItsLimitOnly`, `.aRefusedConnectIsTriedAgainAfterAPause`, `.aRefusalOnARunningHostHasTheStartsWords`; `KeeperLintTests.everyPairTheHostImageMakesIsClassified`; `HostJournalTests.noOtherModeTouchesTheNodesItems` (keeper arm) | here | K3, K4a, J0a; K-M10 (c) for the retry loop | **yes**, with J3a's |
-| K5 | The keeper step and the install's call: the root half as text; `--install COMMIT --objects STAGED` with the root build under the five conditions, the trigger by the recorded `Keeper` tree id and the refusal for an unchanged source built differently (F2); `--remove [--forget-store]` with `bootout` waited on (F8), `--start-over`, `--dry-run`, the trial paths, the plist as fixed text; the install's user half (the objects staged, the step run only when the keeper's source changed); the node's removal running the keeper's once that removal exists (F18) | `KeeperStepTests.theDryRunPrintsExactlyWhatItWouldDo`, `.theRootHalfRefusesEveryValueOutOfPattern`, `.theRootHalfRefusesObjectsThatDontHashToTheCommit`, `.theRootHalfRefusesALinkOrSubmoduleInTheTree`, `.theRootBuildReadsNothingOfTheAccount`, `.anUnchangedSourceBuiltDifferentlyIsRefused` (the root half's text run as the user against a scratch tree, its root-only checks given the scratch owner, as the pins step's root half can be), `.anUpdateKeepsTheStore`, `.removeKeepsTheStore`, `.forgettingTheStoreThenInstallingMakesANewKey`, `.startOverIsRefusedForAStoreThatParses`, `.theInstallRunsTheStepOnlyWhenTheKeeperSourceChanged`, `.theNodesRemovalRemovesTheKeeper` (once it exists) | here, but the real write | K3; K-M13 here (the build as the user under `env -i`: that it builds offline and reproducibly) before it is offered | **yes** (the Mac's S9, and the root build) |
-| K6 | `vibeswitcher start` and `status` tell the keeper not installed (root's plist or program absent), installed but busy (a root listener that doesn't answer within 2 s), and installed but not running (no root listener), or the two as one if K-M10 (c) says a full backlog refuses at once, with the words above: only "not installed" and `damaged`, which your account can't cause, mention the password or the setup line (F4) | `KeeperStatusTests.startSaysTheKeeperIsntInstalled`, `.startSaysTheKeeperIsBusyAndNeverMentionsThePassword`, `.startSaysTheKeeperIsntRunningAndNeverMentionsThePassword` | here | K4; K-M10 (c) for its deadline | no |
-| K7 | **The trial, at your keyboard**: the keeper step with the trial paths and label (`dev.vibeswitcher.keeper-trial.<uid>`), the root build included; K-M2, K-M3, K-M6, K-M7, K-M8, K-M9 (with `bootout`'s timing), K-M12 and K-M13 (as root) against it; a scratch pinned host's `open` and `swap` against the real root keeper; then `--remove --forget-store` | the trial's record | **your `sudo` line** (and another account for K-M6) | K5 | no |
+| K2 | The proof: the connection's one message, every received descriptor closed but one (F7), the pair, the token, uid, the host row, the Hardened Runtime, the token read afresh after the request and a closed other end refused (F5); the `peerToken` comment corrected to K-M1's row | `KeeperProofTests.aPinnedHardenedHostsPairIsTaken`, `.aPairWhoseMakerExecdIsRefused`, `.aSessionsPairIsRefused`, `.aServerOrCommandLineRowIsRefused`, `.anUnhardenedHostIsRefused`, `.anUnpinnedOrDroppedBuildIsRefused`, `.anotherUidIsClosedAtAccept`, `.aHelloWithoutExactlyOneEndIsClosed`, `.everyDescriptorAHelloBringsIsClosed`, `.aConnectedEndThatIsntAPairIsRefused`, `.aHelloWhoseSenderIsntThePairsMakerIsRefused`, `.aPairWhoseOtherEndClosedIsRefused`, `.aRequestOnTheConnectionGetsNothing`, `.aHandoverHandshakeSentToTheKeeperGetsNothing` | here | K1; K-M1 (a) to (f) as measured and kept as a row (else the XPC form is designed first); K-M10 (b) for F7's buffer, which the measurement recorded at `SocketDescriptors+Darwin.swift:62-66` (a 254-descriptor ceiling, a cut message installing every descriptor) may already answer: cited, or run again | **yes** |
+| K3 | The program: the serial loop, `open` and `swap`, the request's prefix, the limits, its one argument, its paths from its own executable's folder (F16), the store's lock taken before anything in its folder is touched (N5), the socket made root's, `0666`; `readError` answered (N3) | `KeeperTests.aSwapIsAnAtomicCompareAndSet`, `.twoHostsRacingASwapLeaveOneValue` (two real processes), `.anIdleConnectionDelaysOthersByItsLimitOnly`, `.anUnknownVerbOrLengthClosesThePair`, `.theKeeperTakesOneArgumentAndNoVariable`, `.theTrialKeeperNeverOpensTheRealStore`, `.aSecondKeeperLeavesTheFirstsSocketAlone`, `.aDamagedStoreRefusesEveryRequest`, `.theSocketIsRootsAndNotTheAccounts` (its mode and owner as made; root's part in K7) | here (as the user; root's part in K7) | K2; K-M10 (with (b), (c), (d) and CPU per hello) and K-M5 before it is offered | **yes**, with K2 |
+| K4a-i | **Every spawn names what it keeps** (F1 (b), KP20b; the re-check's question 3): every `Platform.Spawn` in the image and in the server it gives ends to names `keep` (`POSIX_SPAWN_CLOEXEC_DEFAULT`), its in-place forms too, `PipeCommand+Darwin.swift`'s own spawn, with the lint over the image's and the server's targets. Behaviour-preserving. **Home: the Mac node spec's order of work, step 10**; listed here because K4 and K4b wait on it | `KeeperLintTests.everySpawnInTheImageClosesWhatItDoesntName`; the host's, server's and parser's existing tests unchanged | here | none | **yes**, its own |
+| K4a-ii | **The image's children prove themselves** (F1 (a), KP20a), **with N1's rule and N4's three statements**: the parser and the server child spawned with only a channel (a `HandshakeEnd`: question 4), proving their code with a fresh pair (the spawned pid, the expected cdhash, hardened exactly when the image is: N4 (a), in the handover keeper's two hardened checks too, `refusal` and `parentRefusal`, so the switch's tests run on unhardened scratch hosts) before the host gives them the link, the proof waited off the host's queue for at most 10 s (N4 (b)); **N4 (b)'s four sentences** (the narrow re-check): the parser's spawn runs off the host's queue (a queue of its own for a session start, the history read's own queue for a read; the server child's alike; only the result comes back), the child ended at the limit off the queue and reaped by a process-exit source, never a blocking `waitpid`, each proof's wait a read source and a steady-clock timer holding no thread (not one global-queue thread per proof), and a proof that only timed out told "the helper didn't answer in time", never that something replaced it; the launcher written afresh at each start; the words for a child that fails its proof; a pinned image's pair ends only to its own code, its row's server, or across the checked node's own switch a target the record pins, the record read afresh before each handout, its test flags and by-path handover refused (N1: KP20d, KP20e); a hardened image that isn't pinned starts no server child and takes no test keeper or secret, and **keeps its by-path handover** (KP20f: that end crosses an exec in place, dead to the keeper by KP10 on K-M1's row), so **the Mac app's own host (hardened, never pinned) keeps handing over at every app update**; no exemption keyed on `ownsLaunchers`. In every mode of the image; it touches every session's start on the Mac, the app's host included, so it is checked in the sandbox too. **Home: the Mac node spec's order of work, step 11** | `HostChildProofTests.aParserThatIsntTheImagesCodeGetsNoLink`, `.aServerChildThatIsntItsCodeGetsNoConnector`, `.aChannelCarriesOnlyTheHandshakesBytes`, `.aProofPairsOtherEndCarriesNoRequest`, `.aChildIsHardenedExactlyWhenTheImageIs`, `.aProofThatNeverComesHoldsNothingElse`; N4 (b)'s: `.aSpawnThatBlocksHoldsNotTheHostsQueue`, `.theReapAtTheLimitNeverBlocksTheHost`, `.proofsInFlightHoldNoThreadEach`, `.aProofThatOnlyTimedOutAccusesNothing`; N1's: `.aPinnedImageGivesNoPairEndToCodeASessionNamed` (the server child), `.aPinnedImageRefusesTheTestKeeperAndItsSecret` (the `--handover-test-keeper` keeper), `.aPinnedImageRefusesTheByPathHandover`, `.anImagePinnedWhileRunningGivesNoConnectionToAServerItsRowDoesntPin`, `.aPinsReadThatFailsRefusesTheHandout`, `.theCheckedSwitchGivesItsEndsOnlyToATargetTheRecordPins`, `.aHardenedImageNotYetPinnedGivesNoPairEnd`, `.theAppsHostStillHandsOverByPathAtAnAppUpdate` (the app's host, hardened and unpinned, hands over by path and its sessions survive; with the app's update in the sandbox), `.aHandoverKeeperRequiresItsParentHardenedExactlyWhenItIs` (KP20f); `MacKeeperHandoverTests` on unhardened scratch hosts, its hardened arm at function level (KP20f's cost); `KeeperLintTests.everyChannelAndProofPairIsAHandshakeEnd`; the parser's and the server child's existing tests unchanged in what they see | here | K4a-i; K-M1's row (the proof pair's token, as the handover keeper's; and the by-path handover's end dead after the in-place exec, (a) to (c) asked after the maker's exec: K4a-ii isn't offered until the row confirms it, KP20f); K-M14, extended (the spawn's own time, a quarantined or stalled launcher, a burst of never-proving reads), before it is offered | **yes**, its own (its review checks the proof's waits) |
+| K4b | **The format and the floor, in one commit** (N2, KP6b, the narrow re-check's KP6c): the pins record's `format 2`; K4b's `NodePins` reads only it, its pins step writes only it and carries no row of a format-1 record (said before the password: "Older builds of your node are dropped, so only this build is served"); and **K4b's own install script refuses, unconditionally** (a keeper installed or not, any install or update), **any commit that doesn't contain K4a-ii's commit on v2**: `git merge-base --is-ancestor <K4a-ii's commit> <commit>` in its fresh fetch, beside step 6's on-v2 check, before the pins step, with the floor's words ("This commit of your node is older than its keeper allows: it lacks a fix the keeper needs. Nothing was installed. Install a newer commit."). The floor is K4a-ii's commit, written in by K4b (an ancestor it can name); K5 may raise it to K4b's commit later. So no install script whose pins step writes `format 2` lacks the floor check | `NodePinsTests.onlyFormat2IsRead`, `.theFloorsPinsStepDoesntCarryAFormat1Record`, `.aPreFloorPinsStepRefusesAFormat2Record` (the older commit's step's text, as the user, against a scratch record), `KeeperProofTests.aFormat1RecordServesNothing`; the floor's: `KeeperStepTests.everyInstallThatWritesFormat2RefusesACommitWithoutK4a` (K4b's script text in its test form, against a pre-K4a-ii commit: refused before the pins step, keeper installed or not), `.aPreFloorCommitInstalledAfterAK4bToK5CommitWritesNoRow` (the re-check's sequence: a scratch format-2 record, K4b's script as the installed build's copy, an install of a pre-floor commit: no row written), `.currentPointedAtAFolderOfSuchACommitsPublicFilesChangesNothing` (`current` pointed at a folder made from a K4b-to-K5 commit's public files: the same install refused, the record unchanged) | here | K0, K4a-i, K4a-ii **on v2** (its commit is the floor K4b names) | **yes** (the pins step's root half, and the install's floor check) |
+| K4 | The host's client in `NodeAnchor`: the walk, the root listener, one pair per request with both ends kept, the connect's deadline and pause (F9), every pair the image makes classified (the four classes), the read-back, the start's states (not installed: exit at once; busy, not running or a read error: 60 s, then exit 78), a pins read error `readError`, never `noRecord` (N3 (b)), the running host's refusals with the start's words (F14), no Keychain store; J0a's test gains the keeper arm | `NodeAnchorTests.aListenerThatIsntRootIsRefused`, `.noKeeperEndOutlivesItsRequest`, `.aSpawnDuringARequestInheritsNoEnd`, `.theAnchorTakesNoDescriptorFromItsArguments`, `.aDroppedSwapIsReadBack`, `.theStartWaitsForTheKeeperThenExitsHavingReadNothing`, `.aFullBacklogCostsTheStartItsLimitOnly`, `.aRefusedConnectIsTriedAgainAfterAPause`, `.aRefusalOnARunningHostHasTheStartsWords`, `.aPinsReadErrorIsNotNoRecordAndNeverMentionsAnInstall`; `KeeperLintTests.everyPairTheHostImageMakesIsClassified`; `HostJournalTests.noOtherModeTouchesTheNodesItems` (keeper arm) | here | K3, K4a-i, K4a-ii, J0a; K-M5 and K-M10 (c) for its retry loop | **yes**, with J3a's |
+| K5 | The keeper step and the install's call: the root half as text; `--install COMMIT --objects STAGED` with the root build under the five conditions, root's `git` refusing if it doesn't detect a collision (question 1), the trigger by the recorded `Keeper` tree id and the refusal for an unchanged source built differently (F2); `--remove [--forget-store]` with `bootout` waited on (F8), `--start-over`, `--dry-run`, the trial paths, the plist as fixed text; the install's user half: the objects staged, the `Keeper` tree id read from the install's fresh fetch with `GIT_NO_REPLACE_OBJECTS=1` as its other git runs do (the re-check's F2 note), the step run only when the keeper's source changed, the setup's pins step in its `--fresh` form and the floor refused at the setup and after (N2), K4b's floor check kept (K5 may raise the floor from K4a-ii's commit to K4b's) | `KeeperStepTests.theDryRunPrintsExactlyWhatItWouldDo`, `.theRootHalfRefusesEveryValueOutOfPattern`, `.theRootHalfRefusesObjectsThatDontHashToTheCommit`, `.theRootHalfRefusesALinkOrSubmoduleInTheTree`, `.theRootBuildReadsNothingOfTheAccount`, `.anUnchangedSourceBuiltDifferentlyIsRefused`, `.theStepRefusesWhenRootsGitDoesntDetectACollision` (the root half's text run as the user against a scratch tree, its root-only checks given the scratch owner, as the pins step's root half can be), `.anUpdateKeepsTheStore`, `.removeKeepsTheStore`, `.forgettingTheStoreThenInstallingMakesANewKey`, `.startOverIsRefusedForAStoreThatParses`, `.theInstallRunsTheStepOnlyWhenTheKeeperSourceChanged`, `.theSetupKeepsOnlyTheBuildItInstalls`, `.theSetupSaysOlderBuildsAreDroppedBeforeThePassword`, `.anInstallRefusesACommitBeforeTheFloor` | here, but the real write | K3; K4b on v2 (the format and the floor check); K-M13's here part (offline, reproducible, and root's `git` detecting a collision: else the step refuses and K5 isn't offered) before it is offered | **yes** (the Mac's S9, and the root build) |
+| K6 | `vibeswitcher start` and `status` tell the keeper not installed (root's plist or program absent: `ENOENT` alone), installed but busy (a root listener that doesn't answer within 2 s), installed but not running (no root listener), or the two as one if K-M10 (c) says a full backlog refuses at once (N6's words, no login item), and "couldn't be checked" for a walk failing any other way (N3 (c)), with the words above: only "not installed" and `damaged`, which your account can't cause, mention the password or the setup line (F4) | `KeeperStatusTests.startSaysTheKeeperIsntInstalled`, `.startSaysTheKeeperIsBusyAndNeverMentionsThePassword`, `.startSaysTheKeeperIsntRunningAndNeverMentionsThePassword`, `.theMergedStateNamesNoLoginItem`, `.aWalkThatFailsOtherThanENOENTIsntNotInstalled` | here | K4; K-M10 (c) for its deadline; its Login Items sentence on K-M12 | no |
+| K7 | **The trial, at your keyboard**: the keeper step with the trial paths and label (`dev.vibeswitcher.keeper-trial.<uid>`), the root build included; K-M2, K-M3, K-M6, K-M7, K-M8, K-M9 (with `bootout`'s timing), K-M12 and K-M13 (as root) against it; a scratch pinned host's `open` and `swap` against the real root keeper; then `--remove --forget-store`. And **a read-only look at this Mac's real pins record** (N2: `/Library/Application Support/VibeSwitcher/node-<uid>.pins`, readable by any account, no `sudo`): whether it holds rows, of which commits, and in which format, kept in the trial's record. And **KP20f's owed run**: the first update after the setup pins two real builds, and the switch between them, a hardened host to a hardened target through a proven handover keeper with its server child ended and started again, is run and watched end to end | the trial's record | **your `sudo` line** (and another account for K-M6) | K5 | no |
 | K8 | A checked node's started-over vault (the switch-on list's third item): no wait for the app's key on a checked start; the file that didn't open set aside before the first save under the keeper's key, **only once a key was obtained from the keeper and the file failed to open with it** (a host with no key exits before) | `HostJournalTests.aStartedOverNodeVaultSavesAndSetsTheOldFileAside`, `HostJournalTests.anAppHostsStartedOverVaultStillWaitsForTheAppsKey`, `HostJournalTests.aHostWithNoKeySetsNothingAside` | here | `5e98c1fc` in v2; J3b | with J3b |
 
-**What each slice waits on, in short** (the review's "What must be measured", row by row): K0 on this design's
-re-check alone (Open questions 7's layout is decided); K1 on K0, and K-M4 before it is offered; K2 on K1 and K-M1 (a)
-to (f) kept as a row (F5, F6; (f) says how far the hello's sender check narrows, and the design states that before
-K2's review), and F7's buffer from K-M10 (b); K3 on K2, then K-M10 (with (b), (c) and CPU per hello) and K-M5 before
-it is offered; K4a on K-M1; K4 on K3, K4a and J0a, with K-M5 and K-M10 (c) for its retry loop; K5 on K3 and
-K-M13's here part, and its real use on K7's K-M7, K-M9 (`bootout`'s timing), K-M12 and K-M13's root part; K6 on K4
-and K-M10 (c), its Login Items sentence on K-M12; K7 on K5, at your keyboard, with K-M2, K-M3, K-M6, K-M8, K-M9,
-K-M12 and K-M13; K8 on `5e98c1fc` in v2 and J3b. **The switch-on review** (row 15, the lead) waits on every slice
-here, K4a included, and on K7's trial with every K-M row it owes. K-M11 gates nothing (F15).
+**What each slice waits on, in short** (the review's "What must be measured" and the re-check's slice table, row by
+row; the table above says the same): K0 on nothing more (the re-check cleared it, N7 written here); K1 on K0, and
+K-M4 before it is offered; K2 on K1 and K-M1 (a) to (f) kept as a row (F5, F6; (f) says how far the hello's sender
+check narrows, and the design states that before K2's review), and F7's buffer from K-M10 (b), which may already be
+answered (cited or run again); K3 on K2, then K-M10 (with (b), (c), (d) and CPU per hello) and K-M5 before it is
+offered; **K4a-i** on nothing (behaviour-preserving, safe now); **K4a-ii** on K4a-i and K-M1's row (which must also
+confirm the by-path handover's end dead after the in-place exec, or K4a-ii isn't offered: KP20f), and K-M14, extended
+as the narrow re-check lists, before it is offered (N1's rule, N4's three answers and N4 (b)'s four sentences are
+written here); **K4b** on K0, K4a-i and K4a-ii on v2 (it names K4a-ii's commit as the floor its own install script
+checks: KP6b); K4 on K3, K4a-i, K4a-ii and J0a, with K-M5 and K-M10 (c) for its retry loop; K5 on K3, K4b on v2 (the
+format and the floor check) and K-M13's here part
+(collision detection included), and its real use on K7's K-M7, K-M9 (`bootout`'s timing), K-M12 and K-M13's root
+part; K6 on K4 and K-M10 (c), its Login Items sentence on K-M12; K7 on K5, at your keyboard, with K-M2, K-M3, K-M6,
+K-M8, K-M9, K-M12 and K-M13, and the real record's read-only look; K8 on `5e98c1fc` in v2 and J3b. K4a-i and K4a-ii
+are homed in the Mac node spec's order of work (steps 10 and 11), the node's removal there too (step 12, after K5),
+each with its own review. **The switch-on review** (row 15, the lead) waits on every slice here, K4a-i, K4a-ii and
+K4b included, on the Mac spec's removal step (it checks that nothing removes the node without the keeper's removal),
+and on K7's trial with every K-M row it owes and its look at the real record. K-M11 gates nothing (F15).
 
 **The journal's slices with the keeper:** J0a, J1, J2, J6, J9a and J11 may still be built now (the lead's decision of
-2026-11-27). **J3a** after J0a, J2 and this design's re-check, on the in-memory seam; its keeper arm after K4 (no
-J-M2). **J3b** after J3a, its words corrected for the keeper (F13); its keeper arm after K4. **J4a** and **J4b**
-after J3a's seam, as before. The rest as the journal's build order says. **Nothing switches on** until the switch-on
-review (the measurement table's row 15), by the lead.
+2026-11-27). **J3a** after J0a and J2 (the re-check of 2026-11-27 found it safe to build on the in-memory seam); its
+keeper arm after K4, which waits on K3, K4a-i, K4a-ii and J0a (no J-M2). **J3b** after J3a, its words corrected for
+the keeper (F13); its keeper arm after K4. **J4a** and **J4b** after J3a's seam, as before. The rest as the journal's
+build order says. **Nothing switches on** until the switch-on review (the measurement table's row 15), by the lead.
 
 ## Measurements owed
 
@@ -816,10 +1168,11 @@ None was run for this design (documents only). "Here" needs no `sudo` and no dia
 | K-M7 | `codesign -d -a <arch>` run as root on the root-owned copy gives the install's cdhash | the root half's check (KP21) | trial |
 | K-M8 | Whether Time Machine copies `store/node.keep` by default, and whether a sticky exclusion set by root holds | Open questions 2 | trial |
 | K-M9 | That your account can't `launchctl bootout`, `disable` or `kill` the keeper's daemon, nor `kickstart -k` it; and whether root's `launchctl bootout` returns only after the job's process has exited (F8: else the step waits for the pid itself) | KP18, KP3a | trial |
-| K-M10 | The keeper's memory, descriptors and CPU under a flood of idle and malformed connections, and of hellos each carrying a session-made pair (Security's check and a pins walk each); **(b)** (F7) its descriptor count after hellos carrying 2, 64 and the most descriptors one message can carry, and with a control buffer smaller than what was sent (whether XNU installs what didn't fit); **(c)** (F9) a full backlog: whether the client's `connect` is refused at once or waits, and for how long | KP16a, KP19, the connect's deadline (F9), K6's limit | here, under `scripts/test-under-load.sh` |
+| K-M10 | The keeper's memory, descriptors and CPU under a flood of idle and malformed connections, and of hellos each carrying a session-made pair (Security's check and a pins walk each); **(b)** (F7) its descriptor count after hellos carrying 2, 64 and the most descriptors one message can carry, and with a control buffer smaller than what was sent (whether XNU installs what didn't fit); **(c)** (F9) a full backlog: whether the client's `connect` is refused at once or waits, and for how long; **(d)** (the re-check's N3) whether a process of your account can make a root process's `open` fail (a full system file table, `ENFILE`, across processes of your account), which the design assumes it can | KP16a, KP19, the connect's deadline (F9), K6's limit; (d): only whether `readError`'s words are ever reached at will (they are written as if they are) | here, under `scripts/test-under-load.sh` |
 | K-M11 | Whether signing the genuine host's file again (ad hoc, or with the local identity) gives another cdhash | **information, gating nothing** (F15): either it is other code, refused, or the same cdhash, the genuine code | here, on a scratch copy, nothing installed |
 | K-M12 | Login Items (F10): whether an ad hoc LaunchDaemon runs at boot without your approval, how System Settings › General › Login Items names it, whether turning it off there needs an administrator (and whether a program of yours can script that), and whether macOS shows a notice naming it when it is installed | KP18a; K6's "installed but not running" words (their Login Items sentence); K5's real use and the switch-on | trial |
-| K-M13 | The keeper's root build (F2): that `swift build` of `Keeper/` under `env -i` with its caches in the build folder builds offline and touches nothing outside it (here, as the user, on a scratch folder; then in the trial as root); that two builds of one tree give one cdhash (whether the unchanged-source check can ever answer "already this build"); how long it takes as root; and that the hash check root runs (root's own `git`, `index-pack --strict`) refuses a changed object and detects a SHA-1 collision attack (`sha1dc`) | KP21, KP23a, Doubts 14 | here, then trial |
+| K-M13 | The keeper's root build (F2): that `swift build` of `Keeper/` under `env -i` with its caches in the build folder builds offline and touches nothing outside it (here, as the user, on a scratch folder; then in the trial as root); that two builds of one tree give one cdhash (whether the unchanged-source check can ever answer "already this build"); how long it takes as root; and that the hash check root runs (root's own `git`, `index-pack --strict`) refuses a changed object and detects a SHA-1 collision attack: the exact `git` root runs under `env -i`, its `git version --build-options` naming the SHA-1 backend (`sha1dc` expected, not asserted), and its `index-pack --strict` refusing a published colliding pair; and whether it takes a pack without the commit's parents or needs the whole history as a bundle (the re-check's question 1: if it doesn't detect, the step refuses and K5's real use waits; no fallback reader) | KP21, KP23a, Doubts 14 | here, then trial |
+| K-M14 | **K4a-ii's cost** (the re-check's N4 (c)): the time of a session start, a history read and an app connection on this Mac, before and after K4a-ii (the child's proof by Security's dynamic check, the launcher written afresh at each host start and its first exec, N1's pins read in a pinned image), calm and under `scripts/test-under-load.sh`; and the proof's own time under that load, against K4a-ii's 10 s limit. **Extended (the narrow re-check of 2026-11-27, N4 (b)):** the parser spawn's own time (`posix_spawn` until it returns) after a fresh launcher write, calm and under `scripts/test-under-load.sh`; a launcher replaced by a copy carrying the quarantine attribute (how long its exec blocks); whether your account can mount a volume without an administrator, and how long an exec of a launcher linked to a file on it blocks once the volume stalls; and a burst of never-proving history reads, against the time of another client's request and of the server child's restart | whether the proof is affordable at every session start, whether its limit holds under load, and whether the spawn's move off the host's queue and the no-thread wait hold what N4 (b) claims (N4 (b) and its four sentences) | here, before K4a-ii is offered |
 
 ## Open doubts
 
@@ -827,7 +1180,7 @@ None was run for this design (documents only). "Here" needs no `sudo` and no dia
    `pair.c`) and the handover keeper relies on it, but only a sentence of it is kept, not the probe or its output, and
    not KP10's order (the review's F6); `Sockets+Darwin.swift`'s comment says a socket's token moves with whoever last
    used it, which is why the keeper never takes the connection's token as proof (it asks it once, as the narrowing
-   check of doubt 12). K-M1 reruns it in KP10's order and keeps it as a row; K2 and K4a wait on that row.
+   check of doubt 12). K-M1 reruns it in KP10's order and keeps it as a row; K2 and K4a-ii wait on that row.
 2. **The key travels in clear over the pair** to whoever holds the maker's end. That rests on the host-side rules
    (one pair per request, no descriptor kept, spawns that inherit no end, none taken from arguments or parcels): a
    future host bug that leaks an end mid-request gives the key away. Sealing the answer to a fresh key the host makes
@@ -835,7 +1188,9 @@ None was run for this design (documents only). "Here" needs no `sudo` and no dia
    reviewer's call.
 3. **The keeper can't tell the genuine host's modes apart**, and serves every pinned build. J0a's rule 2 and the
    unswitched-build rule carry it, as they carry the Keychain today; a mode added later that calls `NodeAnchor` breaks
-   it, and only J0a's test would catch it.
+   it, and only J0a's test would catch it. What a pinned image's other modes hand out is N1's rule (KP20d); a test
+   flag or a mode added later that gives a pair end to code a session names breaks that, and only K4a-ii's tests and
+   the pair lint would catch it.
 4. **It runs as root, unsandboxed.** A sandbox profile, or a dedicated system user owning `store/`, would narrow what a
    bug in it reaches; not taken (more install, more to measure). Its input from your account is one `recvmsg` and a
    Security check before anything else is read.
@@ -869,12 +1224,19 @@ None was run for this design (documents only). "Here" needs no `sudo` and no dia
     swapped `--server` file. K4a closes it the handover keeper's way (a channel, a proof by a fresh pair, then the
     link), its proof resting on K-M1 alone, and every spawn naming what it keeps closes the race that hands a child
     both ends (KP20b). It also rests on the image writing nothing on a channel or a proof pair but the handshake's fixed
-    bytes, which K4's lint holds (the fourth class). Reading the maker's command line as root
+    bytes, which a type holds (`HandshakeEnd`, the re-check's answer to its question 4; the lint checks that every
+    channel and proof pair is one). The re-check found the proof alone not enough in a host a session starts (N1): there
+    the session chooses what the host expects, so a pinned image expects only its own code, its row's server, or across
+    the checked node's own switch a target the record pins (KP20d, KP20e). Reading the maker's command line as root
     (`KERN_PROCARGS2`) is not taken (Open questions 8; F11 measured only if it is ever revisited).
 14. **The root build's tie to the commit is git's object hashes** (SHA-1 in this repository): root recomputes each and
     requires them to lead to `COMMIT`, but a chosen-prefix collision would let objects of a session's making hash as a
-    commit that passed CI. Root's check must detect a collision attack (git's `sha1dc`) or refuse; whether the `git`
-    root runs does is K-M13, and K5 waits on it.
+    commit that passed CI. Root's `git` must detect a collision attack (git's `sha1dc`), or the step refuses; K-M13
+    measures it (the backend `git version --build-options` names, and `index-pack --strict` refusing a published
+    colliding pair), and K5's real use waits on it. The fallback reader is dropped (the re-check's question 1: it
+    could only recompute hashes). Once detection is measured present it is enough for this threat: a useful collision
+    also needs its benign twin merged through review and both CI runners on v2, and any second tie would have to cover
+    the commit object and the top tree too, with none found that ties to the CI'd commit without SHA-1 and GitHub.
 
 ## Open questions for the lead or the user
 
@@ -907,7 +1269,10 @@ None was run for this design (documents only). "Here" needs no `sudo` and no dia
    checked node too (F1), so reading the maker's command line as root (`KERN_PROCARGS2`, the earlier recommendation)
    wouldn't close it: the checked node's own parser maker has the checked grammar. Taken instead: the image's
    children prove their code with a fresh pair before they get a link, and every spawn sets `CLOEXEC_DEFAULT`, with a
-   lint (K4a, [The host's side](#the-hosts-side)). The command line read as root is not taken; were the lead ever to
+   lint (K4a, [The host's side](#the-hosts-side)), and (the re-check's N1, the lead's ruling) a pinned image gives pair
+   ends only to its own code, its row's server, or across the checked node's own switch a target the record pins, with
+   its test flags and by-path handover refused (KP20d, KP20e). The command line read as root is not taken (it was the
+   re-check's alternative (B) for N1, not chosen); were the lead ever to
    want the keeper itself to refuse the image's other modes (KP12), it would come back as the review's F1 (d) says,
    after F11's measurement. Fixing the parser's launcher to the image's own file is no better (the builds folder is
    yours, and macOS has no exec from a descriptor).
@@ -989,3 +1354,57 @@ the property's statement and the journal's P30/P34/P35 row carry KP6a's exceptio
 `damaged` root store beside "not installed" (both facts your account can't cause); a merged "installed, not answering"
 state if K-M10 (c) shows a full backlog refuses `connect` at once; the journal's `noKeeper` and row 7a words under 120
 characters.
+
+## Re-check of 2026-11-27: the answers
+
+The re-check of `8a2f13ea` (`RECHECK-keeper-design.md`), each new finding and each answer to the design's open
+questions, with what this branch changed and where. The lead's rulings of 2026-11-27 decided N1 to N4 and the four
+questions; the readings the lead accepted on N1's extension and N2's close are said as such.
+
+| Finding | What changed | Where |
+| --- | --- | --- |
+| **N1** (Important) in a host a session starts, the server child and a `--handover-test-keeper` keeper are "proven" against the session's own program | **A pinned host image never gives an end of a pair it writes on to code other than its own or its row's pinned server, in any mode** (the lead's ruling), with **one named extension the lead accepted**: across the checked node's own switch only, a target host the same record pins, proven by its token against that row, both rows at or after the floor, the target itself a pinned image under the rule (without it the ruling's words would forbid the checked node's own switch, whose handover keeper and new image run the target build's cdhash: `keeperTarget`). Pinned is read as the keeper reads it (hardened, its own cdhash a `host` row, the record read afresh before each handout, nothing from arguments or environment; a failed read refuses the handout). A pinned image's server child is its row's server in every mode (a `--server` that isn't is refused before the spawn; the proof against the row's cdhash; each app connection checked against the record again); `--handover-test-keeper` and `--handover-test-secret` refused at the start and at a switch; the by-path handover refused; so every switch form is refused in a pinned image's non-checked modes. The property is now stated that way in the host's side, the call-site table and the threat table | The host's side (its fourth rule, K4a step 2, the new rule after K4a's tests, the call-site table's `AppConnector.swift:123`, `:286`, `HostHandover.swift:315`, `MacHandoverKeeper.swift:141`); For you ("What it doesn't", last bullet); the threat rows "Copies the node" and "Talks to the keeper"; **KP20d** (the server child and the test keeper) and **KP20e** (the extension) in Every path to the property; Doubts 3, 13; Open questions 8; build order **K4a-ii** with N1's tests (`aPinnedImageGivesNoPairEndToCodeASessionNamed` for the server child, `aPinnedImageRefusesTheTestKeeperAndItsSecret` for the `--handover-test-keeper` keeper, and four more). **This round's blind check found one more path** (a build run by a session in the install window, before its pins step, would keep the ends it gave out then, served once pinned): closed by the lead's choice (A), the rule keyed on "hardened" (a hardened image that isn't pinned hands out nothing), its cost stated (the hardened arm of `MacKeeperHandoverTests` to function level and K7); (B), a row's write time against the maker's start, rejected (the checked switch execs in place) | **KP20f** too |
+| **N2** (Important) builds pinned before K4a carry F1's gap whole, and the keeper serves every pinned build | **Three rules** (the ruling, and the close the lead adopted): the setup's pins step in its existing `--build … --fresh` form, the same record `--keep 1` leaves, in the pins step's own `sudo` (no third password), said before the password; **the floor** (K4b's commit on v2), refused by the install at the setup and after, `git merge-base --is-ancestor` in its fresh fetch (every update runs the installed build's copy of the script, so it checks; **amended by the narrow re-check**: a script from K4b up to K5 had no check, so the floor is K4a-ii's commit, checked by K4b's own install script: [below](#narrow-re-check-of-2026-11-27-the-answers)); **the pins record's `format 2` from the floor on**, which pre-floor pins steps refuse whole and the keeper alone reads, so a first-form install of an older commit (run by that commit's own script once `current` is deleted) writes no served row. Costs stated (no build from before the floor installed or started as the node again; going back needs an administrator); what stays under "the choice of commit" stated (commits at or after the floor; a rewritten install script, S1's class); the general rule beside the `--keep 1` lever. K7's read-only look at this Mac's real record (owed: not made here) | Install, update and removal ("Only builds at or after the floor are ever served", "Order at setup"); How this relates to rows 7 and 10's record (the general rule); For you ("Setup"); the threat row "Copies the node"; **KP6b**, KP6, KP14, KP22; build order **K4b**, K5 (`theSetupKeepsOnlyTheBuildItInstalls`, `anInstallRefusesACommitBeforeTheFloor` and the rest), K7 |
+| **N3** (Doubt) the password rule rests on a classification of read failures the design didn't make | **Three kinds, and no other**: `damaged` only when read whole and refused (parse, owner, mode, ACL, link, uid); `ENOENT` alone is missing for the store and "not installed" for the plist and program; every other failure is `readError`, worded like busy, making no key, never mentioning a password, the setup line or an install. The same split for the pins record (`noRecord` only when missing or read whole and refused) and for K6's walk. K1 gives the walk's refusal a kind. Whether your account can make a root `open` fail is K-M10 (d), written as if it can | What it stores ("What a failed read of the store is"); The interface, step 5 (the statuses); While the keeper is down (the rule, the new `readError` row, the running host's rows); For you (the password sentence); KP4, KP19a, KP25, KP29a; K1 (`aReadErrorIsNeitherDamagedNorMissing`, `aReadErrorMakesNoKey`), K4 (`aPinsReadErrorIsNotNoRecordAndNeverMentionsAnInstall`), K6 (`aWalkThatFailsOtherThanENOENTIsntNotInstalled`); K-M10 (d) |
+| **N4** (Doubt) K4a left open three things that decide whether it is safe to build | **(a)** hardened is keyed on the code's own signature: the child must be hardened exactly when the image is, never on an argument, the environment or a parcel; extended to the handover keeper's proof by KP20f's choice; **(b)** the proof waits off the host's queue, at most 10 s, holding only the session start or history read that needs it; **(c)** its cost per session start, history read and app connection (N1's pins read included) measured as **K-M14**, calm and under load, before and after, before it is offered | The host's side ("Three things the child proof states before it is built"); K-M14; build order K4a-ii (`aChildIsHardenedExactlyWhenTheImageIs`, `aProofThatNeverComesHoldsNothingElse`; K-M14 before it is offered) |
+| **N5** (Nit) the store's lock against the socket | the lock is taken before anything in the folder is touched; a second keeper exits having touched nothing | What it stores (`store/lock`); KP3a; K3 (`aSecondKeeperLeavesTheFirstsSocketAlone`) |
+| **N6** (Nit) the merged state's last sentence can be false | "…either a program on your Mac keeps it busy, or it keeps stopping", no login-item claim; that sentence kept on the busy row alone | While the keeper is down (the merged words); KP19a; K6 (`theMergedStateNamesNoLoginItem`) |
+| **N7** (Nit) where the keeper's own tests run | `Keeper/` declares no test target; its tests stay in the root package's test targets, which `scripts/test.sh` runs; the package lint checks there is no test target | Its program; K0 |
+| **N8** (Nit) the remedy doesn't say to stop what did it first | every copy of the remedy begins with "stop your sessions and what they started" | For you ("What it doesn't"); the threat row "Edits the build"; What it does (`open`); KP6a |
+
+| The design's question | Answer written in | Where |
+| --- | --- | --- |
+| **1.** Is collision detection in root's `git` enough? | K-M13 measures it with the exact `git` root runs (`git version --build-options` naming the SHA-1 backend; `index-pack --strict` refusing a published colliding pair); **the fallback reader is dropped**; if root's `git` doesn't detect, the step refuses and K5's real use waits; once present, detection is enough for this threat | Install (condition 1); Doubts 14; K-M13; K5 (`theStepRefusesWhenRootsGitDoesntDetectACollision`) |
+| **2.** Which slice owns the node's removal (F18)? | **the node-removal slice**, the Mac spec's step 12 (stops the agent first, then the keeper step's `--remove` or `--remove --forget-store`, said before the password), with `theNodesRemovalRemovesTheKeeper`; K5 keeps `--remove` and its own tests; the switch-on review checks it | Install, update and removal ("The node's removal runs the keeper's"); KP27; K5; the waits-on paragraph; the Mac spec's order of work, step 12 |
+| **3.** Where does K4a belong? | **K4a-i** (every spawn `CLOEXEC_DEFAULT` with its lint, behaviour-preserving, waits on nothing) and **K4a-ii** (the child proof, with N1's rule and N4's answers; waits on K4a-i, K-M1's row and K-M14), homed in the Mac spec's order (steps 10 and 11), each with its own review, listed in the keeper's build order because K4 and K4b wait on them | The host's side ("The change, K4a"); build order; the waits-on paragraph; the Mac spec's order of work, steps 10 and 11; the journal's J3a and J3b waits |
+| **4.** Is the fourth pair class sound? | **Yes, and held by a type**: `HandshakeEnd` exposes a channel's and a proof pair's end only through `sayHolding` and `sendDescriptor`, never a raw descriptor; the lint checks every channel and proof pair is one (`everyChannelAndProofPairIsAHandshakeEnd`) | The host's side (above the call-site table); KP20; Doubts 13; K4a-ii |
+
+**Also from the re-check's tables, taken:** `TCP.swift:144` named beside `EgressProxy.swift:418` in F1 (c)'s
+candidate lint; K5's user half reads the `Keeper` tree id from the install's fresh fetch with
+`GIT_NO_REPLACE_OBJECTS=1` (F2's note); K-M10 (b) may already be answered by `SocketDescriptors+Darwin.swift:62-66`'s
+recorded measurement (F7's note), cited or run again in K2.
+
+**Not closed, said plainly:** under "the choice of commit", any commit at or after the floor on v2 with both runners
+green is installed and served, and a rewritten install script (or a pins step of a session's making run with your
+password) writes any row: S1's class, as before. KP6a (F3) is unchanged, accepted by the user. Every K-M row stays
+owed (none was run), and the narrow re-check should attack first N1's extension (KP20e), then KP20f (a hardened image not yet
+pinned, keyed on "hardened"), then the floor's format close (KP6b), then N4 (b)'s wait. **KP20f's cost:** until K7,
+this Mac doesn't run a hardened host's switch end to end (`MacKeeperHandoverTests`' hardened arm); K7 carries it.
+
+## Narrow re-check of 2026-11-27: the answers
+
+The narrow re-check of `654c241c` (`RECHECK2-keeper-design.md`), limited to four points, and the lead's ruling of
+2026-11-27 ("v2 keeper design, after its narrow re-check"), which adopted the reviewer's four changes and ended the
+design's review rounds. Each change, and where the body now says it:
+
+| Point | The re-check's verdict | What changed | Where |
+| --- | --- | --- | --- |
+| **KP20e** (N1's one extension, the checked node's own switch) | closed | Nothing of its own. Its "both rows at or after the floor" now reads "both rows' commits contain K4a-ii", since a commit between K4a-ii and K4b can hold a row of a format-2 record (KP6b's change; that image refuses every handout, its `NodePins` reading only `format 1`) | The host's side (N1's rule, 3); KP20e; Install ("Rows a format-2 record can hold") |
+| **KP20f** (N1's rule keyed on "hardened") | closed with changes | **Rule 5 no longer refuses the by-path handover** of a hardened image that isn't pinned: that end crosses an exec in place at its maker's pid, so the keeper refuses it (KP10, resting on K-M1's row), and **K4a-ii is not offered until K-M1's row confirms it**. The refusal would have caught **the Mac app's own host** (hardened, never pinned), ending its sessions at every app update; the cost paragraph names it, says its handover at every app update must keep working, and K4a-ii's row carries `HostChildProofTests.theAppsHostStillHandsOverByPathAtAnAppUpdate`. **No exemption is keyed on `ownsLaunchers`** (on the Mac it follows the lock's path against `VIBESWITCHER_HOME`, which a session sets). **`parentRefusal`'s hardened check follows "exactly when"** beside `refusal`'s, so the switch's tests run on unhardened scratch hosts (`.aHandoverKeeperRequiresItsParentHardenedExactlyWhenItIs`). Pinned images still refuse the by-path handover (rule 4) | The host's side (N1's rule, 5; "An image pinned while it runs", its cost; N4 (a)); the call-site table's `HostHandover.swift:315`; KP20f; K4a-ii (row and tests, waiting on K-M1's row); the waits-on paragraph; the Mac spec's step 11 |
+| **KP6b** (the floor by the record's `format 2`) | not closed | **K4b's own install script refuses, unconditionally, any commit that doesn't contain K4a-ii's commit** (`git merge-base --is-ancestor` in its fresh fetch, beside step 6), so the floor check lands in the format's own commit and no script whose pins step writes `format 2` lacks it; the floor is K4a-ii's commit, K5 may raise it to K4b's. The re-check's sequence (a K4b-to-K5 script, installed or faked through `current`, installing a pre-floor commit into the format-2 record) is listed as **KP6c**, closed by that check, with its tests: `KeeperStepTests.aPreFloorCommitInstalledAfterAK4bToK5CommitWritesNoRow`, `.currentPointedAtAFolderOfSuchACommitsPublicFilesChangesNothing`, `.everyInstallThatWritesFormat2RefusesACommitWithoutK4a`. The general rule: a format bump and the install's floor check land in one commit, the floor naming an ancestor | Install, update and removal (rules 2 and 3, "Rows a format-2 record can hold", the general rule); KP6b, KP6c; K4b (row, tests, after K4a-ii on v2), K5; the waits-on paragraph; the Mac spec's step 11 |
+| **N4 (b)** (the child proof's wait off the host's queue, 10 s) | closed with changes | **Four sentences in K4a-ii**: the parser's spawn runs off the host's queue (a queue of its own for a session start, the read's own queue for a history read; the server child's alike), not bounded, since `posix_spawn`'s wait has no limit to set; the child ended at the limit off the queue and reaped by a process-exit source, never a blocking `waitpid`; a proof's wait is a read source and a steady-clock timer, holding no thread (the re-check's cap on proofs in flight not taken); a proof that only timed out gets words that accuse nothing ("the helper didn't answer in time"). Tests: `.aSpawnThatBlocksHoldsNotTheHostsQueue`, `.theReapAtTheLimitNeverBlocksTheHost`, `.proofsInFlightHoldNoThreadEach`, `.aProofThatOnlyTimedOutAccusesNothing`. **K-M14 extended**: the spawn's own time after a fresh launcher write, calm and under load; a launcher replaced by a quarantined copy; whether your account can mount a volume without an administrator and how long an exec from it blocks once stalled; a burst of never-proving history reads against another client's request and the server child's restart | The host's side (N4 (b) and its four sentences; the words for a failed proof); K4a-ii (row and tests); K-M14; the waits-on paragraph; the Mac spec's step 11 |
+
+**Not changed, said plainly:** no other redesign; the re-check's remark on KP20e (rule 1's "afresh before each
+handout" against `keeperTarget`'s one read at the switch's ask: only root moves the record in between) needs no
+change and has none. What stays open is as before: the choice among commits at or after the floor, a rewritten
+install script (S1's class), KP6a (accepted by the user), every K-M row owed, and KP20f's cost until K7.
