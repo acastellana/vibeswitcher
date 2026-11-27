@@ -61,8 +61,9 @@ share.
   worker runs it. A first launch failed at once with exit 127 (vs-heavy wasn't on this shell's PATH) and ran nothing,
   so it isn't counted. A separate shell sampled `ps` every 3 seconds: thread states from `ps -AM`, the run's process
   tree, the other holders' trees by their .holder notes, new processes, and `iostat`'s CPU idle beside it. No other
-  tool looked at any process. **The Mac wasn't calm for any of them:** two other slots were held throughout, and the CPU
-  was 0–25% idle. The run's own counts don't depend on that; the Mac's counts do.
+  tool looked at any process. **The Mac wasn't calm for runs 1 and 2:** two other slots were held throughout, and the CPU
+  was 0–25% idle. Run 3's build and tests ran on a calmer Mac (load 4–6, CPU 33–64% idle). The runs' own counts don't
+  depend on that; the Mac's counts do.
 - **Passive looks:** two looks of 3 minutes each, with no run of mine. They sampled the three live holders' trees the
   same way: test.sh at 6 cores, a v2 clone's test.sh at 6, and a load run at 4.
 
@@ -307,10 +308,19 @@ it (top fix 2). Fix 2a removes the most load that is certain, at the least cost 
 | --- | --- | --- | ---: | --- | --- | --- | ---: | --- |
 | 1 | `Resources/bin/vs-heavy bash scripts/test.sh --filter '<the 15 lint suites>'`, no .build (a cold build) | 4 (load 16.0, 2 other slots held) | 384 s | build, 5.5 min | 2.8 (max 5) | 12 (max 14) | 16 | 21.7 / 21.3 / 14% |
 | 2 | `Resources/bin/vs-heavy bash scripts/test.sh` (full suite, the build warm) | 4 (load 16.3, 2 other slots held) | 914 s | test, 14.7 min | 1.2 (max 12) | 15 (max 140) | 111 | 31.9 / 31.6 / 8% |
-| 3 | `bash scripts/test.sh --filter VibeHostTests` (bare, as a worker runs it) | RUN3_WIDTH | RUN3_TOOK | RUN3_PHASE | RUN3_R | RUN3_PROCS | RUN3_NEW | RUN3_MAC |
+| 3 | `bash scripts/test.sh --filter VibeHostTests` (bare, as a worker runs it) | **6** ("load 4.0, 1 of the other 2 slots held, at least the slot's share, 6") | 643 s, 570 of them in line | test, 1.0 min (warm build 0.2 min) | 1.0 (max 10); the build's link 3.2 (max 11) | 31 (max 40); 65 (max 145) at its end | 202; 911 at its end | 6.2 / 4.1 / 55% |
 
 - Run 1 passed its 52 lint tests. Run 2 ran 4,787 tests in 653 suites and passed in 897.6 s (4 known issues), with
-  the web tests 7 of 7 and 2 of 2. Run 3: RUN3_RESULT.
+  the web tests 7 of 7 and 2 of 2. Run 3 ran 275 tests in 61 suites and passed in 58.2 s (3 known issues), with the
+  security socket and signing checks and the web tests passing.
+- **Run 3 waited 9.5 minutes in line, "all 2 slots held".** For the first 6 of them (13:31–13:36 in the samples) slots 1
+  and 2 were held and slot 3 was free. At 13:37 a load run, started on the real home, took slot 3. Then it was given 6
+  cores, the share of 2 slots.
+- **Run 3's test phase spawned 202 processes a minute, and 911 a minute at its end** (up to 145 alive at once): the
+  hosts, MCP servers and git its tests start. Its own runnable threads stayed at 1.0 on average. Outside its tree,
+  syspolicyd, XProtect and tccd were runnable at every look (0.2–0.9 each), checking the new processes. These are root
+  daemons, so the recorder can't see them. This is the mechanism behind "short-lived" in the table above: the cost of a
+  spawn lands in the system's daemons, not in the run's tree.
 - Runs 1 and 2's sampler took membership and thread states in two `ps` calls, so a process born between them went
   unattributed: 3.2–4.4 runnable threads at the Mac's level. Read those runs' numbers as "1.2, plus a share of an
   unattributed 3.2–4.4". Run 3's sampler takes both from one `ps -AMww` snapshot and adds processes outside the tree that
@@ -327,7 +337,7 @@ it (top fix 2). Fix 2a removes the most load that is certain, at the least cost 
 - **What `checkout`, `clone` and `repo` are.** They are other folders' holders with no task. Their slot time, part of
   the 3,199 other-project and 366 no-project minutes, is unattributable.
 - **Spotlight's cause** (fix 1c's experiment) and **whether a cloned .build builds incrementally** (fix 4a's).
-- **A calm-Mac run.** All three observed runs had two other slots held. The runs' own thread counts stand; their
-  durations are those of a busy Mac.
+- **A calm-Mac full suite.** Runs 1 and 2 had two other slots held throughout. The runs' own thread counts stand;
+  their durations are those of a busy Mac.
 - **Uninterruptible waits.** ps state U averaged 0.0–2.6 threads across the looks. Whether the load average counts
   them on this kernel wasn't verified: they were too few to matter here.
