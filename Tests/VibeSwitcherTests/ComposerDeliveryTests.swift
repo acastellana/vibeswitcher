@@ -462,6 +462,28 @@ struct ComposerDeliveryTests {
         #expect(composer.drafts[key] ?? "" == "" && (composer.attachments[key] ?? []).isEmpty)
     }
 
+    /// A draft one harness left and saved (as the composer does half a second after the last change) isn't in the next
+    /// one's box: every harness has the same row key, and the drafts were kept in the test binary's standard defaults,
+    /// which every test process on this Mac shares. So "and another thing", the draft the put-back test ends with, was
+    /// what the image-alone case above sent with its image whenever that save had run (2026-11-27).
+    @Test func aDraftSavedInOneHarnessIsNotInTheNextOnesBox() async throws {
+        let first = try await Harness.start(temp)
+        first.chat.composer.drafts[first.key] = "left over"
+        first.chat.composer.attachments[first.key] = ["/left/over.png"]
+        first.chat.composer.save()
+        // Taken out again wherever it was saved, so a run without the fix leaves nothing for other runs.
+        defer {
+            first.chat.composer.drafts[first.key] = nil
+            first.chat.composer.attachments[first.key] = nil
+            first.chat.composer.save()
+        }
+        first.stop()
+        let second = try await Harness.start(temp)
+        defer { second.stop() }
+        #expect(second.chat.composer.drafts[second.key] == nil)
+        #expect(second.chat.composer.attachments[second.key] == nil)
+    }
+
     /// Each image path on a line of its own: Claude Code reads two quoted paths on one line as one path, not a file.
     @Test func aMessagesImagesAreEachOnALineAfterItsText() {
         let one = "/Users/x/.vibeswitcher/attachments/a.png", two = "/Users/x/My Shots/b.png"
