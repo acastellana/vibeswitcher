@@ -825,6 +825,508 @@ descriptors from sockets it didn't make; it doesn't close it. A Mach message's t
 the send. The design ([the keeper's design](../superpowers/specs/2026-11-27-v2-mac-keeper-design.md), "The proof after
 K-M1") takes it.
 
+### K-M16, here: assumption A as far as a hardened child sees itself, and D1's timing
+
+The part of K-M16 ([the keeper's design](../superpowers/specs/2026-11-27-v2-mac-keeper-design.md), "Measurements
+owed") the proof review of 2026-11-27 (`REVIEW-keeper-proof.md`: I1, I2, D1) said could be measured on the probe's own
+children, taken 2026-11-27 on this Mac (macOS 27.2, SIP enabled), as the user, no `sudo`, no dialog, no debugger or
+process-inspection tool, from an agent's session in a scratch clone of `v2-mac-keeper-proof` (branch
+`v2-mac-keeper-proof2`). A third part of the same probe: `bash scripts/mac-measure/pair-token.sh --a-routes` runs it
+alone (the run below); the script with no argument runs all three parts, and in that run the first two came out as
+their rows above say ((n0) to (n6) line for line but for pids, pidversions and the probe's cdhash; (l)'s counts 155 and
+119 of 200, none once the sender waits). Its images: **IMAGE** (pair-image, hardened) in two new modes, `ports FD`
+(main's first statement takes the time and reads its task's and its main thread's exception ports for each mask group,
+before `argv` is read; it then reports them, its limits and its own status word, clears every mask on its task and its
+main thread to `MACH_PORT_NULL` in one call and each group alone, and reads them again) and `limit NAME VALUE PATH
+ARGS…` (a launcher, as a session's would be: it lowers one of its own limits and execs its target); **PLAIN** (the same
+source as linked, not hardened); **BIG** (the same source with a 256 MiB section of random bytes, hardened: its
+signature covers 16387 pages); **WINDOW** ([probes/window-image.swift](../../scripts/mac-measure/probes/window-image.swift),
+a Swift image linking Foundation, hardened, whose first statement takes the time).
+
+**What was run, and what wasn't.** The probe names exception ports for its own children with a port **E** it made and
+never receives on: no exception is raised while E is named, none is received or answered, and E is destroyed unread.
+So this measures which handlers and limits a hardened image finds on itself at its first statement, and what the clear
+leaves; it doesn't measure what a handler that receives a fault can do. **The active routes were not run from an
+agent's session** (the lead's ruling of 2026-11-27, after a safety stop on this session's first attempt at them): a
+handler receiving a fault from such a child, a reply that changes its registers, a task port a child hands its parent
+before its exec used after it, and a traced exec (`PT_TRACE_ME`). They are owed to the keyboard trial, listed after the
+cases.
+
+```
+$ bash scripts/mac-measure/pair-token.sh --a-routes
+## K-M16, here (pair-token.sh --a-routes)  27.2 (26B123), System Integrity Protection status: enabled.
+pair-token: CodeDirectory v=20500 size=468 flags=0x10002(adhoc,runtime) hashes=8+2 location=embedded
+PROGRAM (facts-hardened): CodeDirectory v=20500 size=312 flags=0x10002(adhoc,runtime) hashes=3+2 location=embedded
+IMAGE (pair-image): CodeDirectory v=20500 size=292 flags=0x10002(adhoc,runtime) hashes=3+2 location=embedded
+PLAIN (pair-image, as linked): CodeDirectory v=20400 size=393 flags=0x20002(adhoc,linker-signed) hashes=9+0 location=embedded
+BIG (pair-image with 256 MiB): CodeDirectory v=20500 size=524584 flags=0x10002(adhoc,runtime) hashes=16387+2 location=embedded
+WINDOW (window-image.swift): CodeDirectory v=20500 size=326 flags=0x10002(adhoc,runtime) hashes=4+2 location=embedded
+IMAGE's file cdhash=2e52cbab01286e88
+BIG's file cdhash=343d6893e5383b81
+#### K-M16, here: what a hardened child finds on itself (assumption A's passive half)
+== (p0) baseline: IMAGE spawned with no exception port named (what a child of this probe inherits)
+  first statement at 622639891429 (mach_absolute_time); its own status word 0x22011311
+  rlimits (cur/max): STACK 8372224/67092480 DATA inf/inf NOFILE 1048576/inf CORE 0/inf
+  at its first statement:
+    task: ALL [mask 0x800 behaviour 0xa0000004 flavour 1]; CRASH none; CORPSE_NOTIFY [mask 0x2000 behaviour 0xa0000004 flavour 1];
+    main thread: ALL none; CRASH none; CORPSE_NOTIFY none;
+  the clear (EXC_MASK_ALL|EXC_MASK_CRASH|EXC_MASK_CORPSE_NOTIFY to MACH_PORT_NULL, one call): task 0x0, main thread 0x0; each group alone: ALL 0x0/0x0 CRASH 0x0/0x0 CORPSE_NOTIFY 0x0/0x0
+  after the clear:
+    task: ALL none; CRASH none; CORPSE_NOTIFY none;
+    main thread: ALL none; CRASH none; CORPSE_NOTIFY none;
+  the window, from just before the spawn or exec to its first statement: 97916 us
+  it exited 0
+== (p1) IMAGE spawned with E named in posix_spawn's attributes, EXCEPTION_DEFAULT
+  posix_spawnattr_setexceptionports_np(E, EXCEPTION_DEFAULT|MACH_EXCEPTION_CODES): ALL 0 CRASH 0 CORPSE_NOTIFY 0
+  first statement at 622639932145 (mach_absolute_time); its own status word 0x22011311
+  rlimits (cur/max): STACK 8372224/67092480 DATA inf/inf NOFILE 1048576/inf CORE 0/inf
+  at its first statement:
+    task: ALL [mask 0x1bfe behaviour 0x80000001 flavour 5]; CRASH [mask 0x400 behaviour 0x80000001 flavour 5]; CORPSE_NOTIFY [mask 0x2000 behaviour 0x80000001 flavour 5];
+    main thread: ALL none; CRASH none; CORPSE_NOTIFY none;
+  the clear (EXC_MASK_ALL|EXC_MASK_CRASH|EXC_MASK_CORPSE_NOTIFY to MACH_PORT_NULL, one call): task 0x0, main thread 0x0; each group alone: ALL 0x0/0x0 CRASH 0x0/0x0 CORPSE_NOTIFY 0x0/0x0
+  after the clear:
+    task: ALL none; CRASH none; CORPSE_NOTIFY none;
+    main thread: ALL none; CRASH none; CORPSE_NOTIFY none;
+  the window, from just before the spawn or exec to its first statement: 1340 us
+  it exited 0
+== (p1) IMAGE spawned with E named in posix_spawn's attributes, EXCEPTION_STATE
+  posix_spawnattr_setexceptionports_np(E, EXCEPTION_STATE|MACH_EXCEPTION_CODES): ALL 0 CRASH 0 CORPSE_NOTIFY 0
+  first statement at 622639993474 (mach_absolute_time); its own status word 0x22011311
+  rlimits (cur/max): STACK 8372224/67092480 DATA inf/inf NOFILE 1048576/inf CORE 0/inf
+  at its first statement:
+    task: ALL [mask 0x1bfe behaviour 0x80000002 flavour 6]; CRASH [mask 0x400 behaviour 0x80000002 flavour 6]; CORPSE_NOTIFY [mask 0x2000 behaviour 0x80000002 flavour 6];
+    main thread: ALL none; CRASH none; CORPSE_NOTIFY none;
+  the clear (EXC_MASK_ALL|EXC_MASK_CRASH|EXC_MASK_CORPSE_NOTIFY to MACH_PORT_NULL, one call): task 0x0, main thread 0x0; each group alone: ALL 0x0/0x0 CRASH 0x0/0x0 CORPSE_NOTIFY 0x0/0x0
+  after the clear:
+    task: ALL none; CRASH none; CORPSE_NOTIFY none;
+    main thread: ALL none; CRASH none; CORPSE_NOTIFY none;
+  the window, from just before the spawn or exec to its first statement: 1680 us
+  it exited 0
+== (p1) IMAGE spawned with E named in posix_spawn's attributes, EXCEPTION_STATE_IDENTITY
+  posix_spawnattr_setexceptionports_np(E, EXCEPTION_STATE_IDENTITY|MACH_EXCEPTION_CODES): ALL 0 CRASH 0 CORPSE_NOTIFY 0
+  first statement at 622640054008 (mach_absolute_time); its own status word 0x22011311
+  rlimits (cur/max): STACK 8372224/67092480 DATA inf/inf NOFILE 1048576/inf CORE 0/inf
+  at its first statement:
+    task: ALL [mask 0x1bfe behaviour 0x80000003 flavour 6]; CRASH [mask 0x400 behaviour 0x80000003 flavour 6]; CORPSE_NOTIFY [mask 0x2000 behaviour 0x80000003 flavour 6];
+    main thread: ALL none; CRASH none; CORPSE_NOTIFY none;
+  the clear (EXC_MASK_ALL|EXC_MASK_CRASH|EXC_MASK_CORPSE_NOTIFY to MACH_PORT_NULL, one call): task 0x0, main thread 0x0; each group alone: ALL 0x0/0x0 CRASH 0x0/0x0 CORPSE_NOTIFY 0x0/0x0
+  after the clear:
+    task: ALL none; CRASH none; CORPSE_NOTIFY none;
+    main thread: ALL none; CRASH none; CORPSE_NOTIFY none;
+  the window, from just before the spawn or exec to its first statement: 2076 us
+  it exited 0
+== (p1) IMAGE spawned with E named in posix_spawn's attributes, EXCEPTION_IDENTITY_PROTECTED
+  posix_spawnattr_setexceptionports_np(E, EXCEPTION_IDENTITY_PROTECTED|MACH_EXCEPTION_CODES): ALL 0 CRASH 0 CORPSE_NOTIFY 0
+  first statement at 622640143129 (mach_absolute_time); its own status word 0x22011311
+  rlimits (cur/max): STACK 8372224/67092480 DATA inf/inf NOFILE 1048576/inf CORE 0/inf
+  at its first statement:
+    task: ALL [mask 0x1bfe behaviour 0x80000004 flavour 5]; CRASH [mask 0x400 behaviour 0x80000004 flavour 5]; CORPSE_NOTIFY [mask 0x2000 behaviour 0x80000004 flavour 5];
+    main thread: ALL none; CRASH none; CORPSE_NOTIFY none;
+  the clear (EXC_MASK_ALL|EXC_MASK_CRASH|EXC_MASK_CORPSE_NOTIFY to MACH_PORT_NULL, one call): task 0x0, main thread 0x0; each group alone: ALL 0x0/0x0 CRASH 0x0/0x0 CORPSE_NOTIFY 0x0/0x0
+  after the clear:
+    task: ALL none; CRASH none; CORPSE_NOTIFY none;
+    main thread: ALL none; CRASH none; CORPSE_NOTIFY none;
+  the window, from just before the spawn or exec to its first statement: 3380 us
+  it exited 0
+== (p1) IMAGE spawned with E named in posix_spawn's attributes, EXCEPTION_STATE_IDENTITY_PROTECTED
+  posix_spawnattr_setexceptionports_np(E, EXCEPTION_STATE_IDENTITY_PROTECTED|MACH_EXCEPTION_CODES): ALL 0 CRASH 0 CORPSE_NOTIFY 0
+  first statement at 622640232576 (mach_absolute_time); its own status word 0x22011311
+  rlimits (cur/max): STACK 8372224/67092480 DATA inf/inf NOFILE 1048576/inf CORE 0/inf
+  at its first statement:
+    task: ALL [mask 0x1bfe behaviour 0x80000005 flavour 6]; CRASH [mask 0x400 behaviour 0x80000005 flavour 6]; CORPSE_NOTIFY [mask 0x2000 behaviour 0x80000005 flavour 6];
+    main thread: ALL none; CRASH none; CORPSE_NOTIFY none;
+  the clear (EXC_MASK_ALL|EXC_MASK_CRASH|EXC_MASK_CORPSE_NOTIFY to MACH_PORT_NULL, one call): task 0x0, main thread 0x0; each group alone: ALL 0x0/0x0 CRASH 0x0/0x0 CORPSE_NOTIFY 0x0/0x0
+  after the clear:
+    task: ALL none; CRASH none; CORPSE_NOTIFY none;
+    main thread: ALL none; CRASH none; CORPSE_NOTIFY none;
+  the window, from just before the spawn or exec to its first statement: 3291 us
+  it exited 0
+== (p2) a forked child sets E as its own task's exception port, EXCEPTION_DEFAULT, then execs IMAGE
+  the forked child's task_set_exception_ports(E, EXCEPTION_DEFAULT|MACH_EXCEPTION_CODES) just before its exec: ALL 0x0, CRASH 0x0, CORPSE_NOTIFY 0x0
+  first statement at 622640329149 (mach_absolute_time); its own status word 0x22011311
+  rlimits (cur/max): STACK 8372224/67092480 DATA inf/inf NOFILE 1048576/inf CORE 0/inf
+  at its first statement:
+    task: ALL [mask 0x1bfe behaviour 0x80000001 flavour 5]; CRASH [mask 0x400 behaviour 0x80000001 flavour 5]; CORPSE_NOTIFY [mask 0x2000 behaviour 0x80000001 flavour 5];
+    main thread: ALL none; CRASH none; CORPSE_NOTIFY none;
+  the clear (EXC_MASK_ALL|EXC_MASK_CRASH|EXC_MASK_CORPSE_NOTIFY to MACH_PORT_NULL, one call): task 0x0, main thread 0x0; each group alone: ALL 0x0/0x0 CRASH 0x0/0x0 CORPSE_NOTIFY 0x0/0x0
+  after the clear:
+    task: ALL none; CRASH none; CORPSE_NOTIFY none;
+    main thread: ALL none; CRASH none; CORPSE_NOTIFY none;
+  the window, from just before the spawn or exec to its first statement: 2371 us
+  it exited 0
+== (p2) a forked child sets E as its own task's exception port, EXCEPTION_STATE, then execs IMAGE
+  the forked child's task_set_exception_ports(E, EXCEPTION_STATE|MACH_EXCEPTION_CODES) just before its exec: ALL 0x0, CRASH 0x0, CORPSE_NOTIFY 0x0
+  first statement at 622640428197 (mach_absolute_time); its own status word 0x22011311
+  rlimits (cur/max): STACK 8372224/67092480 DATA inf/inf NOFILE 1048576/inf CORE 0/inf
+  at its first statement:
+    task: ALL [mask 0x1bfe behaviour 0x80000002 flavour 6]; CRASH [mask 0x400 behaviour 0x80000002 flavour 6]; CORPSE_NOTIFY [mask 0x2000 behaviour 0x80000002 flavour 6];
+    main thread: ALL none; CRASH none; CORPSE_NOTIFY none;
+  the clear (EXC_MASK_ALL|EXC_MASK_CRASH|EXC_MASK_CORPSE_NOTIFY to MACH_PORT_NULL, one call): task 0x0, main thread 0x0; each group alone: ALL 0x0/0x0 CRASH 0x0/0x0 CORPSE_NOTIFY 0x0/0x0
+  after the clear:
+    task: ALL none; CRASH none; CORPSE_NOTIFY none;
+    main thread: ALL none; CRASH none; CORPSE_NOTIFY none;
+  the window, from just before the spawn or exec to its first statement: 2992 us
+  it exited 0
+== (p2) a forked child sets E as its own task's exception port, EXCEPTION_STATE_IDENTITY, then execs IMAGE
+  the forked child's task_set_exception_ports(E, EXCEPTION_STATE_IDENTITY|MACH_EXCEPTION_CODES) just before its exec: ALL 0x0, CRASH 0x0, CORPSE_NOTIFY 0x0
+  first statement at 622640496304 (mach_absolute_time); its own status word 0x22011311
+  rlimits (cur/max): STACK 8372224/67092480 DATA inf/inf NOFILE 1048576/inf CORE 0/inf
+  at its first statement:
+    task: ALL [mask 0x1bfe behaviour 0x80000003 flavour 6]; CRASH [mask 0x400 behaviour 0x80000003 flavour 6]; CORPSE_NOTIFY [mask 0x2000 behaviour 0x80000003 flavour 6];
+    main thread: ALL none; CRASH none; CORPSE_NOTIFY none;
+  the clear (EXC_MASK_ALL|EXC_MASK_CRASH|EXC_MASK_CORPSE_NOTIFY to MACH_PORT_NULL, one call): task 0x0, main thread 0x0; each group alone: ALL 0x0/0x0 CRASH 0x0/0x0 CORPSE_NOTIFY 0x0/0x0
+  after the clear:
+    task: ALL none; CRASH none; CORPSE_NOTIFY none;
+    main thread: ALL none; CRASH none; CORPSE_NOTIFY none;
+  the window, from just before the spawn or exec to its first statement: 1917 us
+  it exited 0
+== (p2) a forked child sets E as its own task's exception port, EXCEPTION_IDENTITY_PROTECTED, then execs IMAGE
+  the forked child's task_set_exception_ports(E, EXCEPTION_IDENTITY_PROTECTED|MACH_EXCEPTION_CODES) just before its exec: ALL 0x0, CRASH 0x0, CORPSE_NOTIFY 0x0
+  first statement at 622640562092 (mach_absolute_time); its own status word 0x22011311
+  rlimits (cur/max): STACK 8372224/67092480 DATA inf/inf NOFILE 1048576/inf CORE 0/inf
+  at its first statement:
+    task: ALL [mask 0x1bfe behaviour 0x80000004 flavour 5]; CRASH [mask 0x400 behaviour 0x80000004 flavour 5]; CORPSE_NOTIFY [mask 0x2000 behaviour 0x80000004 flavour 5];
+    main thread: ALL none; CRASH none; CORPSE_NOTIFY none;
+  the clear (EXC_MASK_ALL|EXC_MASK_CRASH|EXC_MASK_CORPSE_NOTIFY to MACH_PORT_NULL, one call): task 0x0, main thread 0x0; each group alone: ALL 0x0/0x0 CRASH 0x0/0x0 CORPSE_NOTIFY 0x0/0x0
+  after the clear:
+    task: ALL none; CRASH none; CORPSE_NOTIFY none;
+    main thread: ALL none; CRASH none; CORPSE_NOTIFY none;
+  the window, from just before the spawn or exec to its first statement: 1927 us
+  it exited 0
+== (p2) a forked child sets E as its own task's exception port, EXCEPTION_STATE_IDENTITY_PROTECTED, then execs IMAGE
+  the forked child's task_set_exception_ports(E, EXCEPTION_STATE_IDENTITY_PROTECTED|MACH_EXCEPTION_CODES) just before its exec: ALL 0x0, CRASH 0x0, CORPSE_NOTIFY 0x0
+  first statement at 622640669765 (mach_absolute_time); its own status word 0x22011311
+  rlimits (cur/max): STACK 8372224/67092480 DATA inf/inf NOFILE 1048576/inf CORE 0/inf
+  at its first statement:
+    task: ALL [mask 0x1bfe behaviour 0x80000005 flavour 6]; CRASH [mask 0x400 behaviour 0x80000005 flavour 6]; CORPSE_NOTIFY [mask 0x2000 behaviour 0x80000005 flavour 6];
+    main thread: ALL none; CRASH none; CORPSE_NOTIFY none;
+  the clear (EXC_MASK_ALL|EXC_MASK_CRASH|EXC_MASK_CORPSE_NOTIFY to MACH_PORT_NULL, one call): task 0x0, main thread 0x0; each group alone: ALL 0x0/0x0 CRASH 0x0/0x0 CORPSE_NOTIFY 0x0/0x0
+  after the clear:
+    task: ALL none; CRASH none; CORPSE_NOTIFY none;
+    main thread: ALL none; CRASH none; CORPSE_NOTIFY none;
+  the window, from just before the spawn or exec to its first statement: 2377 us
+  it exited 0
+== (p3) a forked child sets E on its own thread (the one that execs), EXCEPTION_DEFAULT, then execs IMAGE
+  the forked child's thread_set_exception_ports (its own thread, the one that execs)(E, EXCEPTION_DEFAULT|MACH_EXCEPTION_CODES) just before its exec: ALL 0x0, CRASH 0x0, CORPSE_NOTIFY 0x0
+  first statement at 622640742524 (mach_absolute_time); its own status word 0x22011311
+  rlimits (cur/max): STACK 8372224/67092480 DATA inf/inf NOFILE 1048576/inf CORE 0/inf
+  at its first statement:
+    task: ALL [mask 0x800 behaviour 0xa0000004 flavour 1]; CRASH none; CORPSE_NOTIFY [mask 0x2000 behaviour 0xa0000004 flavour 1];
+    main thread: ALL none; CRASH none; CORPSE_NOTIFY none;
+  the clear (EXC_MASK_ALL|EXC_MASK_CRASH|EXC_MASK_CORPSE_NOTIFY to MACH_PORT_NULL, one call): task 0x0, main thread 0x0; each group alone: ALL 0x0/0x0 CRASH 0x0/0x0 CORPSE_NOTIFY 0x0/0x0
+  after the clear:
+    task: ALL none; CRASH none; CORPSE_NOTIFY none;
+    main thread: ALL none; CRASH none; CORPSE_NOTIFY none;
+  the window, from just before the spawn or exec to its first statement: 1910 us
+  it exited 0
+== (p3) a forked child sets E on its own thread (the one that execs), EXCEPTION_STATE, then execs IMAGE
+  the forked child's thread_set_exception_ports (its own thread, the one that execs)(E, EXCEPTION_STATE|MACH_EXCEPTION_CODES) just before its exec: ALL 0x0, CRASH 0x0, CORPSE_NOTIFY 0x0
+  first statement at 622640809576 (mach_absolute_time); its own status word 0x22011311
+  rlimits (cur/max): STACK 8372224/67092480 DATA inf/inf NOFILE 1048576/inf CORE 0/inf
+  at its first statement:
+    task: ALL [mask 0x800 behaviour 0xa0000004 flavour 1]; CRASH none; CORPSE_NOTIFY [mask 0x2000 behaviour 0xa0000004 flavour 1];
+    main thread: ALL none; CRASH none; CORPSE_NOTIFY none;
+  the clear (EXC_MASK_ALL|EXC_MASK_CRASH|EXC_MASK_CORPSE_NOTIFY to MACH_PORT_NULL, one call): task 0x0, main thread 0x0; each group alone: ALL 0x0/0x0 CRASH 0x0/0x0 CORPSE_NOTIFY 0x0/0x0
+  after the clear:
+    task: ALL none; CRASH none; CORPSE_NOTIFY none;
+    main thread: ALL none; CRASH none; CORPSE_NOTIFY none;
+  the window, from just before the spawn or exec to its first statement: 1979 us
+  it exited 0
+== (p3) a forked child sets E on its own thread (the one that execs), EXCEPTION_STATE_IDENTITY, then execs IMAGE
+  the forked child's thread_set_exception_ports (its own thread, the one that execs)(E, EXCEPTION_STATE_IDENTITY|MACH_EXCEPTION_CODES) just before its exec: ALL 0x0, CRASH 0x0, CORPSE_NOTIFY 0x0
+  first statement at 622640879868 (mach_absolute_time); its own status word 0x22011311
+  rlimits (cur/max): STACK 8372224/67092480 DATA inf/inf NOFILE 1048576/inf CORE 0/inf
+  at its first statement:
+    task: ALL [mask 0x800 behaviour 0xa0000004 flavour 1]; CRASH none; CORPSE_NOTIFY [mask 0x2000 behaviour 0xa0000004 flavour 1];
+    main thread: ALL none; CRASH none; CORPSE_NOTIFY none;
+  the clear (EXC_MASK_ALL|EXC_MASK_CRASH|EXC_MASK_CORPSE_NOTIFY to MACH_PORT_NULL, one call): task 0x0, main thread 0x0; each group alone: ALL 0x0/0x0 CRASH 0x0/0x0 CORPSE_NOTIFY 0x0/0x0
+  after the clear:
+    task: ALL none; CRASH none; CORPSE_NOTIFY none;
+    main thread: ALL none; CRASH none; CORPSE_NOTIFY none;
+  the window, from just before the spawn or exec to its first statement: 1874 us
+  it exited 0
+== (p3) a forked child sets E on its own thread (the one that execs), EXCEPTION_IDENTITY_PROTECTED, then execs IMAGE
+  the forked child's thread_set_exception_ports (its own thread, the one that execs)(E, EXCEPTION_IDENTITY_PROTECTED|MACH_EXCEPTION_CODES) just before its exec: ALL 0x0, CRASH 0x0, CORPSE_NOTIFY 0x0
+  first statement at 622640974691 (mach_absolute_time); its own status word 0x22011311
+  rlimits (cur/max): STACK 8372224/67092480 DATA inf/inf NOFILE 1048576/inf CORE 0/inf
+  at its first statement:
+    task: ALL [mask 0x800 behaviour 0xa0000004 flavour 1]; CRASH none; CORPSE_NOTIFY [mask 0x2000 behaviour 0xa0000004 flavour 1];
+    main thread: ALL none; CRASH none; CORPSE_NOTIFY none;
+  the clear (EXC_MASK_ALL|EXC_MASK_CRASH|EXC_MASK_CORPSE_NOTIFY to MACH_PORT_NULL, one call): task 0x0, main thread 0x0; each group alone: ALL 0x0/0x0 CRASH 0x0/0x0 CORPSE_NOTIFY 0x0/0x0
+  after the clear:
+    task: ALL none; CRASH none; CORPSE_NOTIFY none;
+    main thread: ALL none; CRASH none; CORPSE_NOTIFY none;
+  the window, from just before the spawn or exec to its first statement: 2489 us
+  it exited 0
+== (p3) a forked child sets E on its own thread (the one that execs), EXCEPTION_STATE_IDENTITY_PROTECTED, then execs IMAGE
+  the forked child's thread_set_exception_ports (its own thread, the one that execs)(E, EXCEPTION_STATE_IDENTITY_PROTECTED|MACH_EXCEPTION_CODES) just before its exec: ALL 0x0, CRASH 0x0, CORPSE_NOTIFY 0x0
+  first statement at 622641044052 (mach_absolute_time); its own status word 0x22011311
+  rlimits (cur/max): STACK 8372224/67092480 DATA inf/inf NOFILE 1048576/inf CORE 0/inf
+  at its first statement:
+    task: ALL [mask 0x800 behaviour 0xa0000004 flavour 1]; CRASH none; CORPSE_NOTIFY [mask 0x2000 behaviour 0xa0000004 flavour 1];
+    main thread: ALL none; CRASH none; CORPSE_NOTIFY none;
+  the clear (EXC_MASK_ALL|EXC_MASK_CRASH|EXC_MASK_CORPSE_NOTIFY to MACH_PORT_NULL, one call): task 0x0, main thread 0x0; each group alone: ALL 0x0/0x0 CRASH 0x0/0x0 CORPSE_NOTIFY 0x0/0x0
+  after the clear:
+    task: ALL none; CRASH none; CORPSE_NOTIFY none;
+    main thread: ALL none; CRASH none; CORPSE_NOTIFY none;
+  the window, from just before the spawn or exec to its first statement: 1824 us
+  it exited 0
+== (p4) control, not hardened: PLAIN spawned with E in posix_spawn's attributes, EXCEPTION_STATE
+  posix_spawnattr_setexceptionports_np(E, EXCEPTION_STATE|MACH_EXCEPTION_CODES): ALL 0 CRASH 0 CORPSE_NOTIFY 0
+  first statement at 622643225952 (mach_absolute_time); its own status word 0x22020201
+  rlimits (cur/max): STACK 8372224/67092480 DATA inf/inf NOFILE 1048576/inf CORE 0/inf
+  at its first statement:
+    task: ALL [mask 0x1bfe behaviour 0x80000002 flavour 6]; CRASH [mask 0x400 behaviour 0x80000002 flavour 6]; CORPSE_NOTIFY [mask 0x2000 behaviour 0x80000002 flavour 6];
+    main thread: ALL none; CRASH none; CORPSE_NOTIFY none;
+  the clear (EXC_MASK_ALL|EXC_MASK_CRASH|EXC_MASK_CORPSE_NOTIFY to MACH_PORT_NULL, one call): task 0x0, main thread 0x0; each group alone: ALL 0x0/0x0 CRASH 0x0/0x0 CORPSE_NOTIFY 0x0/0x0
+  after the clear:
+    task: ALL none; CRASH none; CORPSE_NOTIFY none;
+    main thread: ALL none; CRASH none; CORPSE_NOTIFY none;
+  the window, from just before the spawn or exec to its first statement: 90570 us
+  it exited 0
+== (p4) control, not hardened: a forked child sets E on its own task, EXCEPTION_STATE, then execs PLAIN
+  the forked child's task_set_exception_ports(E, EXCEPTION_STATE|MACH_EXCEPTION_CODES) just before its exec: ALL 0x0, CRASH 0x0, CORPSE_NOTIFY 0x0
+  first statement at 622643326580 (mach_absolute_time); its own status word 0x22020201
+  rlimits (cur/max): STACK 8372224/67092480 DATA inf/inf NOFILE 1048576/inf CORE 0/inf
+  at its first statement:
+    task: ALL [mask 0x1bfe behaviour 0x80000002 flavour 6]; CRASH [mask 0x400 behaviour 0x80000002 flavour 6]; CORPSE_NOTIFY [mask 0x2000 behaviour 0x80000002 flavour 6];
+    main thread: ALL none; CRASH none; CORPSE_NOTIFY none;
+  the clear (EXC_MASK_ALL|EXC_MASK_CRASH|EXC_MASK_CORPSE_NOTIFY to MACH_PORT_NULL, one call): task 0x0, main thread 0x0; each group alone: ALL 0x0/0x0 CRASH 0x0/0x0 CORPSE_NOTIFY 0x0/0x0
+  after the clear:
+    task: ALL none; CRASH none; CORPSE_NOTIFY none;
+    main thread: ALL none; CRASH none; CORPSE_NOTIFY none;
+  the window, from just before the spawn or exec to its first statement: 2740 us
+  it exited 0
+== (p4) control, not hardened: a forked child sets E on its own thread, EXCEPTION_STATE, then execs PLAIN
+  the forked child's thread_set_exception_ports (its own thread, the one that execs)(E, EXCEPTION_STATE|MACH_EXCEPTION_CODES) just before its exec: ALL 0x0, CRASH 0x0, CORPSE_NOTIFY 0x0
+  first statement at 622643404309 (mach_absolute_time); its own status word 0x22020201
+  rlimits (cur/max): STACK 8372224/67092480 DATA inf/inf NOFILE 1048576/inf CORE 0/inf
+  at its first statement:
+    task: ALL [mask 0x800 behaviour 0xa0000004 flavour 1]; CRASH none; CORPSE_NOTIFY [mask 0x2000 behaviour 0xa0000004 flavour 1];
+    main thread: ALL none; CRASH none; CORPSE_NOTIFY none;
+  the clear (EXC_MASK_ALL|EXC_MASK_CRASH|EXC_MASK_CORPSE_NOTIFY to MACH_PORT_NULL, one call): task 0x0, main thread 0x0; each group alone: ALL 0x0/0x0 CRASH 0x0/0x0 CORPSE_NOTIFY 0x0/0x0
+  after the clear:
+    task: ALL none; CRASH none; CORPSE_NOTIFY none;
+    main thread: ALL none; CRASH none; CORPSE_NOTIFY none;
+  the window, from just before the spawn or exec to its first statement: 2028 us
+  it exited 0
+#### K-M16, here: rlimits a launcher sets before its exec (no exception port named)
+== (q1) the launcher lowers RLIMIT_STACK to 64 KiB, then execs IMAGE
+  the launcher set its RLIMIT_STACK to 65536: done, then execs its target
+  first statement at 622643525789 (mach_absolute_time); its own status word 0x22011311
+  rlimits (cur/max): STACK 65536/67092480 DATA inf/inf NOFILE 1048576/inf CORE 0/inf
+  at its first statement:
+    task: ALL [mask 0x800 behaviour 0xa0000004 flavour 1]; CRASH none; CORPSE_NOTIFY [mask 0x2000 behaviour 0xa0000004 flavour 1];
+    main thread: ALL none; CRASH none; CORPSE_NOTIFY none;
+  the clear (EXC_MASK_ALL|EXC_MASK_CRASH|EXC_MASK_CORPSE_NOTIFY to MACH_PORT_NULL, one call): task 0x0, main thread 0x0; each group alone: ALL 0x0/0x0 CRASH 0x0/0x0 CORPSE_NOTIFY 0x0/0x0
+  after the clear:
+    task: ALL none; CRASH none; CORPSE_NOTIFY none;
+    main thread: ALL none; CRASH none; CORPSE_NOTIFY none;
+  it exited 0
+== (q2) the launcher lowers RLIMIT_STACK to 16 KiB, then execs IMAGE
+  the launcher set its RLIMIT_STACK to 16384: done, then execs its target
+  it was ended by signal 11 (Segmentation fault: 11)
+== (q3) the launcher lowers RLIMIT_STACK to 16 KiB, then execs WINDOW (Swift, Foundation)
+  the launcher set its RLIMIT_STACK to 16384: done, then execs its target
+  it was ended by signal 11 (Segmentation fault: 11)
+== (q4) the launcher lowers RLIMIT_NOFILE to 4 (descriptors 0 to 3 open), then execs IMAGE
+  the launcher set its RLIMIT_NOFILE to 4: done, then execs its target
+  it was ended by signal 6 (Abort trap: 6)
+== (q5) the launcher lowers RLIMIT_NOFILE to 5, then execs IMAGE
+  the launcher set its RLIMIT_NOFILE to 5: done, then execs its target
+  it was ended by signal 6 (Abort trap: 6)
+== (q6) the launcher lowers RLIMIT_NOFILE to 4, then execs WINDOW (Swift, Foundation)
+  the launcher set its RLIMIT_NOFILE to 4: done, then execs its target
+  it was ended by signal 6 (Abort trap: 6)
+== (q7) the launcher lowers RLIMIT_NOFILE to 5, then execs WINDOW (Swift, Foundation)
+  the launcher set its RLIMIT_NOFILE to 5: done, then execs its target
+  it was ended by signal 6 (Abort trap: 6)
+== (q8) the launcher lowers RLIMIT_DATA to 1 MiB, then execs IMAGE
+  the launcher set its RLIMIT_DATA to 1048576: Invalid argument, then execs its target
+  first statement at 622646305431 (mach_absolute_time); its own status word 0x22011311
+  rlimits (cur/max): STACK 8372224/67092480 DATA inf/inf NOFILE 1048576/inf CORE 0/inf
+  at its first statement:
+    task: ALL [mask 0x800 behaviour 0xa0000004 flavour 1]; CRASH none; CORPSE_NOTIFY [mask 0x2000 behaviour 0xa0000004 flavour 1];
+    main thread: ALL none; CRASH none; CORPSE_NOTIFY none;
+  the clear (EXC_MASK_ALL|EXC_MASK_CRASH|EXC_MASK_CORPSE_NOTIFY to MACH_PORT_NULL, one call): task 0x0, main thread 0x0; each group alone: ALL 0x0/0x0 CRASH 0x0/0x0 CORPSE_NOTIFY 0x0/0x0
+  after the clear:
+    task: ALL none; CRASH none; CORPSE_NOTIFY none;
+    main thread: ALL none; CRASH none; CORPSE_NOTIFY none;
+  it exited 0
+== (q9) the launcher lowers RLIMIT_CPU to 0, then execs IMAGE
+  it was ended by signal 24 (Cputime limit exceeded: 24) before its first statement wrote anything
+#### K-M16, here: the window before the first statement
+== (w1) IMAGE (C) spawned bare: the window
+  first statement at 622646470617 (mach_absolute_time); its own status word 0x22011311
+  rlimits (cur/max): STACK 8372224/67092480 DATA inf/inf NOFILE 1048576/inf CORE 0/inf
+  at its first statement:
+    task: ALL [mask 0x800 behaviour 0xa0000004 flavour 1]; CRASH none; CORPSE_NOTIFY [mask 0x2000 behaviour 0xa0000004 flavour 1];
+    main thread: ALL none; CRASH none; CORPSE_NOTIFY none;
+  the clear (EXC_MASK_ALL|EXC_MASK_CRASH|EXC_MASK_CORPSE_NOTIFY to MACH_PORT_NULL, one call): task 0x0, main thread 0x0; each group alone: ALL 0x0/0x0 CRASH 0x0/0x0 CORPSE_NOTIFY 0x0/0x0
+  after the clear:
+    task: ALL none; CRASH none; CORPSE_NOTIFY none;
+    main thread: ALL none; CRASH none; CORPSE_NOTIFY none;
+  the window, from just before the spawn or exec to its first statement: 2861 us
+  it exited 0
+== (w1) IMAGE (C) spawned bare: the window
+  first statement at 622646585599 (mach_absolute_time); its own status word 0x22011311
+  rlimits (cur/max): STACK 8372224/67092480 DATA inf/inf NOFILE 1048576/inf CORE 0/inf
+  at its first statement:
+    task: ALL [mask 0x800 behaviour 0xa0000004 flavour 1]; CRASH none; CORPSE_NOTIFY [mask 0x2000 behaviour 0xa0000004 flavour 1];
+    main thread: ALL none; CRASH none; CORPSE_NOTIFY none;
+  the clear (EXC_MASK_ALL|EXC_MASK_CRASH|EXC_MASK_CORPSE_NOTIFY to MACH_PORT_NULL, one call): task 0x0, main thread 0x0; each group alone: ALL 0x0/0x0 CRASH 0x0/0x0 CORPSE_NOTIFY 0x0/0x0
+  after the clear:
+    task: ALL none; CRASH none; CORPSE_NOTIFY none;
+    main thread: ALL none; CRASH none; CORPSE_NOTIFY none;
+  the window, from just before the spawn or exec to its first statement: 3924 us
+  it exited 0
+== (w1) IMAGE (C) spawned bare: the window
+  first statement at 622646660293 (mach_absolute_time); its own status word 0x22011311
+  rlimits (cur/max): STACK 8372224/67092480 DATA inf/inf NOFILE 1048576/inf CORE 0/inf
+  at its first statement:
+    task: ALL [mask 0x800 behaviour 0xa0000004 flavour 1]; CRASH none; CORPSE_NOTIFY [mask 0x2000 behaviour 0xa0000004 flavour 1];
+    main thread: ALL none; CRASH none; CORPSE_NOTIFY none;
+  the clear (EXC_MASK_ALL|EXC_MASK_CRASH|EXC_MASK_CORPSE_NOTIFY to MACH_PORT_NULL, one call): task 0x0, main thread 0x0; each group alone: ALL 0x0/0x0 CRASH 0x0/0x0 CORPSE_NOTIFY 0x0/0x0
+  after the clear:
+    task: ALL none; CRASH none; CORPSE_NOTIFY none;
+    main thread: ALL none; CRASH none; CORPSE_NOTIFY none;
+  the window, from just before the spawn or exec to its first statement: 2704 us
+  it exited 0
+== (w2) WINDOW (Swift, Foundation linked, hardened) spawned bare: the window
+  first statement at 622646771096 (mach_absolute_time); Foundation linked: yes
+  the window, from just before the spawn or exec to its first statement: 4032 us
+  it exited 0
+== (w2) WINDOW (Swift, Foundation linked, hardened) spawned bare: the window
+  first statement at 622646910528 (mach_absolute_time); Foundation linked: yes
+  the window, from just before the spawn or exec to its first statement: 5250 us
+  it exited 0
+== (w2) WINDOW (Swift, Foundation linked, hardened) spawned bare: the window
+  first statement at 622647078654 (mach_absolute_time); Foundation linked: yes
+  the window, from just before the spawn or exec to its first statement: 5637 us
+  it exited 0
+#### D1: Security's check timed (as the user; the keeper runs it as root)
+== (d1) IMAGE (35728 bytes) sends one message; its token checked
+  IMAGE, its file as signed:
+    csops_audittoken (the kernel's record, by the token), both calls in 0.00 ms: cdhash 2e52cbab01286e88 (the image's as started); status word 0x22011311
+    SecCodeCopyGuestWithAttributes: 0 in 1.76 ms
+    SecCodeCopySigningInformation(kSecCSDynamicInformation): 0 in 0.03 ms, cdhash 2e52cbab01286e88 (the image's as started), status word 0x22011311
+    SecCodeCheckValidity, default flags, its own cdhash (the keeper's runs): 0 in 0.03 ms
+    the same, again: 0 in 0.01 ms
+    the same, a third time: 0 in 0.01 ms
+    default flags, another image's cdhash (a pinned row that isn't the sender's): -67050 in 0.06 ms
+    kSecCSBasicValidateOnly, its own cdhash: -67070 in 0.02 ms
+    kSecCSMatchGuestRequirementInKernel, its own cdhash: -67052 in 0.03 ms
+    kSecCSMatchGuestRequirementInKernel, another image's cdhash: -67052 in 0.03 ms
+== (d2) BIG (268995488 bytes: IMAGE's source and a 256 MiB section) sends one message; its token checked; then a copy of IMAGE renamed over BIG's path while BIG runs, and the same token checked again
+  BIG, its file as signed:
+    csops_audittoken (the kernel's record, by the token), both calls in 0.00 ms: cdhash 343d6893e5383b81 (the image's as started); status word 0x22011311
+    SecCodeCopyGuestWithAttributes: 0 in 0.29 ms
+    SecCodeCopySigningInformation(kSecCSDynamicInformation): 0 in 0.61 ms, cdhash 343d6893e5383b81 (the image's as started), status word 0x22011311
+    SecCodeCheckValidity, default flags, its own cdhash (the keeper's runs): 0 in 0.21 ms
+    the same, again: 0 in 0.21 ms
+    the same, a third time: 0 in 0.21 ms
+    default flags, another image's cdhash (a pinned row that isn't the sender's): -67050 in 0.24 ms
+    kSecCSBasicValidateOnly, its own cdhash: -67070 in 0.02 ms
+    kSecCSMatchGuestRequirementInKernel, its own cdhash: -67052 in 0.03 ms
+    kSecCSMatchGuestRequirementInKernel, another image's cdhash: -67052 in 0.03 ms
+  a copy of IMAGE renamed over BIG's path; BIG still runs (pid 7585)
+  BIG, its path now IMAGE's copy:
+    csops_audittoken (the kernel's record, by the token), both calls in 0.00 ms: cdhash 343d6893e5383b81 (the image's as started); status word 0x22011311
+    SecCodeCopyGuestWithAttributes: 0 in 0.13 ms
+    SecCodeCopySigningInformation(kSecCSDynamicInformation): 0 in 0.02 ms, cdhash 2e52cbab01286e88 (not the image's as started), status word 0x22011311
+    SecCodeCheckValidity, default flags, its own cdhash (the keeper's runs): -67034 in 0.08 ms
+    the same, again: -67034 in 0.04 ms
+    the same, a third time: -67034 in 0.04 ms
+    default flags, another image's cdhash (a pinned row that isn't the sender's): -67034 in 0.04 ms
+    kSecCSBasicValidateOnly, its own cdhash: -67070 in 0.02 ms
+    kSecCSMatchGuestRequirementInKernel, its own cdhash: -67034 in 0.04 ms
+    kSecCSMatchGuestRequirementInKernel, another image's cdhash: -67034 in 0.04 ms
+  BIG ended and reaped; its token asked again:
+    csops_audittoken (the kernel's record, by the token), both calls in 0.00 ms: cdhash refused errno=3 (No such process); status refused errno=3 (No such process)
+== (d3) a forked child sends one message, then execs IMAGE; the token asked of the kernel and of Security after the exec
+  the child exec'd IMAGE (its close-on-exec pipe ended)
+  the message read after the exec, its trailer's pid=8299 pidversion=12208934:
+    csops_audittoken (the kernel's record, by the token), both calls in 0.00 ms: cdhash refused errno=3 (No such process); status refused errno=3 (No such process)
+    SecCodeCopyGuestWithAttributes: -67065
+```
+
+**Each case, in a sentence.**
+
+- **(p0) the baseline.** Every child here inherits two task-level handlers, `EXC_RESOURCE` (`0x800`) and
+  `EXC_CORPSE_NOTIFY` (`0x2000`), behaviour `0xa0000004` (`EXCEPTION_IDENTITY_PROTECTED` with 64-bit codes and a
+  backtrace preferred): the system's resource and corpse reporting, set before this probe; none at the thread level.
+  The clear removes them too.
+- **(p1) ports named in `posix_spawn`'s attributes** (`posix_spawnattr_setexceptionports_np`): accepted for every
+  behaviour, and the hardened image finds E at its first statement on every mask of `EXC_MASK_ALL` (`0x1bfe`), on
+  `EXC_MASK_CRASH` (`0x400`) and on `EXC_MASK_CORPSE_NOTIFY` (`0x2000`), with the behaviour and flavour named:
+  `EXCEPTION_DEFAULT`, `EXCEPTION_STATE` and `EXCEPTION_STATE_IDENTITY` (flavour 6, `ARM_THREAD_STATE64`),
+  `EXCEPTION_IDENTITY_PROTECTED`, `EXCEPTION_STATE_IDENTITY_PROTECTED`. The Hardened Runtime refuses and strips none.
+- **(p2) the child's own task's ports, set just before its exec**: the same: they cross the exec into the hardened
+  image, every behaviour, every mask.
+- **(p3) the exec'ing thread's own ports, set just before its exec**: the calls succeed, and the image's main thread has
+  **no** handler at its first statement, for any behaviour; only the inherited task-level pair is there. Thread-level
+  ports set before an exec don't cross it.
+- **(p4) not hardened (PLAIN)**: the same three results. The Hardened Runtime changes nothing here.
+- **The clear** (`task_set_exception_ports` and `thread_set_exception_ports` on `mach_thread_self()`, mask
+  `EXC_MASK_ALL | EXC_MASK_CRASH | EXC_MASK_CORPSE_NOTIFY`, `MACH_PORT_NULL`, `EXCEPTION_DEFAULT`,
+  `THREAD_STATE_NONE`): accepted (`0x0`) in one call on the task and on the main thread, in every case; each group alone
+  too; read back, no handler on any mask, task or thread. It shows what is left **after** the first statement; it
+  doesn't show that nothing was delivered **before** it (the window, below).
+- **(q1) `RLIMIT_STACK` 64 KiB set by a launcher**: crosses the exec; the image starts under it and runs.
+- **(q2), (q3) `RLIMIT_STACK` 16 KiB**: IMAGE and WINDOW (Swift, Foundation) are each ended by `SIGSEGV` before their
+  first statement (neither writes its line): **a bad-access fault forced at a launcher's choice, before any statement
+  of the image's own**, so before any clear can run.
+- **(q4) to (q7) `RLIMIT_NOFILE` 4 or 5**: both images are ended by `SIGABRT` before their first statement (dyld's
+  abort): a crash forced before the first statement, not a fault the image could continue from.
+- **(q8) `RLIMIT_DATA`**: refused to the launcher (`EINVAL`, from its unlimited value); the image starts unlimited.
+- **(q9) `RLIMIT_CPU` 0**: the launcher itself is ended (`SIGXCPU`) before its exec.
+- **(w1), (w2) the window**: from just before the spawn to the image's first statement, IMAGE (C) 1.3 to 3.9 ms and
+  WINDOW (Swift with Foundation) 4.0 to 5.6 ms warm (the first spawn of a fresh file about 90 to 100 ms). Within it
+  dyld and the libraries' initializers run with whatever handlers and limits the parent chose, and nothing of the
+  image's own has run. (In this run's first lines the first (p0) spawn is the cold one.)
+- **(d1) Security's check on IMAGE's token**: `SecCodeCheckValidity` with default flags and a `cdhash H"…"`
+  requirement (the keeper's `runs`) 0.01 to 0.03 ms; another image's cdhash `errSecCSReqFailed` (-67050).
+  `kSecCSBasicValidateOnly` is refused as a flag here (`errSecCSInvalidFlags`, -67070) and
+  `kSecCSMatchGuestRequirementInKernel` refuses a cdhash requirement (`errSecCSReqInvalid`, -67052).
+- **(d2) BIG, 256 MiB**: the same check 0.21 ms, the guest 0.3 ms: **Security doesn't hash the file's pages per
+  check** (D1's size half: refuted). **But it reads the file at the process's path:** once a copy of IMAGE is renamed
+  over BIG's path while BIG runs, the guest's dynamic signing information names IMAGE's cdhash, the file's, not BIG's,
+  and every validity check fails with `errSecCSStaticCodeChanged` (-67034, "the code on disk does not match what is
+  running"), BIG's own requirement included. So each check opens the sender's executable file, which for the node's
+  host is in a folder of your account's (D1's read half: confirmed); a file there that can't be read in bounded time
+  (a stalled volume: K-M14's mount question) would hold the reader, and a file renamed over a running genuine host's
+  path makes its check fail. **The kernel's own record by the token** (`csops_audittoken` with `CS_OPS_CDHASH` and
+  `CS_OPS_STATUS`) gives the cdhash the process was started with, unchanged after the rename, and the status word
+  (`0x22011311`), both in under 0.01 ms, opening no file; once the process exited it is refused (`ESRCH`).
+- **(d3) a message sent, then the sender's exec of IMAGE**: the kernel's record by that token is refused (`ESRCH`), as
+  Security's guest is (-67065, as (n2)): the kernel checks the token's pidversion.
+
+**Owed to the keyboard trial (K7), and why not here.** Each is the active half of a route above; each acts on another
+process's exception, registers, task port or tracing, which this agent's session doesn't do:
+
+1. **A fault delivered to a parent's handler.** IMAGE started with E named (p1, p2), then a fault forced in the window
+   ((q2)'s 16 KiB stack) and one forced after its first statement's clear: whether E receives a message in each, and
+   which identity ports it carries per behaviour (the protected behaviours name no control port).
+2. **A state reply.** For `EXCEPTION_STATE` and `EXCEPTION_STATE_IDENTITY_PROTECTED`: whether a reply that sets the
+   thread's state changes where the faulting thread of a hardened image continues.
+3. **A crash or corpse message's port.** For `EXC_CRASH` and `EXC_CORPSE_NOTIFY` ((q4)'s forced abort, and a crash after
+   the clear): whether the message carries a task or corpse port that reads the image's memory.
+4. **A task port handed over before the exec.** A child sends its parent `mach_task_self()`, then execs the hardened
+   image: whether that port still names a live task after the exec, and what it can read or change.
+5. **A traced exec.** `PT_TRACE_ME`, then the exec of the hardened image: refused, marked `CS_DEBUGGED` (which
+   `isHardened` refuses), or neither.
+
+**For the keeper's design.** Measured: task-level handlers a parent names cross into the hardened image, every
+behaviour and mask (p1, p2); thread-level ones don't cross an exec (p3); a launcher can force both a bad-access fault
+and an abort before the image's first statement ((q2), (q3), (q4) to (q7)); the window is a few milliseconds of dyld
+and initializers (w1, w2); the one-call clear of every mask works on the task and the main thread. So the clear as
+main's first statement closes every route **after** it, and none **before** it: a fault in the window goes to the
+parent's handler, and what that handler can do is the trial's (1) to (3). Until the trial shows those closed, the
+design treats them as open and serves only a host whose exception ports and limits no session chose. And D1: the
+keeper's `runs` reads the sender's file at its path, which a session controls; the kernel's record by the token
+doesn't. The design ([the keeper's design](../superpowers/specs/2026-11-27-v2-mac-keeper-design.md), "Proof review of
+2026-11-27: the answers") takes each.
+
 ## The keyboard session of 2026-11-26
 
 The user ran part A of [the runbook](v2-mac-keyboard-session.md), guided step by step, from 19:29 to 19:38 (local
