@@ -6098,9 +6098,6 @@ public final class LeadToolset: MCPToolset {
         throw Problem(text: "\(not): workflow.md's \(now), not what you last set with configure. Its commands run as you, its policy and limits hold the team, and any session of the team can write the file: a worker may have changed it. If you or the user did, set it again with configure (as it should read) and try again; if not, set it back with configure and tell the user.")
     }
 
-    /// The agents' config (`ConfigSeal`), looked at by the vault: a change made while the team's sessions ran holds new
-    /// workers, verifiers and merges (`not` says what didn't happen) until the user accepts it in the app; one made
-    /// while the team was quiet is the user's, sealed as it is and noted in the progress log.
     /// What every gate says when the look at the agents' config didn't complete (`checkConfig(not:)`): that nothing
     /// was checked, why that's likely, and what to do. It holds as a change does: nothing passes on an older look.
     static func configUnchecked(not: String, _ error: Error) -> String {
@@ -6112,6 +6109,9 @@ public final class LeadToolset: MCPToolset {
             + "for files no one meant to put there."
     }
 
+    /// The agents' config (`ConfigSeal`), looked at by the vault: a change made while the team's sessions ran holds new
+    /// workers, verifiers and merges (`not` says what didn't happen) until the user accepts it in the app; one made
+    /// while the team was quiet is the user's, sealed as it is and noted in the progress log.
     func checkConfig(not: String) throws {
         let found: LeadVault.ConfigCheck
         do { found = try vault.checkConfig(root: root) } catch {
