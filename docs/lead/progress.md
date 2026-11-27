@@ -5108,3 +5108,5 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-27 12:06 Planned why-a-heavy-slot: Why a heavy slot loads the Mac beyond its share of cores: measure where the load of a build or test run comes from, and name the fixes (report only)
 - 2026-11-27 12:06 Started a worker on the-mac-s-load
 - 2026-11-27 12:06 Automatically (auto_advance): Sent the-mac-s-load's worker the open Important findings the-mac-s-load:F1, the-mac-s-load:F2 from its audit at 06e1ba94 (in a new worker: its last one was released during the audit).
+- 2026-11-27 12:14 Exception on fix-refusedgit-swift-333 by lead of vibeswitcher: edits to scripts/temporary-folder-lint.txt accepted. Reason: The lead accepts one allow entry for the literal `/tmp` strings in the new guard test: they are the audit's own probe commands (`sudo -D /tmp git -C /tmp status`) checked as text, never used as a fold…
+- 2026-11-27 12:26 Merged find-why-the-team: Find why the team's vault could not be opened after the Mac's restart on 2026-11-27 (it started over and asked for confirmation) (build c08b3a3f8520)

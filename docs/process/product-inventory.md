@@ -435,5 +435,6 @@ Settings (⌘,), category by category: each option, under its section, with the 
 - `installing-tools` — `Sources/VibeSwitcher/Sandbox.swift`
 - `key-refused` — `Sources/VibeSwitcher/Sandbox.swift`
 - `vault-started-over` — `Sources/VibeSwitcher/Sandbox.swift`
+- `vault-key-unreadable` — `Sources/VibeSwitcher/Sandbox.swift`
 - `choose-folder` — `Sources/VibeSwitcher/Sandbox.swift`
 - `new-session-menu` — `Sources/VibeSwitcher/Sandbox.swift`
