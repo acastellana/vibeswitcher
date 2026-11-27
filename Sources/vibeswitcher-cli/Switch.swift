@@ -166,13 +166,41 @@ enum SwitchCommand {
                 return refused.exitCode
             }
         }
+        // The builds folder as the follow-up finds it, for `build.seal`'s (c): `current` is all the follow-up moves there.
+        let buildsBefore = SwitchSeal.listingLines(prefix)
         if let refused = followUp(context, prefix: prefix, accountHome: home, commit: target, handedOver: handedOver, hostPid: hostPid) {
             Say.err("vibeswitcher: \(ConfigSeal.inert(refused.text, limit: .max))")
             return refused.exitCode
         }
+        // What the follow-up wrote (`current`, the unit's ExecStart), accepted with the switch's own code.
+        if handedOver, let from = running, NodeUnit.isCommit(from) {
+            sealFollowUp(context, rewrites: rewrites(context), target: target, from: from, switchAction: action, typed: typed, buildsBefore: buildsBefore)
+        }
         Say.detail(startLine(context, commit: target, hostPid: hostPid))
         resultLines(context, target: target, rewrites: rewrites(context)).forEach(Say.out)
         return 0
+    }
+
+    /// `build.seal` after a follow-up that wrote something (`current` and the unit under systemd, `current` alone when
+    /// started detached), naming the switch's `switchAction` and carrying its typed code: `current` sealed against the
+    /// builds folder's listing from before the follow-up, then the unit's ExecStart (`SwitchSealCheck`, c and b). What
+    /// it accepted is said with --long; anything it couldn't, always, with the one command that settles it.
+    static func sealFollowUp(_ context: NodeContext, rewrites: NodeTexts.SwitchRewrites, target: String, from: String, switchAction: String,
+                             typed: Typed, buildsBefore: [String]) {
+        if case .nothing = rewrites { return }
+        do {
+            switch connectSettled(context) {
+            case .failure(let failure):
+                Say.out("the switch's own changes aren't accepted yet (the server couldn't be asked: \(ConfigSeal.inert(failure.message, limit: 400))): `vibeswitcher approve`")
+            case .success(let fresh):
+                let seal = WireKinds.BuildSeal.Args(commit: target, from: from, switchAction: switchAction, buildsBefore: buildsBefore)
+                switch fresh.change(WireKinds.BuildSeal.self, seal, action: UUID().uuidString.lowercased(), typed: typed, timeout: 60) {
+                case .success(let result, _): UpdateCommand.sayAccepted(sealed: result.sealed, refusals: result.sealRefusals)
+                case .refused(let reply): Say.out("the switch's own changes aren't accepted yet (\(ConfigSeal.inert(reply.error?.message ?? "refused", limit: 400))): `vibeswitcher approve`")
+                case .failure(let failure): Say.out("the switch's own changes aren't accepted yet (\(ConfigSeal.inert(failure.message, limit: 400))): `vibeswitcher approve`")
+                }
+            }
+        }
     }
 
     /// What a switch says when done, in two lines: switched (and, where the node's start line changed, the one command
@@ -180,8 +208,7 @@ enum SwitchCommand {
     static func resultLines(_ context: NodeContext, target: String, rewrites: NodeTexts.SwitchRewrites) -> [String] {
         var first = "switched to build \(ConfigSeal.inert(String(target.prefix(12)), limit: 64))"
         switch rewrites {
-        case .unitAndCurrent, .currentOnly: first += "; teams wait until you accept the new build: `vibeswitcher approve`"
-        case .nothing: break
+        case .unitAndCurrent, .currentOnly, .nothing: break
         }
         var page = "web: off (`vibeswitcher web` opens it)"
         if case .success(let client) = NodeClient.connect(context, warn: false), case .success(let status, _) = client.read(WireKinds.Status.self, WireNoArgs()) {
@@ -316,7 +343,7 @@ enum SwitchCommand {
             }
             Say.detail("no systemd: `current` names \(commit), so the next `vs start` runs it")
         }
-        Say.detail("every team waits until you accept the new build (`vibeswitcher approve`)")
+        Say.detail("the switch's code accepts the unit's ExecStart and `current` next (`build.seal`)")
         return nil
     }
 

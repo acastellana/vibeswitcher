@@ -198,7 +198,7 @@ struct SwitchTests {
         #expect(text.contains("a running team keeps its build until its lead restarts"), "\(text)")
         // ST-D16: who runs the old build's tool server after the switch (no worker is live at one: ST-D15).
         #expect(text.contains("a lead started before the switch keeps starting its workers with the old build's tool server"), "\(text)")
-        #expect(text.contains("every team waits until you accept the new build and the unit's change"), "\(text)")
+        #expect(text.contains("this code also accepts that unit's ExecStart and `current`, nothing else"), "\(text)")
         // The code is still typed (EN-D5): `build.switch` is a state change in the user's voice.
         #expect(NodeWire.kinds["build.switch"] == .user && NodeWire.changesState("build.switch"))
     }
@@ -221,7 +221,7 @@ struct SwitchTests {
         let line = "\(Self.a) 2026-11-16T10:00:00Z"
         let text = NodeTexts.rollback(from: Self.b, to: Self.a, line: line, rewrites: .unitAndCurrent)
         #expect(text.contains(Self.a) && text.contains(Self.b) && text.contains(line), "\(text)")
-        #expect(text.contains("keeps every session") && text.contains("every team waits until you accept the new build"), "\(text)")
+        #expect(text.contains("keeps every session") && text.contains("this code also accepts"), "\(text)")
         // A line holding a control character is shown inert.
         let odd = NodeTexts.rollback(from: Self.b, to: Self.a, line: "\(Self.a) \u{1b}[2Jx", rewrites: .unitAndCurrent)
         #expect(!odd.contains("\u{1b}"), "\(odd)")
@@ -236,7 +236,7 @@ struct SwitchTests {
                      NodeTexts.rollback(from: Self.a, to: Self.b, line: line, rewrites: .currentOnly)] {
             #expect(text.contains("`current` is moved to \(Self.b), so the next `vs start` runs it"), "\(text)")
             #expect(!text.contains("unit's ExecStart") && !text.contains("the unit change"), "\(text)")
-            #expect(text.contains("every team waits until you accept the new build (`vibeswitcher approve`)"), "\(text)")
+            #expect(text.contains("this code also accepts `current` naming it, nothing else"), "\(text)")
             #expect(text.contains("keeps every session"), "\(text)")
         }
         for text in [NodeTexts.switch(from: Self.a, to: Self.b, rewrites: .nothing("a scratch node")),

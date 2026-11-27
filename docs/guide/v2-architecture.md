@@ -175,7 +175,7 @@ first": the vault records it before it is done. "Card code": its code is checked
 | `board.image` | anyone of the uid |  |  |  | `Requests.act` |  | the page's (WireSchema) |  |  |  |
 | `board.task` | anyone of the uid |  |  |  | `Requests.act` |  | the page's (WireSchema) |  |  |  |
 | `brief` | the user's terminal, or a page that reads |  |  |  | `Requests.act` |  | `WireKinds.Brief` |  |  |  |
-| `build.seal` | the user's terminal | yes | yes |  | `Requests.act` | `commit`, `from`, `switchAction` | `WireKinds.BuildSeal` | its result |  | the terminal's alone |
+| `build.seal` | the user's terminal | yes | yes |  | `Requests.act` | `buildsBefore`, `commit`, `from`, `switchAction` | `WireKinds.BuildSeal` | its result |  | the terminal's alone |
 | `build.switch` | the user's terminal | yes | yes |  | `Requests.act` | `buildsAfter`, `buildsBeforeListing`, `commit` | `WireKinds.BuildSwitch` | its result |  | the terminal's alone |
 | `chat.image` | anyone of the uid |  |  |  | the live hub |  | the page's (WireSchema) |  |  |  |
 | `chat.page` | anyone of the uid |  |  |  | the live hub |  | the page's (WireSchema) |  |  |  |

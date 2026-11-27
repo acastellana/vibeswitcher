@@ -83,6 +83,75 @@ struct SwitchSealTests {
         #expect(left.contains("~/.claude/settings.json") && !left.contains(SwitchSeal.unitFolderName) && !left.contains(SwitchSeal.buildsName), "\(left)")
     }
 
+    /// The real node, 2026-11-27 (`update` 544a3506 → 8df1ee37, one code): after it, the builds folder and the unit
+    /// were held again. The update's own steps, in their order: the install (current and installs moved by it), the
+    /// builds folder sealed as it left it (rule a), then the follow-up's writes (the unit's ExecStart, `current` moved
+    /// to the build it already names), then `build.seal`. Nothing of the update's own may stay held.
+    @Test func anUpdatesOwnStepsLeaveNothingOfItsOwnHeld() throws {
+        let rig = try rig()
+        #expect(try rig.installAndSeal(Self.b).sealed == [SwitchSeal.buildsName])
+        // The command line's read just before the follow-up, then the follow-up (`SwitchFollowUp.apply`'s steps 3 and 5):
+        // `current` names B already (the install's), so the builds folder isn't changed after the seal.
+        let beforeSeal = SwitchSeal.listingLines(rig.prefix)
+        try rig.unitText(Self.b).write(toFile: rig.unit, atomically: true, encoding: .utf8)
+        #expect(SwitchFollowUp.moveCurrent(prefix: rig.prefix, to: Self.b) == nil)
+        #expect(SwitchSeal.listingLines(rig.prefix) == beforeSeal, "the follow-up changed the builds folder the update sealed")
+        let sealed = SwitchSealCheck.sealSwitch(unitFolder: rig.unitFolder, unitFile: "\(NodeStarter.unitName).service", prefix: rig.prefix,
+                                                from: Self.a, to: Self.b, buildsBefore: beforeSeal, home: rig.home, vault: rig.host.vault)
+        #expect(sealed.refusals.isEmpty, "\(sealed)")
+        try rig.look()
+        #expect(try rig.held().isEmpty, "the update's own changes held after its one code: \(rig.heldNow)")
+    }
+
+    /// A plain `switch` to a build installed and accepted before: its follow-up moves `current` and the unit's
+    /// ExecStart, and its one code accepts both (`build.seal`, the builds folder's listing from before the follow-up
+    /// vouched by the accepted hash); `current` the only entry that changed, naming the target. Anything else changed in
+    /// the builds folder meanwhile keeps it held, and the unit with it.
+    @Test func aSwitchsCurrentAndUnitAreAcceptedByItsCodeAndNothingElse() throws {
+        let rig = try rig()
+        #expect(try rig.installAndSeal(Self.b).sealed == [SwitchSeal.buildsName])
+        // Back to A as the node's (`current` and the unit), accepted: then the switch to B.
+        try rig.unitText(Self.a).write(toFile: rig.unit, atomically: true, encoding: .utf8)
+        #expect(SwitchFollowUp.moveCurrent(prefix: rig.prefix, to: Self.a) == nil)
+        try rig.look()
+        _ = SwitchSealCheck.vaultAccept([SwitchSeal.buildsKey: SwitchSeal.listingHash(rig.prefix)], name: SwitchSeal.buildsName, home: rig.home, vault: rig.host.vault)
+        _ = SwitchSealCheck.vaultAccept([SwitchSeal.unitFolderKey: try #require(SwitchSeal.folderHashes(folder: rig.unitFolder, name: SwitchSeal.unitFolderName,
+                                                                                                              file: "\(NodeStarter.unitName).service", swap: { $0 })?.now)],
+                                            name: SwitchSeal.unitFolderName, home: rig.home, vault: rig.host.vault)
+        try rig.look()
+        try #require(try rig.held().isEmpty, "\(rig.heldNow)")
+
+        let before = SwitchSeal.listingLines(rig.prefix)
+        try rig.unitText(Self.b).write(toFile: rig.unit, atomically: true, encoding: .utf8)
+        #expect(SwitchFollowUp.moveCurrent(prefix: rig.prefix, to: Self.b) == nil)
+        let sealed = SwitchSealCheck.sealSwitch(unitFolder: rig.unitFolder, unitFile: "\(NodeStarter.unitName).service", prefix: rig.prefix,
+                                                from: Self.a, to: Self.b, buildsBefore: before, home: rig.home, vault: rig.host.vault)
+        #expect(Set(sealed.sealed) == [SwitchSeal.buildsName, SwitchSeal.unitFolderName] && sealed.refusals.isEmpty, "\(sealed)")
+        try rig.look()
+        #expect(try rig.held().isEmpty, "\(rig.heldNow)")
+
+        // A plant in the builds folder beside the switch's `current`: nothing of it sealed, the unit held with it.
+        let again = SwitchSeal.listingLines(rig.prefix)
+        try rig.unitText(Self.a).write(toFile: rig.unit, atomically: true, encoding: .utf8)
+        #expect(SwitchFollowUp.moveCurrent(prefix: rig.prefix, to: Self.a) == nil)
+        try "x".write(toFile: (rig.prefix as NSString).appendingPathComponent("planted"), atomically: true, encoding: .utf8)
+        let planted = SwitchSealCheck.sealSwitch(unitFolder: rig.unitFolder, unitFile: "\(NodeStarter.unitName).service", prefix: rig.prefix,
+                                                 from: Self.b, to: Self.a, buildsBefore: again, home: rig.home, vault: rig.host.vault)
+        #expect(planted.sealed.isEmpty && !planted.refusals.isEmpty, "\(planted)")
+        try rig.look()
+        let held = try rig.held()
+        #expect(held.contains(SwitchSeal.buildsName) && held.contains(SwitchSeal.unitFolderName), "\(held)")
+    }
+
+    /// The follow-up moves `current` only when it names another build: one already naming the target (the install's)
+    /// is left as it is, so the builds folder the update sealed isn't changed after its seal.
+    @Test func currentAlreadyNamingTheTargetIsLeftAsItIs() throws {
+        let rig = try rig()
+        let before = SwitchSeal.listingHash(rig.prefix)
+        #expect(SwitchFollowUp.moveCurrent(prefix: rig.prefix, to: Self.a) == nil)
+        #expect(SwitchSeal.listingHash(rig.prefix) == before, "current moved onto itself changed the folder")
+    }
+
     @Test func aPlantBesideTheInstallOrInItsFolderIsNeverSealed() throws {
         let rig = try rig()
         let before = SwitchSeal.listingLines(rig.prefix)

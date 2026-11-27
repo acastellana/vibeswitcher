@@ -210,6 +210,9 @@ public enum SwitchFollowUp {
     static func moveCurrent(prefix: String, to commit: String, unit: Bool = true) -> StartRefusal? {
         let done = unit ? ": the unit names \(commit) and the manager has read it" : ""
         let current = NodeFolders.join(prefix, currentLink)
+        // Naming the target already (an `update`'s install moved it): left as it is, so the builds folder the update
+        // sealed isn't changed after its seal (`SwitchSealCheck`, c; the real node, 2026-11-27).
+        if let named = try? FileManager.default.destinationOfSymbolicLink(atPath: current), named == commit { return nil }
         let temporary = NodeFolders.join(prefix, ".\(currentLink).\(getpid()).\(UUID().uuidString.prefix(8)).tmp")
         guard symlink(commit, temporary) == 0 else {
             return StartRefusal("\(ConfigSeal.inert(current, limit: .max)) can't be moved to \(commit) (\(String(cString: strerror(errno))))\(done)", exitCode: 1)

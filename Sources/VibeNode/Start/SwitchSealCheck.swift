@@ -15,6 +15,13 @@ import VibeCore
 ///   4. `COMMIT` is laid out as install-node lays it out (`layoutRefusal`: `bin/`, `Resources/`, `build-info`, regular
 ///      files and folders, no links, nothing group- or other-writable; `bin/` the programs `build-info` names, each of
 ///      its recorded sha256, `NodeFolders.verifyBuild`); `current` links to `COMMIT`; `installs`' last line names it.
+/// (c) **`current`, moved by the follow-up** (a plain `switch`'s, to a build installed and accepted before), sealed by
+///     `build.seal` before (b): the builds folder's listing from just before the follow-up (`buildsBefore`, sent by the
+///     command line) hashes to the accepted hash; since, only `current` changed (`installChange`'s grouping, the
+///     folder's own line aside); it links to the target, an installed build. An `update`'s follow-up leaves `current`
+///     as the install left it (`SwitchFollowUp.moveCurrent` writes nothing when it names the target already), so its
+///     builds folder is as (a) sealed it (the real node, 2026-11-27: the follow-up moved `current` onto itself after
+///     (a), a new link, so the folder and then the unit stayed held after the update's one code).
 /// (b) **The unit folder** (`~/.config/systemd/user`, a `.folder`), sealed by `build.seal` after the follow-up: the
 ///     folder now, but for the node's unit with its `ExecStart` put back to the build it switched from, hashes to the
 ///     accepted one (`unitSwap`): `ExecStart` is the only line that changed, and it is exactly what the follow-up writes
@@ -164,6 +171,49 @@ public enum SwitchSealCheck {
         } catch {
             return Sealed(sealed: [], held: [], refusals: ["the vault couldn't be asked (\(error)): nothing of the unit folder was accepted"])
         }
+    }
+
+    /// (c): the builds folder sealed as the follow-up left it, when its only change since `buildsBefore` (the accepted
+    /// listing, from just before the follow-up) is `current`, linking to `to`. Nothing to do when it is the accepted one
+    /// already. Reads the disk and the vault.
+    public static func sealCurrent(prefix: String, to: String, buildsBefore: [String], home: String, vault: LeadVault) -> Sealed {
+        guard NodeUnit.isCommit(to) else { return Sealed(sealed: [], held: [], refusals: ["\(ConfigSeal.inert(to, limit: 80)) isn't a commit: nothing was sealed"]) }
+        do {
+            let record = try vault.guardedRecord(root: home) ?? [:]
+            let now = SwitchSeal.listingLines(prefix)
+            if record[SwitchSeal.buildsKey] == SwitchSeal.listingHash(lines: now) { return Sealed(sealed: [], held: ConfigSeal.held(in: record), refusals: []) }
+            guard !buildsBefore.isEmpty, record[SwitchSeal.buildsKey] == SwitchSeal.listingHash(lines: buildsBefore) else {
+                return Sealed(sealed: [], held: ConfigSeal.held(in: record), refusals: ["the builds folder before the switch's follow-up wasn't the one you last accepted: its change stays held (`vs config held`)"])
+            }
+            let before = SwitchSeal.entries(lines: buildsBefore), after = SwitchSeal.entries(lines: now)
+            let changed = Set(before.keys).union(after.keys).filter { before[$0] != after[$0] }
+            guard changed.isSubset(of: [SwitchFollowUp.currentLink]) else {
+                return Sealed(sealed: [], held: ConfigSeal.held(in: record), refusals: ["the builds folder changed beyond the switch's `current` ("
+                    + changed.subtracting([SwitchFollowUp.currentLink]).sorted().map { ConfigSeal.inert($0, limit: 80) }.joined(separator: ", ") + "): it stays held (`vs config held`)"])
+            }
+            guard let target = try? FileManager.default.destinationOfSymbolicLink(atPath: NodeFolders.join(prefix, SwitchFollowUp.currentLink)),
+                  target == to || target == NodeFolders.join(prefix, to) else {
+                return Sealed(sealed: [], held: ConfigSeal.held(in: record), refusals: ["current doesn't link to \(to): the builds folder stays held (`vs config held`)"])
+            }
+            if case .failure(let refused) = NodeFolders.verifyBuild(folder: NodeFolders.join(prefix, to), prefix: prefix) {
+                return Sealed(sealed: [], held: ConfigSeal.held(in: record), refusals: ["current links to \(to), which isn't an installed build (\(refused.text)): the builds folder stays held"])
+            }
+            return vaultAccept([SwitchSeal.buildsKey: SwitchSeal.listingHash(lines: now)], name: SwitchSeal.buildsName, home: home, vault: vault)
+        } catch {
+            return Sealed(sealed: [], held: [], refusals: ["the vault couldn't be asked (\(error)): nothing of the builds folder was accepted"])
+        }
+    }
+
+    /// `build.seal`'s: (c), then (b), what each sealed and refused together.
+    public static func sealSwitch(unitFolder: String, unitFile: String, prefix: String, from: String, to: String, buildsBefore: [String]?,
+                                  home: String, vault: LeadVault) -> Sealed {
+        let current = buildsBefore.map { sealCurrent(prefix: prefix, to: to, buildsBefore: $0, home: home, vault: vault) }
+        // A node with no unit (started detached: its follow-up moves `current` alone) has none to seal.
+        guard FileManager.default.fileExists(atPath: NodeFolders.join(unitFolder, unitFile)) else {
+            return current ?? Sealed(sealed: [], held: [], refusals: [])
+        }
+        let unit = sealUnit(unitFolder: unitFolder, unitFile: unitFile, prefix: prefix, from: from, to: to, home: home, vault: vault)
+        return Sealed(sealed: (current?.sealed ?? []) + unit.sealed, held: unit.held, refusals: (current?.refusals ?? []) + unit.refusals)
     }
 
     /// The vault's partial accept of `shown`.

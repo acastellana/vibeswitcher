@@ -307,11 +307,15 @@ extension WireKinds {
             /// The switch's own action id: this request has an action of its own (a server that answered the switch
             /// keeps its reply under that action, for that request's retries alone).
             public var switchAction: String?
-            public enum CodingKeys: String, CodingKey, CaseIterable { case commit, from, switchAction }
-            public init(commit: String?, from: String?, switchAction: String?) {
+            /// The builds folder's listing just before the switch's follow-up (`SwitchSeal.listingLines`): `current`, as
+            /// the follow-up moves it, is sealed against it (`SwitchSealCheck`, c).
+            public var buildsBefore: [String]?
+            public enum CodingKeys: String, CodingKey, CaseIterable { case commit, from, switchAction, buildsBefore }
+            public init(commit: String?, from: String?, switchAction: String?, buildsBefore: [String]? = nil) {
                 self.commit = commit
                 self.from = from
                 self.switchAction = switchAction
+                self.buildsBefore = buildsBefore
             }
         }
         public struct Result: Codable, Sendable, Equatable {

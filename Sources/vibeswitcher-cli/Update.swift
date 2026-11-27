@@ -233,26 +233,14 @@ enum UpdateCommand {
                 return refused.exitCode
             }
         }
+        // The builds folder as the follow-up finds it (`current`, the install's already), for `build.seal`'s (c).
+        let buildsBefore = SwitchSeal.listingLines(prefix)
         if let refused = SwitchCommand.followUp(context, prefix: prefix, accountHome: accountHome, commit: target, handedOver: handedOver, hostPid: hostPid) {
             Say.err("vibeswitcher: \(ConfigSeal.inert(refused.text, limit: .max))")
             return refused.exitCode
         }
-        // The unit's ExecStart move, sealed with the same code, on a node whose follow-up writes the unit.
-        if case .unitAndCurrent = rewrites {
-            // The server that stays, asked as the follow-up asks the host (one on its way out is asked again).
-            switch SwitchCommand.connectSettled(context) {
-            case .failure(let failure):
-                Say.out("the node's new start line isn't accepted yet (the server couldn't be asked: \(ConfigSeal.inert(failure.message, limit: 400))): `vibeswitcher approve`")
-            case .success(let fresh):
-                // An action of its own, naming the switch's (the code typed for this update covers it).
-                let seal = WireKinds.BuildSeal.Args(commit: target, from: running, switchAction: action)
-                switch fresh.change(WireKinds.BuildSeal.self, seal, action: UUID().uuidString.lowercased(), typed: typed, timeout: 60) {
-                case .success(let result, _): sayAccepted(sealed: result.sealed, refusals: result.sealRefusals)
-                case .refused(let reply): Say.out("the node's new start line isn't accepted yet (\(ConfigSeal.inert(reply.error?.message ?? "refused", limit: 400))): `vibeswitcher approve`")
-                case .failure(let failure): Say.out("the node's new start line isn't accepted yet (\(ConfigSeal.inert(failure.message, limit: 400))): `vibeswitcher approve`")
-                }
-            }
-        }
+        // What the follow-up wrote (the unit's ExecStart, `current`), accepted with the same code.
+        SwitchCommand.sealFollowUp(context, rewrites: rewrites, target: target, from: running, switchAction: action, typed: typed, buildsBefore: buildsBefore)
         Say.detail(SwitchCommand.startLine(context, commit: target, hostPid: hostPid))
         // Updated, the page's address, and what still waits (each kind with its command), from the server that stays.
         Say.out("updated to build \(ConfigSeal.inert(String(target.prefix(12)), limit: 64))")
