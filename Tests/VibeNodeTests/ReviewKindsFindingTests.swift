@@ -142,3 +142,43 @@ struct ReviewKindsFindingTests {
         #expect(!ran || model.submitted == nil, "submitted \(model.submitted ?? []) while the reply says \(plan.words)")
     }
 }
+
+/// N-C8-3, closed with the four: `logs` reads under way are capped per node (`NodeLogs.readsInFlight`), one past them
+/// refused with nothing read; each read's end frees its place.
+struct LogsReadsInFlightTests {
+    private let scratch = Scratch()
+
+    @Test func onePastTheReadsInFlightIsRefused() async throws {
+        let requests = requests(scratch)
+        // The journal's stand-in for this scratch node: each read holds until `go` is there (or its 10 s run ends).
+        let test = requests.root.appendingPathComponent("v2/test")
+        try FileManager.default.createDirectory(at: test, withIntermediateDirectories: true)
+        let go = test.appendingPathComponent("go").path
+        let standIn = test.appendingPathComponent("journalctl")
+        try "#!/bin/sh\nwhile [ ! -e '\(go)' ]; do /bin/sleep 0.05; done\necho '{\"MESSAGE\":\"read\",\"SYSLOG_IDENTIFIER\":\"vibeswitcher-node\"}'\n"
+            .write(to: standIn, atomically: true, encoding: .utf8)
+        #expect(chmod(standIn.path, 0o700) == 0)
+        defer { FileManager.default.createFile(atPath: go, contents: Data()) }
+        let replies = Locked<[String: NodeWire.Reply]>([:])
+        let count = NodeLogs.readsInFlight + 1
+        // In order on the requests' queue: the first `readsInFlight` take their places before the last is asked.
+        for index in 0..<count {
+            let request = NodeWire.Request(id: "r\(index)", kind: "logs", args: [:])
+            requests.queue.async { requests.logs(request) { reply in replies.mutate { $0[request.id] = reply } } }
+        }
+        _ = await eventually(timeout: 60) { replies.value["r\(count - 1)"] != nil }
+        let past = try #require(replies.value["r\(count - 1)"])
+        #expect(past.error?.code == NodeWire.Code.refused.rawValue && past.error?.message.contains("under way") == true, "\(past)")
+        #expect(replies.value.count == 1, "a read answered before its stand-in was let go: \(replies.value.keys.sorted())")
+        FileManager.default.createFile(atPath: go, contents: Data())
+        _ = await eventually(timeout: 60) { replies.value.count == count }
+        for index in 0..<(count - 1) {
+            #expect(replies.value["r\(index)"]?.error == nil, "r\(index): \(String(describing: replies.value["r\(index)"]))")
+        }
+        // Their places are free again: the next read is taken.
+        let next = NodeWire.Request(id: "next", kind: "logs", args: [:])
+        requests.queue.async { requests.logs(next) { reply in replies.mutate { $0[next.id] = reply } } }
+        _ = await eventually(timeout: 60) { replies.value["next"] != nil }
+        #expect(replies.value["next"]?.error == nil, "\(String(describing: replies.value["next"]))")
+    }
+}

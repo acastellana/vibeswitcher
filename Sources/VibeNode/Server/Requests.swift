@@ -76,6 +76,8 @@ public final class Requests: @unchecked Sendable {
     let completionIndex = SessionCompletions()
     /// Images web pages are sending in parts (`session.attach`). On `queue`.
     let attachments = SessionAttachments()
+    /// The `logs` reads under way (`NodeLogs.readsInFlight` at most). On `queue`.
+    var logReads = 0
     /// The reply each recorded action (and each page's draft) got, by action id, the newest `repliesKept` (a retry is
     /// answered so).
     var replies: [String: NodeWire.Reply] = [:]

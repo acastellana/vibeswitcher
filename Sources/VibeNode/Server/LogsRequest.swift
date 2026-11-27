@@ -84,6 +84,8 @@ public enum NodeLogs {
     public static let pageDefault = 200
     /// The most bytes of lines a `logs` reply carries: its oldest lines go first past it (`cut` says how many).
     public static let replyBytes = 192 * 1024
+    /// The most `logs` reads a node runs at once.
+    public static let readsInFlight = 4
 
     /// `logs` with `lines` (1…`pageLines`, `pageDefault` when absent) and `sessions`: what `vibeswitcher logs [--lines N]
     /// [--sessions]` prints of them, each line `masked`, at most `replyBytes` of lines (the oldest dropped first); `why`
@@ -120,13 +122,18 @@ public enum NodeLogs {
 extension Requests {
     /// `logs` (the no-terminal inventory's C8, 2026-11-26): `NodeLogs.read` for this node, off the server's queue (a
     /// journal's read runs a program), answered on it. A read of the user's: the user on the socket or a page with its
-    /// read right (`webRead`), never a session's process.
+    /// read right (`webRead`), never a session's process. At most `NodeLogs.readsInFlight` at once (the review's N-C8-3:
+    /// each may run `journalctl` for up to 10 s); one past them is refused, nothing read.
     func logs(_ request: NodeWire.Request, reply: @escaping (NodeWire.Reply) -> Void) {
         let args: WireKinds.Logs.Args
         switch request.typedArgs(WireKinds.Logs.Args.self) {
         case .failure(let failure): return reply(.init(re: request.id, error: failure))
         case .success(let typed): args = typed
         }
+        guard logReads < NodeLogs.readsInFlight else {
+            return reply(.init(re: request.id, error: .init(.refused, "\(NodeLogs.readsInFlight) reads of the logs are under way already: ask again once one has answered")))
+        }
+        logReads += 1
         let (root, queue) = (self.root, self.queue)
         DispatchQueue.global(qos: .userInitiated).async {
             let (place, scratch) = NodeLogs.place(root: root)
@@ -134,6 +141,7 @@ extension Requests {
                 NodeStarter.run(program, arguments, environment: environment, timeout: 10)
             }
             queue.async {
+                self.logReads -= 1
                 switch read {
                 case .failure(let refusal): reply(.init(re: request.id, error: refusal.failure))
                 case .success(let result): reply(.init(re: request.id, typed: result))
