@@ -114,6 +114,34 @@ struct HostRoleTests {
                                           lock: account.appendingPathComponent(".vibeswitcher/host.lock").path))
     }
 
+    /// A host on another lock on the account's own folder, and no `--socket`: it isn't that folder's host, so it
+    /// doesn't start, rather than listen on the account's host.sock (which listening unlinks first, taking the running
+    /// host's socket). However the folder is reached: HOME, VIBESWITCHER_HOME, a link to it.
+    @Test func aHostOnAnotherLockOnTheAccountsFolderTakesNotItsSocket() throws {
+        let other = base.appendingPathComponent("other.lock").path
+        let accountFolder = account.appendingPathComponent(".vibeswitcher")
+        let toAccount = base.appendingPathComponent("to-account")
+        try FileManager.default.createSymbolicLink(at: toAccount, withDestinationURL: account)
+        for environment in [["HOME": account.path], ["HOME": base.path, "VIBESWITCHER_HOME": accountFolder.path],
+                            ["HOME": toAccount.path]] {
+            let scratch = role(environment, lock: other)
+            #expect(!scratch.holdsRootLock && !scratch.isAccountHost, "\(environment)")
+            #expect(scratch.socketPath(argument: nil) == nil, "\(environment): it would take the account's host.sock")
+            // A socket of its own given: that one.
+            #expect(scratch.socketPath(argument: base.appendingPathComponent("own.sock").path)
+                    == base.appendingPathComponent("own.sock").path, "\(environment)")
+        }
+        // The account's host on its own lock: its folder's host.sock, as before.
+        #expect(role(["HOME": account.path]).socketPath(argument: nil) == accountFolder.appendingPathComponent("host.sock").path)
+        #expect(role(["HOME": account.path], lock: accountFolder.appendingPathComponent("host.lock").path).socketPath(argument: nil)
+                == accountFolder.appendingPathComponent("host.sock").path)
+        // A host on another lock on a folder that isn't the account's (the sandbox's: its own home, its own lock): that
+        // folder's host.sock, its own.
+        let theirs = base.appendingPathComponent("theirs/.vibeswitcher")
+        #expect(role(["HOME": account.path, "VIBESWITCHER_HOME": theirs.path], lock: theirs.appendingPathComponent("sandbox-host.lock").path)
+                    .socketPath(argument: nil) == theirs.appendingPathComponent("host.sock").path)
+    }
+
     /// A home reached through a link: a link into another folder, however the path is spelled, isn't the account's
     /// home (`..` after a link is the link's target's parent, as the kernel goes); a link to the account's own home is
     /// that home, the same files.
