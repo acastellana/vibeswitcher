@@ -11,5 +11,7 @@ pattern: UserDefaults\.standard
 pattern: WindowModel\(\)
 #
 # allow: FILE | TEXT | REASON. A use in FILE on a line containing TEXT is allowed, for REASON (required). Only a read
-# of a key the app never writes may be. An entry nothing matches any more fails SharedDefaultsLintTests.
+# of a key the app never writes may be, or a key of the test's own, named with a UUID and removed in a defer. An entry
+# nothing matches any more fails SharedDefaultsLintTests.
 allow: Tests/VibeSwitcherTests/BriefingButtonTests.swift | #expect(!(UserDefaults.standard.dictionaryRepresentation() | reads only, to check the test's made-up API key went to no defaults at all, the shared ones included; nothing writes that key
+allow: Tests/VibeSwitcherTests/ScratchDefaultsTests.swift | let shared = UserDefaults.standard | the check that a scratch suite is isolation: it writes a key of its own, named with a UUID, that the app never reads, and removes it in a defer

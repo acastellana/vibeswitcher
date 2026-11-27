@@ -462,10 +462,12 @@ struct ComposerDeliveryTests {
         #expect(composer.drafts[key] ?? "" == "" && (composer.attachments[key] ?? []).isEmpty)
     }
 
-    /// A draft one harness left and saved (as the composer does half a second after the last change) isn't in the next
-    /// one's box: every harness has the same row key, and the drafts were kept in the test binary's standard defaults,
-    /// which every test process on this Mac shares. So "and another thing", the draft the put-back test ends with, was
-    /// what the image-alone case above sent with its image whenever that save had run (2026-11-27).
+    /// A draft one harness left and saved isn't in the next one's box: every harness has the same row key, and the drafts
+    /// were kept in the test binary's standard defaults, which every harness in the process, and every test process on
+    /// this Mac, shares. The put-back test ends with "and another thing" in the box, and saves it then and there: the put-
+    /// back message reaching the agent after all takes it out of the box with `composer.save()` (`takeOutArrived`), not
+    /// the half-second save. A harness made after that run read it back as its box's draft, and the image-alone case
+    /// above, which types nothing, sent it with its image: "[Image #1] and another thing" (2026-11-27).
     @Test func aDraftSavedInOneHarnessIsNotInTheNextOnesBox() async throws {
         let first = try await Harness.start(temp)
         first.chat.composer.drafts[first.key] = "left over"
