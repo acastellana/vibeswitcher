@@ -5196,3 +5196,6 @@ That freeze looks like starvation (the Mac loaded or paging), not the app's work
 - 2026-11-27 14:19 Merged fix-the-flaky-test-29: Fix the flaky test pastedImagesAndTheirTextArriveOnce(_:) (build c08b3a3f8520)
 - 2026-11-27 14:19 Automatically (auto_advance): Merged fix-the-flaky-test-29 (Fix the flaky test pastedImagesAndTheirTextArriveOnce(_:)) into main at 8ac260e8, on its passing audit and the full test run.
 - 2026-11-27 14:19 Automatically (auto_advance): Cleaned up fix-the-flaky-test-29 (freed 1.8 GB of build output and temporary folders). It stays done.
+- 2026-11-27 16:00 Sent the-host-s-vault's worker contract v3 (it had v2)
+- 2026-11-27 16:00 Started a worker on why-a-heavy-slot
+- 2026-11-27 16:00 Automatically (auto_advance): Sent why-a-heavy-slot's worker the open Important findings why-a-heavy-slot:F1, why-a-heavy-slot:F2, why-a-heavy-slot:F3, why-a-heavy-slot:F4 from its audit at c302f74f (in a new worker: its last one was released during the audit).
