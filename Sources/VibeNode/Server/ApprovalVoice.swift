@@ -15,8 +15,11 @@ import VibeCore
 ///    audit token checked by Security, `Platform.CodeIdentity.runs`) with the Hardened Runtime (`hardened`: no injected
 ///    library, no task port for another process): the request came through the command line;
 /// 3. the guard rails: its ancestry holds no live session's program, the host or the server; its controlling terminal
-///    is no live session's; no branch code runner is above it. (Linux's environment line is left out: with SIP on, the
-///    Mac doesn't show another process's environment, and it would fail every peer.)
+///    is no live session's; no branch code runner is above it; it isn't in the server's own launchd coalition (the
+///    coalition line); its own environment doesn't carry `VIBESWITCHER_SESSION` (the environment line, an early
+///    refusal, not a boundary). The last two are the spec's row 3, settled from the user's measurements of 2026-11-26
+///    ("The rule's lines, settled from the measurements"); both refuse reads too, since every line runs before the kind
+///    is looked at.
 /// 4. a request that changes nothing (`NodeWire.changesState` false) is the user's voice then, as on Linux;
 /// 5. a state change is put to the person at the Mac (`authenticator`, LocalAuthentication's dialog), its reason the
 ///    card's text the engine built (`reason(kind:card:)`, never the board's): approved, it is the user's voice; declined,
@@ -92,7 +95,7 @@ public struct ApprovalVoice: Sendable {
     }
 
     /// Why the caller fails steps 1 to 3 (its uid, the installed command line's code, a hardened process, the guard
-    /// rails), or nil when it passes: silent, never asks. The server runs it before it takes the one dialog's place.
+    /// rails, the coalition and environment lines last), or nil when it passes: silent, never asks. The server runs it before it takes the one dialog's place.
     public func callerRefusal(peer: Platform.PeerToken?, facts: PeerFacts, live: LiveSessions, uid: uid_t) -> String? {
         guard let peerUID = facts.uid else { return "its user can't be read" }
         guard peerUID == uid else { return "it is another user's (uid \(peerUID))" }
@@ -115,6 +118,23 @@ public struct ApprovalVoice: Sendable {
         }
         guard let runner = facts.underRunner else { return "whether it runs under branch code can't be read" }
         guard !runner else { return "it runs under a branch code runner" }
+        // The coalition line: the peer isn't in the server's own resource coalition, the node job's, which the host, the
+        // server and every session descend from. A process keeps its coalition through fork, exec, setsid and being
+        // reparented to launchd (M4; a LaunchAgent job's setsid child, K-AG-1), so a node session's descendant that
+        // didn't go through launchd is refused here however it detached. The peer's is read by the kernel of the
+        // process itself (`PeerFacts.coalition`), never from anything it sent; unread on either side, refused. A guard
+        // rail: launchd's escapes (`open -a Terminal`, AppleScript, a job of its own) land in another (K-ESC-1 to 3).
+        guard let coalition else { return Self.ownCoalitionUnread }
+        guard let peerCoalition = facts.coalition else { return Self.coalitionUnread }
+        guard peerCoalition != coalition else { return Self.inNodeCoalition(coalition) }
+        // The peer's environment line, an EARLY REFUSAL, NOT A SECURITY BOUNDARY (the lead's call, 2026-11-26): a
+        // session drops the variable at will (`env -u`, a re-exec, a job of its own, an escape into Terminal, K-ESC-1 to
+        // 3) and then passes it. It keeps the Mac app's shell cards and agent sessions (which carry it, and which no
+        // other line refuses) and a node session's descendant that kept it away from the dialog. The guarantee for a
+        // state change rests on the dialog alone. Read of the peer itself (`KERN_PROCARGS2`, readable for the user's
+        // builds with SIP on, M2), never of an ancestor (Apple's binaries read empty); unreadable, refused.
+        guard let marker = facts.sessionMarker else { return Self.environmentUnread }
+        guard !marker else { return Self.carriesSession }
         return nil
     }
 
