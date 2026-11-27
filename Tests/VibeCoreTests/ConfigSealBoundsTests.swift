@@ -79,6 +79,30 @@ struct ConfigSealBoundsTests: LeadTeamFixture {
         #expect(read <= 64 * Self.megabyte, "a look read \(read) bytes of a 144 MB folder")
     }
 
+    /// An enabled plugin reads at most one folder's budget, its JSON files, scripts and modules together: a manifest
+    /// that names many big hooks files can't make a look read them all.
+    @Test func aPluginReadsAtMostItsBudget() throws {
+        let root = home + "/.claude/plugins/cache/mkt/p/1.0.0"
+        let hooks = (0..<6).map { "hooks/h\($0).json" }
+        try write(#"{"name":"p","version":"1.0.0","hooks":[\#(hooks.map { "\"\($0)\"" }.joined(separator: ","))]}"#,
+                  root + "/.claude-plugin/plugin.json")
+        for file in hooks { try sparse(root + "/" + file, size: 24 * Self.megabyte) }
+        try write(#"{"version":2,"plugins":{"p@mkt":[{"scope":"user","installPath":"\#(root)","version":"1"}]}}"#,
+                  home + "/.claude/plugins/installed_plugins.json")
+        try write(#"{"enabledPlugins":{"p@mkt":true}}"#, home + "/.claude/settings.json")
+        #expect(ConfigSeal.homeWatched(home: home).contains { $0.name == ConfigSeal.pluginPrefix + "p@mkt" })
+        let read = bytesRead()
+        #expect(read <= 64 * Self.megabyte + Self.megabyte, "a look read \(read) bytes of a plugin naming 144 MB of hooks files")
+    }
+
+    /// A plugin with several installs labels each part by its install: its cut is still past a bound.
+    @Test func aCutUnderAnInstallsLabelIsPastABound() {
+        #expect(ConfigSeal.isPast(part: "cut", ""))
+        #expect(ConfigSeal.isPast(part: "user: cut", ""))
+        #expect(ConfigSeal.isPast(part: "project /a/b: cut", ""))
+        #expect(!ConfigSeal.isPast(part: "user: hooks/hooks.json", "0123abcd"))
+    }
+
     /// Past a bound is held as changed the first time it's seen that way, even in instructions a quiet look seals as
     /// yours: once accepted, it's told by its size, times and inode, so a rewrite in place is a change too.
     @Test func pastTheBoundIsHeldTheFirstTimeAndARewriteIsAChange() throws {

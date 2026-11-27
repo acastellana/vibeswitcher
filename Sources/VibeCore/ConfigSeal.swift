@@ -336,9 +336,10 @@ public enum ConfigSeal {
     /// The `pastKey` value naming `items`: nil when there's none.
     static func pastValue(_ items: [String]) -> String? { items.isEmpty ? nil : Set(items).sorted().joined(separator: "\n") }
 
-    /// Whether a plugin's or a settings' scripts' part (`parts`) is past a bound: cut, or told by metadata ("big").
+    /// Whether a plugin's or a settings' scripts' part (`parts`) is past a bound: cut (under an install's label too,
+    /// "user: cut", for a plugin with several), or told by metadata ("big").
     static func isPast(part label: String, _ digest: String) -> Bool {
-        label == "cut" || digest.split(separator: " ").contains("big")
+        label == "cut" || label.hasSuffix(": cut") || digest.split(separator: " ").contains("big")
     }
 
     /// The bookkeeping read for its shape at most (Claude Code reads its manifest up to 4 MB); past it, it's hashed as
@@ -783,9 +784,10 @@ public enum ConfigSeal {
 
     /// A watched folder's files (and a plugin's modules, a settings file's scripts) read at most this many bytes in
     /// all, in name order: past it, the rest are told as `readLimit` tells a big one. On this Mac (2026-11-27) the
-    /// biggest is `~/.claude/skills`, 23 MB in 1242 files. With `readLimit` and `maxEntries`, what one look reads is
-    /// bounded whatever's watched (about 1.6 GB at worst, a sparse file's zeros reading fast), and the vault hashes one
-    /// look at a time (`LeadVault.Book.lookGate`).
+    /// biggest is `~/.claude/skills`, 23 MB in 1242 files. Each watched thing reads at most this (a plugin: each
+    /// install, its JSON files, scripts and modules together), each file at most `readLimit`, so a look reads at most
+    /// that times what's watched (a plugin enabled is one more), and the vault hashes one look at a time
+    /// (`LeadVault.Book.lookGate`).
     static let folderBudget = 64 << 20
 
     /// What `watched` holds now, hashed (SHA-256, hex). Something absent hashes as such, never as an empty file. nil
@@ -922,6 +924,8 @@ public enum ConfigSeal {
         guard !root.isEmpty, lstat(root, &info) == 0 else { return [("absent", "")] }
         var parts: [(String, String)] = []
         var listed = Set<String>()
+        // One budget for all this install reads: its JSON files, the scripts they name, its modules.
+        var budget = folderBudget
         var configs: [Any] = []
         var files: [(path: String, object: Any)] = []
         let label = { (path: String) -> String in
@@ -930,7 +934,7 @@ public enum ConfigSeal {
         func json(_ path: String) {
             let path = URL(fileURLWithPath: path).standardized.path
             guard listed.insert(path).inserted else { return }
-            let read = jsonPart(path)
+            let read = jsonPart(path, budget: &budget)
             parts.append((label(path), read.digest))
             if let object = read.object {
                 configs.append(object)
@@ -950,7 +954,7 @@ public enum ConfigSeal {
         let vars = ["CLAUDE_PLUGIN_ROOT": root, "HOME": home]
         var named: [String] = []
         for config in configs { for command in commands(in: config) { named += namedPaths(command, vars: vars, home: home, base: root) } }
-        parts += scriptParts(named, skip: [], listed: &listed, label: label)
+        parts += scriptParts(named, skip: [], listed: &listed, budget: &budget, label: label)
         // The manifest's own paths are the plugin folder's; a hooks file's modules are relative to that file.
         let manifestPath = URL(fileURLWithPath: manifest).standardized.path
         let modules = files.flatMap { file -> [String] in
@@ -958,7 +962,7 @@ public enum ConfigSeal {
             return (ConfigSeal.modules(in: file.object) ?? []).map { modulePath($0, in: folder, root: root) }
         }
         if files.contains(where: { ConfigSeal.modules(in: $0.object) != nil }) {
-            parts += moduleParts(root, modules: modules, have: Set(parts.map(\.0)), label: label)
+            parts += moduleParts(root, modules: modules, have: Set(parts.map(\.0)), budget: &budget, label: label)
         }
         return parts
     }
@@ -997,10 +1001,9 @@ public enum ConfigSeal {
     /// descriptor with no link followed, so a folder swapped for a link mid-look reads as unreadable, not as the
     /// link's target. What's a part already (`have`: a script a command names too, read as that) isn't listed again,
     /// but for a listed module that isn't a file to read, which is one more part saying so (`moduleSuffix`).
-    static func moduleParts(_ root: String, modules: [String], have: Set<String>, label: (String) -> String) -> [(String, String)] {
+    static func moduleParts(_ root: String, modules: [String], have: Set<String>, budget: inout Int, label: (String) -> String) -> [(String, String)] {
         var parts: [(String, String)] = []
         var have = have
-        var budget = folderBudget
         for path in modules {
             let name = label(path)
             let digest = path.hasPrefix(root + "/") ? moduleDigest(root, relative: String(path.dropFirst(root.count + 1)), budget: &budget) : moduleOutside
@@ -1141,13 +1144,16 @@ public enum ConfigSeal {
             if let command = object[key] as? String { found.append(.shell(command)) }
         }
         var listed = Set<String>()
-        return scriptParts(found.flatMap { namedPaths($0, vars: vars, home: home, base: project) }, skip: skip, listed: &listed) { shown($0, home: home) }
+        var budget = folderBudget
+        return scriptParts(found.flatMap { namedPaths($0, vars: vars, home: home, base: project) }, skip: skip, listed: &listed, budget: &budget) {
+            shown($0, home: home)
+        }
     }
 
     /// Each of `paths` not yet `listed` nor at or under `skip`, hashed (`scriptDigest`), at most `maxNamed`.
-    private static func scriptParts(_ paths: [String], skip: [String], listed: inout Set<String>, label: (String) -> String) -> [(String, String)] {
+    private static func scriptParts(_ paths: [String], skip: [String], listed: inout Set<String>, budget: inout Int,
+                                    label: (String) -> String) -> [(String, String)] {
         var parts: [(String, String)] = []
-        var budget = folderBudget
         for path in paths where !skip.contains(where: { path == $0 || path.hasPrefix($0 + "/") }) {
             guard listed.insert(path).inserted else { continue }
             guard listed.count <= maxNamed else {
@@ -1163,19 +1169,22 @@ public enum ConfigSeal {
     }
 
     /// A JSON file's digest (as `file` hashes it: "absent", a link's target, its contents) and what it holds, when it
-    /// reads as JSON.
-    private static func jsonPart(_ path: String) -> (digest: String, object: Any?) {
+    /// reads as JSON. Read within what's left of `budget` (taken from it): past it, told by metadata, its commands not read (and
+    /// it's past a bound: `isPast`).
+    private static func jsonPart(_ path: String, budget: inout Int) -> (digest: String, object: Any?) {
         var info = stat()
         guard lstat(path, &info) == 0 else { return ("absent", nil) }
         let link = (info.st_mode & S_IFMT) == S_IFLNK ? "link " + ((try? FileManager.default.destinationOfSymbolicLink(atPath: path)) ?? "") + " " : ""
-        guard let data = regularContents(path, limit: jsonLimit) else {
-            switch contentsDigest(path, followLink: true) {
-            case .other: return (link + "other", nil)
-            case .big(let said): return (link + said, nil)
-            default: return (link + "unreadable", nil)
-            }
+        let limit = min(jsonLimit, max(0, budget))
+        if let data = regularContents(path, limit: limit) {
+            budget -= data.count
+            return (link + hex(SHA256.hash(data: data)), try? JSONSerialization.jsonObject(with: data))
         }
-        return (link + hex(SHA256.hash(data: data)), try? JSONSerialization.jsonObject(with: data))
+        switch contentsDigest(path, followLink: true, limit: limit) {
+        case .other: return (link + "other", nil)
+        case .big(let said): return (link + said, nil)
+        default: return (link + "unreadable", nil)
+        }
     }
 
     /// A file a command names, as watched: "absent", or its link's target and its contents' hash (past
