@@ -158,7 +158,15 @@ config.appExecutable = (restoring != nil ? value(after: "--app-executable") : ni
 // The lead's vault: the account's host keeps it sealed under ~/.vibeswitcher/lead with its Keychain key; any other host
 // keeps one in memory only, never touching the account's (see `HostRole.vault`).
 // After a handover, the vault is the one the build before held in memory (its secrets), not what's on disk.
-config.vault = role.vault(lockFD: restoring?.lockFD ?? heldLock, key: vaultKey(), handedOver: restoredSecrets, logPath: config.logPath)
+do {
+    config.vault = try role.vault(lockFD: restoring?.lockFD ?? heldLock, key: vaultKey(), handedOver: restoredSecrets, logPath: config.logPath)
+} catch {
+    // The account's host no longer on the lock file at its path: it doesn't run (see `HostRole.vault`).
+    HostServer.note("host: \(error); this one (build \(build)) exits", logPath: config.logPath)
+    if let handoverPath { goBack(handoverPath, error) }
+    log("\(error)")
+    exit(1)
+}
 // The app that started this host gives it its key on stdin (see `AppProof`), and says so: taken while the vault
 // holds none, but not by a vault that started over (its file no longer opens under the Keychain key): that one waits
 // for your confirmation through the app (`LeadVault.Book.awaitsAppKey`).

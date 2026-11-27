@@ -100,7 +100,7 @@ public struct HostRole {
     /// each save first checks the file there is still that one (a lock file removed or replaced lets a second host start
     /// on the same folder: from then on that one keeps the vault, and this one saves nothing). Any other host, or one
     /// whose descriptor doesn't hold its lock, keeps a vault in memory only, never touching a vault file.
-    public func vault(lockFD: Int32, key: SymmetricKey?, handedOver: Data?, logPath: String?) -> LeadVault.Book {
+    public func vault(lockFD: Int32, key: SymmetricKey?, handedOver: Data?, logPath: String?) throws -> LeadVault.Book {
         guard isAccountHost, HostHandover.Lock.notHeld(lockFD, path: lockPath) == nil else { return LeadVault.Book(restoring: handedOver) }
         let lockPath = lockPath
         return VaultStorage(file: root.appendingPathComponent("lead/vault.sealed"), key: key, logPath: logPath,

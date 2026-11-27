@@ -56,7 +56,7 @@ struct HostRoleTests {
         let lockFD = try HostServer.takeLock(at: role.lockPath)
         defer { Darwin.close(lockFD) }
         let key = role.vaultKey(reader.read)
-        let book = role.vault(lockFD: lockFD, key: key, handedOver: nil, logPath: nil)
+        let book = try role.vault(lockFD: lockFD, key: key, handedOver: nil, logPath: nil)
         #expect(book.adoptAppKey(theirs), "a first start takes the key on stdin")
         guard case .grant = book.answer(.issue(role: .lead, root: repo, task: nil, auditing: nil), from: .app) else {
             Issue.record("the caller, as the app, got no grant")
@@ -148,7 +148,7 @@ struct HostRoleTests {
         let first = try HostServer.takeLock(at: role.lockPath)
         defer { Darwin.close(first) }
         let log = base.appendingPathComponent("host.log")
-        let running = role.vault(lockFD: first, key: realKey, handedOver: nil, logPath: log.path)
+        let running = try role.vault(lockFD: first, key: realKey, handedOver: nil, logPath: log.path)
         #expect(running.adoptAppKey(Data(repeating: 1, count: AppProof.keySize)))
         let saved = try Data(contentsOf: file)
 
@@ -160,7 +160,7 @@ struct HostRoleTests {
         #expect(try Data(contentsOf: file) == saved, "the host that lost its lock sealed over the vault")
         let said = (try? String(contentsOf: log, encoding: .utf8)) ?? ""
         #expect(said.contains("vault: vault.sealed not saved: this host no longer holds its lock"), "\(said)")
-        let beside = role.vault(lockFD: second, key: realKey, handedOver: nil, logPath: nil)
+        let beside = try role.vault(lockFD: second, key: realKey, handedOver: nil, logPath: nil)
         #expect(beside.appKey?.data == Data(repeating: 1, count: AppProof.keySize))
         _ = beside.answer(.issue(role: .lead, root: repo, task: nil, auditing: nil), from: .app)
         #expect(try Data(contentsOf: file) != saved, "the host holding the lock saves")
@@ -170,9 +170,11 @@ struct HostRoleTests {
         defer { Darwin.close(unheld) }
         let now = try Data(contentsOf: file)
         for fd in [unheld, first, -1] {
-            let book = role.vault(lockFD: fd, key: realKey, handedOver: nil, logPath: nil)
-            #expect(book.appKey == nil, "lock descriptor \(fd): it opened the vault")
-            _ = book.adoptAppKey(theirs)
+            // The account's host gets no vault at all on it (no vault in memory either, to take another key unasked):
+            // `main.swift` doesn't run.
+            #expect(throws: HostRole.Failure.self, "lock descriptor \(fd)") {
+                try role.vault(lockFD: fd, key: realKey, handedOver: nil, logPath: nil)
+            }
             #expect(try Data(contentsOf: file) == now, "lock descriptor \(fd): it sealed over the vault")
         }
     }
@@ -214,12 +216,12 @@ struct HostRoleTests {
         do {
             let lockFD = try HostServer.takeLock(at: role.lockPath)
             defer { Darwin.close(lockFD) }
-            #expect(role.vault(lockFD: lockFD, key: realKey, handedOver: nil, logPath: nil).adoptAppKey(Data(repeating: 1, count: AppProof.keySize)))
+            #expect(try role.vault(lockFD: lockFD, key: realKey, handedOver: nil, logPath: nil).adoptAppKey(Data(repeating: 1, count: AppProof.keySize)))
         }
         try FileManager.default.moveItem(at: file, to: file.deletingLastPathComponent().appendingPathComponent("aside"))
         let lockFD = try HostServer.takeLock(at: role.lockPath)
         defer { Darwin.close(lockFD) }
-        let restarted = role.vault(lockFD: lockFD, key: realKey, handedOver: nil, logPath: nil)
+        let restarted = try role.vault(lockFD: lockFD, key: realKey, handedOver: nil, logPath: nil)
         withKnownIssue("a key that was there with no vault file still counts as a first start") {
             #expect(!restarted.adoptAppKey(theirs), "it took another process's key unasked")
         }
