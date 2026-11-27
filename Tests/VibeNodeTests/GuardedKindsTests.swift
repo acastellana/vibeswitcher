@@ -305,6 +305,21 @@ struct GuardedKindsTests {
         #expect(!FileManager.default.fileExists(atPath: failing.prefix + "/" + Self.commit))
     }
 
+    /// The builds folder read before the vault's look and again after it, as the command line reads it: a change made
+    /// while the vault looked (a rewritten install script) refuses the update, and nothing is run (the blind check's 1).
+    @Test func aBuildsFolderChangedDuringTheVaultsLookRefusesTheUpdate() throws {
+        let world = try UpdateWorld(scratch)
+        let prefix = world.prefix
+        var request = plan(world, installer: .test(program: world.installer))
+        request.held = {
+            try? "rewritten\n".write(toFile: prefix + "/" + GuardedKindsTests.other + "/install-node.sh", atomically: false, encoding: .utf8)
+            return nil
+        }
+        guard case .refused(.refused, let why) = request.plan(.init(commit: Self.commit)) else { Issue.record("not refused"); return }
+        #expect(why.contains("a change you haven't accepted"), "\(why)")
+        #expect(!world.ran)
+    }
+
     /// The server's act refuses before any plan without an install root, and takes its installer from itself alone.
     @Test func theServersActNeedsItsOwnInstallRoot() async throws {
         let requests = requests()
