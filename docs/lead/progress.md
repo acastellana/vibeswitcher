@@ -5002,3 +5002,4 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-27 07:04 Automatically (auto_advance): Started the audit of a-host-whose-vault at 7c862c1b (Its review is audit).
 - 2026-11-27 07:04 Released a-host-whose-vault's worker (idle since its done report on 7c862c1b) while its audit runs
 - 2026-11-27 07:04 Automatically (auto_advance): Released a-host-whose-vault's worker, idle since its done report on 7c862c1b, while its audit runs (ended pid 3334 (Worker: A host whose vault file is missing but whose Keychain key exists doesn't take a new app key unasked (the moved-aside vault variant))): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
+- 2026-11-27 07:07 Audit of a-host-whose-vault: complete, clean, round 1: 2 Nit open
