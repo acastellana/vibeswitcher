@@ -197,3 +197,45 @@ struct HostRoleTests {
         }
     }
 }
+
+/// The same through a real exec of the built host: started on a scratch home's own lock (VIBESWITCHER_HOME, HOME and
+/// CFFIXED_USER_HOME there, as another process of your account would), with an app key on stdin, its caller fills the
+/// vault as the app, and no vault file is sealed: the host on that home keeps its vault in memory. Safe to run only
+/// with the rule in place: it asks `HostRole` first, as the binary will, and starts nothing should that host be the
+/// account's (which reads the Keychain).
+@Suite(hostTestLimit) struct HostOnAnotherHomeProcessTests {
+    @Test func aHostStartedOnAnotherHomeSealsNothing() async throws {
+        // Short: a socket's path has a 104-byte limit.
+        let dir = "\(shortScratchRoot)/vshr-\(UUID().uuidString.prefix(8))"
+        let home = dir + "/home", root = home + "/.vibeswitcher", socket = dir + "/h.sock", lock = root + "/host.lock"
+        try FileManager.default.createDirectory(atPath: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let environment = ["HOME": home, "CFFIXED_USER_HOME": home, "VIBESWITCHER_HOME": root, "SHELL": "/bin/sh",
+                           "PATH": "/usr/bin:/bin", "TMPDIR": dir + "/"]
+        let role = HostRole(environment: environment, fallbackHome: home, lockArgument: lock, accountHome: HostRole.accountHome)
+        try #require(role.holdsRootLock && !role.isAccountHost, "this host would be the account's: not started")
+
+        let host = Process()
+        host.executableURL = URL(fileURLWithPath: hostLauncher)
+        host.arguments = ["--socket", socket, "--lock", lock, "--idle-exit", "600"]
+        host.environment = environment
+        FileManager.default.createFile(atPath: dir + "/host.out", contents: nil)
+        let output = try FileHandle(forWritingTo: URL(fileURLWithPath: dir + "/host.out"))
+        host.standardOutput = output
+        host.standardError = output
+        let key = try TestHosts.authorize(host)
+        try TestHosts.run(host)
+        defer { TestHosts.end(host) }
+        #expect(await eventually { FileManager.default.fileExists(atPath: socket) })
+        let app = try TestClient(socket: socket, appKey: key)
+        defer { app.close() }
+        let reply = app.vault(.issue(role: .lead, root: "/repos/host-role", task: nil, auditing: nil))
+        guard case .grant? = reply else {
+            Issue.record("the caller, as the app, got no grant: \(String(describing: reply))")
+            return
+        }
+        // The host on that home's own lock: its folder's log, and no vault file there.
+        #expect(FileManager.default.fileExists(atPath: root + "/debug/host.log"))
+        #expect(!FileManager.default.fileExists(atPath: root + "/lead/vault.sealed"), "a vault the caller filled was sealed")
+    }
+}
