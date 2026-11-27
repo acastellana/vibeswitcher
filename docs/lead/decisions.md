@@ -503,3 +503,7 @@ Seven v2 tasks were ready and refused for 0.2 GB of disk while the Mac sat idle;
 
 Reported in passing by a merge task that was told not to fix it; without a record it would be lost in a kept task's report, and it would silently lose a Mac node's guarded state after one bad start.
 
+## 2026-11-27 03:11:59 v2 device keys, two readings slice 7's worker put to the lead (2026-11-27). (a) Kept: until slice 21's cut-over a device acts only while web_acts is `trust`; at `off` or `confirm` its acts are refused and its reads and drafts go on; slices 9–20's tests set trust. (b) Overturned: a read key gives reads AND watching a terminal, on loopback only, as the device keys design says (K11, 'The unlock', the read key paragraph); slice 7 built it as reads only. Slice 8 (signed terminal frames) restores watching for the read key: DeviceHandshake.rights `.read` back to [.read, .watch] with the tests' expectations flipped; acting, drafting and typing still need the unlock.
+
+(a) is the fail-closed reading and costs nothing before the cut-over. (b): the user's bar is a page that feels like a well-made native app; the design, independently reviewed, chose a stored reads-only key precisely so a reload shows the page, terminals included, without a prompt and asks Touch ID only to act. The read key is refused off loopback, and a process of the user's account that could take it from the browser profile can already read the sessions' transcripts on disk, so watching adds no exposure the design didn't accept.
+
