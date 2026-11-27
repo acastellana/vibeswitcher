@@ -349,9 +349,10 @@ or copies from, main changed these; each line says what became of it:
 Main's shared changes landed where they were: `VaultStorage.book`'s saver that holds a started-over vault's saves and
 sets the file aside (`Sources/VibeHost/VaultStorage.swift`, the one place a vault is made, `vibeswitcher-host`'s main),
 `LeadVault.Book.awaitsAppKey` and `adoptAppKey`'s rule, `SealedData`, `RefusedGit.keychainTool`, `LeadLaunch.keychainTool`
-and `LeadPrompts.keychain`; `VaultStartedOverTests`, `RefusedSecurityTests` and `KeychainCallLintTests` run on Linux
-too (a key the test makes, no Keychain). On Linux the host has no Keychain key, so its vault has no saver: a started-over
-vault there only refuses the app's key unasked, as on the Mac.
+and `LeadPrompts.keychain`; `VaultStartedOverTests`, `RefusedSecurityTests` and `KeychainCallLintTests` are in targets
+Linux builds (a key the test makes, no Keychain), checked against `v2`'s lints on the Mac, read only for Linux, not run
+there yet. On Linux the host has no Keychain key, so its vault has no saver: a started-over vault there only refuses the
+app's key unasked, as on the Mac.
 
 Four conflicts, each keeping both sides:
 
@@ -367,6 +368,21 @@ What main added that didn't build or pass on Linux, changed in this merge (kinds
 
 - `Sources/VibeCore/SealedData.swift`, `Tests/VibeHostTests/VaultStartedOverTests.swift`: `import CryptoKit` removed
   (VibeCore exports the crypto, swift-crypto's on Linux; PlatformLint).
+- `Tests/VibeCoreTests/KeychainCallLintTests.swift`: its stand-in `security` (run by bash from the PATH it makes)
+  written by `installScript` (ShebangWriteLint); the two scripts its scratch tree only gives the lint to read,
+  `scripts/probe.sh` and `scripts/build-app.sh`, in `ShebangWriteLintTests.exemptions`. Its allowed list takes `v2`'s
+  `scripts/install-node-mac.sh` read of gh's token (the user's own install, at the keyboard; the CI dry run passes
+  `--test-origin` and `--test-ci-answer`, which skip it): for the installer's review, `gh auth token` asks no dialog.
+
+**Owed, for the device keys join:** a checked Mac node host owns the launchers, so its vault is `VaultStorage`'s, under
+a Keychain key, and it takes no app key (`HostServer.enroll` and `replaceAppKey` refuse one with `isCheckedNodeHost`).
+A started-over vault there awaits the app's key for good (`LeadVault.Book.awaitsAppKey`), so main's saver saves nothing
+again on that host, the action record and `.user` seals (`LeadVaultV2`) included, until a restart drops them: closed
+(the old file kept), but in memory only. That host's way to answer is still to decide.
+
+`PromptSizeTests`' worker ceiling went from 11_255 to 11_400: main's `LeadPrompts.keychain` in `v2`'s longer worker
+brief renders 11385 bytes (main's own brief fits under 11_255). Both texts are as their authors wrote them; the `v2` side
+may prefer to trim its worker brief back under 11_255 instead.
 
 ## Non-seam edits
 
