@@ -24,6 +24,12 @@ struct ApprovalRequestsTests {
     }
 
     static let commandLine = Data(repeating: 0xc1, count: 20)
+    /// The user's peer (`CardWorld.user`) in a Terminal's coalition, not the server's (`ApprovalVoiceTests`' two).
+    static let user: PeerFacts = {
+        var user = CardWorld.user
+        user.coalition = ApprovalVoiceTests.terminalCoalition
+        return user
+    }()
 
     /// The world's host and link, with a `Requests` on the Mac's rule: `person` asked, the user's peer (`CardWorld.user`)
     /// running the command line's code unless `commandLinePeer` is false.
@@ -32,7 +38,7 @@ struct ApprovalRequestsTests {
         let requests = Requests(link: world.world.link, sessions: nil, rule: rule, root: world.host.root, hostSocket: world.host.socket,
                                 commit: "test", hostPID: 1)
         requests.engine = world.engine
-        requests.approval = ApprovalVoice(authenticator: person, commandLine: Self.commandLine, runs: { token, code in
+        requests.approval = ApprovalVoice(authenticator: person, commandLine: Self.commandLine, coalition: ApprovalVoiceTests.nodeCoalition, runs: { token, code in
             commandLinePeer && code == Self.commandLine && token.pid == CardWorld.userPID
         }, hardened: { _ in true })
         return requests
@@ -43,7 +49,7 @@ struct ApprovalRequestsTests {
         let reply = Locked<NodeWire.Reply?>(nil)
         let request = NodeWire.Request(id: UUID().uuidString, kind: kind, args: args, action: action)
         let token = ApprovalVoiceTests.token(CardWorld.userPID)
-        world.queue.async { requests.handle(request, from: CardWorld.user, token: token) { reply.value = $0 } }
+        world.queue.async { requests.handle(request, from: Self.user, token: token) { reply.value = $0 } }
         _ = await eventually(timeout: 60) { reply.value != nil }
         return reply.value
     }
@@ -118,7 +124,7 @@ struct ApprovalRequestsTests {
         let request = NodeWire.Request(id: "first", kind: "set", args: ["key": .string("lead_mail"), "value": .string("off")],
                                        action: UUID().uuidString.lowercased())
         let token = ApprovalVoiceTests.token(CardWorld.userPID)
-        world.queue.async { requests.handle(request, from: CardWorld.user, token: token) { first.value = $0 } }
+        world.queue.async { requests.handle(request, from: Self.user, token: token) { first.value = $0 } }
         try #require(await offPool { person.asking.wait(timeout: .now() + 60) == .success })
         let second = try #require(await ask(world, requests, "set", ["key": .string("lead_mail"), "value": .string("on")]))
         #expect(second.error?.message.contains("dialog is open at the Mac right now, so this one wasn't asked") == true, "\(second)")

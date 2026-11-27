@@ -18,7 +18,7 @@ mm_build la
 DIALOGS=(com.apple.coreautha com.apple.LocalAuthentication.UIAgent com.apple.LocalAuthenticationRemoteService com.apple.SecurityAgent)
 /usr/bin/swiftc -O -o "$mm_bin/keys" "$mm_root/scripts/mac-measure/probes/keys.swift" > "$mm_out/keys-swiftc.log" 2>&1 \
     || { cat "$mm_out/keys-swiftc.log" >&2; mm_stop "keys didn't build"; }
-"$mm_bin/keys" | tee "$mm_out/keys.txt"
+if [[ $mm_dry == 1 ]]; then mm_say "(dry run: would run  keys  to print whether Terminal is trusted for Accessibility)"; else "$mm_bin/keys" | tee "$mm_out/keys.txt"; fi
 mm_new_label la-keys
 mm_write_plist "$mm_bin/la" ask "MEASURE-7 can a key answer this" 30
 mm_say ""
@@ -30,4 +30,5 @@ mm_wait_for "$mm_out/$mm_label.out" '^asking' 30
 /bin/sleep 3
 "$mm_bin/keys" escape "${DIALOGS[@]}" | tee -a "$mm_out/keys.txt" || true
 mm_wait_for "$mm_out/$mm_label.out" '^outcome=' 60
+mm_seen="did the dialog close by itself a few seconds after it appeared, or did you Cancel it? Any 'control this computer' request (its words)?"
 mm_record "$mm_out/keys.txt" "$mm_out/$mm_label.out" "$mm_out/$mm_label.err"

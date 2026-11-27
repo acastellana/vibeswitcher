@@ -345,4 +345,11 @@ extension Platform.Processes {
 
     /// Whether this system has cgroups: Linux does, the Mac doesn't (`cgroup` is nil there for every process).
     public static var hasCgroups: Bool { System.hasCgroups }
+
+    /// The id of the launchd resource coalition the process `pid` is in (the Mac: xnu's private
+    /// `PROC_PIDCOALITIONINFO`, any of the user's processes, Apple's and hardened ones too; the measurement record's M4).
+    /// A process keeps its coalition through fork, exec, `setsid` and being reparented to launchd; launchd puts each job
+    /// it starts in a new one. nil when it can't be read (gone, a zombie, a flavour a later macOS changed), and on
+    /// Linux, which has none. The Mac's voice rule reads it (`ApprovalVoice`'s coalition line).
+    public static func coalition(_ pid: pid_t) -> UInt64? { pid > 0 ? System.coalition(pid) : nil }
 }

@@ -34,6 +34,12 @@ struct NodeAgentTests {
 
     /// What a process of the user's could change in the file (it is the user's to write; the Mac seal watches it):
     /// anything added or changed is found.
+    /// The seal's row for the node's plist (`MacSealList.plist`, step 8) is the file `start` writes and a switch rewrites.
+    @Test func theSealsPlistRowIsTheAgentsFile() {
+        #expect(NodeAgent.path(home: "/Users/u") == "/Users/u/" + MacSealList.plist)
+        #expect(NodeAgent.Place.user(home: "/Users/u", uid: 501, launchctl: "/bin/launchctl").plistPath == "/Users/u/" + MacSealList.plist)
+    }
+
     @Test func aChangedFileIsFound() throws {
         let data = try NodeAgent.plist(Self.inputs, nodeRoot: Self.root, atLogin: false).get()
         let values = try #require(try PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any])

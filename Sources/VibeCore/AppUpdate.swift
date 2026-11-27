@@ -10,7 +10,7 @@ import Foundation
 public enum AppUpdate {
     /// What the build reads: build-app.sh's `source_state` list. A commit touching none of it (the lead's records under
     /// docs/, say) makes no new version.
-    public static let buildPaths = ["Sources", "Package.swift", "Package.resolved", "scripts/build-app.sh", "scripts/lib", "Resources", "Web"]
+    public static let buildPaths = ["Sources", "Keeper", "Package.swift", "Package.resolved", "scripts/build-app.sh", "scripts/lib", "Resources", "Web"]
 
     public struct Failure: Error, Equatable, CustomStringConvertible {
         public var description: String

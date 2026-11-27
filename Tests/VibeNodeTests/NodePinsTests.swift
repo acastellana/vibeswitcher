@@ -245,7 +245,7 @@ struct NodePinsAnchorTests {
         #expect(anchor == genuine.cli, "(1) the anchor is \(anchor.map(NodePins.hex) ?? "nil"), the swapped file's \(NodePins.hex(swappedHash))")
         // The voice as `ServerStart` builds it (Security's checks, not a table), a person who approves.
         let person = ApprovalVoiceTests.Person(.approved)
-        let voice = ApprovalVoice(authenticator: person, commandLine: anchor)
+        let voice = ApprovalVoice(authenticator: person, commandLine: anchor, coalition: ApprovalVoiceTests.nodeCoalition)
         let queue = DispatchQueue(label: "row7-requests")
         let requestsRoot = top.appendingPathComponent("node")
         try FileManager.default.createDirectory(at: requestsRoot, withIntermediateDirectories: true)
@@ -256,7 +256,8 @@ struct NodePinsAnchorTests {
         requests.approval = voice
         requests.approvalLinkWelcomed = { true }
         func facts(_ pid: pid_t) -> PeerFacts {
-            PeerFacts(pid: pid, uid: uid, cgroup: nil, ancestry: [.init(pid: pid, startTicks: 5)], terminal: .none, sessionMarker: nil, underRunner: false)
+            PeerFacts(pid: pid, uid: uid, cgroup: nil, ancestry: [.init(pid: pid, startTicks: 5)], terminal: .none, sessionMarker: false, underRunner: false,
+                      coalition: ApprovalVoiceTests.terminalCoalition)
         }
         func judged(_ token: Platform.PeerToken) async -> (done: Bool, refused: NodeWire.Reply?) {
             let result = Locked<(Bool, NodeWire.Reply?)>((false, nil))

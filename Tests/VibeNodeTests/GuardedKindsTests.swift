@@ -169,12 +169,13 @@ struct GuardedKindsTests {
         let person = ApprovalVoiceTests.Person(.approved)
         let requests = requests(VoiceRule(mode: .approval, scopes: [], uid: getuid(), says: VoiceRule.approvalSays))
         let pid: pid_t = 9_000_952
-        requests.approval = ApprovalVoice(authenticator: person, commandLine: ApprovalVoiceTests.commandLine, runs: { token, code in
+        // The Mac line's row 3: the node's coalition, and the user's terminal in another (as ApprovalJudgmentTests' user).
+        requests.approval = ApprovalVoice(authenticator: person, commandLine: ApprovalVoiceTests.commandLine, coalition: ApprovalVoiceTests.nodeCoalition, runs: { token, code in
             code == ApprovalVoiceTests.commandLine && token.pid == pid
         }, hardened: { _ in true })
         requests.approvalLinkWelcomed = { true }
         let facts = PeerFacts(pid: pid, uid: getuid(), cgroup: nil, ancestry: [.init(pid: pid, startTicks: 5)], terminal: .named("ttytest-mac"),
-                              sessionMarker: nil, underRunner: false)
+                              sessionMarker: false, underRunner: false, coalition: ApprovalVoiceTests.terminalCoalition)
         for name in Self.kinds {
             let done = Locked<NodeWire.Reply?>(nil)
             let request = NodeWire.Request(id: "m", kind: name, args: Self.args(name), action: UUID().uuidString.lowercased())

@@ -88,6 +88,7 @@ struct MacCheckedStartTests {
         #expect(refused.host.server.queue.sync { refused.host.server.serverChild == nil && !refused.host.server.isMacNodeHost })
         #expect(!refused.host.server.welcomeCapabilities.contains(HostProtocol.Capability.vaultV2))
         #expect(!refused.book.recordsActions, "a host that isn't a node host keeps the record of the user's actions")
+        #expect(!refused.book.watchesMacList, "a host that isn't a node host watches the Mac seal list")
 
         let checked = HostImages.macNodeStart(arguments: given, lockPath: node.lock, own: own,
                                               pins: record([try row(host: own, server: node.server)]), accountHome: node.home)
@@ -99,6 +100,7 @@ struct MacCheckedStartTests {
         #expect(made.host.server.queue.sync { made.host.server.isMacNodeHost }, "a checked node host isn't a node host")
         #expect(made.host.server.queue.sync { made.host.server.welcomeCapabilities.contains(HostProtocol.Capability.vaultV2) })
         #expect(made.book.recordsActions, "a checked node host's book keeps no record")
+        #expect(made.book.watchesMacList, "a checked node host's book doesn't watch the Mac seal list")
     }
 
     /// (b) A pinned host whose `--server` file is another build's server (pinned, but in another row), or no server the

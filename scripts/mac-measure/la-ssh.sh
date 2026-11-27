@@ -12,11 +12,14 @@ mm_users_terminal
 if [[ $mm_dry == 0 && -z ${SSH_CONNECTION:-} ]]; then mm_stop "SSH_CONNECTION isn't set: run this from an ssh login"; fi
 mm_build la
 mm_say "launchctl managername here: $(/bin/launchctl managername 2>&1)" | tee "$mm_out/ssh.txt"
-"$mm_bin/la" can | tee -a "$mm_out/ssh.txt"
+if [[ $mm_dry == 1 ]]; then mm_say "(dry run: would run  la can)"; else "$mm_bin/la" can | tee -a "$mm_out/ssh.txt"; fi
 mm_say ""
 mm_say "Next: this process asks once, directly (the server would be a LaunchAgent; this is what an ssh login itself gets)."
 mm_say "If a dialog appears on the Mac's screen, Cancel it and note that it appeared."
 mm_go "Ready?"
 if [[ $mm_dry == 1 ]]; then mm_say "dry run done: nothing was asked"; exit 0; fi
-MEASURE_ASK=yes "$mm_bin/la" ask "MEASURE-5 approve over ssh" 30 2>&1 | tee -a "$mm_out/ssh.txt"
+# Ctrl-C or a dropped ssh never ends the ask midway: the subshell ignores both, la and tee inherit that, and the ask
+# ends by itself within its 30 s.
+( trap '' INT HUP; MEASURE_ASK=yes "$mm_bin/la" ask "MEASURE-5 approve over ssh" 30 2>&1 | tee -a "$mm_out/ssh.txt" )
+mm_seen="did anything appear on the Mac's own screen during the ask (no, or what)?"
 mm_record "$mm_out/ssh.txt"

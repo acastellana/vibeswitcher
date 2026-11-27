@@ -1,0 +1,13 @@
+== la-keys (2026-11-26 19:37, run from: a shell session of the app's host (a shell card))
+keys: pid=79878 accessibility_trusted=false frontmost=dev.vibeswitcher.VibeSwitcher (VibeSwitcher)
+keys: posted nothing (give escape BUNDLE_ID…)
+keys: pid=80261 accessibility_trusted=false frontmost=com.apple.LocalAuthentication.UIAgent (coreautha)
+keys: posted Escape at=2026-11-26T18:37:36Z
+la: pid=80235 ppid=1 at=2026-11-26T18:37:33Z
+availability=available
+deviceOwnerAuthentication=true error=none
+deviceOwnerAuthenticationWithBiometrics=true error=none
+biometryType=touchID
+asking at=2026-11-26T18:37:33Z timeout=30s reason=MEASURE-7 can a key answer this
+outcome=declined("cancelled at the Mac") after=17.8s at=2026-11-26T18:37:50Z
+seen:            took more than 10sec and i cancelled

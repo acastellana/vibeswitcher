@@ -1,0 +1,16 @@
+== la-second (2026-11-26 19:37, run from: a shell session of the app's host (a shell card))
+la: pid=78950 ppid=78946 at=2026-11-26T18:37:03Z
+availability=available
+deviceOwnerAuthentication=true error=none
+deviceOwnerAuthenticationWithBiometrics=true error=none
+biometryType=touchID
+asking at=2026-11-26T18:37:03Z timeout=60s reason=MEASURE-6 FIRST dialog
+outcome=declined("cancelled at the Mac") after=1.0s at=2026-11-26T18:37:04Z
+la: pid=79180 ppid=78946 at=2026-11-26T18:37:06Z
+availability=available
+deviceOwnerAuthentication=true error=none
+deviceOwnerAuthenticationWithBiometrics=true error=none
+biometryType=touchID
+asking at=2026-11-26T18:37:06Z timeout=60s reason=MEASURE-6 SECOND dialog
+outcome=declined("cancelled at the Mac") after=1.0s at=2026-11-26T18:37:07Z
+seen: after it

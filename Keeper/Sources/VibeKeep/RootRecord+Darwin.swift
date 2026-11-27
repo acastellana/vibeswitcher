@@ -1,7 +1,7 @@
 #if canImport(Darwin)
 import Foundation
 
-extension Platform.Files {
+extension Keep.Files {
     /// Whether the file `fd` names carries an extended ACL with any entry (`acl_get_fd_np`, `ACL_TYPE_EXTENDED`): mode bits
     /// don't show an ACL's grant (`chmod +a "everyone allow add_file"`). nil when it can't be read.
     public static func hasExtendedACL(_ fd: Int32) -> Bool? {

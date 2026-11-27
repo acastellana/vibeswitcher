@@ -17,4 +17,5 @@ mm_say "Note what you see when the second comes, then Cancel each one."
 mm_go "Ready?"
 mm_bootstrap_and_start
 mm_wait_for "$mm_out/$mm_label.out" '^outcome=' 150 2
+mm_seen="when the second dialog came: did it wait behind the first, replace it, or appear beside it?"
 mm_record "$mm_out/$mm_label.out" "$mm_out/$mm_label.err"

@@ -1,6 +1,7 @@
 #if canImport(Darwin)
 import Foundation
 import Security
+import VibeKeep
 
 // The Mac's code identity: the session host's `AppCode` bodies (Sources/VibeHost/AppCode.swift), moved here
 // unchanged. Builds are ad-hoc signed (no team), so the identity is the code directory hash.
@@ -31,47 +32,25 @@ extension Platform.CodeIdentity {
             return runs(token, cdhash: cdhash)
         }
 
+        // The dynamic check by audit token lives in the keeper's package (Keeper/Sources/VibeKeep/CodeIdentity+Darwin.swift,
+        // moved there unchanged): each name here is a one-line call into it.
+
         /// The guest the audit token names, as Security finds it (it refuses a token whose pid exec'd since).
-        static func guest(_ token: audit_token_t) -> SecCode? {
-            var token = token
-            let audit = Data(bytes: &token, count: MemoryLayout<audit_token_t>.size)
-            var guest: SecCode?
-            guard SecCodeCopyGuestWithAttributes(nil, [kSecGuestAttributeAudit: audit] as CFDictionary, [], &guest) == errSecSuccess else { return nil }
-            return guest
-        }
+        static func guest(_ token: audit_token_t) -> SecCode? { Keep.CodeIdentity.guest(token) }
 
         // The dynamic status word's flags (xnu's <kern/cs_blobs.h>): valid, the Hardened Runtime, get-task-allow, and
         // a debugger attached.
-        static let validFlag: UInt32 = 0x0000_0001
-        static let getTaskAllowFlag: UInt32 = 0x0000_0004
-        static let runtimeFlag: UInt32 = 0x0001_0000
-        static let debuggedFlag: UInt32 = 0x1000_0000
+        static let validFlag: UInt32 = Keep.CodeIdentity.validFlag
+        static let getTaskAllowFlag: UInt32 = Keep.CodeIdentity.getTaskAllowFlag
+        static let runtimeFlag: UInt32 = Keep.CodeIdentity.runtimeFlag
+        static let debuggedFlag: UInt32 = Keep.CodeIdentity.debuggedFlag
 
-        static func isHardened(_ token: audit_token_t) -> Bool? {
-            guard let guest = guest(token) else { return nil }
-            var information: CFDictionary?
-            // A guest is a code object too: Security reads its dynamic status with kSecCSDynamicInformation.
-            guard SecCodeCopySigningInformation(unsafeBitCast(guest, to: SecStaticCode.self),
-                                                SecCSFlags(rawValue: numericCast(kSecCSDynamicInformation)), &information) == errSecSuccess,
-                  let information = information as? [String: Any],
-                  let status = (information[kSecCodeInfoStatus as String] as? NSNumber)?.uint32Value else { return nil }
-            return isHardened(status: status)
-        }
+        static func isHardened(_ token: audit_token_t) -> Bool? { Keep.CodeIdentity.isHardened(token) }
 
         /// Whether a dynamic status word says valid, hardened and not debuggable.
-        static func isHardened(status: UInt32) -> Bool {
-            status & validFlag != 0 && status & runtimeFlag != 0 && status & (getTaskAllowFlag | debuggedFlag) == 0
-        }
+        static func isHardened(status: UInt32) -> Bool { Keep.CodeIdentity.isHardened(status: status) }
 
-        static func runs(_ token: audit_token_t, cdhash: Data) -> Bool {
-            guard let guest = guest(token) else { return false }
-            let hex = cdhash.map { String(format: "%02x", $0) }.joined()
-            var requirement: SecRequirement?
-            guard SecRequirementCreateWithString("cdhash H\"\(hex)\"" as CFString, [], &requirement) == errSecSuccess,
-                  let requirement else { return false }
-            // Dynamic validity: the kernel still holds the process's code valid, and it's the code the requirement names.
-            return SecCodeCheckValidity(guest, [], requirement) == errSecSuccess
-        }
+        static func runs(_ token: audit_token_t, cdhash: Data) -> Bool { Keep.CodeIdentity.runs(token, cdhash: cdhash) }
 
         static func architecture(of pid: pid_t) -> Architecture? {
             var architecture = Architecture()

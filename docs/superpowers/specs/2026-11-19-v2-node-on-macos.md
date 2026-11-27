@@ -30,8 +30,17 @@ platform seam (`Platform.Service`) or refused by name, so that on a Mac:
 - A scratch node (`VIBESWITCHER_HOME` naming a folder other than the account's `~/.vibeswitcher`) is not refused: its
   harness starts it, and its tests decide what runs on the Mac, as before.
 
-**It isn't**: a node that runs as the user's on a Mac. No LaunchAgent, no node host beside the app's, no voice rule, no
-Mac seal list, no install script for the Mac. Those are the steps below, each needing a real Mac.
+**It isn't**: a node that runs as the user's on a Mac. When this was written (2026-11-19) there was no LaunchAgent, no
+node host beside the app's, no voice rule, no Mac seal list, no install script for the Mac. **Since (corrected
+2026-11-26, the join of `v2-mac-seal-list` and `v2-mac-runbook`):** each of those is built and off, none of it running
+as the user's: the LaunchAgent (step 5, "The LaunchAgent: start, stop and status"; `start` refused by
+`NodeSystem.macUnbuilt`), the checked node host beside the app's ("The checked node start"; off behind
+`HostImages.isCheckedMacNode` and `macServerRefusal`), the voice rule's `approval` mode (off behind
+`NodeSystem.approvalMeasured`; row 3's two new lines built, off, reviewed ready with fixes: "The rule's lines, settled
+from the measurements"), the Mac seal list (step 8, "Built: `MacSealList`"; watched only by a checked node host's book) and the
+install script (step 7, `install-node-mac.sh`, unproven by a real install). Still not built: the unified log (step 6)
+and living beside the app (step 9). The node runs as the user's on a Mac only when the switch-on review and the user
+turn those flags on.
 
 ## Where the node is Linux-only today
 
@@ -48,7 +57,7 @@ Mac) is the one platform fact shared code may read (`PlatformLintTests`), now jo
 | The question post to the server | `NodeQuestionPost.enabled` | off |
 | Host notes, `spawnNeedsLead`, `watchesItsPath` | `HostServer.capabilities`, `vibeswitcher-host/main.swift` | off |
 | The voice rule's cgroup line | `VoiceRule.at`, `Voice.judge`, `Platform.Processes.cgroup` (nil on the Mac) | was the weaker rule; **now closed for the user's server** |
-| The voice rule's environment line (`VIBESWITCHER_SESSION`) | `PeerFacts`, `Platform.Processes.environment` (`KERN_PROCARGS2`) | the hosted runner (SIP off) shows another process's environment; a real Mac with SIP on is expected not to, which fails the line for every peer **(needs a real Mac)** |
+| The voice rule's environment line (`VIBESWITCHER_SESSION`) | `PeerFacts`, `Platform.Processes.environment` (`KERN_PROCARGS2`) | the hosted runner (SIP off) shows another process's environment; a real Mac with SIP on was expected not to. **Measured (2026-11-25, M2): it does**, for every process of the user's but Apple's platform binaries; the peer's line comes back (the rule's lines, below) |
 | The unit, `start`/`stop`, `daemon-reload`, `show` | `NodeUnit`, `NodeStarter`, `NodeStopper`, `StartSequence`, `StopSequence`, `ManagerConfig` | `systemctl` absent; **now refused before any of it** |
 | The detached start (no systemd) | `NodeFolders.mode` (`/run/systemd/system`, `/proc/1/comm`), `NodeRecord` | `mode` said `.noSystemd` on the Mac; `NodeContext.current` and `StopSequence.kind` gated it by `CodeIdentity`, now by `Platform.Service` |
 | The runtime folder | `NodeFolders.runtimeFolder` (`/run/user/<uid>`) | no such folder; `Platform.Service.runtimeFolder` is nil there |
@@ -95,16 +104,26 @@ The other four lines (ancestry, terminal, environment, branch-code runner) are g
 - `setsid` drops its terminal; `script` gives it a new one, as on Linux.
 - Hide its environment from the server, or rather: the server can't read it. With SIP on, `KERN_PROCARGS2` is expected
   not to give another process's environment, so the environment line fails closed for everyone and must go.
+  **Measured otherwise (2026-11-25, the measurement record's M2):** with SIP on, a process of the user's reads
+  another's environment, the user's own builds hardened or not; only Apple's platform binaries (`zsh`, `bash`,
+  `login`) read empty. So the line can be read of the peer, never of its ancestors; a session drops it at will.
 - Leave every trace of the session: `open -a Terminal x.command`, `osascript -e 'tell app "Terminal" to do script …'`
   (Automation consent the first time, often granted already), `launchctl submit`/`bootstrap` of its own agent. A
   Terminal window so opened is a real terminal, indistinguishable by process facts from one the user opened. This is
   where the Mac is weaker than Linux: `systemd-run --user` lands in the user's manager, which the cgroup line refuses;
-  `open -a Terminal` lands in a context that *is* the user's terminal.
+  `open -a Terminal` lands in a context that *is* the user's terminal. **Measured (the user's keyboard session,
+  2026-11-26, from a shell card; the measurement record's K-ESC-1 to K-ESC-3):** `open -a Terminal` and `osascript … do
+  script` from a detached process each gave a shell in Terminal's own coalition, on a fresh terminal of Terminal's,
+  without `VIBESWITCHER_SESSION`, its chain `login` → Terminal → launchd; no consent dialog was reported for the
+  AppleScript one. A job the session bootstrapped itself ran with launchd its parent, no terminal, no variable and a
+  coalition of its own.
 
 **What it can't do.** Forge its audit token (the kernel's, `LOCAL_PEERTOKEN`, `Platform.PeerToken`); pass a cdhash
 check as other code (`Platform.CodeIdentity.runs`, the host's app check today); click a system authentication dialog
 (LocalAuthentication's, drawn by the system: synthetic events need Accessibility consent, which Terminal and Claude
-Code don't have by default **(needs a real Mac)**); read a Hardened Runtime process's memory without
+Code don't have by default; **measured for a process not trusted for Accessibility** (2026-11-26, K-LA-7): an Escape
+it posted while the dialog was frontmost didn't end it, the person's Cancel did 14 s later (dropped or ignored, not
+told apart; no Escape by hand yet); a trusted process is not measured, and a key can at most cancel or type, never give the finger); read a Hardened Runtime process's memory without
 `get-task-allow`.
 
 **What the Mac app's code identity already gives.** The app's host takes the app as the app's code (cdhash beside the
@@ -118,7 +137,8 @@ it only by changing the app (a main-side change, out of this step).
 | --- | --- | --- | --- |
 | Peer code identity: the server checks the peer's audit token runs the installed `vibeswitcher` (cdhash) | the request came through the node's own command line, so its typed word and confirmation ran | a session runs the same command line | a guard rail; Linux has no equivalent (an exec'd path proves nothing there) |
 | The four non-cgroup lines (ancestry, terminal, branch-code runner; the environment line dropped) | not obviously a session's | passes after double-fork + `setsid` + `script`, or `open -a Terminal` | Linux's weaker rule, minus one line |
-| `responsibility_get_pid_responsible_for_pid` (the responsible process TCC uses) | which app a process is attributed to; inherited across fork, exec, `setsid` | escapes through `open`/AppleScript/launchd into Terminal's own attribution | the nearest thing to a cgroup, but private SPI and escapable: not a rule alone |
+| `responsibility_get_pid_responsible_for_pid` (the responsible process TCC uses) | which app a process is attributed to; inherited across fork, exec, `setsid` | escapes through `open`/AppleScript/launchd into Terminal's own attribution | the nearest thing to a cgroup, but private SPI and escapable: not a rule alone. **Measured (M5, K-ESC-1 to 3): not inherited under the app's session host (each process its own); Terminal's after `open -a Terminal`, each process its own after `osascript` and `launchctl`: no line** |
+| The coalition (`PROC_PIDCOALITIONINFO`, private; launchd's per-job resource coalition) | which launchd job a process descends from: kept through fork, exec, `setsid` and reparenting (M4, K-AG-1) | a session's descendant stays in its host's job's coalition unless it goes through launchd: `open -a Terminal` and AppleScript land in Terminal's, a job of its own in a new one (K-ESC-1 to 3) | the nearest thing to Linux's cgroup for what doesn't go through launchd; escapable through launchd as the Mac is: a guard rail (added, below) |
 | **LocalAuthentication, asked by the server per state change** (Touch ID, else the login password; the prompt's text built by the server from the card) | a person at the Mac agreed to *this* card | can make the prompt appear; can't answer it. The user sees an unexpected prompt naming the card, and declines | **stronger than Linux's cgroup rule against an autonomous session** (it needs the person), weaker against prompt fatigue; S12's signed approvals, early |
 | The app's window (its existing code-identity channel) | the user clicked in the app | can't be the app | the strongest, but changes the app (main) |
 
@@ -129,6 +149,84 @@ code identity (the installed command line's cdhash) and the guard-rail lines. Re
 and code identity as on Linux. Until it is built and measured on a real Mac, the user's server there is on the closed
 rule, and the user's node isn't started at all. Never the weaker rule by default. Later, the app's window as a second
 voice, once main takes the change.
+
+**Since: one Touch ID for the page, a 12-hour unlock (the user, 2026-11-25; device keys, 2026-11-26).** Touch ID per
+state change stays the rule for the command line. For the page the user chose (2026-11-25, their answer 541E258F) **one
+Touch ID** that allows the "page acts for you" mode, opens the page and confirms it, after which the page acts with no
+prompt for **up to 12 hours** on loopback; the user accepted its stated cost, that during those hours anything able to
+read the open page's secrets, a team's session included, could act as them (a design change with a security review).
+The same day the remote-access choices made the unlock the device's: a device is paired once with its own key, and
+opening the page after a while asks Touch ID (Face ID on the phone) for an unlock that lasts 12 hours; each guarded
+change (update and rollback, hooks, a first config accept and changed rails, policy, review floors and models, adding a
+plugin) asks its own Touch ID with the change shown, never by the 12-hour unlock alone (2026-11-25, N1). **The
+device-keys design's review changes how the Mac does it (2026-11-26, I2): the Mac desktop's daily unlock is a browser
+passkey** (still one Touch ID, the browser's prompt), and **the server's own Touch ID dialog, this section's, stays for
+the first enrolment of the desktop's key and for guarded changes only**. So on a Mac node the server's dialog is asked:
+for each state change the command line sends (the rule below), at the first enrolment, and for each guarded change; the
+page's acts inside an unlock ask none. The rule's lines below judge the command line's callers; under the device-keys
+design the page's requests are judged by the device's key, outside them.
+
+### The rule's lines, settled from the measurements (row 3, 2026-11-26)
+
+The measurement record's row 3: whether to add the coalition line (M4) and the peer's environment line (M2), and the
+`approval` mode's guard rails, from [the measurements](../../process/v2-mac-measurements.md): M1 to M14 (2026-11-25, an
+agent's session) and the user's keyboard session of 2026-11-26 (K-LA-1 to K-LA-7, K-ESC-1 to K-ESC-3, K-AG-1; run from a
+VibeSwitcher shell card, not Terminal.app). Settled 2026-11-26; `NodeSystem.approvalMeasured` stays false until the
+review's items before the flip are closed and the user says go.
+**Built, off (2026-11-27, branch `v2-mac-approval-lines`):** both lines are in `ApprovalVoice.callerRefusal` (`ApprovalLinesTests`), each as this table words it, still off behind `NodeSystem.approvalMeasured`. The independent review read them (REVIEW-row3, `ApprovalLinesReviewTests`): ready with fixes, no Important; its two fixes owed before the branch is offered are in (D1 and N2: which kinds the lines refuse, in this table and `ApprovalVoice`'s doc; D2: `PeerFacts.read` drops the session marker when the token's check fails, as it drops the coalition).
+
+**What carries the guarantee for a state change: the dialog alone.** (A read asks no dialog: for reads these lines
+are the whole gate, which K-ESC-1 to 3 now show an escape passes; "Open for the user: the Mac's reads" below.) Every
+line in the table is a guard rail, the caller's code and the
+Hardened Runtime included: a session runs the installed command line itself, and every process fact below it can shed
+by going through launchd (`open -a Terminal`, AppleScript and a job of its own each pass every line, K-ESC-1 to 3), as
+the design said. The code check keeps any program but the command line, and a steered one, off the server; the lines
+refuse early and quietly what they can tell, so honest callers that aren't the user never reach the dialog. The review
+counts the dialog (what it shows, and that only the person at the Mac can answer it) and none of the lines as the
+boundary.
+
+| Line | Refuses (and the record) | Lets through | A legitimate caller refused | Unreadable | Settled |
+| --- | --- | --- | --- | --- | --- |
+| The uid, the installed command line's code (the record's row), the Hardened Runtime | another user; any program but the installed command line; one that could be steered (M6, M7; rows 7, 10) | a session running the command line itself | none | refused | **kept** |
+| Ancestry: no live session's program, the host or the server above the peer | a node session's descendant that didn't detach | a double fork (M3); every escape (K-ESC-1/2: `bash` → `zsh` → `login` → Terminal → launchd; K-ESC-3: launchd); item 11's fallback read the escaped chain whole through root's `login` (K-ESC-1/2, as M8) | a command line typed in a node session (meant) | refused | **kept** |
+| The controlling terminal isn't a live session's | a peer on a session's terminal | `setsid`; an escape, which gets a fresh terminal of Terminal's (K-ESC-1/2: `ttys014`) | none | refused | **kept** |
+| No branch code runner above | a peer under one | (not measured on the Mac) | none | refused | **kept** |
+| **The coalition: the peer isn't in the server's own resource coalition** (the node job's: the host, the server and every session descend from it; the server reads its own once at its start, M4's `self`) | every descendant of a node session that didn't go through launchd, however detached: a process keeps its coalition through fork, exec, `setsid` and reparenting to launchd (M4); a `setsid` child of a LaunchAgent job is in the job's coalition while the job runs (K-AG-1, two runs) | the escapes through launchd: a job of its own gets a new coalition (K-ESC-3), `open -a Terminal` and AppleScript land in Terminal's (K-ESC-1/2) | none expected: the user's Terminal is Terminal's coalition (by inference from K-ESC-1, Terminal's process in it; **open**, closed by ANC-1), the app's shell cards the app's (1841, every caller block); a command line typed in a node session is ancestry's already | refused (for the user's own reads too, the socket's `.user` and `.webRead` reads, as every line: `callerRefusal` runs first; anyone's kinds, `status`, `board`, `questions`, never reach it): the installed command line is the user's hardened build, which M4 read detached and hardened; a private read (flavour 20, not in the SDK's headers) a later macOS may change makes every state change refused, loudly, never open | **added** (settled here on the records, for the review) |
+| **The peer's environment: `VIBESWITCHER_SESSION` set on the peer itself** (never an ancestor: Apple's binaries read empty, M2 and K-ESC-1/2's chains) | any process carrying the variable: the Mac app's shell cards and agent sessions (`VIBESWITCHER_SESSION=set` in every caller block, K-ESC-1 to 3), which no other line refuses (not a node session, not the node's coalition: an app agent's Bash tool running the command line would otherwise reach the dialog); a node session's descendant that kept it | anything that dropped it: `env -u`, a re-exec with an environment of its own, a job a session loads itself (K-ESC-3: unset, `ppid=1`), an escape into Terminal (K-ESC-1/2: unset) | **the user's own shell cards in the Mac app, for their own reads as well as state changes**: `ApprovalVoice.judge` runs every line (`callerRefusal`) before it looks at the kind, so every state change and every one of the user's own reads (the socket's `.user` and `.webRead` reads: `mail`, `recent`, `brief`, `shells`, `config.held`, `base.show`, `approve.list`, `plugin.inspect`, `update.check`, `start`, `web.passkey`, `web.pairing`) is refused there with the line's words and no dialog, and the hello's voice word says `other`; anyone's kinds (`status`, `board`, `questions`, `plugin.list` and the other `.anyone` reads) never reach `ApprovalVoice` (the socket routes them `.read`), so a shell card keeps them (the review's `onTheWireTheLinesRefuseTheUsersReadsButNotAnyonesReads`); on a node the user runs the command line from Terminal, or uses the page; the refusal says so | refused (readable for the user's builds with SIP on, M2) | **added as an early refusal, not a boundary** (the lead's call, 2026-11-26, reversible): the approval's guarantee rests on the dialog alone (its words, open below; one Escape posted by an untrusted process didn't end it, K-LA-7), never on this line or any other, and the review is not to count it |
+| The responsible process | — | — | — | — | **no line**: after `open -a Terminal` the escaped shell, `bash` and `zsh` name Terminal (K-ESC-1), after AppleScript each names itself (K-ESC-2), a self-loaded job itself (K-ESC-3), and under the app's session host every process names itself (M5, every caller block): no fact to judge by, and private |
+
+**The `approval` mode's guard rails, with the dialog:**
+
+- **The dialog from the server's place** (a LaunchAgent's process in `gui/<uid>`) appears and approves: K-LA-1 (Touch
+  ID, 2.7 s) and K-LA-3 (approved, 3.8 s; the password route by the runbook's instruction, not in the record).
+- **Every end but an approval is a decline**: Cancel (K-LA-2, 1.6 s) and the untouched dialog at the server's 60 s
+  (K-LA-2, 60.0 s, gone from the screen); the command line waits 120 s (M14), so it always hears it. Kept: the 10 s
+  cooldown after a declined, cancelled, timed-out or unavailable dialog; the dialog's text built by the server from the
+  card (the tasks' "Before approvalMeasured flips", items 1, 2, 4).
+- **One dialog at a time on the server** (`Requests.approvalJudgment`, a second refused while one waits): kept; it
+  doesn't depend on the system. **Open**: what the system does with two LocalAuthentication dialogs at once, which is
+  what the user sees when a session's own dialog (M9) comes while the server's is up: K-LA-6's first was cancelled
+  before the second was asked. Closed by LA-6 with the first left up (the measurement record's owed step 3).
+- **A synthetic key, so far**: one Escape posted by a process not trusted for Accessibility, with the dialog
+  frontmost, didn't end it (K-LA-7); whether macOS dropped it or the dialog ignored it isn't told apart, and no Escape
+  was pressed by hand on it (owed step 1 adds that control). Rail: the node's host, server and command line never ask
+  for Accessibility or Automation. **Open**, and left so: a trusted process (an escaped shell is attributed to Terminal, K-ESC-1, so a
+  Terminal holding Accessibility would lend it its trust) can at most cancel the dialog or type into it; approving
+  needs the enrolled finger or the login password.
+- **Open: the dialog's words** (its title, whether the request's word reads first after the program's name). No record
+  holds them; the switch-on's own precondition (the tasks' "Before approvalMeasured flips", item 2). Closed by LA-1 with
+  a screenshot or the words typed (owed step 1).
+- **Open: the lid closed and ssh** (LA-4, LA-5 not run): whether a closed lid changes the route, and that an ssh
+  login's ask is unavailable with nothing on the Mac's screen; `LimitLoadToSessionType Aqua` keeping the node out of an
+  ssh login's `Background` session (ANC-2's `managername`). Owed steps 5 and 6.
+- **Open: anything stronger than the variable to tell the app's sessions from the user's Terminal.** The coalition
+  could: a process of an app session that doesn't go through launchd stays in the app's coalition (1841 in every caller
+  block; M4), and the user's Terminal is in Terminal's (109496, by inference). A second coalition line, "not in the Mac
+  app's coalition" (the app's read from its host, which the node can identify by code), would refuse the app's sessions
+  without leaning on the variable, at the same cost (the user's shell cards) and with the same escape (launchd). Not
+  decided: K-ESC-1/2 ran from a shell card, so no record holds the user's own Terminal shell's coalition and
+  responsible process. ANC-1 in Terminal.app (owed step 2) closes the fact; the review then chooses between the second
+  coalition line and the variable.
 
 ## The service: a LaunchAgent, not the app
 
@@ -142,7 +240,9 @@ What launchd gives less than systemd, said now so later steps don't assume it:
 
 - No cgroup: `launchctl bootout` kills the job's process group, not a session in a POSIX session of its own. So "every
   session ends with the unit" (`KillMode=control-group`) doesn't hold: the host ends its sessions itself on a stop, and a
-  crashed host leaves them running, as the app's host does today (S9's row "A host exit").
+  crashed host leaves them running, as the app's host does today (S9's row "A host exit"). Measured (step 5's "What
+  `bootout` ends", and the user's AG-1, K-AG-1, twice): the job's process and its group end, a `setsid` child runs on
+  (in the job's coalition while the job ran; its coalition after the `bootout` not read).
 - The server check: the listener's audit token, its cdhash against the installed build's server, and its parent the
   job's pid (`launchctl print gui/<uid>/dev.vibeswitcher.node`): stronger than Linux's "non-dumpable, in the unit's
   cgroup" on the code, weaker on containment.
@@ -290,10 +390,19 @@ genuine server, the child of the job's process. Closing it from the command line
 launchd and then checked, the racy shape this design avoids. The server closes it instead: at its start, before it
 serves or writes anything, a Mac node server finds its own row by its running code and requires its connector's peer
 token to run that row's host, hardened (`NodeCheck.macConnectorRefusal`, in `ServerStart`; off with the rest, since no
-Mac host starts a `--node` server yet). Measured by the reviewer (`pair.c`): a stream pair's `LOCAL_PEERTOKEN` names
-the process that made the pair (its pid and pidversion), fixed at creation: not "the last sender", as this section said
-before. Two things for item 13: after an in-place exec handover that token is stale (Security refuses a token whose
-process exec'd), so a server carried across a handover needs a new connector or a restart; and the test is at the
+Mac host starts a `--node` server yet). **Corrected 2026-11-27 (the keeper design's K-M1, measured on this Mac, [its row in the
+record](../../process/v2-mac-measurements.md)):** this section said, after the reviewer's `pair.c`, that a stream
+pair's `LOCAL_PEERTOKEN` names the process that made the pair, fixed at creation. **It doesn't**: it names whoever last
+sent, received or polled on the other end, as that process runs now; after an exec a fresh read names the new image
+and Security accepts it, and a failed write or read moves it without a byte (K-M1 (a) to (c), (j), (g4)). So the
+connector check above is open the same way: a host of a session's own that makes the connector, forks a holder of its
+end and execs the genuine pinned host passes it, and the holder talks to the server as its host. It stays off with
+the rest (no Mac host starts a `--node` server); its redesign is the keeper design's Mach form (the server judging a
+message from its host by the message's own audit trailer: its parent's pid, a host row of the record, hardened, as
+K4a-ii's child proof runs the other way), in step 11. Two things for item 13: after an in-place exec handover the connector's token, read afresh, names the new image
+(K-M1 (b): it was thought stale, "Security refuses a token whose process exec'd", which holds only for a token kept
+from before the exec), so it proves nothing about the handover either way, and a server carried across a handover
+needs the Mach form's proof from its host again, or a restart; and the test is at the
 function, with a real pair's token (a node server's record path isn't a test's to choose). And from the re-check: a
 server child checks its connector's peer once, at its start, so after a handover it would keep serving a swapped host
 image; on the Mac the server child is ended and started again after every handover, so the check runs against the new
@@ -332,7 +441,7 @@ vault keeps the record (item 14, below). No checked start, no node host: the ref
 (`macServerRefusal`) stay as they are. Tests reach the same function with an injected record, own cdhash and home;
 nothing in the node lets a flag, file or variable choose them.
 
-**A switch (F6 narrowed; the fix round's re-check pending).** macOS has no exec from a descriptor, so whatever is checked before the in-place exec, the
+**A switch (F6 narrowed; the fix round's re-check pending, as first written; since: re-checked, "not yet" on 2026-11-25 with I1 and I2, below, then after a second fix round "ready to offer for v2", 2026-11-26, corrected at the join of 2026-11-26).** macOS has no exec from a descriptor, so whatever is checked before the in-place exec, the
 exec runs what the path names then. A checked node host's switch goes through a keeper (`MacHandoverKeeper`):
 
 1. The path check as before (`HandoverTarget.macPinned`): the target's file, read once, is a pinned host; that read's
@@ -341,7 +450,11 @@ exec runs what the path names then. A checked node host's switch goes through a 
    to make a fresh stream pair and send one end over the inherited channel; that end's `LOCAL_PEERTOKEN` names the
    keeper's own image, made after its exec. The old host requires that token to be its spawned pid, to run *expected*
    by Security's dynamic check, and to be hardened. Otherwise the keeper is ended and the switch refused: the old host
-   and its sessions are as they were (a file swapped before this point is caught here, the long window F6 named).
+   and its sessions are as they were (a file swapped before this point was thought caught here, the long window F6
+   named; **K-M1 refutes it**: code at the path can make the pair, send its end, fork a holder and exec a copy of the
+   target, and the token then names the target at the spawned pid, so the holder takes the parcel. The keeper
+   design's K4c moves this proof and step 4's to Mach messages judged by their trailers; until then this switch is
+   open to that order, and it is off with the checked node).
 3. On the old host's queue: the server child is ended and reaped (below), the state built, and the state's bytes and
    every descriptor it names (the lock, the listener, the secrets' channel, each session's terminal) sent to the
    proven keeper over the pair it made. Then the host execs the target with only its end of the channel, and with the
@@ -487,7 +600,8 @@ take the keeper's switch end to end.
 **What it doesn't cover** (open, in the reviewer's words where they are the reviewer's):
 
 - **A switch's target swapped between check and exec (F6): narrowed, not closed (the fix round of 2026-11-25; the
-  review's re-check of F1 is pending).** The reviewer first: it "is reliable, not a tight race: `HostServer.handOver`
+  review's re-check of F1 was pending when written; since: re-checked twice, the last verdict "ready to offer for v2"
+  on 2026-11-26, with F6 still narrowed and not closed as below; corrected at the join of 2026-11-26).** The reviewer first: it "is reliable, not a tight race: `HostServer.handOver`
   checks the path, then probes the new build off the queue". With the keeper, what the probes show:
   - A file of other code renamed over the target after the path check: refused at the keeper's proof, the old host and
     its sessions as they were (`MacKeeperHandoverTests/aTargetSwappedAfterThePathCheckHandsOverNothing`).
@@ -547,6 +661,11 @@ plists in the clone's `.build`, never `~/Library/LaunchAgents`).**
   session of its own (`sleep 303`, parent pid 1) ran on. A process of the job killed by a signal took its group with it
   too (`sleep 302` gone, `sleep 303` running). So launchd ends the job's process group and nothing outside it: the host's
   sessions (each in a session of its own, `PTYSpawn`) and its server child (a group of its own) are the node's to end.
+  The user's AG-1 (2026-11-26, twice; the measurement record's K-AG-1) gives the same, and adds that the `setsid`
+  child was in the job's coalition while the job ran. Its coalition after the `bootout` was not read, so whether a
+  process that detached and dropped `VIBESWITCHER_SESSION` (which `stop`'s search by the session ids environments
+  carry misses) stays findable by the job's coalition is not measured: a sweep by coalition for `stop` is an idea for
+  this step's review, to be measured first, not decided.
 
 **The plist** (`NodeAgent.Job`, written by `NodeAgent.plist`, the same function `agent-plist` prints for the install):
 
@@ -634,8 +753,8 @@ server child is started with:
   owns, not a link; else the sessions have none. Measured: a scratch job in `gui/501` running `launchctl getenv
   SSH_AUTH_SOCK` gets the same socket (`/var/run/com.apple.launchd.<random>/Listeners`) as a process outside launchd,
   and launchd gives the job the same in its own environment. *Residual:* the domain's value is any process of the user's to set
-  (`launchctl setenv`), as for every Terminal opened after it; the Mac seal list (step 8) watches launchctl's user
-  environment.
+  (`launchctl setenv`), as for every Terminal opened after it; the Mac seal list (step 8) can't watch it (launchd's
+  memory, not a file: "Built: `MacSealList`", what can't be sealed), only its persistent forms.
 - `__CF_USER_TEXT_ENCODING`: `0x<uid>:<encoding>:<region>` as launchd gives it, from the user's
   `~/.CFUserTextEncoding` (home from the user database; two hex or decimal numbers), `0x<uid>:0x0:0x0` without one.
 - `LANG`: `en_US.UTF-8` when nothing sets it, as the app's sessions get it (`HostedSession.environment`, unchanged): a
@@ -866,7 +985,7 @@ the user's). The plist written at the user's login (`--at-login`, `RunAtLoad`).
   build's. The switch's follow-up now rewrites the plist for the build it went to, and `status` refuses a host whose
   build isn't the plist's.
 - *`launchctl getenv SSH_AUTH_SOCK`* is any process of the user's to set (`launchctl setenv`), as for every Terminal
-  opened after it (the Mac seal list, step 8).
+  opened after it; the Mac seal list (step 8) can't watch it, only its persistent forms (its "what can't be sealed").
 - *Sessions keep a hard core limit of 0* (the reset's): soft-only in the reset would give `ulimit -c` back.
 - *A session that ignores the hangup* outlives a `stop` without the server: `stop` names it by pid and fails after its
   limit (it doesn't kill what may be the user's own program).
@@ -1019,7 +1138,270 @@ accept), starts from: `~/Library/LaunchAgents` (folder), the node's plist, the z
 `.zprofile`, `.zshrc`, `.zlogin`) and what they source, Homebrew's prefix (`/opt/homebrew/bin` is the user's to write on
 Apple Silicon and early on PATH: by listing), `~/.nvm` as on Linux, `~/.gitconfig`, Terminal's startup command
 (`~/Library/Preferences/com.apple.Terminal.plist`), `launchctl`'s user environment, and the Xcode selection
-(`xcode-select -p`). Each row measured on a real Mac before it is added, as Linux's were.
+(`xcode-select -p`). Each row measured on a real Mac before it is added, as Linux's were. (The plan as written
+2026-11-19. What was built and measured, below, is newer and differs: `launchctl`'s user environment is not a row, being
+launchd's memory and not a file ("What can't be sealed"), and the Xcode selection is read as `/var/db/xcode_select_link`;
+noted at the join of 2026-11-26.)
+
+### Built: `MacSealList` (step 8, 2026-11-26, `v2-mac-seal-list`; the measurement record's row 13)
+
+Off as the rest: `NodeSystem.macUnbuilt`, `HostImages.isCheckedMacNode`, `approvalMeasured` and `macServerRefusal`
+untouched; proven on scratch homes, roots and vaults. State at the join of 2026-11-26: built, fix round done (R1–R9
+below, then 01a05734), re-check done ("ready with fixes", N1–N7 below); second fix round done on `v2-mac-seal-fix2`
+(2026-11-26: N1, N2, N4, N5, N6 fixed; N3, N7 owed).
+
+**What is built.** `MacSealList` (`Sources/VibeCore/V2/MacSealList.swift`) is the Mac's list in `LinuxSealList`'s shape:
+the rows as data (`homeEntries`, `startupFiles`, `outsideEntries`), the same `ConfigSeal.Watched` kinds, Linux's
+`sourced` reader, the rows outside the home read only for the account's own home (an `outside:` root for tests), every
+row executing (a change waits for the user's accept whoever made it). It reaches the seal by the one path Linux's list
+does: `ConfigSeal.homeWatched(home:macList:)` appends it, the vault's book hashes it at each look
+(`LeadVault.Book.answer`), and its `judge` holds a change until the user's accept (`config held`, `config accept`, the
+app's accept), as for every watched thing; no second mechanism. *Off unless asked:* only a book with `watchesMacList`
+watches it, and only a checked Mac node host sets that, in the same place and on the same condition as
+`recordsActions` (`HostServer.serverChild`'s `isMacNodeHost`: never the app's host, never a scratch host, never another
+book in the process). The node's own code (its server's cards and refusals: `HeldChange`, `ConfigHoldStore`,
+`Answers`) names the rows on the Mac (`MacSealList.namedByTheNode`), a superset of what its book holds: a row with
+nothing recorded is no refusal and no card. The app's seal, and the Mac's `homeWatched` without `macList`, are today's
+(`theMacListIsOnlyWhereAsked`, `LinuxSealListTests.theMacsListIsEmpty`). On Linux the list is empty whatever is asked.
+
+One shared-code addition, approved by the lead (2026-11-26): `ConfigSeal.Watched.Kind.preferences`, an app's
+preferences read as a property list: every top-level key but the ones measured to change as the app runs, each by its
+parsed value in a canonical form (format and key order don't matter, a type does, nested values whole), and each
+`ByHost/<domain>.*.plist` beside it (CFPreferences reads the current host's domain first); a link at the path, an
+unreadable file, a non-plist, a ByHost file coming or going, or the ByHost folder unreadable each hash as themselves,
+never as nothing to compare. Used by Terminal's row alone. Since the review's fix round: ByHost names matched in any
+case and Unicode form, a linked ByHost folder read through with its target in the hash, a file past 16 MB or not a
+property list hashed by its bytes, and dictionary keys walked as `NSDictionary`'s own and compared by their UTF-8 bytes
+at every level (below).
+
+The fix round added one more kind, `.sessions` (zsh's saved Terminal sessions, below), gave a listing per-entry hashes
+for its card (one per top-level entry, from the same walk as its hash; the hash's bytes unchanged), let a listing read
+its links' targets by name (Homebrew's two only, so no Linux row's bytes move), and made `sourced`'s caller shared
+(`LinuxSealList.addSourced`: every level, each file read whole up to 16 MB, both lists).
+
+**A folder's mode.** A `.folder` item doesn't see a folder's mode (`ConfigSeal.readFolder`; the security document's S11
+item 8, main's to change). No Mac row is a `.folder`: the folders are `.listing` (each entry's name, type, mode, size,
+inode, times with nanoseconds and link target, never contents) or `.entries` (Linux's shell snapshots, whose walk reads
+every folder's mode), so a mode changed in place, of the folder or under it, is a change (`everyRowDetectsAChange`).
+
+**What a real Mac measured** (this Mac, macOS 27.2, 2026-11-26; `stat`, `ls -le`, reading files; uid 501). Owner and mode
+`owner:group mode`; "ACL" where `ls -le` lists one.
+
+| Row | Kind | Measured: the thing, its parents | What writes it in normal use | Decided |
+| --- | --- | --- | --- | --- |
+| `~/Library/LaunchAgents` | listing | `501:staff drwx------`, xattrs `com.apple.provenance`, `com.apple.quarantine`, no ACL; `~/Library` `501:staff drwx------` (hidden) ACL `everyone deny delete`; `~` `501:staff drwxr-x---` ACL `everyone deny delete`; 11 plists of 7 vendors and the user's own tools, none a link | an app installing or updating its agent: the folder's last change 2026-11-09, one agent rewritten in place on 2026-11-15 (Steam's, ctime) | a row: each such write is code launchd runs at login, so it holds; `.listing` for the folder's and entries' modes, links and a rewrite kept to size and mtime (ctime); no `.DS_Store` there (one Finder writes would hold) |
+| `~/Library/LaunchAgents/dev.vibeswitcher.node.plist` | file | absent (no node here); `start` writes it `0644` (`O_EXCL`, no link followed) in the folder above, which `start` requires the user's and writable by no one else | `start`, and a switch's rewrite (`MacAgent.switched`) | a row of its own, so a card names it; its contents and a link at it; a same-bytes replace, its mode and its folder are the folder's row |
+| `~/Library/Preferences/com.apple.Terminal.plist` | preferences | `501:staff -rw-------`, binary; `~/Library/Preferences` `501:staff drwx------` ACL `everyone deny delete`; no `ByHost/com.apple.Terminal.*` file | cfprefsd, at each Terminal start and window move (rewritten 2026-11-24): against its `.bak` two weeks older only `LastTerminalStartTime` and `NSWindow Frame TTWindow Homebrew` differed; "Window Settings", "Default Window Settings", "Startup Window Settings" byte for byte the same; no `CommandString` or `Shell` set | a row by keys: `LastTerminalStartTime` and `NSWindow Frame …` left out (`MacSealList.churnKeys`, `churnPrefix`, compared by bytes), every other key hashed, so a key no one listed holds; its ByHost files in any case (R1) |
+| `~/.zsh_sessions` | sessions | `501:staff drwx------`; 5 `<id>.session` files of 52 bytes, each the restore line alone (`echo Restored session: "$(/bin/date -r <time>)"`), 5 `.history` files, `_expiration_check_timestamp` | `/etc/zshrc_Apple_Terminal` (read, never run): at each window's close a `.session` file is written under a temporary name and renamed into place, holding the restore line and whatever the user's save hooks add; at a window's restore its file is sourced when its first line is that line, then removed; `.history` files appended at each close; files older than 2 weeks removed daily | a row of the `*.session` files only (any case): each by its bytes, but one that is the restore line alone (`MacSealList.isRestoreLineOnly`), which runs `echo` and `/bin/date` only; so ordinary closes and restores hold nothing (none of this Mac's 5 files would), and a line added to a saved session, or a session file of another form coming, changing or going, holds; a user with save hooks (`shell_session_save_user_state`) would see a card at each close; `.history` left out (read as history by `fc -R`, never run) |
+| What the zsh files source | file | `~/.zshenv`, `.zprofile`, `.zshrc` `501:staff -rw-r--r--` (`.zlogin`, `.zlogout` absent; all of them `homeFiles` rows already); sourced: `~/.cargo/env` (`501:staff -rw-r--r--`, `~/.cargo` `drwxr-xr-x`, from `.zshenv`) and a key file under `~/.config/` (from `.zshrc`) | the user, by hand | a row each, by Linux's `sourced`, and what those source in turn, every level (R6; `addSourced`, at most 256 files read, each whole up to 16 MB); a key file is hashed, never shown (a card compares text only for `~/.claude/skills`: `ConfigSeal.difference(of:in:home:)` says there's no earlier text of anything else) |
+| `/opt/homebrew/bin`, `/opt/homebrew/sbin` | listing | `501:admin drwxrwxr-x` (the user's, and the admin group's); `/opt/homebrew` `501:admin drwxr-xr-x`; `/opt` `root:wheel drwxr-xr-x`; `bin` 1,213 entries (1,205 links into the Cellar); on the login shell's PATH ahead of `/usr/bin` | `brew install` and `upgrade`: 24 entries of `bin` changed on 2026-11-18; none of the prefix's 487,688 entries in the 7 days before | a row each, the account's own home only; each link's target's line too (R7: type, mode, size, device, inode and times of what the link leads to, one `stat` each, 1,213 here), so a Cellar file rewritten in place behind a link holds; so does a rebuild of a target outside the Cellar that a `bin` link names (here `passage` → `/Applications/Passage.app`, `ygr-site` → `~/dev/ygr-sites`, conda in the Caskroom, npm's global packages): new code on PATH, a card each time (no target's ctime moved in the 3 days before 2026-11-26) |
+| `/opt/homebrew/Library/Homebrew/brew.sh`, `utils/os.sh`, `cmd/shellenv.sh` | file | each `albert:admin -rw-r--r--` (22,020, 6,737 and 4,035 bytes); `bin/brew` (a regular file in the `bin` listing) runs `brew.sh`, which sources `os.sh` first, and for `shellenv` sources `cmd/shellenv.sh` and exits (read 2026-11-26) | `brew update` | a row each, by contents, the account's own home only (R7): what every login shell runs through `.zprofile`'s `eval "$(brew shellenv)"` |
+| `/var/db/xcode_select_link` | file | `root:wheel lrwxr-xr-x` → `/Applications/Xcode.app/Contents/Developer` (`root:wheel drwxr-xr-x`); `/private/var/db` `root:wheel drwxr-xr-x`; `/var` a root link | `sudo xcode-select -s` only | a row (cheap, no churn), the account's own home only: only an administrator changes it; `DEVELOPER_DIR`, which overrides it, is the startup files' (their rows) |
+| `~/.nvm` (`nvm.sh`, `versions/node`, `alias`) | file, listing | absent here | `nvm install`, `nvm alias` | Linux's rows, by its names: absent hashes as absent, made is a change |
+| `~/bin`, `~/.local/bin`, `~/.local/share/claude/versions` | listing | `~/bin` absent; `~/.local/bin` `501:staff drwxr-xr-x`, 7 entries, `claude` a link into the versions (`501:staff drwxr-xr-x`, 5 versions); both on the login shell's PATH ahead of `/usr/bin` | Claude Code's update: the `claude` link rewritten on 2026-11-25 | Linux's rows (listings here, Linux's `~/bin` is a `.folder`): an update holds once, as on Linux, being new code every session runs |
+| `~/.config/gh` | listing | `501:staff drwxr-x--x`; `config.yml` and `hosts.yml` `501:staff -rw-------` (the token's file: by metadata, never read); `~/.config` `501:staff drwxr-xr-x` | `gh auth`: `hosts.yml` rewritten on 2026-10-27, `config.yml` not since 2026-01-14 | Linux's row: an alias in `config.yml` runs as `gh <alias>`; a login holds once |
+| `~/.claude/shell-snapshots`, `~/.codex/shell-snapshots` | entries | `501:staff drwxr-xr-x`, 18 snapshots, none rewritten after it was made (one's ctime 1 s after its birth); Codex's absent | each session's start writes one | Linux's rows by Linux's names, so an entry coming or going is no change and one changed in place is (`LinuxSealList.cameOrWent`) |
+| `~/.gitconfig`, `~/.config/git/config` | (file) | `501:staff -rw-r--r--`; no `include`, `hooksPath` or `sshCommand` line | the user, `git config` | the Mac's `homeFiles` rows already: nothing added |
+| `launchctl`'s user environment | none | no file: launchd keeps `launchctl setenv` in memory; `launchctl config user` persists under `/private/var/db/com.apple.xpc.launchd/config` (`root:wheel drwxr-xr-x`, empty) | any process of the user's | not a row (below) |
+
+**Ordinary churn that doesn't fire** (`MacSealVaultTests.ordinaryChurnHoldsNothing`): Terminal's start and window
+moves (cfprefsd's rewrite renamed over), a session's shell snapshot coming and going, and a Terminal window's close and
+restore (its `.session` file the restore line alone, its `.history` appended:
+`aSavedSessionIsHeldOnlyWhenItRunsMoreThanTheRestoreLine`). *What fires by design:* an
+app's agent written into `~/Library/LaunchAgents`, `brew install` and `upgrade`, and Claude Code's update (as on Linux);
+and each `start` and switch rewrite of the node's plist (below).
+
+**The plist's row and step 5's rule.** `start` believes only the plist it wrote (its bytes, inode, ctime and folder,
+checked against launchd's own word); the seal adds that a change to the plist holds the team's workers, verifiers and
+merges until the user accepts it. A seal accept never makes `start`, `status`, `stop` or a switch take a plist: they
+check it by their own rules whatever the seal says. Since nothing of step 5 tells the seal it wrote the plist
+(`appWrite`), each `start` that writes it and each switch that rewrites it is a held change until accepted (the spec's
+"a rewrite is then a held change"): left so, fail closed. Telling the seal (an `appWrite` around `MacAgent`'s two
+writes, sealing only the bytes `start`'s checks then hold) changes step 5's code: for the switch-on review.
+
+**What the switch-on review can rely on:** on a checked Mac node host, a change to any row (a file's contents, a file
+replaced, a link put in its place, a folder's entries, modes, links and ctimes, Terminal's hashed keys) is held at the
+vault's next look until the user's accept, and the next change after an accept is held again
+(`aChangeToEachRowIsHeldUntilAcceptedThenTheNextAgain`); an accept with a card's hashes seals only what the card showed
+(`anAcceptSealsOnlyWhatTheCardShowed`); a row removed or unreadable is held, never left out (no Mac row's fingerprint is
+nil: `anUnreadableOrMissingRowFailsClosed`); no other host's book watches the list
+(`aBookThatIsntANodeHostsWatchesNoneOfIt`, `MacCheckedStartTests`). Terminal's ByHost files are read whether its own
+file is there or not (the blind check's finding: before, an absent domain file hid them). A checked node host's book
+holds each Mac row's first read for the user's accept (R9, below), and a listing's card names the top-level entries that
+changed ("claude changed, 2.1.333 added", "git added": R8).
+
+**What can't be sealed, and why:**
+
+- *`launchctl`'s user environment.* It is launchd's memory, not a file, so no look reads it; reading it would mean the
+  vault running `launchctl` at each look. What of it reaches the node: a checked node's host rebuilds its environment
+  from a fixed list, and takes one name from launchd, `SSH_AUTH_SOCK`, once at its start, only as an absolute path to a
+  socket the user owns (`CheckedSessions`); a later `setenv` reaches no session until the host's next start, and a
+  planted socket then is one a session of the user's could already talk to. Its persistent forms are sealed or root's:
+  an agent that runs `launchctl setenv` at login is the LaunchAgents row; `launchctl config user` writes a root-owned
+  file.
+- *What Homebrew's links point at, beyond one stat.* `bin` and `sbin` are read by metadata, with each link's target's
+  `stat` line, and `brew shellenv`'s three files by contents (R7); the Cellar's other files (a library a binary loads, a
+  script a linked binary runs), the `opt` links (`/opt/homebrew/opt/libpq/bin` is on this Mac's PATH), and the files
+  `brew.sh` sources for commands other than `shellenv` (`utils.sh`, `help.sh`, `utils/auto-update.sh`, `utils/curl.sh`,
+  `utils/git.sh`, `utils/analytics.sh`, `utils/ruby.sh` and the `cmd/*.sh` it picks) aren't: the prefix's 487,688
+  entries would be a 1.5 s listing at every look. They run when the user runs `brew`, not at a shell's start.
+- *A PATH folder of the user's own tools.* This Mac's login shell puts `~/.grok/bin` and `~/.antigravity/…/bin` ahead of
+  `/usr/bin`; the list can't know such folders. The startup file that adds one is a row; the folder isn't.
+- *cfprefsd's cache.* A `defaults write com.apple.Terminal …` reaches cfprefsd first, and Terminal reads it from there;
+  the seal reads the file, which cfprefsd writes after. A change Terminal took before the file was written is seen at the
+  first look after it is.
+- *Through CFPreferences.* The contract's first choice for Terminal's row was to hash the effective values of its
+  startup keys (`Shell` and the three profile keys) as `CFPreferencesCopyAppValue` resolves them (ByHost, the app's
+  domain, the global one). It is dialog-free (10 ms, measured read-only on this Mac's Terminal domain), but not sound in
+  a long-lived process: measured on a scratch path domain, a process that read it once read the old value again after
+  the file was rewritten and `CFPreferencesAppSynchronize` called (1 s later as at once), while a new process
+  (`defaults read`) read the new one; so the stale copy is the client's own. The node's server
+  (`HeldChange.refusal`) and its vault fingerprint the row in their own processes, so a hash from that cache could
+  differ between them as well as miss a change. Not built: the row reads the files alone, and R1 is closed there.
+- *The global preferences domain.* Terminal's own domain is sealed by keys, but a key it doesn't hold may be read from
+  `NSGlobalDomain` (`~/Library/Preferences/.GlobalPreferences.plist` and its ByHost files: `defaults write -g Shell …`),
+  if Terminal looks its startup keys up through the standard defaults (not measured: it would mean writing the user's
+  domain). That file is every app's to write (rewritten on 2026-11-26 at 07:57 here), so a row needs its churn measured
+  over days before its keys can be told from churn: owed, below. The effective read that would have closed it isn't
+  sound in the host (above).
+- *A saved session where zsh isn't told to look.* `~/.zsh_sessions` is the row; a `ZDOTDIR` set in `~/.zshenv` moves
+  the folder to `$ZDOTDIR/.zsh_sessions`, which isn't read (the `.zshenv` change that sets it is held, as that file's).
+- *A row's owner.* No kind reads one: a process of the user's can't give a file to another user (`chown` refused,
+  `aRowsOwnerIsntAProcessOfTheUsersToChange`), and a group changed among the user's own changes ctime, which a listing
+  reads (a file row reads contents only, which a group doesn't change).
+- *A change made and undone between two looks*, as on Linux.
+
+**The independent review and its fix round** (review-v2-s-mac-5, 2026-11-26, "ready with fixes"; its tests are
+`MacSealReviewTests` and `MacSealReviewVaultTests`, copied as they ran, each named one red at `f4b22149`; the fixes and
+the round's own tests, `MacSealFixRoundTests`, on top):
+
+| Finding | What the review found | What changed |
+| --- | --- | --- |
+| R1 (important) | a ByHost file named in another case (`com.apple.terminal.<host>.plist`) is the one cfprefsd opens on a case-insensitive volume, and the seal's case-sensitive filter skipped it | ByHost names matched in any case and Unicode form |
+| R5 (important) | `~/.zsh_sessions` wasn't read, though Terminal's zsh sources a saved `<id>.session` on restore | the `.sessions` row (the table) |
+| R3 (important) | two profiles whose names are canonically equal (NFC and NFD "Café"): bridged to a Swift dictionary, one was dropped from the hash | dictionaries walked as `NSDictionary` with their own keys, ordered and compared by UTF-8 bytes, at every level and in the churn test; the card names each twin |
+| R2, R2b (important) | a linked ByHost folder hashed as "not a folder", a file past 16 MB as "unreadable": blind after one accept | the folder read through the link, its target in the hash; a file not taken apart hashed by its bytes |
+| R9 (important) | a Mac node's vault took every Mac row on trust at its first read (`VaultFirstLook` is Linux's) | a book that watches the list holds each Mac row it has nothing recorded for, at its first read, for the user's accept (`judge`'s `firstLookKeys`); the vault's whole first look stays Linux's |
+| R8 (note) | a listing's card named nothing: Claude Code's update and a planted `~/.local/bin/git` read the same | per-entry hashes, one per top-level entry |
+| R4 (note) | `UInt64.max` and `-1` had one canonical form | an unsigned 64-bit value tagged `u` |
+| R6 (note, inherited) | one level of sourcing; a startup file past 1 MB named nothing | every level; 16 MB |
+| R6b (note, inherited) | `source $ZSH/…` (a variable other than HOME) and a glob loop aren't read | owed (below); its test stands as a known issue |
+| R7 (note) | a Cellar file rewritten behind a `bin` link; `brew shellenv`'s files | the three files as rows; each link's target's `stat` line |
+| Global domain (note) | likely read by Terminal; the cheap close is the effective read | not sound in the host (measured, above): owed |
+
+**The re-check and its second fix round** (re-check-v2-s-5, 2026-11-26, "ready with fixes": the first findings closed but
+R5, reopened by zsh's compiled twins; its tests are `MacSealRecheckTests`, `MacSealRecheckFindingsTests` and
+`MacSealRecheckVaultTests`, copied as they ran at 5a6044ab, one red per finding; the fixes and the round's own tests,
+`MacSealFix2Tests`, on top, branch `v2-mac-seal-fix2` on `v2-mac-joined`):
+
+| Finding | What the re-check found | What changed |
+| --- | --- | --- |
+| N1 (important) | zsh runs `<file>.zwc` (made by `zcompile`) in place of a startup file, a sourced file or a saved session when it is as new or the file is absent, and no row read one; a snapshot's twin came into the snapshots row as an entry coming | a `.file` row for each zsh startup file's twin (`~/.zshenv.zwc`, `.zprofile`, `.zshrc`, `.zlogin`, `.zlogout`: `MacSealList.twinnedStartupFiles`) and each sourced file's on the Mac (`addSourced`'s `twins`), absent hashed as absent; `<id>.session.zwc` (any case) read in the sessions row by its bytes, never as the restore line; a `.zwc` entry (any case) coming into or going from any `.entries` row judged as ever (`cameOrWent`), so held |
+| N2 (important) | a link's target went into the preferences and sessions hashes with no length before it: a ByHost link whose target's name spelt key lines hashed as a real plist with `Shell=/opt/evil` | every link target in those hashes said as `link <bytes>:<target> ` (`MacSealList.linkSaid`; read by `readlink`, hex when not UTF-8); a listing's link whose target holds a newline said as ` ->x <hex>` (`LinuxSealList.targetSaid`), any other as before |
+| N5 (note) | `sourced` took time in the square of a file's lines, rows had no cap: a 5,000-line `.zshrc` took 47 s, a 100,000-line one more than 30 minutes | `sourced` keeps a set of what it found; `addSourced` reads at most 1,024 rows' files (`maxSourcedRows`, twins counted) and 32 MB in all (`maxSourcedBytes`), each file whole up to 16 MB; at any cap it stops and adds one row, `~/(sourced files past the seal's cap)` (`Kind.capped`, hashed by which cap), so the look that crosses it holds a change; 100,000 lines return in well under the hang guard (`aHundredThousandSourceLinesAreBounded`) |
+| N4 (note) | the 256-file read cap hid a file sourced past it, silently | the read cap is the row cap (a file read is a row), and hitting it holds (N5's row) |
+| N6 (note) | a lone UTF-16 surrogate read as U+FFFD, so profiles `P\u{D800}` and `P\u{DC00}` hashed as one | a string or key with a lone surrogate hashed by its code units (`MacSealList.form`: `u<count>:<hex>`), at every level and at the top; a valid string's form is the one before |
+| N3 (note) | at the 4,096-entry cap a listing's card says every sealed entry was removed | owed (below): neither fix passes both of the re-check's tests (`aPaddedListingStillHashesEveryEntry` asserts no keys past the cap) |
+| N7 (note) | a new node book's first look takes the home files (`homeFiles`) as they are | owed (below), before `isCheckedMacNode` is lifted |
+
+The zsh behaviour, probed in scratch homes only (`env -i HOME=<scratch> /bin/zsh`, zsh 5.9, 2026-11-26), each twin
+compiled from `echo EVIL…` and its source rewritten benign with an older time: `zsh -i` printed the `~/.zshrc.zwc`'s
+text; `zsh -l` ran `~/.zlogin.zwc` with no `~/.zlogin`; `zsh -c` ran `~/.cargo/env.zwc` sourced from `.zshenv`;
+`. /etc/zshrc_Apple_Terminal` with `TERM_SESSION_ID=A` ran `A.session.zwc` beside a restore-line `A.session`; `source`
+of a snapshot ran its twin; and `~/.zshrc.ZWC`, upper case, ran in place of `~/.zshrc`.
+
+What a user sees once, when the list is lifted on a book that recorded the rows before this round: one card for each
+new row (the twins, absent: a book that watches the list holds each Mac row first read, R9), and one for each recorded
+row whose hash moved: a preferences or sessions row with a link in it (its target now said with its length), a
+preferences row holding a lone surrogate, a listing with a link whose target holds a newline. No book records any of
+them today (`isCheckedMacNode` is false), so no one sees these cards now.
+
+What each read's work is bounded by (N5's audit): `addSourced` by its caps above; every file whose contents are hashed
+(a `.file` row, a session or ByHost file, a folder's or entries row's file: `ConfigSeal.contentsDigest`) is read up to
+256 MB (`digestLimit`), and past it hashed by its metadata (size, inode, times with nanoseconds), so a write to it is
+still a change: a sparse file's size costs no disk, and `truncate -s 100T ~/.zshrc.zwc` would otherwise have a look
+hash 100 TB of zeros (the round's blind check; `aSparseFilesRowIsBoundedAndStillSeesAWrite`); a preferences file is
+parsed whole only up to 16 MB (past it, by its bytes, to that limit); a `.entries` row by `ConfigSeal.maxEntries` (cut,
+held); a listing walks every entry, uncapped, one `lstat` each (Homebrew's `bin`, the largest, 1,213 here); the
+sessions and ByHost folders read every matching file. That caps each file, not a row's total: a sparse file just under
+256 MB costs an inode and no disk, and hashing one took 0.22 s here (`openssl dgst -sha256` of a 255 MB sparse file,
+2026-11-26), so 20,000 of them in a `.entries` row (`maxEntries`) is about 73 minutes, and the sessions and ByHost
+folders have no count cap at all. Owed (below): a total budget per row.
+
+Shared code, for Linux: `LinuxSealList.sourced` keeps a set (same result, linear); `addSourced` caps as above (no twins
+on Linux: bash reads none), so a Linux startup file that reaches a cap adds the cap's row where it named nothing before
+(held at its first read in a book that holds its first look; elsewhere recorded as it is, the crossing held through the
+startup file's own row, whose change made it); a `.zwc` entry coming into or going from any `.entries` row (the snapshots, the hooks, the launch folders, the
+manager's `transient`) is held; a listing's link target holding a newline is said in hex; a file past 256 MB is hashed by
+its metadata wherever the seal hashes contents (the app's seal on v2 too: one card for such a file, none exists here). A Linux listing's hash bytes
+are otherwise unchanged (`MacSealRecheckTests.aListingsHashBytesAreUnchanged`, run here). What Linux must run:
+`LinuxSealListTests`, `MacSealListTests.theListIsEmptyOnLinux`, the ConfigSeal suites,
+`MacSealRecheckTests.aListingsHashBytesAreUnchanged`, and `MacSealFix2Tests`' tests without the Mac trait
+(`aTwinComingIntoAnEntriesFolderIsHeld`, `aListingLinksNewlineCantSpellALine`, `aHundredThousandSourceLinesAreBounded`,
+`eachSourcingCapAddsAHeldRow`, `aSparseFilesRowIsBoundedAndStillSeesAWrite`).
+
+**Owed:**
+
+- N7 (the re-check's, R9's remainder): a new node book's first look takes the home files (`ConfigSeal.homeFiles`: zsh's,
+  bash's, `.gitconfig`…) as they are; only the Mac list's rows are held at their first read. Before `isCheckedMacNode`
+  is lifted, a checked Mac node book holds its whole first look (`holdsFirstLook`, as Linux's node does) or is seeded
+  from the app book's record with what that holds still held. `MacSealRecheckVaultTests.aNewNodeBooksFirstLookHoldsAPlantedZshrc`
+  stands as a known issue.
+- N3: at the 4,096-entry cap a listing's card names every sealed entry "removed" (the hash is whole, so the change is
+  held; the card's words are wrong). The re-check's proposed fix, one "more than 4,096 entries" key, still says "git
+  removed", so its own test stays red; keeping the first 4,096 keys contradicts its `aPaddedListingStillHashesEveryEntry`
+  (no keys past the cap): either way a re-check test changes, the lead's call.
+  `aListingsCardAtTheCapDoesntSayItsEntriesWereRemoved` stands as a known issue.
+- A stalled look, in two parts that must both close before `isCheckedMacNode` is lifted (the second fix round's blind
+  check and its follow-up, 2026-11-26):
+  1. *A total budget per row*, so no look can be stalled: every row has one, in bytes hashed and in entries read, and a
+     row past it is held as changed, never hashed without bound. Today each file is capped (256 MB, past it by its
+     metadata), not a row's total: a 255 MB sparse file costs an inode and no disk and hashed in 0.22 s here, so 20,000
+     of them in one row is about 73 minutes. The rows: the sessions row and the preferences row's ByHost files
+     (`MacSealList.sessionFiles`, `preferenceFiles`: no count cap), the `.entries` rows (`LinuxSealList.readEntries`:
+     up to 20,000 entries), and `ConfigSeal.readFolder`'s folders (the app's `~/.claude/skills`, agents, commands,
+     hooks and `~/.vibeswitcher/bin`, the same walk: they need it too).
+  2. *A look that fails or times out counts as something held*, for every gate that reads the record. Today the look
+     hashes before it decides, so a stalled look seals and holds nothing; but the vault's calls carry a timeout, and
+     `ConfigHoldStore.held` swallows the look's failure (`_ = try? vault.checkConfig`) and then reads the last completed
+     record, as `LeadVault.heldConfig` reads it: while every look stalls, a later change (to `~/.zshrc`, say) is never
+     recorded as held there. Traced: `HeldChange.refusal` (the switch's and the builds folder's) re-hashes in the server
+     and blocks rather than passes; `ConfigHoldStore.held` (`config held`, the server's `lookAtConfig`) shows the stale
+     record; `heldConfig` returns it. Not traced: whether `start_worker`'s and a merge's refusals need a look that
+     finished, or pass on that record.
+  The Mac rows are dormant while the list is off; `readFolder`'s folders and the `.entries` rows are read today (the
+  app's seal, Linux's node), and the node's code above is the node's on Linux too, so there both parts are
+  pre-existing.
+- What lies past a sourcing cap (`addSourced`): after the cap's row is accepted, the files past it are unwatched until
+  the startup files are under the caps again; and a compiled twin is hashed, never read for what it sources (as R6b).
+- `$ZDOTDIR`'s startup files and their twins when `ZDOTDIR` is set (zsh reads them there, not in the home).
+- The node's own folders under its root (`~/.vibeswitcher/v2/node`): the launch presets, the allowed projects, the
+  roles' launch folders and the lead's accepted hooks, which Linux's list seals at `~/.vibeswitcher/…`; and the builds
+  folder (`~/.vibeswitcher/v2/builds`). Linux's quiet rules for them (`cameOrWent`'s hooks and launch rules,
+  `SessionPresets.sealName`, `SwitchSeal.buildsName` and the switch's refusals) key on Linux's names, so on the Mac
+  they need the node root's names first; the builds folder's row turns on the switch's refusals, a change of step 5's
+  switch. For the step that lifts `isCheckedMacNode`.
+- `appWrite` around `start`'s and a switch's plist writes (above), for the switch-on review.
+- The global preferences domain (above): whether Terminal takes `Shell` or a profile from it (a scratch account's
+  measurement), and if it does, a `.preferences` row on `.GlobalPreferences.plist` with its churn measured over days.
+  The effective read through CFPreferences was measured stale in a long-lived process on a path domain; what a
+  keyboard session with the user would measure: a named scratch domain written through cfprefsd (`defaults write`),
+  then read again by a process that read it before, to learn whether named domains refresh where path domains don't. A
+  candidate close that keeps the hash a function of the disk alone: the same four keys (`Shell`, "Default Window
+  Settings", "Startup Window Settings", "Window Settings") read from `.GlobalPreferences.plist` and its ByHost files by
+  the `.preferences` code, the rest of that file's churn left out. Not built.
+- R6b: a `source` or `.` whose path starts with a variable other than HOME (`$ZSH/oh-my-zsh.sh`) and a loop over a glob
+  (`for f in ~/.zsh.d/*.zsh; do source "$f"; done`) name no row (a startup file past 16 MB, which named none, now adds the cap's row:
+  N5). `MacSealReviewTests.sourceFormsThePatternMissesAreWatched` stands as a known issue (`withKnownIssue`), so it
+  says when it starts passing.
+- `$ZDOTDIR/.zsh_sessions` when `ZDOTDIR` is set (above), and bash's `~/.bash_sessions`, which
+  `/etc/bashrc_Apple_Terminal` restores the same way (absent here: the user's shell is zsh).
+- A real checked node host's book watching the list (`isCheckedMacNode` is false: `MacCheckedStartTests` proves the
+  flag on a checked start's host built by hand).
+- On Linux, `MacSealListTests.theListIsEmptyOnLinux` and `LinuxSealListTests` once there: this Mac reads none of
+  Linux's paths (`LinuxSealListTests` skip their Linux-only cases here). The fix round's shared changes reach Linux's
+  list: `addSourced` follows every level (a node book that holds its first look shows the new rows once), and a
+  listing's card names its entries; a Linux listing's hash is unchanged (its link targets aren't read).
 
 ## The order of work
 
@@ -1047,6 +1429,47 @@ Each step is small, keeps the app unchanged, and says what it needs from a real 
 7. **install-node.sh's Mac arm** and the signing decision. Needs: a real Mac with Xcode.
 8. **The Mac seal list**, measured. Needs: a real Mac.
 9. **Coexistence**: `lead` refusing an app-led project; the hooks decision. Needs: a real Mac with the app.
+10. **Every spawn names what it keeps** (the keeper design's K4a-i, [2026-11-27-v2-mac-keeper-design.md](2026-11-27-v2-mac-keeper-design.md),
+    "The host's side"; homed here by the re-check of 2026-11-27, its question 3): every `Platform.Spawn` in the host
+    image and in the server names `keep` (`POSIX_SPAWN_CLOEXEC_DEFAULT`), its in-place forms too, with a lint over
+    their targets. Behaviour-preserving; safe to build now; its own review. Needs: the hosted Mac for the tests.
+11. **The host image's children prove themselves** (the keeper design's K4a-ii), **in the Mach form** (the keeper
+    design's proof after K-M1: a pair's token can't prove a child, K-M1 (b), (c), (g4)): the parser and the server
+    child spawned with a port of the host's as their bootstrap special port and no socket, each proving its code by
+    one Mach message whose audit trailer must name the spawned pid running the expected code, hardened exactly when the
+    image is (a message sent before an exec is refused, K-M1 (n2)), and only then given its link or connector as a
+    fileport to a port it made, with its real bootstrap port back; the proof waited off the host's queue, at most 10 s,
+    its spawn off that queue as well, the child at the limit reaped by an exit source, no thread held per proof, and a
+    proof that only timed out told so, never that something replaced the helper (the narrow re-check's N4 (b)); the
+    launcher written afresh at each host start; a pinned image gives ends only to its own code, its row's server, or
+    across the checked node's own switch a target the record pins, with its test flags and by-path handover refused
+    (the re-check's N1). Beside it, **the handover keeper's proofs in the Mach form** (the keeper design's K4c:
+    `MacHandoverKeeper` is open today to K-M1 (b) with the pid matching) and the server's check of its host above.
+    Every session's start on the Mac changes, the app's host included, with or without the keeper. After step 10; its
+    cost measured first (K-M14, extended: the spawn's own time, a quarantined or stalled launcher, a burst of
+    never-proving history reads, the host's own image started with a bootstrap port that isn't launchd's, a fileport's
+    round trip); a hardened image that isn't pinned starts no server child and takes no test keeper or secret (its
+    KP20f, the lead's choice (A)), and **keeps its by-path handover** (KP20f, settled: the keeper takes no socket end,
+    so no end it hands out carries a request), so **the Mac app's own host (hardened, never pinned) keeps its handover
+    at every app update** (`HostChildProofTests.theAppsHostStillHandsOverByPathAtAnAppUpdate`), with no exemption keyed
+    on `ownsLaunchers`; `MacKeeperHandoverTests`' hardened arm moves to function level and to the keeper's K7; its own
+    review; the app and its update checked in the sandbox. The keeper's K4 waits on steps 10 and 11. Then, once step 11
+    is on v2, the pins record's `format 2` (the keeper design's K4b, which lands only after this step's Mach form is on
+    v2), whose own install script refuses, unconditionally, any commit that doesn't contain step 11's commit (the
+    floor, which the keeper's K5 raises to K4b's commit). **The keeper design's proof review of 2026-11-27 adds** (its
+    rows K4a-ii and K4c, and KA1 to KA12): each child and handover process runs the image's first statement (every
+    exception mask cleared, task and main thread, then the environment rule) before its proof: every host (the app's
+    included) spawns its parser with exactly the fixed list, and a checked node its handover keeper (the app's host
+    uses none: it hands over by path), and each of them, finding another variable, execs itself again once with the
+    list, so a parent of an older build still gets a working child; a hardened image's parser refuses
+    `--parser-test-hooks`; each proof names its role and each receiver takes only its own; the server judges its host
+    by the handout's own message (the Mach form of the server's check above); and this step is offered only after the
+    keeper design's K-M16 trial part as well. Needs: this Mac's real signed hardened images.
+12. **The node's removal** (the keeper design's answer to its re-check's question 2): an `install-node-mac.sh` remove
+    form that stops the node's agent first, then runs the keeper step's `--remove`, or `--remove --forget-store` when
+    you ask it to forget the node's record, said before the password (`KeeperStepTests.theNodesRemovalRemovesTheKeeper`
+    is this step's). After the keeper's K5. The switch-on review checks that nothing removes the node without the
+    keeper's removal. Needs: a real Mac, your `sudo` line for its real use.
 
 Progress (2026-11-20, on Linux, checked on the hosted Mac only when pushed; each commit and what a real Mac must run are
 in [the Mac's tasks](../../process/v2-mac-tasks.md)): step 2 is built (`Platform.Service.nodeRoot`; `--node` still
@@ -1057,6 +1480,20 @@ behind a seam (`Platform.Approval`, `ApprovalVoice`) and not wired: step 4 measu
 (`VoiceRule.Mode.approval`, `Requests.approvalJudgment`, the command line asking no code under it) and still off: the
 user's server takes it only once `NodeSystem.approvalMeasured` is turned on, after step 4 and a review. Step 5's agent is built as data (`NodeAgent`: the
 property list, its check, the `launchctl` lines and `print`'s pid), not wired: `start` on the Mac is still refused.
+Step 4 on this Mac (2026-11-25 and 26): the agent's measurements M1 to M14, then the user's keyboard session (part A of
+the runbook, from a shell card: LA-1, 2, 3, 6, 7, ESC-1, 2, 3, AG-1; ANC-1, ANC-2, LA-4, LA-5 and the `sudo` trial not
+run); row 3 settled from them ("The rule's lines, settled from the measurements"), its two lines since built, off; the page's
+12-hour unlock and the Mac's browser passkey recorded in "The user's voice on the Mac".
+
+**Progress since (corrected 2026-11-26, the join of `v2-mac-seal-list` and `v2-mac-runbook`).** "Step 5's agent is
+built as data, not wired" above is the state of 2026-11-21: step 5 is now wired ("The LaunchAgent: start, stop and
+status": `NodeAgent`, `MacAgent`; independently reviewed three times, last verdict "ready to offer for v2", 2026-11-26)
+and still off, `start` refused by `NodeSystem.macUnbuilt` for the user's node. Built and off besides: the checked node
+start (item 13, re-checked "ready to offer for v2", 2026-11-26), the web port held by the host (item 9), the anchor
+(item 10, root-owned pins, the user's choice of 2026-11-25), rows 7 and 10 (reviewed, "still ready to offer"); step 7's
+install script, unproven by a real install; step 8's seal list ("Built: `MacSealList`": built, fix round done,
+re-check running). Not built: step 6 (the unified log) and step 9 (coexistence). The measurement record's table
+("What stands between this Mac and `vibeswitcher start`") keeps each row's state.
 
 ## Open for the user: the Mac's reads
 
@@ -1066,7 +1503,9 @@ are the user's alone on Linux, where the cgroup tells a detached session apart: 
 their leads' messages), `recent`, `shells`, `config.held` and `base.show`. On the Mac a session that detached itself
 (`open -a Terminal`, AppleScript) passes the caller check with no dialog. **Open (the review of 2026-11-21):** take a
 dialog for those five too, keep them as reads (they show what the files show), or refuse them on the Mac until the
-app's window carries the voice.
+app's window carries the voice. **Measured since (2026-11-26, K-ESC-1 to 3):** `open -a Terminal`, AppleScript and a job
+a session loads itself each pass every caller line, the coalition and environment lines settled above included, so
+the premise holds: a detached session reads these five with no dialog unless the user chooses a dialog or a refusal.
 
 ## Decisions
 
@@ -1078,6 +1517,13 @@ app's window carries the voice.
 - **(confirmed by the user, 2026-11-20)** The user's voice on the Mac: LocalAuthentication (Touch ID or the login
   password) asked by the server per state change, with the peer's code identity and the guard rails; the app's window
   later, through main.
+- **(the user, 2026-11-25; the device-keys review, 2026-11-26)** For the page: one Touch ID allows the acting mode,
+  opens and confirms the page, then up to 12 hours with no prompt; the unlock is the device's, and on the Mac desktop a
+  browser passkey (one Touch ID); the server's own dialog stays for the command line's state changes, the first
+  enrolment and guarded changes (each its own Touch ID, never by the unlock alone).
+- **(settled 2026-11-26 on the measurements; built 2026-11-27, off, reviewed ready with fixes)** The rule's lines: the coalition line added;
+  the peer's environment line added as an early refusal, not a boundary (the lead's call, reversible); no
+  responsible-process line; the guard rails kept; what stays open named with its keyboard step.
 - **(call)** The service is a LaunchAgent in `gui/<uid>`, not started by the app.
 - **(call)** Events in the unified log, stderr in a file.
 - **(for the user)** Signing the node's builds with `setup-signing.sh`'s identity, so the vault's Keychain key doesn't

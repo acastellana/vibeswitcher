@@ -591,6 +591,9 @@ extension Platform.Processes.System {
 
     static let hasCgroups = true
 
+    /// nil: Linux has no launchd coalitions (its cgroup is `cgroup`).
+    static func coalition(_ pid: pid_t) -> UInt64? { nil }
+
     static func cgroup(_ pid: pid_t) -> [String]? {
         guard case .success(let bytes) = contents("/proc/\(pid)/cgroup"), !bytes.isEmpty else { return nil }
         return String(decoding: bytes, as: UTF8.self).split(separator: "\n").map(String.init)

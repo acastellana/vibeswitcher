@@ -188,7 +188,7 @@ struct ConfigSealBoundsTests: LeadTeamFixture {
         try FileManager.default.createDirectory(atPath: root, withIntermediateDirectories: true)
         let overlap = Overlap()
         let entered = DispatchSemaphore(value: 0), release = DispatchSemaphore(value: 0)
-        book.hashLook = { home, _ in
+        book.hashLook = { home, _, _ in
             let call = overlap.enter()
             defer { overlap.leave() }
             if call == 1 {
