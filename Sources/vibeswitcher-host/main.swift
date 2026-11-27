@@ -54,8 +54,9 @@ func ensureLauncher() -> String {
     }
     return launcher
 }
+guard let socketPath = role.socketPath(argument: value(after: "--socket")) else { exit(1) }
 var config = HostServer.Config(
-    socketPath: value(after: "--socket") ?? role.root.appendingPathComponent("host.sock").path,
+    socketPath: socketPath,
     lockPath: lockPath,
     shell: shell,
     launcher: ensureLauncher(),

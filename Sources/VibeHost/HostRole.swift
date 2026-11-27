@@ -15,6 +15,8 @@ public struct HostRole {
     public let holdsRootLock: Bool
     /// The account's own host: the only one that reads the vault's Keychain item and seals the vault under it.
     public let isAccountHost: Bool
+    /// Its folder is the account's own `~/.vibeswitcher` (resolved, as `isAccountHost` asks), whatever lock it's on.
+    let onAccountFolder: Bool
     private let afterTaking: ((String) -> Void)?
 
     /// `environment` and `fallbackHome`: as `VibePaths.root(environment:fallbackHome:)` takes them. `lockArgument`:
@@ -38,7 +40,9 @@ public struct HostRole {
         let rootLock = given.appendingPathComponent("host.lock").path
         let lockPath = lockArgument ?? rootLock
         holdsRootLock = lockPath == rootLock
-        if holdsRootLock, let accountHome, let own = Self.resolved(accountHome + "/.vibeswitcher"), Self.resolved(given.path) == own {
+        let own = accountHome.flatMap { Self.resolved($0 + "/.vibeswitcher") }
+        onAccountFolder = own != nil && Self.resolved(given.path) == own
+        if holdsRootLock, onAccountFolder, let own {
             root = URL(fileURLWithPath: own, isDirectory: true)
             self.lockPath = root.appendingPathComponent("host.lock").path
             isAccountHost = true
@@ -62,6 +66,11 @@ public struct HostRole {
         guard let entry = getpwuid(getuid()), let dir = entry.pointee.pw_dir else { return nil }
         let home = String(cString: dir)
         return home.hasPrefix("/") ? home : nil
+    }
+
+    /// The socket it listens on: `socketArgument` (`--socket`'s value), else its root's `host.sock`.
+    public func socketPath(argument socketArgument: String?) -> String? {
+        socketArgument ?? root.appendingPathComponent("host.sock").path
     }
 
     /// A fresh start's lock (`HostServer.takeLock` on `lockPath`, never through a link): the descriptor that holds it.
