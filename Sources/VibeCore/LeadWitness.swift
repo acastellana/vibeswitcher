@@ -1085,7 +1085,7 @@ extension LeadWitness {
         }
 
         /// What to tell each refused lead now that the Mac has room, one message per project: the waits `mac` has
-        /// room for under `limits` (the load, `MacLoad.Averages.steady`, not over load_threshold, and with a wait's sessions the team
+        /// room for under `limits` (the load, as `MacLoad.room` judges it, not over load_threshold, and with a wait's sessions the team
         /// sessions within mac_max_sessions and the Mac not short of memory, `MacMemory.shortage`). Those told are removed; the rest stay until there's room for them too.
         /// A project whose automatic steps were refused is nudged (`LeadAdvance.nudge`) instead: its lead's tool server
         /// tries them again, and only the lead's own refusals are told.
@@ -1204,10 +1204,12 @@ extension LeadWitness {
     /// "The Mac has room again for what was refused: start_worker(one), audit(two). Now: load 3.0 (load_threshold 24,
     /// twice the 12 cores), 4 team sessions across 2 projects (this one 1, 1 other 3) (mac_max_sessions 10). Retry what's
     /// still wanted." Naming no project but the lead's `root`'s: the lead may copy it into its repo's records.
+    /// A load judged by the gates' rule (`MacLoad.room`) says which reading it is, as a refusal does: "load 28.8 (the
+    /// last minute's: no worker or verifier runs and no build or test holds a slot; load_threshold 36)".
     /// `disk`: the bytes free on the project's worktrees' volume, said when a wait waited for disk too.
     public static func roomText(_ whats: [String], mac: MacLoad, limits: MacLimits, root: String, disk: Int64? = nil) -> String {
         "The Mac has room again for what was refused: \(whats.joined(separator: ", ")). Now: load \(mac.loadText) "
-            + "(load_threshold \(limits.loadLimitText)), \(mac.sessionsText(for: root)) (mac_max_sessions \(limits.maxSessionsText))"
+            + "(\(mac.room.map { $0.reason + "; " } ?? "")load_threshold \(limits.loadLimitText)), \(mac.sessionsText(for: root)) (mac_max_sessions \(limits.maxSessionsText))"
             + (mac.memory.map { ", \($0.text)" } ?? "") + (disk.map { ", \(DiskSpace.text($0)) of disk free" } ?? "") + ". "
             + "Retry what's still wanted; other projects' leads may take the room too."
     }

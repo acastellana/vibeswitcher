@@ -769,12 +769,16 @@ struct MacLine: Equatable {
         }
     }
 
-    static func make(_ sessions: [HostSession], load: Double?, limits: MacLimits) -> MacLine {
-        make(listed: sessions.map(Session.init), load: load, limits: limits)
+    static func make(_ sessions: [HostSession], averages: MacLoad.Averages?, slotsHeld: Int?, limits: MacLimits) -> MacLine {
+        make(listed: sessions.map(Session.init), averages: averages, slotsHeld: slotsHeld, limits: limits)
     }
 
-    static func make(listed sessions: [Session], load: Double?, limits: MacLimits) -> MacLine {
-        let mac = MacLoad.count(sessions.map { ($0.label, $0.cwd, $0.live) }, load: load)
+    /// The load judged as start_worker judges it (`MacLoad.room`): the hosted sessions are every project's (`hostListed`
+    /// false: the host hasn't listed them yet, so they aren't known to be none), and `slotsHeld` the heavy slots held
+    /// (nil: not read, counted as held).
+    static func make(listed sessions: [Session], hostListed: Bool = true, averages: MacLoad.Averages?, slotsHeld: Int?, limits: MacLimits) -> MacLine {
+        var mac = MacLoad.count(sessions.map { ($0.label, $0.cwd, $0.live) }, load: nil)
+        mac.judge(MacLoad.room(averages, teamSessions: hostListed ? mac.sessions : nil, slotsHeld: slotsHeld))
         return MacLine(text: mac.line, spoken: mac.spoken(threshold: limits.loadLimit, max: limits.maxSessions),
                        isOver: mac.isBusy(threshold: limits.loadLimit) || mac.isFull(max: limits.maxSessions))
     }

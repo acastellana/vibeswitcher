@@ -73,6 +73,9 @@ struct LeadPipelineTests: LeadTeamFixture {
         // The load hold, over a merge in progress.
         let load = look(.init(head: "h", loadHold: (14.5, 12), merging: (["add-a"], now)))
         #expect(load.cause == .load && (load.text ?? "").contains("The Mac's load (14.5) is over load_threshold (12)"), "\(String(describing: load.text))")
+        // A load that can't be read holds merges too (merge's wait takes it for no room).
+        let unread = look(.init(head: "h", loadHold: (nil, 12)))
+        #expect(unread.cause == .load && (unread.text ?? "").contains("The Mac's load can't be read, so merges wait until it reads under load_threshold (12)"), "\(String(describing: unread.text))")
         // Every test slot held, by what for how long, over the load.
         let slots = look(.init(head: "h", slotsHeld: (2, "slot 1 held by another project's run, for 52 min; slot 2 held by another project's run, for 47 min"), loadHold: (14.5, 12)))
         #expect(slots.cause == .slots, "\(String(describing: slots.text))")

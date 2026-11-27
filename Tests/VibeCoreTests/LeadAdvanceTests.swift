@@ -1454,12 +1454,17 @@ struct LeadAdvanceTests: LeadTeamFixture {
     }
 
     /// 2026-10-28: load 150 at 17:30 on 12 cores, and at 17:38 auto_advance started two workers on a dip of the
-    /// 1-minute load with the 5-minute still at 64. The loop's room check judges by the greater of the two, so through
-    /// a series of readings (spike, dip, calm) it starts nothing until the 5-minute is under load_threshold too, even
-    /// nudged in the dip.
+    /// 1-minute load with the 5-minute still at 64, a build holding a heavy slot. While anything of ours runs the
+    /// loop's room check judges by the greater of the two (`MacLoad.room`), so through a series of readings (spike,
+    /// dip, calm) it starts nothing until the 5-minute is under load_threshold too, even nudged in the dip.
     @Test func aDipOfTheOneMinuteLoadAfterASpikeStartsNothing() async throws {
         let (root, runtime, lead) = try team()
         lead.macLimits = { MacLimits(maxSessions: 6, loadThreshold: 24) }
+        guard case .held(let build, _, _) = try #require(lead.testLock).acquire(as: "a build", timeout: hangGuard) else {
+            Issue.record("no slot taken")
+            return
+        }
+        defer { build.release() }
         let set = { (one: Double, five: Double) in
             runtime.calls.lock()
             runtime.averages = MacLoad.Averages(one: one, five: five)
@@ -1482,6 +1487,29 @@ struct LeadAdvanceTests: LeadTeamFixture {
         #expect(runtime.spawned.isEmpty)
         // Calm: both under it.
         set(8, 22)
+        LeadAdvance.nudge(root: root)
+        #expect(await advancing.until { task("dip", root)?.status == .running })
+    }
+
+    /// After the 2026-11-27 restart nothing of ours ran and the 5-minute's spike decayed for 10 minutes: the loop's
+    /// room check reads the 1-minute alone then (`MacLoad.room`), so the dip starts the worker (no slot held, no team
+    /// session).
+    @Test func withNothingOfOursRunningTheLoopStartsOnTheOneMinute() async throws {
+        let (root, runtime, lead) = try team()
+        lead.macLimits = { MacLimits(maxSessions: 6, loadThreshold: 24) }
+        let set = { (one: Double, five: Double) in
+            runtime.calls.lock()
+            runtime.averages = MacLoad.Averages(one: one, five: five)
+            runtime.calls.unlock()
+        }
+        set(150.4, 102.16)
+        let advancing = Advancing(lead)
+        defer { advancing.stop() }
+        _ = lead.call("add_task", ["title": "Dip", "goal": "g", "acceptance": ["a"]])
+        #expect(await advancing.until { roomWaits.waits().contains { $0.wait.auto == true && $0.wait.what == "start_worker(dip)" } },
+                "\(roomWaits.waits())")
+        #expect(task("dip", root)?.status == .planned)
+        set(20, 64)
         LeadAdvance.nudge(root: root)
         #expect(await advancing.until { task("dip", root)?.status == .running })
     }

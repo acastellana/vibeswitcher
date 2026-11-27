@@ -34,7 +34,7 @@ public struct BoostLimits: Codable, Equatable, Sendable {
     public static let defaultMaxWorkers = 7
     public static let defaultHeavySlots = 3
 
-    /// The load (the greater of the 1- and 5-minute averages) above which leads start nothing while boosted.
+    /// The load (as `MacLoad.room` judges it) above which leads start nothing while boosted.
     public var loadThreshold: Double
     /// Team sessions of every project at once while boosted.
     public var maxSessions: Int

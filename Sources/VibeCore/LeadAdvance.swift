@@ -535,7 +535,7 @@ public final class LeadAdvance: @unchecked Sendable {
             }
         }
         let limits = lead.macLimits()
-        let busy = lead.runtime.steadyLoad().map { $0 > limits.loadLimit } ?? false
+        let busy = lead.loadOver(limits)
         // The quick steps first: findings back to work, merged tasks' sessions ended (room on the Mac); then the starts
         // (a done report freed its worker's slot already); then the audits and merges. Each in board order.
         let tasks = board.tasks.filter { $0.autoAdvance != false }
@@ -579,7 +579,7 @@ public final class LeadAdvance: @unchecked Sendable {
         guard let pending = try? recovery.pending(), !pending.isEmpty else { return }
         for event in pending {
             guard let power = lead.power(), !(power.onBattery && power.heldUnder != nil),
-                  let load = lead.runtime.steadyLoad(), load <= lead.macLimits().loadLimit else {
+                  let load = lead.roomLoad()?.load, load <= lead.macLimits().loadLimit else {
                 deferSleepRecovery(recovery)
                 return
             }
@@ -1270,7 +1270,7 @@ public final class LeadAdvance: @unchecked Sendable {
     /// audit count it), and isn't short of memory.
     private func hasRoom(_ slug: String, need: Int) -> Bool {
         guard let sessions = try? lead.advanceSessions(),
-              let mac = try? lead.macLoad(sessions, load: lead.runtime.steadyLoad(), except: Worktrees.path(root: lead.root, slug: slug)) else { return false }
+              let mac = try? lead.macLoad(sessions, except: Worktrees.path(root: lead.root, slug: slug)) else { return false }
         let limits = lead.macLimits()
         return !mac.isBusy(threshold: limits.loadLimit) && mac.memoryShortage(limits) == nil && mac.sessions + need <= limits.maxSessions
             && lead.roomWaits.heldFor(root: lead.root, need: need, mac: mac, limits: limits, freeSpace: lead.freeSpace) == nil

@@ -32,6 +32,16 @@ final class HostClient: ObservableObject {
 
     @Published private(set) var sessions: [HostSession] = []
     @Published private(set) var state: State = .notRunning
+    /// The host has listed its sessions (`sessions` is its list, not the empty one before it answers): the load gate's
+    /// census is readable (`MacLoad.room`). A host that refused the app's proof (`proofRefusal`) lists only what the app
+    /// may end, none of it, so its list is no census: no sign nothing runs (as `RestartCard` reads it).
+    var hasListed: Bool {
+        guard proofRefusal == nil else { return false }
+        switch state {
+        case .connected, .outdated: return true
+        case .notRunning, .connecting, .failed: return false
+        }
+    }
     /// The running host can be updated without ending its sessions (`HostProtocol.Capability.handover`).
     @Published private(set) var canHandOver = false
     var onBell: ((UUID) -> Void)?

@@ -12,12 +12,16 @@ public struct MacLoad: Equatable, Sendable {
         public var sessions: Int
     }
 
-    /// The load the leads judge by (`steady`); nil when it couldn't be read.
+    /// The load the leads judge room by (`MacLoad.room`'s, once `judge`d); nil when it couldn't be read.
     public var load: Double?
     /// The projects holding live team sessions, most first.
     public var holders: [Holder]
     /// The Mac's memory (`MacMemory`), where it was read: start_worker, audit and auto_advance's starts weigh it too.
     public var memory: MacMemory? = nil
+    /// The gates' reading of the load (`MacLoad.room`), set by `judge`: which average `load` is, and why.
+    public var room: Room? = nil
+    /// Judged by the gates' rule (`judge`): a load that couldn't be read is then no room (`isBusy`).
+    public var judged = false
 
     public var sessions: Int { holders.reduce(0) { $0 + $1.sessions } }
 
@@ -34,13 +38,86 @@ public struct MacLoad: Equatable, Sendable {
             self.five = five
         }
 
-        /// The load the leads judge room by: the greater of the two. The 1-minute alone dips within a minute or two
-        /// of a spike's work pausing: on 2026-10-28 the Mac hit load 150 on 12 cores at 17:30, and at 17:38, with the
-        /// 5-minute still at 64, auto_advance read a dip under load_threshold and started two workers. The 5-minute
-        /// falls only once the load has stayed down for minutes (from 64 to 24 with the Mac idle, about 5 minutes),
-        /// and the 1-minute still says a new rise at once.
+        /// The greater of the two, the load `MacLoad.room` judges by while anything of ours runs (no gate reads it
+        /// alone). The 1-minute alone dips within a minute or two of a spike's work pausing: on 2026-10-28 the Mac
+        /// hit load 150 on 12 cores at 17:30, and at 17:38, with the 5-minute still at 64 and a heavy slot held,
+        /// auto_advance read a dip under load_threshold and started two workers. The 5-minute falls only once the load
+        /// has stayed down for minutes (from 64 to 24 with the Mac idle, about 5 minutes), and the 1-minute still says
+        /// a new rise at once.
         public var steady: Double { max(one, five) }
     }
+
+    /// The load the gates judge room by, and which reading of the averages it is (`MacLoad.room`).
+    public struct Room: Equatable, Sendable {
+        public enum Reading: Equatable, Sendable {
+            /// The 1-minute alone: no worker or verifier runs in any project and no build or test holds a heavy slot.
+            case lastMinute
+            /// The greater of the 1- and 5-minute: something of ours runs, or that couldn't be told.
+            case steady
+        }
+
+        public var averages: Averages
+        public var reading: Reading
+
+        public init(averages: Averages, reading: Reading) {
+            self.averages = averages
+            self.reading = reading
+        }
+
+        /// The load judged against load_threshold.
+        public var load: Double { reading == .lastMinute ? averages.one : averages.steady }
+
+        /// Which reading the load is, in plain words: "the last minute's: no worker or verifier runs and no build or
+        /// test holds a slot", "its 5-minute average; the last minute's is 6.0", "the last minute's; the 5-minute
+        /// average is 12.0".
+        public var reason: String {
+            switch reading {
+            case .lastMinute: return "the last minute's: no worker or verifier runs and no build or test holds a slot"
+            case .steady where averages.five > averages.one:
+                return "its 5-minute average; the last minute's is \(MacLoad.text(averages.one))"
+            case .steady: return "the last minute's; the 5-minute average is \(MacLoad.text(averages.five))"
+            }
+        }
+
+        /// `reason` in a few words, for status's line: "1-min: none of ours runs", "5-min; 1-min 20.0", "greater of 1-
+        /// and 5-min".
+        public var shortReason: String {
+            switch reading {
+            case .lastMinute: return "1-min: none of ours runs"
+            case .steady where averages.five > averages.one: return "5-min; 1-min \(MacLoad.text(averages.one))"
+            case .steady: return "greater of 1- and 5-min"
+            }
+        }
+
+        /// Whole minutes until the 5-minute average decays to `threshold`, when that alone holds the load over it
+        /// (the 1-minute under it): N = 5 ln((five − one) / (threshold − one)), rounded up. In the load-gate review's
+        /// replay (docs/process/reviews/load-gate-2026-11.md) it was within 2 minutes of the actual wait 63% of the
+        /// time. Nil otherwise.
+        public func minutesToRoom(threshold: Double) -> Int? {
+            guard reading == .steady, averages.one < threshold, averages.five > threshold else { return nil }
+            let minutes = 5 * Foundation.log((averages.five - averages.one) / (threshold - averages.one))
+            guard minutes.isFinite, minutes > 0 else { return nil }
+            return max(1, Int(minutes.rounded(.up)))
+        }
+    }
+
+    /// The one rule every gate judges the Mac's room by (rule (cI) of docs/process/reviews/load-gate-2026-11.md): the
+    /// 1-minute load alone while no worker or verifier runs in any project (`teamSessions`, the host's census) and no
+    /// build or test holds a heavy slot (`slotsHeld`, `TestLock.readHolders`); otherwise the greater of the 1- and
+    /// 5-minute, as before. After the 2026-11-27 11:01 restart the 5-minute's spike decayed for 10 minutes while
+    /// nothing of ours ran, and every start was refused ("it can be that the load is 51, since literally all of them
+    /// are queued or the worker ended. It can't be."). The 5-minute stays whenever anything of ours runs: a dip of the
+    /// 1-minute under the threshold with the 5-minute over it preceded an overload 27% of the time in the replay.
+    /// A census or slots that can't be read (nil) count as something running; nil when the averages can't be read
+    /// (no room: `judge`).
+    public static func room(_ averages: Averages?, teamSessions: Int?, slotsHeld: Int?) -> Room? {
+        guard let averages else { return nil }
+        let idle = teamSessions == 0 && slotsHeld == 0
+        return Room(averages: averages, reading: idle ? .lastMinute : .steady)
+    }
+
+    /// The rule in one sentence, as a lead or the user is told it.
+    public static let ruleText = "The Mac has room when its load is under the threshold, counting the last 5 minutes too unless nothing of ours runs: no worker, no verifier, no build or test holding a slot."
 
     /// The Mac's load averages; nil when the system doesn't say.
     public static func averages() -> Averages? {
@@ -48,8 +125,19 @@ public struct MacLoad: Equatable, Sendable {
         return getloadavg(&loads, 3) >= 2 ? Averages(one: loads[0], five: loads[1]) : nil
     }
 
-    /// The Mac's load as the leads judge room by (`Averages.steady`); nil when the system doesn't say.
-    public static func steady() -> Double? { averages()?.steady }
+    /// Judged by the gates' one rule (`MacLoad.room`): `load` is `room`'s, and a `room` that couldn't be read is busy.
+    public mutating func judge(_ room: Room?) {
+        self.room = room
+        load = room?.load
+        judged = true
+    }
+
+    /// As `judge`, a copy.
+    public func judging(_ room: Room?) -> MacLoad {
+        var mac = self
+        mac.judge(room)
+        return mac
+    }
 
     /// The cores the load is shared by.
     public static var processors: Int { ProcessInfo.processInfo.activeProcessorCount }
@@ -95,8 +183,9 @@ public struct MacLoad: Equatable, Sendable {
         return MacLoad(load: load, holders: holders)
     }
 
-    /// Above the threshold: builds and tests slow down for every project's team.
-    public func isBusy(threshold: Double) -> Bool { load.map { $0 > threshold } ?? false }
+    /// Above the threshold: builds and tests slow down for every project's team. A load that couldn't be read is room
+    /// unless `judged` by the gates' rule, which fails toward waiting.
+    public func isBusy(threshold: Double) -> Bool { load.map { $0 > threshold } ?? judged }
 
     /// Why the Mac is short of memory under `limits` (`MacMemory.shortage`); nil when it isn't or wasn't read.
     public func memoryShortage(_ limits: MacLimits) -> String? { memory?.shortage(limits) }
@@ -105,7 +194,22 @@ public struct MacLoad: Equatable, Sendable {
     public func isFull(max: Int) -> Bool { sessions >= max }
 
     /// 12.34 → "12.3"; unknown → "unknown".
-    public var loadText: String { load.map { String(format: "%.1f", $0) } ?? "unknown" }
+    public var loadText: String { load.map(Self.text) ?? "unknown" }
+
+    /// 12.34 → "12.3".
+    static func text(_ load: Double) -> String { String(format: "%.1f", load) }
+
+    /// The load with which reading it is, as a lead is told it: "64.0 (its 5-minute average; the last minute's is
+    /// 20.0)", "6.0 (the last minute's: no worker or verifier runs and no build or test holds a slot)"; unjudged,
+    /// `loadText` alone.
+    public var loadSaid: String { loadText + (room.map { " (\($0.reason))" } ?? "") }
+
+    /// A refusal's "room again in about 4 minutes", when the 5-minute's decay alone holds the load over `threshold`
+    /// (`Room.minutesToRoom`); "" otherwise.
+    public func roomAgainText(threshold: Double) -> String {
+        guard isBusy(threshold: threshold), let minutes = room?.minutesToRoom(threshold: threshold) else { return "" }
+        return "room again in about \(minutes) minute\(minutes == 1 ? "" : "s")"
+    }
 
     /// "3 team sessions across 2 projects (vibeswitcher 2, project-c 1)": every project by name, for the app's own
     /// views only. What a lead is told goes into its repository's records (auto_advance logs refusals to progress.md),
@@ -136,16 +240,30 @@ public struct MacLoad: Equatable, Sendable {
         return "\(sessions) team session\(sessions == 1 ? "" : "s") across \(projects)"
     }
 
-    /// The Team view's line: "Mac: load 12.3, 3 team sessions across 2 projects".
-    public var line: String { "Mac: load \(loadText), \(sessionsCount)" }
+    /// The Team view's line: "Mac: load 12.3, 3 team sessions across 2 projects"; judged, which reading the load is
+    /// where it isn't both averages': "load 6.0 (last minute)", "load 64.0 (5-minute)".
+    public var line: String { "Mac: load \(loadText)\(readingShort), \(sessionsCount)" }
+
+    /// " (last minute)" while nothing of ours runs, " (5-minute)" while the 5-minute is the greater; "" otherwise.
+    private var readingShort: String {
+        guard let room else { return "" }
+        if room.reading == .lastMinute { return " (last minute)" }
+        return room.averages.five > room.averages.one ? " (5-minute)" : ""
+    }
 
     /// The line as VoiceOver reads it: what the numbers are, who holds the sessions, and against the lead's limits.
     public func spoken(threshold: Double, max: Int) -> String {
-        let load = self.load.map { _ in "load average \(loadText), the greater of the last minute's and the last 5 minutes'" } ?? "load average unknown"
+        let load = self.load.map { _ in "load average \(loadText), " + spokenReading } ?? "load average unknown"
         var parts = ["Whole Mac, all projects: \(load)", sessionsText]
         if isBusy(threshold: threshold) { parts.append("over the load limit of \(Self.number(threshold)): new workers and audits wait") }
         if isFull(max: max) { parts.append("at the limit of \(max) team sessions: new workers and audits wait") }
         return parts.joined(separator: "; ")
+    }
+
+    /// Which load the line shows, spoken: "the last minute's, since nothing of ours runs", or "the greater of the last
+    /// minute's and the last 5 minutes'" (also when not judged: the gates' rule then fails toward the greater).
+    private var spokenReading: String {
+        room?.reading == .lastMinute ? "the last minute's, since nothing of ours runs" : "the greater of the last minute's and the last 5 minutes'"
     }
 
     /// 24 → "24", 2.5 → "2.5".
@@ -162,8 +280,9 @@ public struct MacLimits: Codable, Equatable, Sendable {
     /// How many workers and verifiers may run at once across every project the session host knows; start_worker and
     /// audit refuse at it.
     public var maxSessions: Int
-    /// The load (the greater of the 1- and 5-minute averages, `MacLoad.Averages.steady`) above which start_worker and
-    /// audit refuse, and merge waits before its tests; nil: twice the cores (`loadLimit`).
+    /// The load (as `MacLoad.room` judges it: the 1-minute alone while nothing of ours runs, else the greater of the 1-
+    /// and 5-minute averages) above which start_worker and audit refuse, and merge waits before its tests; nil: twice
+    /// the cores (`loadLimit`).
     public var loadThreshold: Double?
     /// The heavy-work slots (builds and full test runs at once, Mac-wide: `vs-heavy`'s, merges', audits'; see
     /// `TestLock`), 1 to the cores. The user chose 2 on a 12-core Mac (2026-11-01): the default is the cores ÷ 6.

@@ -385,8 +385,10 @@ These are set once for the Mac, not per project, in Settings › Performance, an
 `~/.vibeswitcher/mac-limits.json`:
 
 - **Team sessions** (`mac_max_sessions`): the most workers and verifiers of all projects together, 10 by default.
-- **Load** (`load_threshold`): the load above which leads start nothing, the greater of the 1- and 5-minute averages
-  (so a dip of the 1-minute after a spike isn't room); empty means twice the cores.
+- **Load** (`load_threshold`): the load above which leads start nothing; empty means twice the cores. The Mac has room
+  when its load is under the threshold, counting the last 5 minutes too unless nothing of ours runs: no worker, no
+  verifier, no build or test holding a slot. So after a restart the first start goes once the last minute's load is
+  under it, while a dip of the 1-minute after a spike, with anything of ours running, still isn't room.
 - **Test and build slots** (`heavySlots` in the file): the builds and full test runs at once, below. The cores ÷ 6,
   rounded down, by default (2 on a 12-core Mac, the user's choice on 2026-11-01).
 

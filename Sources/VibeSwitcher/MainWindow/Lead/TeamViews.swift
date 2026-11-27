@@ -614,6 +614,8 @@ struct LeadTeamPane: View, Equatable {
     @ObservedObject var keepAwake: KeepAwake
     /// Every session the host lists, of every project (the Mac-wide line counts their teams).
     var hosted: [MacLine.Session] = []
+    /// The host has listed its sessions (`HostClient.hasListed`): until then `hosted` is no count of them.
+    var hostListed = true
     /// Where the lead's records are kept (`LeadController.recordsDirs`).
     var recordsDir: String? = LeadWorkflow.defaultRecordsDir
     /// The messages between this project's lead and others' (`LeadController.mail`).
@@ -633,40 +635,50 @@ struct LeadTeamPane: View, Equatable {
 
     static func == (a: LeadTeamPane, b: LeadTeamPane) -> Bool {
         a.root == b.root && a.board.isSame(as: b.board) && a.decisions == b.decisions && a.seen == b.seen && a.rows == b.rows
-            && a.notices == b.notices && a.summaries === b.summaries && a.keepAwake === b.keepAwake && a.hosted == b.hosted
+            && a.notices == b.notices && a.summaries === b.summaries && a.keepAwake === b.keepAwake && a.hosted == b.hosted && a.hostListed == b.hostListed
             && a.recordsDir == b.recordsDir && a.mail == b.mail
     }
 
-    /// The Mac-wide line's inputs read and the line made on a queue of its own: the load (`MacLoad.steady`), the limits' file
+    /// The Mac-wide line's inputs read and the line made on a queue of its own: the load averages and the heavy slots held
+    /// (judged by `MacLoad.room`, as start_worker judges them), the limits' file
     /// (`MacLimits.load`), every project's team sessions counted. Made again when the sessions listed change or the
     /// clock ticks, never for the same sessions in between.
     final class MacReads {
         private let run: (@escaping () -> Void) -> Void
-        private var hosted: [MacLine.Session]?
+        private var hosted: (sessions: [MacLine.Session], listed: Bool)?
         /// The load and limits as last read, for a change of sessions between ticks (only on `run`'s queue).
-        private var read: (load: Double?, limits: MacLimits)?
+        private var read: (averages: MacLoad.Averages?, slotsHeld: Int?, limits: MacLimits)?
+        private let averages: () -> MacLoad.Averages?
+        private let slotsHeld: () -> Int?
+        private let limits: () -> MacLimits
         /// Each request's number: a line that comes back after a newer request is dropped.
         private var asked = 0
         /// How many times a line was asked for (for tests).
         private(set) var made = 0
 
-        init(run: ((@escaping () -> Void) -> Void)? = nil) {
+        /// `averages`, `slotsHeld` and `limits`: the Mac's (`TestLock.standard()`'s holders, nil: a slot couldn't be read;
+        /// Settings' limits); faked in tests.
+        init(run: ((@escaping () -> Void) -> Void)? = nil, averages: @escaping () -> MacLoad.Averages? = MacLoad.averages,
+             slotsHeld: @escaping () -> Int? = { TestLock.standard()?.readHolders()?.count }, limits: @escaping () -> MacLimits = { MacLimits.current() }) {
             let queue = DispatchQueue(label: "VibeSwitcher.mac-line", qos: .utility)
             self.run = run ?? { queue.async(execute: $0) }
+            self.averages = averages
+            self.slotsHeld = slotsHeld
+            self.limits = limits
         }
 
         /// Makes the line for `hosted` and hands it to `then` on the main thread: `reread` reads the load and the limits
         /// again (a tick); without it, nothing is made for the sessions it was last made for.
-        func make(_ hosted: [MacLine.Session], reread: Bool, then: @escaping (MacLine) -> Void) {
-            guard reread || hosted != self.hosted else { return }
-            self.hosted = hosted
+        func make(_ hosted: [MacLine.Session], listed: Bool = true, reread: Bool, then: @escaping (MacLine) -> Void) {
+            guard reread || self.hosted.map({ $0.sessions != hosted || $0.listed != listed }) ?? true else { return }
+            self.hosted = (hosted, listed)
             made += 1
             asked += 1
             let number = asked
             run { [self] in
-                if reread || read == nil { read = (MacLoad.steady(), MacLimits.current()) }
+                if reread || read == nil { read = (averages(), slotsHeld(), limits()) }
                 let read = read!
-                let line = MacLine.make(listed: hosted, load: read.load, limits: read.limits)
+                let line = MacLine.make(listed: hosted, hostListed: listed, averages: read.averages, slotsHeld: read.slotsHeld, limits: read.limits)
                 DispatchQueue.main.async { if number == self.asked { then(line) } }
             }
         }
@@ -680,7 +692,8 @@ struct LeadTeamPane: View, Equatable {
                      mac: mac, rows: teamRows, recordsDir: recordsDir, mail: mail, linesVersion: summaries.version, walls: walls)
             .onAppear(perform: request)
             .onChange(of: tick) { request() }
-            .onChange(of: hosted) { macReads.make(hosted, reread: false) { mac = $0 } }
+            .onChange(of: hosted) { macReads.make(hosted, listed: hostListed, reread: false) { mac = $0 } }
+            .onChange(of: hostListed) { macReads.make(hosted, listed: hostListed, reread: false) { mac = $0 } }
             .onChange(of: summaries.enabled) { request() }
             .task {
                 while !Task.isCancelled {
@@ -691,7 +704,7 @@ struct LeadTeamPane: View, Equatable {
     }
 
     private func request() {
-        macReads.make(hosted, reread: true) { mac = $0 }
+        macReads.make(hosted, listed: hostListed, reread: true) { mac = $0 }
         if board.tasks.contains(where: \.isTeam) {
             wallReads.make(root: root, board: board) { if walls != $0 { walls = $0 } }
         } else if !walls.isEmpty {

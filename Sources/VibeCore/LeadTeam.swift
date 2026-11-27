@@ -559,7 +559,7 @@ extension LeadToolset {
             }
             let memberSlug = Worktrees.memberSlug(slug, member: member.name)
             let folder = Worktrees.path(root: root, slug: memberSlug)
-            let mac = try macLoad(sessions, load: runtime.steadyLoad(), except: folder,
+            let mac = try macLoad(sessions, except: folder,
                                   refused: "whether the Mac has room for \(slug)'s member \(member.name) isn't known; \(started.isEmpty ? "no member" : started.joined(separator: ", ")) started")
             if let refusal = macRefusal(mac, not: "Not started", what: "start_worker(\(slug))", need: 1, disk: newWorktree(memberSlug) ? loadRunRoom(workflow) : nil) {
                 held = refusal

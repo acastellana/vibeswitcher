@@ -31,7 +31,9 @@ extension LeadToolset {
             }
         }
         let limits = macLimits()
-        if let load = runtime.steadyLoad(), load > limits.loadLimit { signals.loadHold = (load, limits.loadLimit) }
+        // An unreadable load holds merges too (`waitForLoad` waits it out): a hold whose load can't be said.
+        let load = roomLoad()?.load
+        if load.map({ $0 > limits.loadLimit }) ?? true { signals.loadHold = (load, limits.loadLimit) }
         signals.gateLag = gateLag(workflow)?.text(base: base)
         // A merge into the base under way (its lock held), and since when (as it noted when it took the lock).
         let baseLock = LeadRecords.baseLock(vault: vault, root: root, base: base)

@@ -49,7 +49,7 @@ extension LeadAdvanceTests {
         #expect(runtime.spawned.isEmpty)
         #expect(task("one", root)?.status == .planned)
         // status's Mac line: the free disk, and that starts wait for it.
-        let held = try #require(lead.call("status", [:]).text.split(separator: "\n").first { $0.hasPrefix("Mac (every project's team)") })
+        let held = try #require(lead.call("status", [:]).text.split(separator: "\n").first { $0.hasPrefix("Mac (all projects)") })
         #expect(held.contains("12.0 GB of disk free") && held.contains("New workers wait for disk"), "\(held)")
 
         // The room-again witness: not while the disk is still short, once when it's back.
@@ -72,11 +72,11 @@ extension LeadAdvanceTests {
         free.set(Self.threshold)
         #expect(!lead.call("start_worker", ["task": "one"]).isError)
         #expect(runtime.spawned.count == 1)
-        let roomy = try #require(lead.call("status", [:]).text.split(separator: "\n").first { $0.hasPrefix("Mac (every project's team)") })
+        let roomy = try #require(lead.call("status", [:]).text.split(separator: "\n").first { $0.hasPrefix("Mac (all projects)") })
         #expect(roomy.contains("22.1 GB of disk free") && !roomy.contains("New workers wait"), "\(roomy)")
         // A roomy disk (twice the room or more) goes unsaid: status stays bounded.
         free.set(2 * Self.threshold)
-        let ample = try #require(lead.call("status", [:]).text.split(separator: "\n").first { $0.hasPrefix("Mac (every project's team)") })
+        let ample = try #require(lead.call("status", [:]).text.split(separator: "\n").first { $0.hasPrefix("Mac (all projects)") })
         #expect(!ample.contains("of disk free") && !ample.contains("New workers wait"), "\(ample)")
     }
 

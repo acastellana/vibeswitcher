@@ -1190,6 +1190,27 @@ struct TestLockTests {
         try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-ago)], ofItemAtPath: path)
     }
 
+    /// The load gate reads the slots' holders to tell whether anything of ours runs (`MacLoad.room`): a slot file that
+    /// can't be opened isn't taken for a free slot there. `holders` leaves it out as before; `readHolders` says it
+    /// couldn't read them (nil), which the gate counts as not idle. No folder yet, or no slot file: none held.
+    @Test func aSlotThatCantBeOpenedMakesTheHoldersUnreadable() throws {
+        let lock = TestLock(directory: url("unreadable-locks").path, slots: 2)
+        #expect(lock.readHolders() == [])
+        try FileManager.default.createDirectory(atPath: lock.directory, withIntermediateDirectories: true)
+        #expect(lock.readHolders() == [])
+        guard case .held(let held, _, _) = lock.acquire(as: "merge of a", timeout: 5) else { Issue.record("not taken"); return }
+        #expect(lock.readHolders()?.map(\.slot) == [1])
+        held.release()
+        #expect(lock.readHolders() == [])
+        // Slot 2's file there but not openable (its mode 000).
+        try Data().write(to: URL(fileURLWithPath: lock.slotPath(2)))
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: lock.slotPath(2))
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: lock.slotPath(2)) }
+        #expect(lock.readHolders() == nil)
+        #expect(lock.holders().isEmpty)
+        #expect(MacLoad.room(MacLoad.Averages(one: 5, five: 60), teamSessions: 0, slotsHeld: lock.readHolders()?.count)?.load == 60)
+    }
+
     @Test func withTwoSlotsTwoRunsHoldOneEachAndAThirdWaitsNamingBoth() throws {
         let lock = TestLock(directory: url("locks").path, slots: 2)
         guard case .held(let first, _, let none) = lock.acquire(as: "merge of a", in: "/Users/a/dev/alpha", timeout: 5) else { Issue.record("not taken"); return }
