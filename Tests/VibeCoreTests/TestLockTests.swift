@@ -811,6 +811,7 @@ struct TestLockTests {
             #!/bin/bash
             echo "$TMPDIR" > \(RecentProjects.shellQuote(log)).$RUN.tmpdir
             echo "$RUN $*" >> \(RecentProjects.shellQuote(log)).args
+            echo "slot=$VIBESWITCHER_TEST_LOCK cores=$VS_HEAVY_CORES home=$VIBESWITCHER_HOME root=${VIBESWITCHER_HEAVY_ROOT-unset}" > \(RecentProjects.shellQuote(log)).$RUN.env
             echo "$RUN $1 start" >> \(RecentProjects.shellQuote(log))
             if [ -n "$SWIFT_GATE" ]; then while [ ! -e "$SWIFT_GATE" ]; do sleep 0.05; done; fi
             sleep "${SWIFT_SLEEP:-1}"
@@ -910,6 +911,99 @@ struct TestLockTests {
         // In a worktree the lead made, scripts/lib/module-cache.sh puts its cache's path first.
         let said = lines(log + ".args").map { $0.replacingOccurrences(of: #" -Xswiftc -module-cache-path -Xswiftc \S+"#, with: "", options: .regularExpression) }
         #expect(said == ["A build --build-system native -j 2 -Xswiftc -j2", "A test --build-system native -j 2 -Xswiftc -j2 --filter X"], "\(lines(log + ".args"))")
+    }
+
+    // MARK: scripts/test.sh's slot, on the caller's settings
+
+    /// A session's home (HOME and CFFIXED_USER_HOME, no VIBESWITCHER_HOME, as a session the app starts has it) whose
+    /// VibeSwitcher folder holds `limits` as mac-limits.json (Settings' count: `heavySlots`) and, when `boosted`, a
+    /// fresh boost.json raising the slots to that many.
+    func sessionHome(_ name: String, limits: String?, boosted: Int? = nil) throws -> [String: String] {
+        let home = url(name), folder = home.appendingPathComponent(".vibeswitcher")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        if let limits { try Data(limits.utf8).write(to: folder.appendingPathComponent("mac-limits.json")) }
+        if let boosted {
+            try BoostState(on: true, why: "w", limits: BoostLimits(heavySlots: boosted), at: Date().timeIntervalSince1970)
+                .save(to: folder.appendingPathComponent("boost.json"))
+        }
+        // 12 cores as loaded as they're many: each run gets its slot's share, whatever's free. No count of the session's own.
+        return ["HOME": home.path, "CFFIXED_USER_HOME": home.path, "VIBESWITCHER_HOME": "", TestLock.slotsVariable: "",
+                "VIBESWITCHER_HEAVY_NCPU": "12", "VIBESWITCHER_HEAVY_LOAD": "12"]
+    }
+
+    /// scripts/test.sh run as `name` with `environment`, to its end: what it said, and what its swift was given (the
+    /// fake's line: its slot, its cores, its VibeSwitcher folder, and VIBESWITCHER_HEAVY_ROOT or "unset"). `blocked`, when
+    /// given, is called if the run waits for a slot rather than start (it lets the holders go, so the run ends).
+    func scriptRun(_ name: String, environment: [String: String], blocked: (() -> Void)? = nil) async throws -> (said: String, swift: String) {
+        let (bin, log) = try fakes()
+        let run = try start(name, sleep: 0, bin: bin, arguments: ["--filter", "X"], environment: environment)
+        if let blocked {
+            #expect(await eventually { lines(log).contains("\(name) build start") || lines(run.output).joined().contains("waiting for the Mac-wide") })
+            if !lines(log).contains("\(name) build start") { blocked() }
+        }
+        #expect(await exited(run.process), "pid \(run.process.processIdentifier) still running")
+        #expect(run.process.terminationStatus == 0, "\(lines(run.output))")
+        return (lines(run.output).joined(separator: "\n"), lines("\(log).\(name).env").first ?? "")
+    }
+
+    /// Fix 2a of docs/process/reviews/heavy-slot-load-2026-11.md: scripts/test.sh moved VIBESWITCHER_HOME to its scratch
+    /// home before it called vs-heavy, so vs-heavy read neither Settings' count nor Boost: with 3 slots set on 12 cores
+    /// a worker's bare run counted 2 and got 6 cores (live, three slots held 6 + 6 + 4 = 16 on 12). Now test.sh hands
+    /// vs-heavy the caller's folder (VIBESWITCHER_HEAVY_ROOT, for vs-heavy alone): 3 slots, the share 4. The tests
+    /// themselves keep the scratch home, and VIBESWITCHER_HEAVY_ROOT doesn't reach them.
+    @Test func theScriptsSlotCountsTheCallersSettings() async throws {
+        let session = try sessionHome("session", limits: #"{"heavySlots": 3}"#)
+        let (said, swift) = try await scriptRun("A", environment: session)
+        #expect(said.contains("vs-heavy: VS_HEAVY_CORES 4 of 12 cores: what was free as it started (load 12.0, 0 of the other 2 slots held)"), "\(said)")
+        let locks = TestLock(directory: url("script-locks").path)
+        #expect(swift.hasPrefix("slot=\(locks.slotPath(1)) cores=4 home="), "\(swift)")
+        // The tests' own folder: test.sh's scratch home, not the session's.
+        let home = swift.firstMatch(of: #/ home=(\S*) /#).map { String($0.1) } ?? ""
+        #expect(home.hasSuffix("/home/.vibeswitcher") && !home.hasPrefix(url("session").path), "\(swift)")
+        #expect(swift.hasSuffix(" root=unset"), "\(swift)")
+    }
+
+    /// With slots 1 and 2 held by others, a run on 3 slots takes slot 3 at once: before fix 2a it counted 2 and waited
+    /// "all 2 slots held" while slot 3 was free.
+    @Test func theScriptTakesSlotThreeWhenOneAndTwoAreHeld() async throws {
+        let session = try sessionHome("session", limits: #"{"heavySlots": 3}"#)
+        let locks = TestLock(directory: url("script-locks").path)
+        let holders = try [1, 2].map { try Self.outsideHolder(path: locks.slotPath($0)) }
+        defer { holders.forEach { $0.terminate(); waitForEnd($0) } }
+        let (said, swift) = try await scriptRun("A", environment: session) {
+            Issue.record("the run waited for a slot while slot 3 was free")
+            holders.forEach { $0.terminate() }
+        }
+        #expect(said.contains("vs-heavy: VS_HEAVY_CORES 4 of 12 cores: what was free as it started (load 12.0, 2 of the other 2 slots held)"), "\(said)")
+        #expect(swift.hasPrefix("slot=\(locks.slotPath(3)) cores=4 "), "\(swift)")
+    }
+
+    /// Boost raises the count test.sh's vs-heavy reads too: Settings' 2, boost's 3, the share 4.
+    @Test func theScriptsSlotCountsBoost() async throws {
+        let session = try sessionHome("session", limits: #"{"heavySlots": 2}"#, boosted: 3)
+        let (said, swift) = try await scriptRun("A", environment: session)
+        #expect(said.contains("vs-heavy: VS_HEAVY_CORES 4 of 12 cores: what was free as it started (load 12.0, 0 of the other 2 slots held)"), "\(said)")
+        #expect(swift.contains(" cores=4 "), "\(swift)")
+    }
+
+    /// The caller's folder or its mac-limits.json can't be read: the narrower share, never a wider one. The count is
+    /// then the highest of Settings' default and the slots the lock folder shows were taken (its test-build-N.lock
+    /// files: a reader that could read its count made them): 3 there, the share 4, not the default's 6.
+    @Test(arguments: ["garbage", "unreadable", "no folder"]) func theScriptsSlotFailsTowardTheNarrowerShare(_ broken: String) async throws {
+        var session = try sessionHome("session", limits: broken == "garbage" ? "{heavySlots: 3" : #"{"heavySlots": 3}"#)
+        let limits = url("session").appendingPathComponent(".vibeswitcher/mac-limits.json")
+        switch broken {
+        case "unreadable": try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: limits.path)
+        case "no folder": session["HOME"] = url("nowhere").path; session["CFFIXED_USER_HOME"] = url("nowhere").path
+        default: break
+        }
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: limits.path) }
+        let locks = TestLock(directory: url("script-locks").path)
+        try FileManager.default.createDirectory(atPath: locks.directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        FileManager.default.createFile(atPath: locks.slotPath(3), contents: nil)
+        let (said, swift) = try await scriptRun("A", environment: session)
+        #expect(said.contains("vs-heavy: VS_HEAVY_CORES 4 of 12 cores: "), "\(said)")
+        #expect(swift.contains(" cores=4 "), "\(swift)")
     }
 
     /// Inside Codex's sandbox (CODEX_SANDBOX set in its commands) swift build and swift test leave SwiftPM's own sandbox
