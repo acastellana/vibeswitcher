@@ -533,8 +533,9 @@ pair end names whichever process last sent or received on the other end, as that
   empty path or none, listening unbound) is refused.
 - **(e)** After the other end's `close` (its only holder), the token read again on the received end is **refused**
   (`ENOTCONN`, 57); after its `shutdown(SHUT_WR)` with the end kept open, the token **still reads** (the maker); after
-  a former holder's `shutdown(SHUT_RD)` and close, nothing shows on the received end (the token the maker's, `poll`
-  0). `poll` gives `POLLIN|POLLPRI|POLLHUP` and `recv` end of file **both** after a close and after `SHUT_WR`: `POLLHUP`
+  a former holder's `shutdown(SHUT_RD)` and close, the token is still the maker's, no `POLLHUP` and no end of file
+  (`recv` `EAGAIN`), but `POLLOUT` is no longer reported (`poll` 0, `revents` 0, where the open baseline gives
+  `POLLOUT`). `poll` gives `POLLIN|POLLPRI|POLLHUP` and `recv` end of file **both** after a close and after `SHUT_WR`: `POLLHUP`
   doesn't tell a closed other end from a half-closed one; the token read again does (refused once closed). For K2:
   step 5's second token read refuses a closed other end by itself; `POLLHUP` isn't the test.
 - **(f)** A connection's token at the accept names **the last writer** of the connecting socket: its forked child when
