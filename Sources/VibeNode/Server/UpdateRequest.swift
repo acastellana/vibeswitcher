@@ -67,6 +67,8 @@ extension WireKinds {
 public enum UpdateInstall {
     /// How long the install is waited for at most.
     public static let installWait: TimeInterval = 3 * 60 * 60
+    /// The server's image's name in a build's `bin` (`NodeFolders.installedBuild`'s `program` for the server's own build).
+    public static let serverProgram = "vibeswitcher-server"
     /// The user's manager's runner of a transient scope.
     public static let systemdRun = "/usr/bin/systemd-run"
 
@@ -246,6 +248,9 @@ struct UpdateRequest {
         guard Self.commitRefusal(args) == nil, let commit = args.commit else {
             return .refused(.badArgs, "update needs commit, 40 lowercase hex digits")
         }
+        guard let running else {
+            return .refused(.refused, "update: the host's notes name no build it runs: `vibeswitcher status` says what runs; nothing was installed or switched")
+        }
         if commit == running {
             return .already(.init(outcome: "already", commit: commit, installed: false, said: "\(commit) runs already: nothing to update"))
         }
@@ -303,6 +308,29 @@ struct UpdateRequest {
 }
 
 extension Requests {
+    /// The vault's look of the builds folder for `update`, as the command line takes it: a change `HeldChange` sees (held,
+    /// or since the vault's record), then the look `config held` answers from (the engine's: a fresh vault's first look
+    /// holds what it hasn't recorded). Either can't be had: refused, never let through. Blocking (it waits for the
+    /// engine's look, at most a minute): off `queue`.
+    func updateHeld(home: String) -> () -> StartRefusal? {
+        let (vault, engine) = (link.vault, self.engine)
+        return {
+            if let refusal = HeldChange.refusal([HooksRequest.buildsName], home: home, vault: vault, accept: SwitchRequest.acceptFirst) { return refusal }
+            let couldnt = StartRefusal("update: the server couldn't say which changes wait for your accept: nothing was installed or switched")
+            guard let engine else { return couldnt }
+            let names = Locked<[String]?>(nil)
+            let done = DispatchSemaphore(value: 0)
+            engine.configHeld(root: home, diff: nil) { result in
+                if case .success(let held) = result {
+                    names.set((held.card?["config"]?["items"]?.array ?? []).compactMap { $0["name"]?.string })
+                }
+                done.signal()
+            }
+            guard done.wait(timeout: .now() + 60) == .success, let held = names.get() else { return couldnt }
+            return UpdateInstall.buildsRefusal(heldNames: held, looked: [], now: [])
+        }
+    }
+
     /// `update` with `commit` (and `rollback`): `UpdateRequest`'s plan and install off `queue`, then `build.switch`'s act
     /// under this request's id and action. On `queue`.
     func update(_ request: NodeWire.Request, reply: @escaping (NodeWire.Reply) -> Void) {
@@ -316,10 +344,10 @@ extension Requests {
             return reply(.init(re: request.id, error: .init(.refused, "this server has no install root to update in")))
         }
         let running = notes?.notes.build
-        let (home, vault) = (self.home, link.vault)
+        let home = self.home
         let plan = UpdateRequest(installRoot: installRoot, home: home, installer: updateInstaller, running: running, blockers: switchBlockersNow().blockers,
                                  rollbackTarget: running.flatMap { SwitchPlan.rollbackTarget(installs: SwitchRequest.installs(in: installRoot), running: $0)?.commit },
-                                 held: { HeldChange.refusal([HooksRequest.buildsName], home: home, vault: vault, accept: SwitchRequest.acceptFirst) },
+                                 held: updateHeld(home: home),
                                  say: note)
         let queue = self.queue
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in

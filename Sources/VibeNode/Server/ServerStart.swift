@@ -170,7 +170,8 @@ public enum ServerStart {
         // install-node of the build this server's own image is (`/proc/self/exe`, as the command line proves its own) in a
         // scope of the user's manager.
         if parsed.node, !Platform.CodeIdentity.isAvailable, let accountHome,
-           case .success(let build) = NodeFolders.installedBuild(executable: "/proc/self/exe", prefix: NodeFolders.defaultPrefix(accountHome: accountHome)) {
+           case .success(let build) = NodeFolders.installedBuild(executable: "/proc/self/exe", prefix: NodeFolders.defaultPrefix(accountHome: accountHome),
+                                                                 program: UpdateInstall.serverProgram) {
             requests.updateInstaller = .script(own: build.folder, scope: UpdateInstall.systemdRun)
         }
         // Check for Updates on the user's node (`UpdateWatch`): a scratch server asks GitHub nothing.

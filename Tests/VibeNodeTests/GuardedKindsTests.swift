@@ -340,7 +340,7 @@ struct GuardedKindsTests {
         guard case .refused(.refused, let why) = plan(world, installer: .test(program: world.installer), running: nil).plan(.init(commit: Self.commit)) else {
             Issue.record("not refused"); return
         }
-        #expect(why.contains("names no build"), "\(why)")
+        #expect(why.contains("name no build"), "\(why)")
         #expect(!world.ran)
     }
 
