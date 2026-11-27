@@ -400,8 +400,10 @@ connector check above is open the same way: a host of a session's own that makes
 end and execs the genuine pinned host passes it, and the holder talks to the server as its host. It stays off with
 the rest (no Mac host starts a `--node` server); its redesign is the keeper design's Mach form (the server judging a
 message from its host by the message's own audit trailer: its parent's pid, a host row of the record, hardened, as
-K4a-ii's child proof runs the other way), in step 11. Two things for item 13: after an in-place exec handover that token is stale (Security refuses a token whose
-process exec'd), so a server carried across a handover needs a new connector or a restart; and the test is at the
+K4a-ii's child proof runs the other way), in step 11. Two things for item 13: after an in-place exec handover the connector's token, read afresh, names the new image
+(K-M1 (b): it was thought stale, "Security refuses a token whose process exec'd", which holds only for a token kept
+from before the exec), so it proves nothing about the handover either way, and a server carried across a handover
+needs the Mach form's proof from its host again, or a restart; and the test is at the
 function, with a real pair's token (a node server's record path isn't a test's to choose). And from the re-check: a
 server child checks its connector's peer once, at its start, so after a handover it would keep serving a swapped host
 image; on the Mac the server child is ended and started again after every handover, so the check runs against the new
@@ -449,7 +451,11 @@ exec runs what the path names then. A checked node host's switch goes through a 
    to make a fresh stream pair and send one end over the inherited channel; that end's `LOCAL_PEERTOKEN` names the
    keeper's own image, made after its exec. The old host requires that token to be its spawned pid, to run *expected*
    by Security's dynamic check, and to be hardened. Otherwise the keeper is ended and the switch refused: the old host
-   and its sessions are as they were (a file swapped before this point is caught here, the long window F6 named).
+   and its sessions are as they were (a file swapped before this point was thought caught here, the long window F6
+   named; **K-M1 refutes it**: code at the path can make the pair, send its end, fork a holder and exec a copy of the
+   target, and the token then names the target at the spawned pid, so the holder takes the parcel. The keeper
+   design's K4c moves this proof and step 4's to Mach messages judged by their trailers; until then this switch is
+   open to that order, and it is off with the checked node).
 3. On the old host's queue: the server child is ended and reaped (below), the state built, and the state's bytes and
    every descriptor it names (the lock, the listener, the secrets' channel, each session's terminal) sent to the
    proven keeper over the pair it made. Then the host execs the target with only its end of the channel, and with the
