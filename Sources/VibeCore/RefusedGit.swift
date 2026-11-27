@@ -325,12 +325,64 @@ public enum RefusedGit {
     struct Wrapper {
         var valued: Set<String> = []
         var operands = 0
+        /// Its options read as getopt_long reads them (`Getopt`), instead of a word each and `valued`'s next.
+        var getopt: Getopt?
+    }
+    /// A wrapper's options as getopt_long reads them (sudo's): short ones run together (`-nu root`), a value attached
+    /// (`-uroot`) or the next word; long ones with `=value` or the next word, spelled to any prefix that names one
+    /// alone (`--us root`); `--` ends them. `valued`: the letters and long names that take a value; `optional`: those
+    /// whose value is attached or, alone, the next word when that isn't an option (sudo's `-h host`, `-h` alone its
+    /// help); `flags`: the long names that take none, for the prefixes.
+    struct Getopt {
+        var valued: Set<String>
+        var optional: Set<String> = []
+        var flags: Set<String> = []
+    }
+    /// sudo's options (1.9.17p2), its parse_args' `+Aa:BbC:c:D:Eeg:Hh::iKklNnPp:R:r:SsT:t:U:u:Vv` and long options:
+    /// `-a`, `-c`, `-r` and `-t` too, which sudo reads with their value where it doesn't support them (macOS's BSD
+    /// auth, login class, SELinux role and type), and refuses to run.
+    static let sudo = Getopt(valued: ["a", "C", "c", "D", "g", "p", "R", "r", "T", "t", "U", "u", "--auth-type", "--close-from",
+                                      "--login-class", "--chdir", "--group", "--host", "--prompt", "--chroot", "--role", "--type",
+                                      "--command-timeout", "--other-user", "--user"],
+                             optional: ["h"],
+                             flags: ["--askpass", "--background", "--bell", "--preserve-env", "--edit", "--set-home", "--help",
+                                     "--login", "--remove-timestamp", "--reset-timestamp", "--list", "--no-update",
+                                     "--non-interactive", "--preserve-groups", "--stdin", "--shell", "--version", "--validate"])
+
+    /// What the option at `words[index]` takes, read as `getopt` says: how many words (it and its value's), the values
+    /// it's given, and whether it ends the options (`--`).
+    static func option(_ getopt: Getopt, _ words: [String], at index: Int) -> (count: Int, values: [String], ends: Bool) {
+        let option = words[index]
+        let next = index + 1 < words.count ? words[index + 1] : nil
+        if option == "--" { return (1, [], true) }
+        if starts(option, with: "--") {
+            let body = option.utf8.dropFirst(2)
+            let equals = body.firstIndex(of: UInt8(ascii: "="))
+            let name = "--" + String(decoding: body[..<(equals ?? body.endIndex)], as: UTF8.self)
+            let attached = equals.map { String(decoding: body[body.index(after: $0)...], as: UTF8.self) }
+            // The name, or the one long option it's a prefix of: another (none, or several) sudo refuses to run.
+            let known = getopt.valued.union(getopt.flags).filter { starts($0, with: "--") }
+            let named = known.contains(name) ? [name] : known.filter { starts($0, with: name) }
+            guard named.count == 1, let long = named.first, getopt.valued.contains(long) else { return (1, attached.map { [$0] } ?? [], false) }
+            if let attached { return (1, [attached], false) }
+            return next.map { (2, [$0], false) } ?? (1, [], false)
+        }
+        var letters = option.utf8.dropFirst()
+        while let letter = letters.popFirst() {
+            let short = String(decoding: [letter], as: UTF8.self)
+            let valued = getopt.valued.contains(short)
+            guard valued || getopt.optional.contains(short) else { continue }
+            if !letters.isEmpty { return (1, [String(decoding: letters, as: UTF8.self)], false) }
+            guard let next, valued || !starts(next, with: "-") else { return (1, [], false) }
+            return (2, [next], false)
+        }
+        return (1, [], false)
     }
     static let wrappers: [String: Wrapper] = {
         let timeout = Wrapper(valued: ["-s", "--signal", "-k", "--kill-after"], operands: 1)
         return ["env": Wrapper(valued: ["-u", "-P", "-S", "-C"]), "command": Wrapper(), "builtin": Wrapper(), "exec": Wrapper(valued: ["-a"]),
                 "nohup": Wrapper(), "nice": Wrapper(valued: ["-n"]), "xcrun": Wrapper(valued: ["--sdk", "--toolchain", "-sdk"]),
-                "sudo": Wrapper(valued: ["-u", "-g"]), "caffeinate": Wrapper(valued: ["-t", "-w"]), "time": Wrapper(valued: ["-o"]),
+                "sudo": Wrapper(getopt: sudo), "caffeinate": Wrapper(valued: ["-t", "-w"]), "time": Wrapper(valued: ["-o"]),
                 "xargs": Wrapper(valued: ["-I", "-J", "-L", "-n", "-P", "-E", "-s", "-R", "-S"]),
                 "timeout": timeout, "gtimeout": timeout, "arch": Wrapper(valued: ["-arch", "-d", "-e"]),
                 "stdbuf": Wrapper(valued: ["-i", "-o", "-e"]), "gstdbuf": Wrapper(valued: ["-i", "-o", "-e"]),
@@ -404,6 +456,12 @@ public enum RefusedGit {
                 budget -= 1
                 guard budget >= 0 else { return .unreadable(.tangled) }
                 let option = words[index]
+                if let getopt = wrapper.getopt {
+                    let taken = Self.option(getopt, words, at: index)
+                    index += taken.count
+                    if taken.ends { break }
+                    continue
+                }
                 // `command -v x` (`-V`) says what `x` is, and runs nothing.
                 if name == "command", option.dropFirst().contains(where: { $0 == "v" || $0 == "V" }) { return nil }
                 // `env -S '…'`: its string is text handed over (`refusal(command:)`), not read here; the word after it
@@ -534,10 +592,16 @@ public enum RefusedGit {
                         if let refusal = unread(by: "env -S", text, reads: fills, named: named, budget: &budget) { return refusal }
                     }
                     var values = [option]
-                    if wrapper.valued.contains(option), index + 1 < words.count { values.append(words[index + 1]) }
-                    for valued in wrapper.valued where option.utf8.count > valued.utf8.count && starts(option, with: valued) {
-                        values.append(String(decoding: option.utf8.dropFirst(valued.utf8.count), as: UTF8.self))
+                    var taken = (count: wrapper.valued.contains(option) ? 2 : 1, values: [String](), ends: false)
+                    if let getopt = wrapper.getopt {
+                        taken = Self.option(getopt, words, at: index)
+                    } else {
+                        if wrapper.valued.contains(option), index + 1 < words.count { taken.values.append(words[index + 1]) }
+                        for valued in wrapper.valued where option.utf8.count > valued.utf8.count && starts(option, with: valued) {
+                            taken.values.append(String(decoding: option.utf8.dropFirst(valued.utf8.count), as: UTF8.self))
+                        }
                     }
+                    values += taken.values
                     for value in values {
                         guard let variable = assigned(value) else { continue }
                         if isRefused(variable: variable) { return .variable(variable) }
@@ -546,7 +610,8 @@ public enum RefusedGit {
                     if name == "xargs", starts(option, with: "-I") || starts(option, with: "-J") {
                         filled += values.dropFirst().filter { !$0.isEmpty }
                     }
-                    index += wrapper.valued.contains(option) ? 2 : 1
+                    index += taken.count
+                    if taken.ends { break }
                 }
                 if name == "xargs" { appends = true }
                 index += wrapper.operands
