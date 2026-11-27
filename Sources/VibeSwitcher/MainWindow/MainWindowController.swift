@@ -31,8 +31,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     private var endedBar: NSView { endedHost }
     private var shownID: String?
     private var cancellables: Set<AnyCancellable> = []
-    /// The selected session's conversation, shown over the terminal (which stays attached underneath).
-    let chat = ChatModel()
+    /// The selected session's conversation, shown over the terminal (which stays attached underneath). Its composer's
+    /// drafts are kept in the window model's defaults: the app's own, a test's own suite in tests.
+    let chat: ChatModel
     /// The chat's side of the selected session's terminal: its answer card, and what's typed into it.
     private lazy var sync = makeSync()
     private var chatHost = MainWindowController.makeHost()
@@ -146,6 +147,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         self.host = host
         self.model = model
         self.actions = actions
+        chat = ChatModel(defaults: model.defaults)
         pane = TerminalPaneController(host: host)
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1280, height: 800),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
