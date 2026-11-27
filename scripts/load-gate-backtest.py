@@ -7,7 +7,7 @@ Read-only: it opens the recorder's files for reading and writes nothing. Standar
     python3 -I scripts/load-gate-backtest.py --stats DIR     # another folder of load-*.jsonl / merges-*.jsonl
     python3 -I scripts/load-gate-backtest.py --top           # also the top process groups' evidence
     python3 -I scripts/load-gate-backtest.py --until 2026-11-27T11:28   # the data as the review saw it
-    python3 -I scripts/load-gate-backtest.py --selftest      # the hand-checked fixture, Tests/Fixtures/load-gate
+    python3 -I scripts/load-gate-backtest.py --selftest      # the hand-checked fixture, scripts/fixtures/load-gate
 
 Inputs (LoadRecorder.swift): load-YYYY-MM-DD.jsonl, one LoadSample about every minute (`load` [1, 5, 15],
 `cores`, `boost`, `heavy` {slots, held}, `sessions` by project and role, `memory`, above load 48 `top`), and
@@ -599,7 +599,7 @@ def print_top(samples, out):
 
 
 def selftest():
-    """The fixture, Tests/Fixtures/load-gate/stats, by hand. 12 cores, no boost: T = 24, overload = 1-minute > 48.
+    """The fixture, scripts/fixtures/load-gate/stats, by hand. 12 cores, no boost: T = 24, overload = 1-minute > 48.
 
     load-2026-01-05.jsonl, 16 samples (time, 1-min, 5-min, team sessions, heavy slots held):
       09:00 10 10 1 1 | 09:01 60 20 1 1 | 09:02 70 40 1 1 | 09:03 20 45 1 1 (the 2026-10-28 dip) | 09:04 80 50 1 1
@@ -623,7 +623,7 @@ def selftest():
     (d) the 5-minute only while a slot is held: the same as (cG) here, 7.
     """
     here = os.path.dirname(os.path.abspath(__file__))
-    stats = os.path.join(os.path.dirname(here), "Tests", "Fixtures", "load-gate", "stats")
+    stats = os.path.join(here, "fixtures", "load-gate", "stats")
     with open(os.devnull, "w", encoding="utf-8") as sink:
         got = report(stats, None, 36.0, False, out=sink)
     a, b, c, d, g = (got["results"][k] for k in ("a", "b", "c30", "d", "cG"))

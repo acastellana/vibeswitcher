@@ -15,7 +15,7 @@ Written by a worker (task the-mac-s-load) on 2026-11-27. It is a replay of recor
 ran no bench and changed no code in Sources/. Reproduce it with
 `python3 -I scripts/load-gate-backtest.py --top --until 2026-11-27T11:28` (the data as this review saw it)
 ([the script](../../../scripts/load-gate-backtest.py)). Its arithmetic is checked on a hand-made fixture
-([Tests/Fixtures/load-gate](../../../Tests/Fixtures/load-gate)) by `python3 -I scripts/load-gate-backtest.py --selftest`.
+([scripts/fixtures/load-gate](../../../scripts/fixtures/load-gate)) by `python3 -I scripts/load-gate-backtest.py --selftest`.
 
 ## What was replayed
 
