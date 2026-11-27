@@ -1270,6 +1270,16 @@ public enum ConfigSeal {
         return readRegular(fd, limit: limit, chunk: chunk)
     }
 
+    /// The bytes the seal's reads take from files, counted while a test sets one (none otherwise): what a look costs.
+    final class ReadCount: @unchecked Sendable {
+        private let lock = NSLock()
+        private var total = 0
+        var bytes: Int { lock.lock(); defer { lock.unlock() }; return total }
+        func add(_ count: Int) { lock.lock(); total += count; lock.unlock() }
+    }
+
+    @TaskLocal static var readCount: ReadCount?
+
     /// `readRegular` of a file already open at `fd` (left open).
     private static func readRegular(_ fd: Int32, limit: Int?, chunk: (Data) -> Void) -> Contents {
         var info = stat()
@@ -1283,6 +1293,7 @@ public enum ConfigSeal {
             if count < 0, errno == EINTR { continue }
             guard count >= 0 else { return .unreadable }
             if count == 0 { return .digest("") }
+            readCount?.add(count)
             total += count
             if let limit, total > limit { return .unreadable }
             chunk(Data(buffer[0..<count]))

@@ -662,6 +662,13 @@ extension LeadVault {
         /// The lead's private folder the team tasks' walls are in (`LeadWall`), which a teammate's post is sealed from:
         /// nil, the Mac's (`LeadVault.standard`'s); a test's scratch one.
         public var wallFolder: URL?
+        /// How a look hashes the agents' config of the home `home`: everything watched for the team at `root`, or (nil)
+        /// your home's alone. A test's own sees looks overlap.
+        var hashLook: @Sendable (_ home: String, _ root: String?) -> [String: String] = { home, root in
+            root.map { ConfigSeal.hashes(home: home, root: $0) } ?? ConfigSeal.hashes(of: ConfigSeal.homeWatched(home: home))
+        }
+        /// The looks waiting for another's hashing to end before theirs (none: each look hashes at once).
+        var looksWaiting: Int { 0 }
 
         /// A vault as it was saved (`saved`, from `onChange` or `serialized`), or a new one when there's none or it
         /// doesn't read. `startingOver`: a new one stands in for one that was kept but couldn't be read.
@@ -770,9 +777,9 @@ extension LeadVault {
             if case .setGuarded(let root, let hashes) = request {
                 // A branch run's end is a look as well (`sealConfig`).
                 if hashes[ConfigSeal.checkKey] != nil || hashes[ConfigSeal.runEndKey] != nil {
-                    config = ConfigSeal.hashes(home: configHome, root: root)
+                    config = hashLook(configHome, root)
                 } else if hashes[ConfigSeal.wroteKey] != nil {
-                    config = ConfigSeal.hashes(of: ConfigSeal.homeWatched(home: configHome))
+                    config = hashLook(configHome, nil)
                 }
             }
             let (reply, skills): (Reply, (hash: String, entries: String)?) = {
