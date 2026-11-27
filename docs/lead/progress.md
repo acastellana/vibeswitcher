@@ -4952,3 +4952,4 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-27 01:09 Automatically (auto_advance): Started a worker on a-host-started-on (A host started on another home can't seal a vault under the real key (the fresh-start variant of the handover gap)), its after tasks done (the-session-host-s).
 - 2026-11-27 01:09 Started a worker on v2-on-the-mac-12
 - 2026-11-27 01:10 Update: Session host: a handover is accepted only from the running host it replaces (in main; read the install note before installing) — **What changed** (on main, `b804c67c`). At an install the running session host hands its state, including the opened team vault, to the new host process. Until now the receiving host accepted that sta…
+- 2026-11-27 01:15 Planned a-host-whose-vault: A host whose vault file is missing but whose Keychain key exists doesn't take a new app key unasked (the moved-aside vault variant) (review audit, for security)
