@@ -400,13 +400,16 @@ enum EPipeProbe {
                 + "SO_NOSIGPIPE or MSG_NOSIGNAL), thread \(pthread_mach_thread_np(pthread_self())), \(test). The writer:"
             dump("=== " + head + "\n" + pcs.map(symbol).map { "  " + $0 }.joined(separator: "\n") + "\n")
             if first { Issue.record(Comment(rawValue: ([head] + stack(pcs, limit: frameLines - 1).map { "  " + $0 }).joined(separator: "\n"))) }
-            // The writer stays in here until the handler has taken its snapshot (1 s at most), so the snapshot finds it:
+            // The writer stays in here until the handler has taken its snapshot (10 s at most, as `snapshotLines` waits),
+            // so the snapshot finds it:
             // the kernel raises a write's SIGPIPE on the process, and any thread not blocking it may take it (the Mac
             // runs, 2026-11-22/23: the main thread, in its run loop, took it, and by the time its handler ran the
             // writer had left the write and this hook, so "no thread was in a write"). A snapshot taken before this
-            // (the handler ran at once) already found the writer here or in the call.
+            // (the handler ran at once) already found the writer here or in the call. 1 s wasn't enough on the 3-core runner
+            // under load: the thread that took the signal ran its handler later than that, and the snapshot found no
+            // writer (v2 macos, core, 969fa2a6). Only while the probe's own handler is SIGPIPE's, which then runs.
             if handlerIsTheProbes {
-                let deadline = Date().addingTimeInterval(1)
+                let deadline = Date().addingTimeInterval(10)
                 while Snapshot.total == before, Date() < deadline { usleep(1_000) }
             }
             return result
