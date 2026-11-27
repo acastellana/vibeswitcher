@@ -349,7 +349,7 @@ public enum RefusedGit {
                                      "--login", "--remove-timestamp", "--reset-timestamp", "--list", "--no-update",
                                      "--non-interactive", "--preserve-groups", "--stdin", "--shell", "--version", "--validate"])
 
-    /// What the option at `words[index]` takes, read as `getopt` says: how many words (it and its value's), the values
+    /// What the option at `words[index]` (a word that starts with `-`) takes, read as `getopt` says: how many words (it and its value's), the values
     /// it's given, and whether it ends the options (`--`).
     static func option(_ getopt: Getopt, _ words: [String], at index: Int) -> (count: Int, values: [String], ends: Bool) {
         let option = words[index]
@@ -456,7 +456,8 @@ public enum RefusedGit {
                 budget -= 1
                 guard budget >= 0 else { return .unreadable(.tangled) }
                 let option = words[index]
-                if let getopt = wrapper.getopt {
+                // A variable sudo sets (`sudo LANG=C git …`) is one word, not options.
+                if let getopt = wrapper.getopt, starts(option, with: "-") {
                     let taken = Self.option(getopt, words, at: index)
                     index += taken.count
                     if taken.ends { break }
@@ -593,7 +594,7 @@ public enum RefusedGit {
                     }
                     var values = [option]
                     var taken = (count: wrapper.valued.contains(option) ? 2 : 1, values: [String](), ends: false)
-                    if let getopt = wrapper.getopt {
+                    if let getopt = wrapper.getopt, starts(option, with: "-") {
                         taken = Self.option(getopt, words, at: index)
                     } else {
                         if wrapper.valued.contains(option), index + 1 < words.count { taken.values.append(words[index + 1]) }
