@@ -45,6 +45,10 @@ public struct ApprovalVoice: Sendable {
     /// the row whose server is this server's own running code, never a file under the node's root); nil when it
     /// couldn't be taken, and then no peer is the user's.
     public var commandLine: Data?
+    /// The server's own launchd resource coalition (`Platform.Processes.coalition(getpid())`), read once at its start
+    /// (the measurement record's M4, `self`): the node job's, which the host, the server and every session descend from.
+    /// nil when it couldn't be read, and then no peer is the user's (the coalition line).
+    public var coalition: UInt64?
     /// Whether a peer's token runs code of a cdhash (`Platform.CodeIdentity.runs(_:cdhash:)`; a test's table).
     public var runs: @Sendable (Platform.PeerToken, Data) -> Bool
     /// Whether a peer runs with the Hardened Runtime (`Platform.CodeIdentity.isHardened`; unreadable is no; a test's own).
@@ -61,11 +65,12 @@ public struct ApprovalVoice: Sendable {
         return record.build(server: own)?.cli
     }
 
-    public init(authenticator: any Authenticator, commandLine: Data?,
+    public init(authenticator: any Authenticator, commandLine: Data?, coalition: UInt64?,
                 runs: @escaping @Sendable (Platform.PeerToken, Data) -> Bool = { Platform.CodeIdentity.runs($0, cdhash: $1) },
                 hardened: @escaping @Sendable (Platform.PeerToken) -> Bool = { Platform.CodeIdentity.isHardened($0) == true }) {
         self.authenticator = authenticator
         self.commandLine = commandLine
+        self.coalition = coalition
         self.runs = runs
         self.hardened = hardened
     }

@@ -26,6 +26,9 @@ struct ApprovalVoiceTests {
     static let uid: uid_t = 501
     static let commandLine = Data(repeating: 0xc1, count: 20)
     static let card = "Which database? → Postgres (project shop, lead in /Users/u/shop)"
+    /// The server's own coalition (the node job's, as M4's `self` read one), and a Terminal's (K-ESC-1's): made up here.
+    static let nodeCoalition: UInt64 = 1841
+    static let terminalCoalition: UInt64 = 109_496
 
     /// A token for `pid` (the Mac's audit token, Linux's pid and start ticks).
     static func token(_ pid: pid_t) -> Platform.PeerToken {
@@ -38,18 +41,20 @@ struct ApprovalVoiceTests {
         #endif
     }
 
-    /// Facts of a peer from a user's terminal: the server's uid, an ancestry of a shell, a terminal no session holds.
+    /// Facts of a peer from a user's terminal: the server's uid, an ancestry of a shell, a terminal no session holds,
+    /// Terminal's coalition and no session's variable.
     static func facts(pid: pid_t = 900, uid: uid_t = uid, ancestry: [pid_t]? = [900, 800], terminal: PeerFacts.Terminal = .named("/dev/ttys004"),
-                      underRunner: Bool? = false) -> PeerFacts {
+                      underRunner: Bool? = false, marker: Bool? = false, coalition: UInt64? = terminalCoalition) -> PeerFacts {
         PeerFacts(pid: pid, uid: uid, cgroup: nil, ancestry: ancestry.map { $0.map { PeerFacts.Ancestor(pid: $0, startTicks: 1) } }, terminal: terminal,
-                  sessionMarker: nil, underRunner: underRunner)
+                  sessionMarker: marker, underRunner: underRunner, coalition: coalition)
     }
 
     static let live = LiveSessions(programs: [700], terminals: ["/dev/ttys009"], host: 600, server: 650)
 
     /// The voice with `person`, the peers running the command line's code being `commandLinePeers`.
-    static func voice(_ person: Person, commandLinePeers: Set<pid_t> = [900], commandLine: Data? = commandLine, hardened: Bool = true) -> ApprovalVoice {
-        ApprovalVoice(authenticator: person, commandLine: commandLine, runs: { token, code in
+    static func voice(_ person: Person, commandLinePeers: Set<pid_t> = [900], commandLine: Data? = commandLine, hardened: Bool = true,
+                      coalition: UInt64? = nodeCoalition) -> ApprovalVoice {
+        ApprovalVoice(authenticator: person, commandLine: commandLine, coalition: coalition, runs: { token, code in
             code == Self.commandLine && commandLinePeers.contains(token.pid)
         }, hardened: { _ in hardened })
     }

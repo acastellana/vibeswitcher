@@ -350,6 +350,18 @@ extension Platform.Processes.System {
     /// nil: the Mac has no cgroups.
     static func cgroup(_ pid: pid_t) -> [String]? { nil }
 
+    /// xnu's private `PROC_PIDCOALITIONINFO` (flavour 20, not in the SDK's headers), read as the measurement's probe
+    /// reads it (`scripts/mac-measure/probes/facts.c`, M4): five 64-bit words, the resource coalition's id first, then
+    /// the jetsam coalition's and three reserved. Only an answer of exactly that size counts; a zombie, a process gone,
+    /// a later macOS that changed the flavour (another size, or none) or a 0 id give nil.
+    static func coalition(_ pid: pid_t) -> UInt64? {
+        var info: (UInt64, UInt64, UInt64, UInt64, UInt64) = (0, 0, 0, 0, 0)
+        let size = Int32(MemoryLayout.size(ofValue: info))
+        let read = withUnsafeMutableBytes(of: &info) { proc_pidinfo(pid, 20, 0, $0.baseAddress, size) }
+        guard read == size, info.0 != 0 else { return nil }
+        return info.0
+    }
+
     static let hasCgroups = false
 }
 #endif

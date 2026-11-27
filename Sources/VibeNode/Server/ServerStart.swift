@@ -126,8 +126,11 @@ public enum ServerStart {
         // `<node root>/bin/vibeswitcher`: `ApprovalVoice.commandLineAnchor`); unreadable, no peer is the user's.
         if rule.mode == .approval {
             let commandLine = ApprovalVoice.commandLineAnchor(nodeRoot: parsed.nodeRoot, own: Platform.CodeIdentity.ownCdhash(), pins: NodePins.read())
-            requests.approval = ApprovalVoice(authenticator: ApprovalVoice.System(timeout: 60), commandLine: commandLine)
-            say("the Mac's rule: Touch ID per state change; the command line's code \(commandLine == nil ? "couldn't be read: no peer is the user's" : "read")")
+            // This server's own coalition, read once here (the node job's): a peer in it is refused (the coalition line).
+            let coalition = Platform.Processes.coalition(getpid())
+            requests.approval = ApprovalVoice(authenticator: ApprovalVoice.System(timeout: 60), commandLine: commandLine, coalition: coalition)
+            say("the Mac's rule: Touch ID per state change; the command line's code \(commandLine == nil ? "couldn't be read: no peer is the user's" : "read")"
+                + "; this server's coalition \(coalition.map { "\($0)" } ?? "couldn't be read: no peer is the user's")")
         }
         var options = LeadEngine.Options()
         options.firstLook = parsed.node || parsed.testFirstLook
