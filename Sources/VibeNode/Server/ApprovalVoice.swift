@@ -118,6 +118,21 @@ public struct ApprovalVoice: Sendable {
         return nil
     }
 
+    /// The coalition line's refusals: the server's own coalition unread at its start, the peer's unread, the peer in it.
+    public static let ownCoalitionUnread = "this server's own launchd coalition couldn't be read at its start, so no caller can be told apart from the node's sessions: restart the node"
+    public static let coalitionUnread = "its launchd coalition can't be read"
+    public static func inNodeCoalition(_ coalition: UInt64) -> String {
+        "it runs in the node's own launchd coalition (\(coalition)), as a node session's process does however it detached"
+    }
+
+    /// The environment line's refusals, each saying what the user does instead: the command line from Terminal, or
+    /// the page. The Mac app's shell cards carry the variable, so the user's own command line typed in one is refused
+    /// here, reads included (the spec's row 3).
+    public static let carriesSession = "it carries \(PeerFacts.sessionMarkerName), as a VibeSwitcher session's process does (the Mac app's shell cards "
+        + "and agent sessions included): run the command line from Terminal, or use the page"
+    public static let environmentUnread = "its environment can't be read, so whether it carries \(PeerFacts.sessionMarkerName) can't be told: "
+        + "run the command line from Terminal, or use the page"
+
     /// The longest card text a reason carries: the dialog is small, and the rest is on the command line's screen.
     public static let cardLimit = 200
 
