@@ -98,11 +98,11 @@ struct BuildSourceStateTests {
     }
 
     /// build-app.sh compares that state across the compile, and the uncommitted-changes check before it still reads
-    /// Sources/ and Package.swift.
+    /// Sources/, Keeper/ (the keeper's package, which the app's build reads) and Package.swift.
     @Test func buildAppComparesTheStateAcrossTheCompile() throws {
         let script = try String(contentsOf: Self.repo.appendingPathComponent("scripts/build-app.sh"), encoding: .utf8)
         #expect(script.contains("SOURCE_STATE=\"$(source_state | shasum)\""))
         #expect(script.contains("if [[ \"$(source_state | shasum)\" != \"$SOURCE_STATE\" ]]; then"))
-        #expect(script.contains("if ! git diff --quiet HEAD -- Sources Package.swift || [[ -n \"$(git ls-files --others --exclude-standard -- Sources Package.swift)\" ]]; then"))
+        #expect(script.contains("if ! git diff --quiet HEAD -- Sources Keeper Package.swift || [[ -n \"$(git ls-files --others --exclude-standard -- Sources Keeper Package.swift)\" ]]; then"))
     }
 }
