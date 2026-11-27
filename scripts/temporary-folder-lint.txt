@@ -106,3 +106,5 @@ allow: Tests/VibeCoreTests/RefusedGitSpellingsTests.swift | git --git-dir=/tmp/x
 # RefusedGitProgramName and RefusedGitMonotonic: the audit's lines and the fuzz's refused command, which the guard parses; nothing runs them or opens the path.
 allow: Tests/VibeCoreTests/RefusedGitProgramNameTests.swift | "[[ ( -z a )]] || git -C /tmp status" | the audit's line, a command line the guard reads and refuses; nothing runs it
 allow: Tests/VibeCoreTests/RefusedGitMonotonicTests.swift | static let refused = ["git -C /tmp status" | the contract's command hidden in generated lines the guard reads and refuses; nothing runs them
+# RefusedGitSudo: the audit's lines (F5), which the guard parses; nothing runs them or opens the path.
+allow: Tests/VibeCoreTests/RefusedGitSudoTests.swift | static let finding = ["sudo -D /tmp git -C /tmp status" | the audit's lines, command lines the guard reads and refuses; nothing runs them
