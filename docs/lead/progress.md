@@ -5066,3 +5066,4 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-27 09:40 Update: Config seal: large files can't stall every gate, and a failed check says what to do (in main; active after an install) — **What changed** (on main, `274a4bb8`..`5543d771`, four commits). The config seal checks your Claude config before every worker start, audit and merge. It used to read every watched file whole, so a s…
 - 2026-11-27 09:40 Started a worker on v2-on-the-mac-13
 - 2026-11-27 09:41 Planned a-build-check-no: A build check: no watched file VibeSwitcher ships is over the config seal's per-file limit
+- 2026-11-27 09:57 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns: no task paused yet, since 09:57.
