@@ -98,10 +98,13 @@ public struct HostRole {
     /// (see `VaultStorage`), as the build before handed it over (`handedOver`) or as saved, and only while it holds its
     /// lock: `lockFD` must be the descriptor holding the lock file at `lockPath` (taken before the vault is read), and
     /// each save first checks the file there is still that one (a lock file removed or replaced lets a second host start
-    /// on the same folder: from then on that one keeps the vault, and this one saves nothing). Any other host, or one
-    /// whose descriptor doesn't hold its lock, keeps a vault in memory only, never touching a vault file.
+    /// on the same folder: from then on that one keeps the vault, and this one saves nothing). On a descriptor that
+    /// doesn't hold its lock the account's host gets no vault at all (`Failure.notTheLock`: `main.swift` doesn't run),
+    /// not one in memory that a first start would fill with another process's key. Any other host keeps its vault in
+    /// memory only, never touching a vault file.
     public func vault(lockFD: Int32, key: SymmetricKey?, handedOver: Data?, logPath: String?) throws -> LeadVault.Book {
-        guard isAccountHost, HostHandover.Lock.notHeld(lockFD, path: lockPath) == nil else { return LeadVault.Book(restoring: handedOver) }
+        guard isAccountHost else { return LeadVault.Book(restoring: handedOver) }
+        if let why = HostHandover.Lock.notHeld(lockFD, path: lockPath) { throw Failure.notTheLock(why) }
         let lockPath = lockPath
         return VaultStorage(file: root.appendingPathComponent("lead/vault.sealed"), key: key, logPath: logPath,
                             holdsLock: { HostHandover.Lock.names(lockFD, path: lockPath) }).book(handedOver: handedOver)
