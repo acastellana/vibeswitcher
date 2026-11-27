@@ -28,7 +28,7 @@ let ownsLaunchers = role.holdsRootLock
 
 // As the probe of a handover (see `HostHandover`): only whether this build can take over, and for the account's host
 // whether it gets the same vault key.
-HostHandover.probeIfAsked(arguments) { role.vaultKey { VaultStorage.keychainKey() } }
+HostHandover.probeIfAsked(arguments) { role.vaultKey { VaultStorage.keychainKey() }?.key }
 
 signal(SIGPIPE, SIG_IGN)
 signal(SIGHUP, SIG_IGN)
@@ -128,9 +128,10 @@ if handoverPath == nil {
         exit(1)
     }
 }
-// The vault's Keychain key, for the account's host only, read once and only when first asked.
-var vaultKeyRead: SymmetricKey??
-func vaultKey() -> SymmetricKey? {
+// The vault's Keychain key, for the account's host only, read once and only when first asked: whether it was made
+// on this read is known from that one read alone (a second finds the one the first made).
+var vaultKeyRead: VaultStorage.Key??
+func vaultKey() -> VaultStorage.Key? {
     if let read = vaultKeyRead { return read }
     let key = role.vaultKey { VaultStorage.keychainKey() }
     vaultKeyRead = .some(key)
@@ -143,7 +144,7 @@ if let handoverPath {
         // A test of the fallback: as if this build couldn't read the state.
         if arguments.contains("--handover-fail-restore") { throw HostHandover.Failure.unreadable("--handover-fail-restore") }
         let received = try HostHandover.receive(from: handoverPath, lockPath: lockPath, userHost: role.isAccountHost,
-                                                proof: value(after: HostHandover.proofFlag), logPath: config.logPath, key: vaultKey)
+                                                proof: value(after: HostHandover.proofFlag), logPath: config.logPath, key: { vaultKey()?.key })
         restoredSecrets = received.secrets
         restoring = received.state
     } catch {
@@ -180,7 +181,7 @@ server.onExit = { exit(0) }
 // The vault is what a build this one hands over to must hold in memory too.
 if let vault = config.vault { server.secretsForHandover = { vault.serialized } }
 // The user's host proves to the build it hands over to that the handover is its own (see `HostHandover.receive`).
-server.handoverKey = vaultKey()
+server.handoverKey = vaultKey()?.key
 server.handoverNeedsKey = role.isAccountHost
 // A test of the secret channel: these bytes are handed over, and the next build says whether it got them.
 let testSecret = value(after: "--handover-test-secret").map { Data($0.utf8) }

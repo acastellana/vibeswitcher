@@ -12,6 +12,9 @@ public struct VaultStorage {
     public let file: URL
     /// Nil: no key (the Keychain didn't give it without asking): the vault lives in memory only.
     public let key: SymmetricKey?
+    /// `key` was made on this start, the Keychain holding none before (`Key.made`): only then is a missing vault file a
+    /// first start. False for a key that was there already.
+    public let keyIsNew: Bool
     /// The host's log, for a save that failed (the file's name and why, never what's in it); nil logs nothing.
     private let logPath: String?
     private let sync: (Int32) -> Bool
@@ -20,16 +23,24 @@ public struct VaultStorage {
     /// Whether the host still holds its lock (see `HostRole.vault`), asked before each save: false saves nothing more.
     private let holdsLock: () -> Bool
 
-    public init(file: URL, key: SymmetricKey?, logPath: String? = nil, holdsLock: @escaping () -> Bool = { true }) {
-        self.init(file: file, key: key, logPath: logPath, sync: VibePaths.syncToDisk, holdsLock: holdsLock) {
+    /// `keyIsNew`: said by whoever read the key (`Key.made`), never assumed.
+    public init(file: URL, key: SymmetricKey?, keyIsNew: Bool, logPath: String? = nil, holdsLock: @escaping () -> Bool = { true }) {
+        self.init(file: file, key: key, keyIsNew: keyIsNew, logPath: logPath, sync: VibePaths.syncToDisk, holdsLock: holdsLock) {
             DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + $0, execute: $1)
         }
     }
 
-    init(file: URL, key: SymmetricKey?, logPath: String? = nil, sync: @escaping (Int32) -> Bool = VibePaths.syncToDisk,
-         holdsLock: @escaping () -> Bool = { true }, retryLater: @escaping (TimeInterval, @escaping () -> Void) -> Void) {
+    /// A test's: its key one it just made (`keyIsNew`), unless it says otherwise.
+    init(file: URL, key: SymmetricKey?, logPath: String? = nil) {
+        self.init(file: file, key: key, keyIsNew: true, logPath: logPath)
+    }
+
+    init(file: URL, key: SymmetricKey?, keyIsNew: Bool = true, logPath: String? = nil,
+         sync: @escaping (Int32) -> Bool = VibePaths.syncToDisk, holdsLock: @escaping () -> Bool = { true },
+         retryLater: @escaping (TimeInterval, @escaping () -> Void) -> Void) {
         self.file = file
         self.key = key
+        self.keyIsNew = keyIsNew
         self.logPath = logPath
         self.sync = sync
         self.holdsLock = holdsLock
@@ -189,10 +200,23 @@ public struct VaultStorage {
 
     public static let keychainService = "dev.vibeswitcher.lead-vault"
 
-    /// The vault's key from the login Keychain, made the first time. Never asks you (the host has no window to ask
-    /// from): nil when the Keychain won't give it without asking (a rebuilt host without the stable signing
+    /// The vault's key as the Keychain gave it: `made` on this read (the Keychain had no such item, and the one made
+    /// was added), or there already.
+    public struct Key {
+        public let key: SymmetricKey
+        public let made: Bool
+
+        public init(_ key: SymmetricKey, made: Bool) {
+            self.key = key
+            self.made = made
+        }
+    }
+
+    /// The vault's key from the login Keychain, made the first time (`Key.made`: only when the Keychain said it had
+    /// none and took the new one; every other key is one that was there). Never asks you (the host has no window to
+    /// ask from): nil when the Keychain won't give it without asking (a rebuilt host without the stable signing
     /// identity, see scripts/setup-signing.sh), and then nothing is saved.
-    public static func keychainKey(service: String = keychainService, account: String = "vault") -> SymmetricKey? {
+    public static func keychainKey(service: String = keychainService, account: String = "vault") -> Key? {
         SecKeychainSetUserInteractionAllowed(false)
         defer { SecKeychainSetUserInteractionAllowed(true) }
         let item: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
@@ -202,13 +226,13 @@ public struct VaultStorage {
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
         let status = SecItemCopyMatching(query as CFDictionary, &found)
-        if status == errSecSuccess, let data = found as? Data, data.count == 32 { return SymmetricKey(data: data) }
+        if status == errSecSuccess, let data = found as? Data, data.count == 32 { return Key(SymmetricKey(data: data), made: false) }
         guard status == errSecItemNotFound else { return nil }
         let data = SymmetricKey(size: .bits256).withUnsafeBytes { Data($0) }
         var add = item
         add[kSecValueData as String] = data
         add[kSecAttrLabel as String] = "VibeSwitcher lead vault"
-        return SecItemAdd(add as CFDictionary, nil) == errSecSuccess ? SymmetricKey(data: data) : nil
+        return SecItemAdd(add as CFDictionary, nil) == errSecSuccess ? Key(SymmetricKey(data: data), made: true) : nil
     }
 
     public static func removeKeychainKey(service: String, account: String = "vault") {

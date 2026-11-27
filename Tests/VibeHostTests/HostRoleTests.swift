@@ -34,16 +34,19 @@ struct HostRoleTests {
         try FileManager.default.createDirectory(at: base.appendingPathComponent("theirs/.vibeswitcher"), withIntermediateDirectories: true)
     }
 
-    /// The Keychain as the account's host reads it, counting the reads.
+    /// The Keychain as the account's host reads it, counting the reads: its key made on that read (a first start).
     final class Reader {
         let key: SymmetricKey
         var reads = 0
         init(_ key: SymmetricKey) { self.key = key }
-        func read() -> SymmetricKey? {
+        func read() -> VaultStorage.Key? {
             reads += 1
-            return key
+            return VaultStorage.Key(key, made: true)
         }
     }
+
+    /// The real key as the Keychain gives it: `made` on this start (none there before), else there already.
+    func real(made: Bool) -> VaultStorage.Key { VaultStorage.Key(realKey, made: made) }
 
     func role(_ environment: [String: String], lock: String? = nil, accountHome: String?? = nil) -> HostRole {
         HostRole(environment: environment, fallbackHome: account.path, lockArgument: lock, accountHome: accountHome ?? account.path)
@@ -148,7 +151,7 @@ struct HostRoleTests {
         let first = try HostServer.takeLock(at: role.lockPath)
         defer { Darwin.close(first) }
         let log = base.appendingPathComponent("host.log")
-        let running = try role.vault(lockFD: first, key: realKey, handedOver: nil, logPath: log.path)
+        let running = try role.vault(lockFD: first, key: real(made: true), handedOver: nil, logPath: log.path)
         #expect(running.adoptAppKey(Data(repeating: 1, count: AppProof.keySize)))
         let saved = try Data(contentsOf: file)
 
@@ -160,7 +163,7 @@ struct HostRoleTests {
         #expect(try Data(contentsOf: file) == saved, "the host that lost its lock sealed over the vault")
         let said = (try? String(contentsOf: log, encoding: .utf8)) ?? ""
         #expect(said.contains("vault: vault.sealed not saved: this host no longer holds its lock"), "\(said)")
-        let beside = try role.vault(lockFD: second, key: realKey, handedOver: nil, logPath: nil)
+        let beside = try role.vault(lockFD: second, key: real(made: false), handedOver: nil, logPath: nil)
         #expect(beside.appKey?.data == Data(repeating: 1, count: AppProof.keySize))
         _ = beside.answer(.issue(role: .lead, root: repo, task: nil, auditing: nil), from: .app)
         #expect(try Data(contentsOf: file) != saved, "the host holding the lock saves")
@@ -173,7 +176,7 @@ struct HostRoleTests {
             // The account's host gets no vault at all on it (no vault in memory either, to take another key unasked):
             // `main.swift` doesn't run.
             #expect(throws: HostRole.Failure.self, "lock descriptor \(fd)") {
-                try role.vault(lockFD: fd, key: realKey, handedOver: nil, logPath: nil)
+                try role.vault(lockFD: fd, key: real(made: false), handedOver: nil, logPath: nil)
             }
             #expect(try Data(contentsOf: file) == now, "lock descriptor \(fd): it sealed over the vault")
         }
@@ -206,25 +209,166 @@ struct HostRoleTests {
         }
     }
 
-    /// Known, and the next task in these files (not this one's): on the account's own home, the vault file moved aside
-    /// and the host started again, it's a first start once more and takes the key on stdin unasked, though the
-    /// Keychain's key was there already (a vault had been sealed under it). The rule proposed: a key that was there
-    /// with no vault file is a vault that started over, waiting for your confirmation through the app.
-    @Test func aVaultFileMovedAsideOnTheAccountsHomeIsntAFirstStart() throws {
+    /// The vault folder of the account's host, a first start there sealing a vault that holds your app key (`ours`),
+    /// under the real key made then. What's left of it: the role, its vault file, and the file's bytes.
+    let ours = Data(repeating: 1, count: AppProof.keySize)
+
+    func sealedOnAFirstStart() throws -> (role: HostRole, file: URL, sealed: Data) {
         let role = role(["HOME": account.path])
         let file = role.root.appendingPathComponent("lead/vault.sealed")
-        do {
-            let lockFD = try HostServer.takeLock(at: role.lockPath)
-            defer { Darwin.close(lockFD) }
-            #expect(try role.vault(lockFD: lockFD, key: realKey, handedOver: nil, logPath: nil).adoptAppKey(Data(repeating: 1, count: AppProof.keySize)))
-        }
-        try FileManager.default.moveItem(at: file, to: file.deletingLastPathComponent().appendingPathComponent("aside"))
         let lockFD = try HostServer.takeLock(at: role.lockPath)
         defer { Darwin.close(lockFD) }
-        let restarted = try role.vault(lockFD: lockFD, key: realKey, handedOver: nil, logPath: nil)
-        withKnownIssue("a key that was there with no vault file still counts as a first start") {
-            #expect(!restarted.adoptAppKey(theirs), "it took another process's key unasked")
+        #expect(try role.vault(lockFD: lockFD, key: real(made: true), handedOver: nil, logPath: nil).adoptAppKey(ours))
+        return (role, file, try Data(contentsOf: file))
+    }
+
+    /// The account's host started again on `role`'s lock, the Keychain's key there already (`made: false`), and given
+    /// another process's app key on stdin as `main.swift` takes it: it must start over, take no key unasked and save
+    /// nothing, as a vault that didn't open does (`VaultStartedOverTests`). The vault, for what follows.
+    func restartedRefusingTheirs(_ role: HostRole, log: URL? = nil, sourceLocation: SourceLocation = #_sourceLocation) throws -> LeadVault.Book {
+        let lockFD = try HostServer.takeLock(at: role.lockPath)
+        defer { Darwin.close(lockFD) }
+        let file = role.root.appendingPathComponent("lead/vault.sealed")
+        let before = FileManager.default.contents(atPath: file.path)
+        let book = try role.vault(lockFD: lockFD, key: real(made: false), handedOver: nil, logPath: log?.path)
+        #expect(!book.adoptAppKey(theirs), "it took another process's key unasked", sourceLocation: sourceLocation)
+        #expect(book.appKey == nil, sourceLocation: sourceLocation)
+        #expect(book.awaitsAppKey, "not started over", sourceLocation: sourceLocation)
+        guard case .startedOver(_?) = book.answer(.startedOver, from: .app) else {
+            Issue.record("not started over", sourceLocation: sourceLocation)
+            return book
         }
+        // A change meanwhile (the caller as "the app" would get none: its proof is refused) saves nothing.
+        _ = book.answer(.issue(role: .lead, root: repo, task: nil, auditing: nil), from: .app)
+        #expect(FileManager.default.contents(atPath: file.path) == before, "something was saved before you answered",
+                sourceLocation: sourceLocation)
+        return book
+    }
+
+    /// The files set aside beside `file` (`VaultStorage.setAsideSuffix`).
+    func aside(_ file: URL) -> [URL] {
+        let folder = file.deletingLastPathComponent()
+        return ((try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? [])
+            .filter { $0.hasPrefix(file.lastPathComponent + VaultStorage.setAsideSuffix) }.map { folder.appendingPathComponent($0) }
+    }
+
+    /// On the account's own home, the vault file moved aside and the host started again with a key on stdin: the
+    /// Keychain's key was there already (a vault had been sealed under it), so it isn't a first start: the vault
+    /// started over, and waits for your confirmation through the app.
+    @Test func aVaultFileMovedAsideOnTheAccountsHomeIsntAFirstStart() throws {
+        let (role, file, sealed) = try sealedOnAFirstStart()
+        let moved = file.deletingLastPathComponent().appendingPathComponent("aside")
+        try FileManager.default.moveItem(at: file, to: moved)
+        let log = base.appendingPathComponent("moved.log")
+        _ = try restartedRefusingTheirs(role, log: log)
+        #expect(!FileManager.default.fileExists(atPath: file.path))
+        #expect(try Data(contentsOf: moved) == sealed)
+        let said = (try? String(contentsOf: log, encoding: .utf8)) ?? ""
+        #expect(said.contains("vault: vault.sealed isn't there though its key is; nothing saved until you answer"), "\(said)")
+        // Started again before you answered: still started over.
+        _ = try restartedRefusingTheirs(role)
+    }
+
+    /// The file replaced by an empty one, or by one this host can't read: started over as ever (a vault file there that
+    /// doesn't open), the same behaviour as a missing one.
+    @Test func aVaultFileEmptiedOrUnreadableStartsOverAsOne() throws {
+        let (role, file, _) = try sealedOnAFirstStart()
+        try Data().write(to: file)
+        _ = try restartedRefusingTheirs(role)
+        #expect(try Data(contentsOf: file).isEmpty)
+        try Data("junk".utf8).write(to: file)
+        try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: file.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path) }
+        _ = try restartedRefusingTheirs(role)
+    }
+
+    /// The vault's folder replaced by a link to an empty folder, and the account's VibeSwitcher folder itself made a link
+    /// to an empty one (the account's host then, a fresh lock there beside the running host's): no vault file, the key
+    /// there already: started over.
+    @Test func aVaultFolderReplacedByALinkStartsOver() throws {
+        let (role, file, sealed) = try sealedOnAFirstStart()
+        let lead = file.deletingLastPathComponent()
+        let empty = base.appendingPathComponent("theirs/empty-lead")
+        try FileManager.default.createDirectory(at: empty, withIntermediateDirectories: true)
+        try FileManager.default.moveItem(at: lead, to: base.appendingPathComponent("lead-aside"))
+        try FileManager.default.createSymbolicLink(at: lead, withDestinationURL: empty)
+        _ = try restartedRefusingTheirs(role)
+        #expect(try Data(contentsOf: base.appendingPathComponent("lead-aside/vault.sealed")) == sealed)
+
+        // The whole folder: ~/.vibeswitcher a link to an empty folder of the caller's.
+        let folder = account.appendingPathComponent(".vibeswitcher")
+        let emptyRoot = base.appendingPathComponent("theirs/empty-root")
+        try FileManager.default.createDirectory(at: emptyRoot, withIntermediateDirectories: true)
+        try FileManager.default.moveItem(at: folder, to: base.appendingPathComponent("root-aside"))
+        try FileManager.default.createSymbolicLink(at: folder, withDestinationURL: emptyRoot)
+        let linked = self.role(["HOME": account.path])
+        #expect(linked.isAccountHost && linked.root.path == emptyRoot.path)
+        _ = try restartedRefusingTheirs(linked)
+    }
+
+    /// The file put back while the started-over host waits: your confirmation through the app sets it aside beside the
+    /// new vault, byte for byte, never seals over it.
+    @Test func aVaultFilePutBackBeforeYouConfirmIsSetAside() throws {
+        let (role, file, sealed) = try sealedOnAFirstStart()
+        let moved = file.deletingLastPathComponent().appendingPathComponent("aside")
+        try FileManager.default.moveItem(at: file, to: moved)
+        let waiting = try restartedRefusingTheirs(role)
+        try FileManager.default.moveItem(at: moved, to: file)
+        // Your "Teach It This App's Key": the new vault holds your key, the file put back beside it.
+        #expect(waiting.adoptAppKey(ours, replacing: true))
+        let set = aside(file)
+        #expect(set.count == 1, "\(set)")
+        #expect(set.first.flatMap { try? Data(contentsOf: $0) } == sealed, "the file put back was sealed over")
+        let saved = try Data(contentsOf: file)
+        #expect(saved != sealed && SealedData.open(saved, key: realKey) != nil)
+    }
+
+    /// After you confirmed: the vault is an ordinary one, and a restore of the old file from a backup opens as it was
+    /// (your key in it); neither takes the stdin key.
+    @Test func afterYouConfirmAVaultFilePutBackOpensAsBefore() throws {
+        let (role, file, sealed) = try sealedOnAFirstStart()
+        let moved = file.deletingLastPathComponent().appendingPathComponent("aside")
+        try FileManager.default.moveItem(at: file, to: moved)
+        #expect(try restartedRefusingTheirs(role).adoptAppKey(ours, replacing: true))
+        for restart in ["confirmed", "restored"] {
+            if restart == "restored" {
+                try FileManager.default.removeItem(at: file)
+                try FileManager.default.moveItem(at: moved, to: file)
+            }
+            let lockFD = try HostServer.takeLock(at: role.lockPath)
+            defer { Darwin.close(lockFD) }
+            let book = try role.vault(lockFD: lockFD, key: real(made: false), handedOver: nil, logPath: nil)
+            #expect(!book.awaitsAppKey && book.answer(.startedOver, from: .app) == .startedOver(nil), "\(restart)")
+            #expect(!book.adoptAppKey(theirs), "\(restart)")
+            #expect(book.appKey?.data == ours, "\(restart)")
+        }
+        #expect(try Data(contentsOf: file) == sealed)
+    }
+
+    /// A first install: no Keychain item (the key made on this start) and no file: the app's key on stdin is taken,
+    /// as ever. A key made with a file there that doesn't open is started over as ever.
+    @Test func aFirstInstallTakesTheKeyOnStdin() throws {
+        let role = role(["HOME": account.path])
+        let lockFD = try HostServer.takeLock(at: role.lockPath)
+        defer { Darwin.close(lockFD) }
+        let book = try role.vault(lockFD: lockFD, key: real(made: true), handedOver: nil, logPath: nil)
+        #expect(!book.awaitsAppKey)
+        #expect(book.adoptAppKey(ours))
+        let file = role.root.appendingPathComponent("lead/vault.sealed")
+        #expect(SealedData.open(try Data(contentsOf: file), key: realKey) != nil)
+        // The Keychain key gone and made anew: the file doesn't open under it.
+        let other = try role.vault(lockFD: lockFD, key: VaultStorage.Key(SymmetricKey(size: .bits256), made: true), handedOver: nil, logPath: nil)
+        #expect(other.awaitsAppKey && !other.adoptAppKey(theirs))
+    }
+
+    /// No key to be had (the Keychain wouldn't give it without asking): a vault in memory only, a first start as ever.
+    @Test func noKeyIsAVaultInMemoryAsBefore() throws {
+        let role = role(["HOME": account.path])
+        let lockFD = try HostServer.takeLock(at: role.lockPath)
+        defer { Darwin.close(lockFD) }
+        let book = try role.vault(lockFD: lockFD, key: nil, handedOver: nil, logPath: nil)
+        #expect(book.adoptAppKey(theirs))
+        #expect(!FileManager.default.fileExists(atPath: role.root.appendingPathComponent("lead/vault.sealed").path))
     }
 }
 

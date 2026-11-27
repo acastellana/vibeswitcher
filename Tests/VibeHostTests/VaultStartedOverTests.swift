@@ -174,6 +174,38 @@ extension LeadVaultHostTests {
         #expect(storage.book().appKey?.data == key)
     }
 
+    /// No vault file, and a key the Keychain had already (`keyIsNew` false: a vault had been sealed under it, and its
+    /// file moved aside or deleted): started over, the same as a file that didn't open. Nothing is saved until you
+    /// answer, the host refuses the app's proof in the same words (the same alert), and your confirmation saves it.
+    /// With a key made on this start it's a first start as ever.
+    @Test func aMissingFileWithAKeyThereAlreadyStartsOver() async throws {
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let file = folder.appendingPathComponent("missing/vault.sealed")
+        let storage = VaultStorage(file: file, key: SymmetricKey(size: .bits256), keyIsNew: false)
+        let book = storage.book()
+        #expect(book.awaitsAppKey)
+        let key = SymmetricKey(data: try appKey())
+        #expect(!book.adoptAppKey(key.data))
+        _ = book.answer(.issue(role: .lead, root: root, task: nil, auditing: nil), from: .app)
+        #expect(!FileManager.default.fileExists(atPath: file.path), "saved before you answered")
+
+        let host = try TestHost(vault: book, appExecutable: "/usr/bin/nc", log: sessionLog(), holdsKey: false)
+        let message = SteerMessage(text: "x", from: .user, agentPid: 1)
+        _ = try await viaNC(host.socket, proof: nil, [.enrollApp(key: key.data), .screen(id: UUID())])
+        #expect(book.appKey == nil)
+        let proved = try await viaNC(host.socket, proof: key, [.vault(.seal(message))])
+        #expect(proved[0] == .error(AppProof.vaultStartedOver), "\(proved)")
+        await #expect(try viaNC(host.socket, proof: nil, [.replaceAppKey(key: key.data)])[2] == .ok)
+        #expect(storage.book().appKey?.data == key.data)
+        #expect(asideFiles(file).isEmpty)
+
+        // A key made now, no file: a first start.
+        let first = VaultStorage(file: folder.appendingPathComponent("made/vault.sealed"), key: SymmetricKey(size: .bits256), keyIsNew: true)
+        #expect(first.book().adoptAppKey(key.data))
+        // No key at all: in memory, as ever, whatever the Keychain had.
+        #expect(VaultStorage(file: folder.appendingPathComponent("none/vault.sealed"), key: nil, keyIsNew: false).book().adoptAppKey(key.data))
+    }
+
     /// The host's side: the app's connection enrolls its key with a keyless host as ever, and a started-over vault
     /// doesn't take it; the proof is refused in its own words, which the app's alert shows; the app's
     /// `replaceAppKey` (your "Teach It This App's Key") puts it in, and only then does the key prove the app.

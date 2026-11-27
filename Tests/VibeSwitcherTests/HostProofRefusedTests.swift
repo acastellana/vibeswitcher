@@ -66,6 +66,7 @@ struct HostProofRefusedTests {
         #expect(started.messageText == "The team's vault could not be opened and was started again.")
         for words in ["Keychain reset", "another program on this Mac replaced the vault's key", "Check first", "VibeSwitcher lead vault",
                       "don't teach the host until", "kept as it was, at ~/.vibeswitcher/lead/vault.sealed",
+                      "or is no longer there", "if you didn't move or delete it",
                       "nothing is saved over it until you answer", "vault.sealed.didnt-open-<date>"] {
             #expect(started.informativeText.contains(words), "\(words)")
         }

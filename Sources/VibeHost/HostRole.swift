@@ -90,7 +90,7 @@ public struct HostRole {
     }
 
     /// The vault's key, `read` (the Keychain's) for the account's host alone: nil for any other, which never reads it.
-    public func vaultKey(_ read: () -> SymmetricKey?) -> SymmetricKey? {
+    public func vaultKey<Key>(_ read: () -> Key?) -> Key? {
         isAccountHost ? read() : nil
     }
 
@@ -102,11 +102,12 @@ public struct HostRole {
     /// doesn't hold its lock the account's host gets no vault at all (`Failure.notTheLock`: `main.swift` doesn't run),
     /// not one in memory that a first start would fill with another process's key. Any other host keeps its vault in
     /// memory only, never touching a vault file.
-    public func vault(lockFD: Int32, key: SymmetricKey?, handedOver: Data?, logPath: String?) throws -> LeadVault.Book {
+    /// `key`: as the Keychain gave it (`VaultStorage.Key`), whether made on this start or there already.
+    public func vault(lockFD: Int32, key: VaultStorage.Key?, handedOver: Data?, logPath: String?) throws -> LeadVault.Book {
         guard isAccountHost else { return LeadVault.Book(restoring: handedOver) }
         if let why = HostHandover.Lock.notHeld(lockFD, path: lockPath) { throw Failure.notTheLock(why) }
         let lockPath = lockPath
-        return VaultStorage(file: root.appendingPathComponent("lead/vault.sealed"), key: key, logPath: logPath,
+        return VaultStorage(file: root.appendingPathComponent("lead/vault.sealed"), key: key?.key, keyIsNew: key?.made ?? false, logPath: logPath,
                             holdsLock: { HostHandover.Lock.names(lockFD, path: lockPath) }).book(handedOver: handedOver)
     }
 }
