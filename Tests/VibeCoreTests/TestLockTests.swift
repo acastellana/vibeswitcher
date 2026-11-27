@@ -986,9 +986,10 @@ struct TestLockTests {
         #expect(swift.contains(" cores=4 "), "\(swift)")
     }
 
-    /// The caller's folder or its mac-limits.json can't be read: the narrower share, never a wider one. The count is
-    /// then the highest of Settings' default and the slots the lock folder shows were taken (its test-build-N.lock
-    /// files: a reader that could read its count made them): 3 there, the share 4, not the default's 6.
+    /// The caller's folder or its mac-limits.json can't be read: the narrower share, never a wider one, and no more runs
+    /// at once. The slots it may take are Settings' default (2 on 12 cores); its share is worked out on the highest of
+    /// that and the slots the lock folder shows were taken (its test-build-N.lock files: a reader that could read its
+    /// count made them): 3 there, the share 4, not the default's 6.
     @Test(arguments: ["garbage", "unreadable", "unreadable folder"]) func theScriptsSlotFailsTowardTheNarrowerShare(_ broken: String) async throws {
         let session = try sessionHome("session", limits: broken == "garbage" ? "{heavySlots: 3" : #"{"heavySlots": 3}"#)
         let folder = url("session").appendingPathComponent(".vibeswitcher"), limits = folder.appendingPathComponent("mac-limits.json")
@@ -1000,8 +1001,26 @@ struct TestLockTests {
         try FileManager.default.createDirectory(atPath: locks.directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         FileManager.default.createFile(atPath: locks.slotPath(3), contents: nil)
         let (said, swift) = try await scriptRun("A", environment: session)
-        #expect(said.contains("vs-heavy: couldn't read "), "\(said)")
-        #expect(said.contains("vs-heavy: VS_HEAVY_CORES 4 of 12 cores: what was free as it started (load 12.0, 0 of the other 2 slots held)"), "\(said)")
+        #expect(said.contains("vs-heavy: couldn't read ") && said.contains(": 2 slots, each a share of the cores as if 3 "), "\(said)")
+        #expect(said.contains("vs-heavy: VS_HEAVY_CORES 4 of 12 cores: "), "\(said)")
+        #expect(swift.contains(" cores=4 "), "\(swift)")
+    }
+
+    /// Unread settings and a test-build-3.lock left from a boosted run, slots 1 and 2 held: the run waits for one of
+    /// those two rather than take slot 3, so no third job starts (6 + 6 + 4 on 12 cores); then runs on 4 cores.
+    @Test func anUnreadFolderStartsNoMoreRunsAtOnce() async throws {
+        let session = try sessionHome("session", limits: "{heavySlots: 3")
+        let locks = TestLock(directory: url("script-locks").path)
+        let holders = try [1, 2].map { try Self.outsideHolder(path: locks.slotPath($0)) }
+        defer { holders.forEach { $0.terminate(); waitForEnd($0) } }
+        FileManager.default.createFile(atPath: locks.slotPath(3), contents: nil)
+        var waited = false
+        let (said, swift) = try await scriptRun("A", environment: session) {
+            waited = true
+            holders.forEach { $0.terminate() }
+        }
+        #expect(waited && said.contains("(all 2 slots held"), "\(said)")
+        #expect(!swift.contains("slot=\(locks.slotPath(3)) "), "\(swift)")
         #expect(swift.contains(" cores=4 "), "\(swift)")
     }
 
