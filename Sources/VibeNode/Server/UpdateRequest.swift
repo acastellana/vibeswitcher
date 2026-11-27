@@ -268,8 +268,10 @@ struct UpdateRequest {
         if case .script(_, let scope) = installer, scope == UpdateInstall.systemdRun, let why = SwitchSealCheck.userManagerRefusal(runner: scope) {
             return .refused(.refused, "update: the install runs only in a scope of its own, and \(why): nothing was installed or switched")
         }
-        if let held = held() { return .refused(.refused, held.text) }
+        // The builds folder read before the vault's look and again after it, as the command line reads it: a change made
+        // while the vault looked isn't the folder the vault vouched for.
         let looked = SwitchSeal.listingLines(installRoot)
+        if let held = held() { return .refused(.refused, held.text) }
         if let refused = UpdateInstall.buildsRefusal(heldNames: [], looked: looked, now: SwitchSeal.listingLines(installRoot)) {
             return .refused(.refused, refused.text)
         }
