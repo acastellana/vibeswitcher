@@ -357,6 +357,194 @@ own `withKnownIssue` (`aChildCollectedElsewhereIsNamedAndItsEndComes`, `aChildSt
   `approvalPatience`), so `web`'s `timeout: 30` waits 120 s there; the dialog's own is 60 s (`ApprovalVoice.System(timeout: 60)`, `ServerStart.swift` 120).
 - `launchctl print` of the user's GUI domain works without admin from the `Aqua` session (M11).
 
+### K-M1. A received pair end's token, in KP10's order (the keeper's design)
+
+The row [the keeper's design](../superpowers/specs/2026-11-27-v2-mac-keeper-design.md) owes ("Measurements owed",
+K-M1; slices K2 and K4a wait on it), taken 2026-11-27 on this Mac (as above: macOS 27.2, SIP enabled), as the user, no
+`sudo`, no dialog, no debugger or process-inspection tool, from an agent's session in a scratch clone of
+`v2-mac-keeper-k0`. The probe is [probes/pair-token.c](../../scripts/mac-measure/probes/pair-token.c), run by
+[pair-token.sh](../../scripts/mac-measure/pair-token.sh) (`bash scripts/mac-measure/pair-token.sh`: it builds the probe
+and `facts`, signs both ad hoc with the Hardened Runtime, runs it on a socket in its scratch folder and prints its lines
+with the scratch folder, home and account name cut). The probe plays the keeper: each trial forks a fresh **maker**,
+which makes a pair after its fork and sends one end with the hello's 23 bytes over a connection by `SCM_RIGHTS`; the
+keeper asks the received end's `LOCAL_PEERTOKEN` afresh (a new `getsockopt` each time) and asks Security for that token
+(`SecCodeCopyGuestWithAttributes`, then `SecCodeCheckValidity`, the dynamic cdhash and status word: the node's
+`runs`/`isHardened`). In (a) to (c) the token is asked only after the maker's exec (the exec seen by its close-on-exec
+pipe's end of file), except in the control marked so. The maker execs `facts-hardened` (`facts --sleep 30`, ad hoc,
+Hardened Runtime: the measurements' hardened image of M6 and M7), not the node's host: a copy of the host started bare
+could touch the account's `~/.vibeswitcher`, and Security's answer for a token doesn't depend on which hardened image it
+names. Each process reports its own pid and pidversion (its own task's audit token, `TASK_AUDIT_TOKEN`), so each token
+read is named by whose it is; no other task's port is taken. The handover keeper's own pairs as the positive control:
+`MacKeeperHandoverTests` pass on this branch (`bash scripts/test.sh --filter MacKeeperHandoverTests`, with K0's move),
+and the probe's own control trial is the first below.
+
+```
+$ bash scripts/mac-measure/pair-token.sh
+## K-M1  27.2 (26B123), System Integrity Protection status: enabled.
+pair-token: CodeDirectory v=20500 size=372 flags=0x10002(adhoc,runtime) hashes=5+2 location=embedded
+PROGRAM (facts-hardened): CodeDirectory v=20500 size=312 flags=0x10002(adhoc,runtime) hashes=3+2 location=embedded
+this probe's file cdhash=ea089d7f08afefa3
+PROGRAM's file cdhash=bd5977d7fff8c336
+== control: a live maker that hasn't exec'd (the positive control)
+  keeper pid=79615 pidversion=3266607; maker pid=79619 pidversion=3266617
+  the maker alive, not exec'd, nothing written: LOCAL_PEERTOKEN pid=79619 pidversion=3266617 = the maker, as it was before any exec | LOCAL_PEERPID=79619 | Security: guest=0 valid=0 cdhash=ea089d7f08afefa3 (this probe's file) hardened=yes
+== control: the token asked at the receipt too, then the maker writes a request and execs
+  keeper pid=79615 pidversion=3266607; maker pid=79620 pidversion=3266619
+  asked at the receipt, before the exec (this control only): LOCAL_PEERTOKEN pid=79620 pidversion=3266619 = the maker, as it was before any exec | LOCAL_PEERPID=79620 | Security: guest=0 valid=0 cdhash=ea089d7f08afefa3 (this probe's file) hardened=yes
+  the maker exec'd: it now runs PROGRAM
+  after the exec: LOCAL_PEERTOKEN pid=79620 pidversion=3266620 = the maker's pid, another pidversion (its image after the exec) | LOCAL_PEERPID=79620 | Security: guest=0 valid=0 cdhash=bd5977d7fff8c336 (PROGRAM's file) hardened=yes
+  the keeper read the 3-byte request and wrote a 3-byte answer on its end
+  after the keeper's read and write: LOCAL_PEERTOKEN pid=79620 pidversion=3266620 = the maker's pid, another pidversion (its image after the exec) | LOCAL_PEERPID=79620 | Security: guest=0 valid=0 cdhash=bd5977d7fff8c336 (PROGRAM's file) hardened=yes
+== (a) a forked child of the maker writes on the maker's end; the maker execs; then the token
+  keeper pid=79615 pidversion=3266607; maker pid=79621 pidversion=3266621; forked child pid=79622 pidversion=3266622
+  the forked child wrote 1 byte on the maker's end
+  the maker exec'd: it now runs PROGRAM
+  after the exec: LOCAL_PEERTOKEN pid=79622 pidversion=3266622 = the maker's forked child | LOCAL_PEERPID=79622 | Security: guest=0 valid=0 cdhash=ea089d7f08afefa3 (this probe's file) hardened=yes
+== (a) a forked child of the maker writes and reads on the maker's end; the maker execs; then the token
+  keeper pid=79615 pidversion=3266607; maker pid=79623 pidversion=3266624; forked child pid=79624 pidversion=3266625
+  the keeper wrote 1 byte on its end (for the child to read), before the child acted
+  the forked child wrote 1 byte on the maker's end and read 1
+  the maker exec'd: it now runs PROGRAM
+  after the exec: LOCAL_PEERTOKEN pid=79624 pidversion=3266625 = the maker's forked child | LOCAL_PEERPID=79624 | Security: guest=0 valid=0 cdhash=ea089d7f08afefa3 (this probe's file) hardened=yes
+== (b) the maker writes a request and execs; the keeper reads and writes on its end; the token after each
+  keeper pid=79615 pidversion=3266607; maker pid=79625 pidversion=3266627
+  the maker exec'd: it now runs PROGRAM
+  after the exec: LOCAL_PEERTOKEN pid=79625 pidversion=3266628 = the maker's pid, another pidversion (its image after the exec) | LOCAL_PEERPID=79625 | Security: guest=0 valid=0 cdhash=bd5977d7fff8c336 (PROGRAM's file) hardened=yes
+  the keeper read the 3-byte request and wrote a 3-byte answer on its end
+  after the keeper's read and write: LOCAL_PEERTOKEN pid=79625 pidversion=3266628 = the maker's pid, another pidversion (its image after the exec) | LOCAL_PEERPID=79625 | Security: guest=0 valid=0 cdhash=bd5977d7fff8c336 (PROGRAM's file) hardened=yes
+== (c) KP10: the maker writes a request, gives a copy of its end to a third process, execs; the keeper answers; the third reads it
+  keeper pid=79615 pidversion=3266607; maker pid=79626 pidversion=3266629; third pid=79627 pidversion=3266630
+  the maker exec'd: it now runs PROGRAM
+  after the exec: LOCAL_PEERTOKEN pid=79626 pidversion=3266631 = the maker's pid, another pidversion (its image after the exec) | LOCAL_PEERPID=79626 | Security: guest=0 valid=0 cdhash=bd5977d7fff8c336 (PROGRAM's file) hardened=yes
+  the keeper read the 3-byte request and wrote a 3-byte answer on its end
+  after the keeper's read and write: LOCAL_PEERTOKEN pid=79626 pidversion=3266631 = the maker's pid, another pidversion (its image after the exec) | LOCAL_PEERPID=79626 | Security: guest=0 valid=0 cdhash=bd5977d7fff8c336 (PROGRAM's file) hardened=yes
+  the third process read the answer on its copy of the maker's end
+  after the third's read: LOCAL_PEERTOKEN pid=79627 pidversion=3266630 = the third process | LOCAL_PEERPID=79627 | Security: guest=0 valid=0 cdhash=ea089d7f08afefa3 (this probe's file) hardened=yes
+== (d) the names of a pair's ends and of a connection's
+  socketpair, end 0: getsockname len=16 family=1 path="" getpeername len=16 family=1 path=""
+  socketpair, end 1: getsockname len=16 family=1 path="" getpeername len=16 family=1 path=""
+  socketpair, end 1 received by SCM_RIGHTS: getsockname len=16 family=1 path="" getpeername len=16 family=1 path=""
+  connect: the connecting end: getsockname len=16 family=1 path="" getpeername len=106 family=1 path="<scratch>/d.sock"
+  connect: the accepted end: getsockname len=106 family=1 path="<scratch>/d.sock" getpeername len=16 family=1 path=""
+  (the listener's path unlinked)
+  connect: the connecting end: getsockname len=16 family=1 path="" getpeername len=106 family=1 path="<scratch>/d.sock"
+  connect: the accepted end: getsockname len=106 family=1 path="<scratch>/d.sock" getpeername len=16 family=1 path=""
+  (the listener closed)
+  connect: the accepted end: getsockname len=106 family=1 path="<scratch>/d.sock" getpeername len=16 family=1 path=""
+  (a listener's path renamed before a connect through the new name)
+  connect via the new name: the connecting end: getsockname len=16 family=1 path="" getpeername len=106 family=1 path="<scratch>/d.sock"
+  connect via the new name: the accepted end: getsockname len=106 family=1 path="<scratch>/d.sock" getpeername len=16 family=1 path=""
+  other ways tried to make two connected stream ends unnamed on both sides:
+  bind to an empty path (sun_path "", full length): refused errno=2 (No such file or directory)
+  bind with no path (the length of the family alone): refused errno=22 (Invalid argument)
+  listen on a socket never bound: refused errno=22 (Invalid argument)
+  that socket: getsockname len=16 family=1 path="" getpeername refused errno=57 (Socket is not connected)
+  connect to an empty path: refused errno=2 (No such file or directory)
+  connect with no path (the length of the family alone): refused errno=22 (Invalid argument)
+  connect to a path where nothing is bound: refused errno=2 (No such file or directory)
+== (e) baseline: the other end open
+  keeper pid=79615 pidversion=3266607; maker pid=79628 pidversion=3266632
+  the maker's end open, untouched (the baseline): LOCAL_PEERTOKEN pid=79628 pidversion=3266632 = the maker, as it was before any exec | LOCAL_PEERPID=79628 | Security: guest=0 valid=0 cdhash=ea089d7f08afefa3 (this probe's file) hardened=yes
+  poll (POLLIN|POLLOUT|POLLPRI asked, no wait): 1 revents=0x4 POLLOUT
+  recv(MSG_PEEK|MSG_DONTWAIT): -1 errno=35 (Resource temporarily unavailable)
+  (the maker ended)
+  after the maker ended too: LOCAL_PEERTOKEN refused errno=57 (Socket is not connected)
+  poll (POLLIN|POLLOUT|POLLPRI asked, no wait): 1 revents=0x13 POLLIN POLLPRI POLLHUP
+  recv(MSG_PEEK|MSG_DONTWAIT): 0
+== (e) the other end half-closed: shutdown(SHUT_WR)
+  keeper pid=79615 pidversion=3266607; maker pid=79629 pidversion=3266633
+  after the maker's shutdown(SHUT_WR), its end kept open: LOCAL_PEERTOKEN pid=79629 pidversion=3266633 = the maker, as it was before any exec | LOCAL_PEERPID=79629 | Security: guest=0 valid=0 cdhash=ea089d7f08afefa3 (this probe's file) hardened=yes
+  poll (POLLIN|POLLOUT|POLLPRI asked, no wait): 1 revents=0x13 POLLIN POLLPRI POLLHUP
+  recv(MSG_PEEK|MSG_DONTWAIT): 0
+  (the maker ended)
+  after the maker ended too: LOCAL_PEERTOKEN refused errno=57 (Socket is not connected)
+  poll (POLLIN|POLLOUT|POLLPRI asked, no wait): 1 revents=0x13 POLLIN POLLPRI POLLHUP
+  recv(MSG_PEEK|MSG_DONTWAIT): 0
+== (e) the other end closed
+  keeper pid=79615 pidversion=3266607; maker pid=79630 pidversion=3266634
+  after the maker's close of its end (its only holder; the maker alive): LOCAL_PEERTOKEN refused errno=57 (Socket is not connected)
+  poll (POLLIN|POLLOUT|POLLPRI asked, no wait): 1 revents=0x13 POLLIN POLLPRI POLLHUP
+  recv(MSG_PEEK|MSG_DONTWAIT): 0
+  (the maker ended)
+  after the maker ended too: LOCAL_PEERTOKEN refused errno=57 (Socket is not connected)
+  poll (POLLIN|POLLOUT|POLLPRI asked, no wait): 1 revents=0x13 POLLIN POLLPRI POLLHUP
+  recv(MSG_PEEK|MSG_DONTWAIT): 0
+== (e) a former holder's shutdown(SHUT_RD)
+  keeper pid=79615 pidversion=3266607; maker pid=79631 pidversion=3266635; forked child pid=79632 pidversion=3266636
+  after a former holder's shutdown(SHUT_RD) and close (the maker's forked child, ended; the maker's end open): LOCAL_PEERTOKEN pid=79631 pidversion=3266635 = the maker, as it was before any exec | LOCAL_PEERPID=79631 | Security: guest=0 valid=0 cdhash=ea089d7f08afefa3 (this probe's file) hardened=yes
+  poll (POLLIN|POLLOUT|POLLPRI asked, no wait): 0 revents=0x0
+  recv(MSG_PEEK|MSG_DONTWAIT): -1 errno=35 (Resource temporarily unavailable)
+  (the maker ended)
+  after the maker ended too: LOCAL_PEERTOKEN refused errno=57 (Socket is not connected)
+  poll (POLLIN|POLLOUT|POLLPRI asked, no wait): 1 revents=0x13 POLLIN POLLPRI POLLHUP
+  recv(MSG_PEEK|MSG_DONTWAIT): 0
+== (f) a connection: the connector writes, then its forked child holding a copy writes last
+  the connector wrote 1 byte, then its forked child (holding a copy of the connecting socket) wrote 1
+  keeper pid=79615 pidversion=3266607; maker pid=79633 pidversion=3266637; forked child pid=79634 pidversion=3266638
+  at the accept, nothing read: LOCAL_PEERTOKEN pid=79634 pidversion=3266638 = the maker's forked child | LOCAL_PEERPID=79634 | Security: guest=0 valid=0 cdhash=ea089d7f08afefa3 (this probe's file) hardened=yes
+  the keeper read 2 bytes: mf
+  after the keeper's read: LOCAL_PEERTOKEN pid=79634 pidversion=3266638 = the maker's forked child | LOCAL_PEERPID=79634 | Security: guest=0 valid=0 cdhash=ea089d7f08afefa3 (this probe's file) hardened=yes
+== (f) a connection: the connector writes, its forked child writes, the connector writes last
+  the connector wrote 1 byte, then its forked child (holding a copy of the connecting socket) wrote 1, then the connector wrote 1 more
+  keeper pid=79615 pidversion=3266607; maker pid=79635 pidversion=3266639; forked child pid=79636 pidversion=3266640
+  at the accept, nothing read: LOCAL_PEERTOKEN pid=79635 pidversion=3266639 = the maker, as it was before any exec | LOCAL_PEERPID=79635 | Security: guest=0 valid=0 cdhash=ea089d7f08afefa3 (this probe's file) hardened=yes
+  the keeper read 3 bytes: mfM
+  after the keeper's read: LOCAL_PEERTOKEN pid=79635 pidversion=3266639 = the maker, as it was before any exec | LOCAL_PEERPID=79635 | Security: guest=0 valid=0 cdhash=ea089d7f08afefa3 (this probe's file) hardened=yes
+```
+
+Run five times (the script once more before this one, the probe three times by hand from the same source): the same
+lines but for the pids, the pidversions and the probe's own cdhash. A first version of the probe, whose maker closed the
+sent end and its connection right after the `sendmsg`, before the keeper's `recvmsg`, twice read end of file on the
+received end where the maker had written a request (once in (b), once in (c), in two runs); with the maker waiting until
+the keeper had the end, no run lost it. Not measured further (XNU's collection of in-flight Unix sockets is a
+candidate); the host's client (K4) keeps the connection and both ends until the answer, so it waits for the keeper's
+receipt anyway.
+
+**What each letter says, for K2 and K4a.** The design assumes the pair's token is "fixed when the pair was made" (its
+"The interface", step 3, from the Mac spec's sentence). **It isn't, on this Mac**: `LOCAL_PEERTOKEN` on a received
+pair end names whichever process last sent or received on the other end, as that process runs *now*, which is what
+`Sockets+Darwin.swift`'s `peerToken` comment says for every socket.
+
+- **The controls.** A live maker that hasn't exec'd is named and accepted (valid, its cdhash, hardened): the check
+  works when nothing moved. Asked at the receipt the token names the maker as it was; asked again after its exec, the
+  same pid with a **new pidversion**, and Security **accepts** it as PROGRAM's code, hardened. So asking at the receipt
+  and comparing later (step 5's "must equal the first") is what tells an exec, not Security.
+- **(a)** A forked child of the maker that writes (or writes and reads) on the maker's end, the maker then exec'd: the
+  token names **the forked child**, accepted by Security as the child's code. For K2: the token moves to a forked
+  holder, so a pinned host's forked child (or any holder of its end) that writes last is who the keeper would judge.
+- **(b)** The maker writes a request and execs; the keeper reads it and answers on its own end: the token names the
+  maker's **image after the exec** (new pidversion), accepted as PROGRAM's code, before and after the keeper's own read
+  and write. The keeper's own reads and writes don't move it. For K2: **KP10's "write then exec" passes Security**:
+  the token asked after the request names the exec'd image, so a session that makes the pair, writes a request and
+  execs a pinned hardened host is judged as that host; only a token taken before the exec and compared would tell.
+- **(c)** KP10 whole: the maker writes a request, gives a copy of its end to a third process, execs; the keeper reads
+  and answers: the token names the maker's exec'd image (accepted as PROGRAM's code) until the third process reads the
+  answer on its copy, and then **the third process**. For K2: the keeper's answer goes to whoever holds the maker's
+  end, and the token read before answering names the exec'd image, so the sibling of KP10 gets the answer.
+- **(d)** Both ends of a `socketpair` have no path on either side (`len=16`, empty), also after an end travels by
+  `SCM_RIGHTS`; a connection made by `connect` and `accept` has the listener's path on one side of each end (the
+  connecting end's peer name, the accepted end's own name), still after the path is unlinked, after the listener is
+  closed, and after the path is renamed (the name stays the one bound). As the design assumes. That nothing else makes
+  two connected stream ends unnamed on both sides is argued, not measured: what was tried (binding or connecting to an
+  empty path or none, listening unbound) is refused.
+- **(e)** After the other end's `close` (its only holder), the token read again on the received end is **refused**
+  (`ENOTCONN`, 57); after its `shutdown(SHUT_WR)` with the end kept open, the token **still reads** (the maker); after
+  a former holder's `shutdown(SHUT_RD)` and close, nothing shows on the received end (the token the maker's, `poll`
+  0). `poll` gives `POLLIN|POLLPRI|POLLHUP` and `recv` end of file **both** after a close and after `SHUT_WR`: `POLLHUP`
+  doesn't tell a closed other end from a half-closed one; the token read again does (refused once closed). For K2:
+  step 5's second token read refuses a closed other end by itself; `POLLHUP` isn't the test.
+- **(f)** A connection's token at the accept names **the last writer** of the connecting socket: its forked child when
+  the child wrote last, the connector when it wrote after the child; the keeper's reading doesn't change it. For K2:
+  the hello's sender check (the connection's token equals the pair's) narrows only to "the process that last used each
+  socket", and both move the same way.
+
+**For the lead (a finding, not designed around here).** (a), (b) and (c) are the design's own "If K-M1 finds a pair's
+token moves too" case ("The interface", after step 5): the pair proves nothing as it stands, so K2 isn't built in that
+form; and **K4a**, whose children prove themselves with "a fresh pair (the spawned pid, the expected cdhash, hardened)",
+rests on the same assumption. The handover keeper (`MacHandoverKeeper.swift`'s header: "each proof is a pair made by
+the process proving itself, after its exec") and the Mac spec's "fixed at creation" sentence rest on it too; whether
+the handover keeper's order of reads is open to (b) wasn't looked at here.
+
 ## The keyboard session of 2026-11-26
 
 The user ran part A of [the runbook](v2-mac-keyboard-session.md), guided step by step, from 19:29 to 19:38 (local
