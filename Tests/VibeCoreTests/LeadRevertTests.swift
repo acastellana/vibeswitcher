@@ -203,7 +203,8 @@ struct LeadRevertTests: LeadTeamFixture {
         #expect(text.contains("c.txt (changed since by commit \(Git.run(["rev-parse", "--short=8", "main"], in: root).output) “Edit c by hand”)"), "\(text)")
         #expect(text.contains("main is as it was, and \(change) stays merged") && text.contains("fix-forward task"), "\(text)")
         #expect(head(root) == before)
-        #expect(Git.run(["status", "--porcelain"], in: root).output.isEmpty)
+        // Nothing of the revert's in the checkout; the lead's records wait there uncommitted, as between merges (`LeadRecords`).
+        #expect(Git.run(["status", "--porcelain", "--", ".", ":!docs/lead"], in: root).output.isEmpty)
         #expect(BoardStore(root: root).load().task(change)?.status == .done)
     }
 

@@ -140,7 +140,19 @@ public final class LeadRecords: @unchecked Sendable {
     public func tick(base: String, now: Date = Date()) -> Outcome? {
         guard due(now, taking: true) else { return nil }
         try? store.withRecordsLock { _ = try Self.rollProgress(store, now: now) }
-        return LeadRedaction.pending(store).isEmpty ? nil : flush(base: base, now: now)
+        return redactionWaits(on: base) ? flush(base: base, now: now) : nil
+    }
+
+    /// Whether a redaction waits for its commit: its new line is in its file and not on `base` yet. One whose line has
+    /// left the file since (archived, rolled over) is never carried by a commit, and would have every pass commit.
+    private func redactionWaits(on base: String) -> Bool {
+        let lines = { (text: String) in Set(text.components(separatedBy: "\n").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }) }
+        return LeadRedaction.pending(store).contains { redaction in
+            let path = (root as NSString).appendingPathComponent(redaction.file)
+            guard let text = try? String(contentsOfFile: path, encoding: .utf8), lines(text).contains(redaction.new) else { return false }
+            let committed = Git.run(["cat-file", "blob", "\(base):\(redaction.file)"], in: root)
+            return !(committed.ok && lines(committed.output).contains(redaction.new))
+        }
     }
 
     /// Whether a pass is due; `taking`: it starts now, the next one due `interval` later.

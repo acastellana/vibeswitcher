@@ -243,6 +243,10 @@ struct LeadRecordsTests: LeadTeamFixture {
         #expect(records.tick(base: "main", now: start.addingTimeInterval(301)) == nil)
         #expect(records.tick(base: "main", now: start.addingTimeInterval(3600)) == nil)
         #expect(head("main", root) == first)
+        // A redaction whose line has left its file since (archived, rolled over) is never carried: no pass commits for it.
+        try LeadRedaction.save([LeadRedaction(file: "docs/lead/decisions.md", old: "- gone (before)", new: "- gone", lints: ["PrivateNamesLint"])], lead.store)
+        #expect(records.tick(base: "main", now: start.addingTimeInterval(3650)) == nil)
+        #expect(head("main", root) == first)
         // A redaction whose commit had to wait: the next pass commits it (and the records with it).
         let line = try #require(read(root + "/docs/lead/decisions.md").components(separatedBy: "\n").first { $0.contains("One") })
         try LeadRedaction.save([LeadRedaction(file: "docs/lead/decisions.md", old: line + " (before)", new: line, lints: ["PrivateNamesLint"])], lead.store)
