@@ -235,7 +235,9 @@ struct ActingPageTests {
     /// none; the right changes nothing for any other kind; a terminal needs the watch right, never reading alone.
     @Test func anActingPageRoutesTheUsersKindsItsEntryLets() {
         let terminalOnly: Set<String> = ["start", "web.open", "build.switch", "build.seal", "hooks.install", "plugin.add", "plugin.inspect", "web.pairing", "web.confirm",
-                                         "web.passkey", "web.passkey.add", "web.passkey.forget"]
+                                         "web.passkey", "web.passkey.add", "web.passkey.forget",
+                                         // G3's guarded kinds, no page's until the device keys track's slices 14 and 15.
+                                         "update", "journal.ack", "claude.autoupdate"]
         for spec in KindSpec.all {
             switch (spec.sender, spec.page) {
             case (.user, .acts): #expect(!terminalOnly.contains(spec.name), "\(spec.name)")
