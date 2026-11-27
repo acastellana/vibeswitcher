@@ -471,6 +471,22 @@ def analyse(data):
                     refused["held_top_outside"] += s.weight
                     break
     out["refused"] = refused
+    # Which slot each kind held (a bare scripts/test.sh counts 2 slots under its scratch home and takes only 1 and 2),
+    # and the minutes with 3 slots in force, 1 and 2 held and 3 free: when a bare run in line had to wait.
+    by_slot = {}
+    one_two = three = 0.0
+    for i, s in enumerate(data.samples):
+        held = set()
+        for k, h in data.holders[i]:
+            key = (k, h.get("slot"))
+            by_slot[key] = by_slot.get(key, 0.0) + s.weight
+            held.add(h.get("slot"))
+        if s.slots >= 3:
+            three += s.weight
+            if 1 in held and 2 in held and 3 not in held:
+                one_two += s.weight
+    out["by_slot"] = by_slot
+    out["one_two_free_three"] = (one_two, three)
     # Merges: duration by the cores their run was given (lines that say), a batch's run once.
     by_cores = {}
     for m in data.merges:
@@ -565,6 +581,12 @@ def report(data, out=sys.stdout):
       f"{r['held']:.0f} (the 1-minute itself over T at {r['held_one_over']:.0f}); with top groups named "
       f"{r['held_top']:.0f}, of which {r['held_top_outside']:.0f} show build or test work of ours outside the slots")
     p()
+    p("slot-minutes by slot number (a bare scripts/test.sh takes only slots 1 and 2):")
+    for k in ("worker", "worker-v2", "merge", "lead-other", "other-project"):
+        p(f"  {k:14} " + "  ".join(f"slot {n}: {a['by_slot'].get((k, n), 0):5.0f}" for n in (1, 2, 3)))
+    one_two, three = a["one_two_free_three"]
+    p(f"  with 3 slots in force, slots 1 and 2 held and 3 free: {one_two:.0f} of {three:.0f} min")
+    p()
     p("merges whose line says their width: count and median minutes by VS_HEAVY_CORES given")
     for c, (n, med) in a["merge_cores"].items():
         p(f"  {c:2d} cores: {n:3d} runs, median {med / 60:5.1f} min")
@@ -636,6 +658,9 @@ def selftest():
         ("outside build cores", a["outside"]["build_cpu"] / 100, 3.0),
         ("anchor 1 held", a["anchor"][1][2], 8),
         ("merge widths", a["merge_cores"], {4: (1, 120)}),
+        # 10:04: the merge in slot 1, fix-a in slot 2, slot 3 free; every sample has 3 slots in force.
+        ("1 and 2 held, 3 free", a["one_two_free_three"], (1.0, 14.0)),
+        ("v2 in slot 3", a["by_slot"].get(("worker-v2", 3)), 1.0),
         ("others aliased", sorted(data.alias.values()), ["other-1"]),
     ]
     failed = [(name, value, want) for name, value, want in expected if value != want]

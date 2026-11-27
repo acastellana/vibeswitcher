@@ -151,7 +151,8 @@ processes make. The live looks below can.
 ## The causes, ranked by the load they account for, and the fixes
 
 Each fix is written to become a task. "Expected load" says what should change. None of it was tried: this task changes
-no code.
+no code. Cause 1 accounts for the most load, but the samples can't size any of its fixes, so its first fix is to record
+it (top fix 2). Fix 2a removes the most load that is certain, at the least cost (top fix 1).
 
 ### 1. Load outside any slot (the largest share: 64–70% of the runnable threads in the live looks)
 
@@ -200,7 +201,12 @@ no code.
     runs about a third fewer: about 1.4 on average, 2 at its peak.
   - Cost: a worker's build at 4 cores instead of 6 while other slots are held. A full suite's test phase at width 4,
     not 6: about 1009 s instead of 680 s (2026-11-18). Fix 4 gives that back.
-  - Gained: no worker run waits in line while slot 3 is free (run 3 waited "all 2 slots held").
+  - Gained: no worker run waits in line while slot 3 is free (run 3 waited "all 2 slots held", 3rd in line behind two
+    other bare test.sh runs). In the samples, slots 1 and 2 were held and slot 3 free for 1,564 of the 12,250 minutes
+    with 3 slots in force: an upper bound on that wait. Workers did hold slot 3 for 550 minutes, through runs wrapped in
+    vs-heavy on the real home and load runs.
+  - What it changes besides: slot 3 fills more often, so more minutes have three slots held. They hold 4 + 4 + 4, the
+    same 12 cores that two bare runs hold today (6 + 6). So the third slot no longer adds a third job on top.
 - **Fix 2b, not recommended now: stop widening.** give_width can't narrow a widened run when others start beside it.
   So the only way to hold the sum to 12 is to never widen past `ncpu − share × (slots − 1)`, which is 4 at three slots:
   no widening at all.
