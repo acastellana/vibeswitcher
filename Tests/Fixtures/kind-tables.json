@@ -25,6 +25,7 @@
       "code"
     ],
     "build.seal" : [
+      "buildsBefore",
       "commit",
       "from",
       "switchAction"
@@ -289,6 +290,7 @@
       "code"
     ],
     "build.seal" : [
+      "buildsBefore",
       "commit",
       "from",
       "switchAction"

@@ -812,7 +812,14 @@ extension LeadEngine {
         var card = CardStore.Card(root: root, kind: .configHeld)
         card.config = shown
         cards.put(card)
-        note("lead: the vault holds \(shown.items.map { ConfigSeal.inert($0.name, limit: 80) }.joined(separator: ", ")) for "
+        // What it holds by name: its own things, and what it leaves to the home folder's card (a card holding only those
+        // was logged with an empty list, the real node 2026-11-27).
+        let own = shown.items.map { ConfigSeal.inert($0.name, limit: 80) }
+        let shared = shown.sharedHome.map { home in
+            "\(home.names.count) of the home folder's (\(home.names.prefix(3).map { ConfigSeal.inert($0, limit: 80) }.joined(separator: ", "))"
+                + (home.names.count > 3 ? ", …" : "") + "), left to \(ConfigSeal.inert(home.folder, limit: 200))'s card"
+        }
+        note("lead: the vault holds \((own + [shared].compactMap { $0 }).joined(separator: "; ")) for "
              + "\(LeadMail.project(of: root)): card \(card.id) (config held, config accept)")
     }
 

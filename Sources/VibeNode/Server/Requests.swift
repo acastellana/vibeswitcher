@@ -1279,12 +1279,16 @@ public final class Requests: @unchecked Sendable {
             if let why = Self.sealRefusal(action: action, commit: commit, from: from, client: client) {
                 return queue.async { reply(.init(re: request.id, error: .init(.refused, why))) }
             }
-            let sealed = SwitchSealCheck.sealUnit(unitFolder: NodeFolders.join(home, ".config/systemd/user"), unitFile: "\(NodeStarter.unitName).service",
-                                                  prefix: NodeFolders.defaultPrefix(accountHome: home), from: from, to: commit, home: home, vault: vault)
+            // `current` as the follow-up moved it (c), then the unit's ExecStart (b).
+            let before = request.args?["buildsBefore"]?.array.map { $0.compactMap(\.string) }
+            let sealed = SwitchSealCheck.sealSwitch(unitFolder: NodeFolders.join(home, ".config/systemd/user"), unitFile: "\(NodeStarter.unitName).service",
+                                                    prefix: NodeFolders.defaultPrefix(accountHome: home), from: from, to: commit, buildsBefore: before,
+                                                    home: home, vault: vault)
             if !sealed.sealed.isEmpty {
                 _ = try? client.recordUserAction(action, kind: Self.sealedKind, subject: commit, digest: Self.switchedDigest(from: from, to: commit))
             }
-            note("build.seal \(commit): " + (sealed.sealed.isEmpty ? "the unit folder not sealed: " + (sealed.refusals.isEmpty ? "nothing held" : sealed.refusals.joined(separator: "; ")) : "the unit folder sealed"))
+            note("build.seal \(commit): " + (sealed.sealed.isEmpty ? "nothing sealed: " + (sealed.refusals.isEmpty ? "nothing held" : sealed.refusals.joined(separator: "; "))
+                : "sealed " + sealed.sealed.joined(separator: ", ") + (sealed.refusals.isEmpty ? "" : "; " + sealed.refusals.joined(separator: "; "))))
             queue.async { reply(.init(re: request.id, typed: WireKinds.BuildSeal.Result(sealed: sealed.sealed, held: sealed.held, sealRefusals: sealed.refusals))) }
         }
     }

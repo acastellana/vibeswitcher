@@ -94,7 +94,8 @@ public enum NodeTexts {
         let when = parks.isEmpty ? "It runs now" : "It parks the idle workers first (\(parks.joined(separator: ", "))), then runs"
         let after: String
         switch rewrites {
-        case .unitAndCurrent, .currentOnly: after = "; then teams wait until you accept the new build: `vibeswitcher approve`."
+        case .unitAndCurrent: after = "; this code also accepts the node's new start line and `current`, nothing else."
+        case .currentOnly: after = "; this code also accepts `current` naming it, nothing else."
         case .nothing: after = "."
         }
         return first + "\n" + when + after
@@ -127,12 +128,12 @@ public enum NodeTexts {
         case .unitAndCurrent:
             written = [
                 "  your unit's ExecStart is rewritten to \(commit) and `current` names it, so the next start runs it",
-                "  every team waits until you accept the new build and the unit's change (`vibeswitcher approve`)",
+                "  this code also accepts that unit's ExecStart and `current`, nothing else: any other change there stays held (`vibeswitcher approve`)",
             ]
         case .currentOnly:
             written = [
                 "  `current` is moved to \(commit), so the next `vs start` runs it (no systemd: there is no unit)",
-                "  every team waits until you accept the new build (`vibeswitcher approve`)",
+                "  this code also accepts `current` naming it, nothing else: any other change there stays held (`vibeswitcher approve`)",
             ]
         case .nothing(let why):
             written = ["  no unit is rewritten and `current` isn't moved (\(ConfigSeal.inert(why, limit: 200)))"]
