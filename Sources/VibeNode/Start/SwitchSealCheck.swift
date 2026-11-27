@@ -130,6 +130,10 @@ public enum SwitchSealCheck {
             guard SwitchSeal.listingHash(lines: now) == seen.after else {
                 return Sealed(sealed: [], held: ConfigSeal.held(in: record), refusals: ["the builds folder changed after the install: its change stays held (`vs config held`)"])
             }
+            // The folder itself the accepted one, and the user's alone.
+            if let why = folderRefusal(prefix: prefix, before: seen.beforeListing, now: now) {
+                return Sealed(sealed: [], held: ConfigSeal.held(in: record), refusals: [why + ": it stays held (`vs config held`)"])
+            }
             // Judged here, from the lines the accepted hash vouches for: only the install's top-level entries changed.
             let other = installChange(before: SwitchSeal.entries(lines: seen.beforeListing), after: SwitchSeal.entries(lines: now), commit: commit)
             guard other.isEmpty else {
@@ -173,6 +177,31 @@ public enum SwitchSealCheck {
         }
     }
 
+    /// Why the builds folder itself isn't the one the accepted listing (`before`) shows, or isn't the user's alone, now
+    /// (the automated review of a04e2336): its own line's type, mode and inode the same before and now (its times and
+    /// size aside: entries come and go), and the folder, by `lstat`, a real folder (not a link), owned by this user, not
+    /// writable by group or others. A folder made writable, re-owned or replaced by a copy between the two listings is
+    /// refused, naming what differs. Nil: it is.
+    static func folderRefusal(prefix: String, before: [String], now: [String]) -> String? {
+        /// The own line's fields the times leave alone: type, mode, inode.
+        func kept(_ line: String?) -> [Substring]? {
+            guard let line, line.hasPrefix("listing ") else { return nil }
+            let fields = line.split(separator: " ")
+            guard fields.count >= 6 else { return nil }
+            return [fields[1], fields[3], fields[5]]
+        }
+        guard let was = kept(before.first), let current = kept(now.first) else { return "the builds folder's own listing line can't be read" }
+        let names = ["type", "mode", "inode"]
+        let differs = (0..<names.count).filter { was[$0] != current[$0] }.map { "its \(names[$0]) (\(was[$0]) → \(current[$0]))" }
+        if !differs.isEmpty { return "the builds folder itself changed since your last accept: " + differs.joined(separator: ", ") }
+        var info = stat()
+        guard lstat(prefix, &info) == 0 else { return "the builds folder can't be read" }
+        guard info.st_mode & S_IFMT == S_IFDIR else { return "the builds folder isn't a folder (a link, or another file)" }
+        guard info.st_uid == getuid() else { return "the builds folder isn't yours (owner uid \(info.st_uid))" }
+        guard info.st_mode & 0o022 == 0 else { return "the builds folder is writable by group or others (mode \(String(info.st_mode & 0o7777, radix: 8)))" }
+        return nil
+    }
+
     /// (c): the builds folder sealed as the follow-up left it, when its only change since `buildsBefore` (the accepted
     /// listing, from just before the follow-up) is `current`, linking to `to`. Nothing to do when it is the accepted one
     /// already. Reads the disk and the vault.
@@ -184,6 +213,9 @@ public enum SwitchSealCheck {
             if record[SwitchSeal.buildsKey] == SwitchSeal.listingHash(lines: now) { return Sealed(sealed: [], held: ConfigSeal.held(in: record), refusals: []) }
             guard !buildsBefore.isEmpty, record[SwitchSeal.buildsKey] == SwitchSeal.listingHash(lines: buildsBefore) else {
                 return Sealed(sealed: [], held: ConfigSeal.held(in: record), refusals: ["the builds folder before the switch's follow-up wasn't the one you last accepted: its change stays held (`vs config held`)"])
+            }
+            if let why = folderRefusal(prefix: prefix, before: buildsBefore, now: now) {
+                return Sealed(sealed: [], held: ConfigSeal.held(in: record), refusals: [why + ": it stays held (`vs config held`)"])
             }
             let before = SwitchSeal.entries(lines: buildsBefore), after = SwitchSeal.entries(lines: now)
             let changed = Set(before.keys).union(after.keys).filter { before[$0] != after[$0] }
@@ -213,7 +245,13 @@ public enum SwitchSealCheck {
             return current ?? Sealed(sealed: [], held: [], refusals: [])
         }
         let unit = sealUnit(unitFolder: unitFolder, unitFile: unitFile, prefix: prefix, from: from, to: to, home: home, vault: vault)
-        return Sealed(sealed: (current?.sealed ?? []) + unit.sealed, held: unit.held, refusals: (current?.refusals ?? []) + unit.refusals)
+        // `current` sealed and the unit refused: the switch's mark is recorded (one seal a switch), so its code can't
+        // take the unit again; said with the half still waiting and its command (mac-ci-3's read of a04e2336, F2).
+        var unitRefusals = unit.refusals
+        if current?.sealed.isEmpty == false, unit.sealed.isEmpty, !unit.refusals.isEmpty {
+            unitRefusals = unit.refusals.map { "still waiting: the node's new start line (\($0)); `current` is accepted, and this switch's code can't take the start line again: `vibeswitcher approve`" }
+        }
+        return Sealed(sealed: (current?.sealed ?? []) + unit.sealed, held: unit.held, refusals: (current?.refusals ?? []) + unitRefusals)
     }
 
     /// The vault's partial accept of `shown`.
