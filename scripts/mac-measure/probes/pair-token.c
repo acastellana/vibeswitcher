@@ -1719,6 +1719,42 @@ static void d1_timing(void) {
         printf("  BIG ended and reaped; its token asked again:\n");
         kernel_identity(token, big_cdhash);
     }
+    printf("== (d3) a forked child sends one message, then execs IMAGE; the token asked of the kernel and of Security after the exec\n");
+    int ex[2];
+    closed_on_exec_pipe(ex);
+    mach_port_t saved = MACH_PORT_NULL;
+    if (task_get_special_port(mach_task_self(), TASK_BOOTSTRAP_PORT, &saved) != KERN_SUCCESS) die("task_get_special_port");
+    if (task_set_special_port(mach_task_self(), TASK_BOOTSTRAP_PORT, port) != KERN_SUCCESS) die("task_set_special_port");
+    pid_t c = fork();
+    if (c != 0 && task_set_special_port(mach_task_self(), TASK_BOOTSTRAP_PORT, saved) != KERN_SUCCESS) die("restore");
+    if (c == 0) {
+        close(ex[0]);
+        mach_send_or_say("before");
+        execl(image, image, "sleep", (char *)NULL);
+        _exit(127);
+    }
+    close(ex[1]);
+    char byte;
+    while (read(ex[0], &byte, 1) != 0) {
+        if (errno != EINTR) break;
+    }
+    close(ex[0]);
+    printf("  the child exec'd IMAGE (its close-on-exec pipe ended)\n");
+    if (receive_token(port, &token)) {
+        printf("  the message read after the exec, its trailer's pid=%d pidversion=%d:\n", (int)token.val[5], (int)token.val[7]);
+        kernel_identity(token, image_cdhash);
+        CFDataRef data = CFDataCreate(NULL, (const UInt8 *)&token, sizeof token);
+        const void *keys[] = {kSecGuestAttributeAudit};
+        const void *values[] = {data};
+        CFDictionaryRef attributes = CFDictionaryCreate(NULL, keys, values, 1, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+        SecCodeRef code = NULL;
+        printf("    SecCodeCopyGuestWithAttributes: %d\n", (int)SecCodeCopyGuestWithAttributes(NULL, attributes, kSecCSDefaultFlags, &code));
+        if (code) CFRelease(code);
+        CFRelease(attributes);
+        CFRelease(data);
+    }
+    kill(c, SIGTERM);
+    waitpid(c, NULL, 0);
     mach_port_mod_refs(mach_task_self(), port, MACH_PORT_RIGHT_RECEIVE, -1);
     mach_port_deallocate(mach_task_self(), port);
 }
