@@ -5104,3 +5104,7 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-27 12:01 Automatically (auto_advance): Released the-mac-s-load's worker, idle since its done report on 06e1ba94, while its audit runs (ended pid 15984 (Worker: The Mac's load gate: backtest better rules against the recorded load samples and recommend one (report only))): its Mac slot and memory are free. Its worktree and branch stay; findings the verdict sends back go to a fresh worker there, and a clean verdict merges with none.
 - 2026-11-27 12:02 Planned the-load-gate-reads: The load gate reads the 1-minute average alone while nothing heavy runs: no lockout after a restart (rule cG of the load-gate review) (review audit)
 - 2026-11-27 12:04 Audit of find-why-the-team: complete, clean, round 1: 3 Nit open
+- 2026-11-27 12:06 Audit of the-mac-s-load: complete, clean, round 1: 2 Important open, 9 Nit open
+- 2026-11-27 12:06 Planned why-a-heavy-slot: Why a heavy slot loads the Mac beyond its share of cores: measure where the load of a build or test run comes from, and name the fixes (report only)
+- 2026-11-27 12:06 Started a worker on the-mac-s-load
+- 2026-11-27 12:06 Automatically (auto_advance): Sent the-mac-s-load's worker the open Important findings the-mac-s-load:F1, the-mac-s-load:F2 from its audit at 06e1ba94 (in a new worker: its last one was released during the audit).

@@ -523,3 +523,7 @@ The review found that the proof passed for a program a session can plant at the 
 
 The limit exists because the node is built from source under the user's account, with no paid signing identity. The keeper still closes the day-to-day routes (rollback and replacement of the record outside an install or update), which the Keychain anchor could not. The user chose to accept it, stated, over pausing the keeper.
 
+## 2026-11-27 12:06:10 Heavy slots stay at 3 while boosted (the user's answer to 72820DBB, 2026-11-27). Instead the lead finds why each heavy slot loads the Mac beyond its share of the cores (task why-a-heavy-slot) and fixes that. The load gate's formula changes only by rule (cG) of docs/process/reviews/load-gate-2026-11.md (task the-load-gate-reads); load_threshold stays.
+
+The load review (10 days of samples) showed the gate's formula isn't the blocker: 96% of refused minutes had a heavy slot held, and the Mac averages load 19.9 with two slots held and 44.6 with three, against a limit of 36. Offered 2 slots for a week, the user chose to keep 3 and look for the cause: three jobs each sized to a third of 12 cores should load the Mac to about 12, not 45.
+
