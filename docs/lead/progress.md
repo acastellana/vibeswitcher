@@ -5019,3 +5019,4 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-27 07:24 Abandoned fix-the-flaky-test-27: Already fixed on main by a-host-whose-vault (merged at 5a37065d): the flake was HostRoleTests.swift:268 checking debug/host.log before the host had written it, and that test now waits for the log with eventually (its audit confirmed it). Nothing left to fix.
 - 2026-11-27 07:32 Released a-config-seal-look's worker (idle since its done report on 933c9706) while its audit runs
 - 2026-11-27 07:32 Automatically (auto_advance): Started the audit of a-config-seal-look at 933c9706 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
+- 2026-11-27 07:36 Audit of a-config-seal-look: complete, clean, round 1: 2 Nit open, 2 Pre-existing open
