@@ -5073,3 +5073,15 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-27 11:15 App health: VibeSwitcher's own logs show something new (read by VibeSwitcher itself, no model; only names, numbers and function names, never what a message or transcript says):
 Error lines in app.log within 10 min, by kind: app: failed ×1, host: could not ×1
 Turn what's a real bug into a task (one already on the board needs nothing); read the reports for the full stacks.
+- 2026-11-27 11:16 Planned find-why-the-team: Find why the team's vault could not be opened after the Mac's restart on 2026-11-27 (it started over and asked for confirmation) (review audit, for security)
+- 2026-11-27 11:20 Started a worker on the-lead-s-records-2
+- 2026-11-27 11:20 Automatically (auto_advance): Started a worker on the-lead-s-records-2 (The lead's records make one commit where they now make many ("Lead: decisions and progress" commits unified)).
+- 2026-11-27 11:20 Started a worker on fix-refusedgit-swift-333
+- 2026-11-27 11:20 Automatically (auto_advance): Started a worker on fix-refusedgit-swift-333 (Fix RefusedGit.swift:333: `"sudo": Wrapper(valued: ["-u", "-g"])` doesn't li…), its after tasks done (the-command-guard-fails).
+- 2026-11-27 11:20 Started a worker on v2-device-keys-slice-9
+- 2026-11-27 11:20 Started a worker on find-why-the-team
+- 2026-11-27 11:20 Automatically (auto_advance): Started a worker on find-why-the-team (Find why the team's vault could not be opened after the Mac's restart on 2026-11-27 (it started over and asked for confirmation)).
+- 2026-11-27 11:20 Started a worker on v2-on-the-mac-13
+- 2026-11-27 11:21 Planned the-mac-s-load: The Mac's load gate: backtest better rules against the recorded load samples and recommend one (report only)
+- 2026-11-27 11:21 Started a worker on the-mac-s-load
+- 2026-11-27 11:21 Automatically (auto_advance): Started a worker on the-mac-s-load (The Mac's load gate: backtest better rules against the recorded load samples and recommend one (report only)).
