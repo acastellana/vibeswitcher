@@ -15,6 +15,75 @@
 <link rel="icon" href="icon.png" type="image/png">
 <link rel="stylesheet" href="style.css">
 <script type="module" src="app.js"></script>
+<!-- Every module app.js imports, asked for at once instead of as each import is found (D26: a cold load on a slow link
+     waited on four rounds of it). tests/preload.test.mjs keeps the list exactly app.js's static imports. -->
+<link rel="modulepreload" href="js/acting.js">
+<link rel="modulepreload" href="js/actions.js">
+<link rel="modulepreload" href="js/activity.js">
+<link rel="modulepreload" href="js/brief.js">
+<link rel="modulepreload" href="js/cardparts.js">
+<link rel="modulepreload" href="js/chatops.js">
+<link rel="modulepreload" href="js/composing.js">
+<link rel="modulepreload" href="js/conversation.js">
+<link rel="modulepreload" href="js/copying.js">
+<link rel="modulepreload" href="js/devports.js">
+<link rel="modulepreload" href="js/dictate.js">
+<link rel="modulepreload" href="js/dom.js">
+<link rel="modulepreload" href="js/forecast.js">
+<link rel="modulepreload" href="js/health.js">
+<link rel="modulepreload" href="js/heldconfig.js">
+<link rel="modulepreload" href="js/i18n-es.js">
+<link rel="modulepreload" href="js/i18n.js">
+<link rel="modulepreload" href="js/images.js">
+<link rel="modulepreload" href="js/keys.js">
+<link rel="modulepreload" href="js/kit.js">
+<link rel="modulepreload" href="js/mail.js">
+<link rel="modulepreload" href="js/marks.js">
+<link rel="modulepreload" href="js/notify.js">
+<link rel="modulepreload" href="js/passkey.js">
+<link rel="modulepreload" href="js/plugincard.js">
+<link rel="modulepreload" href="js/push.js">
+<link rel="modulepreload" href="js/runnable.js">
+<link rel="modulepreload" href="js/sendways.js">
+<link rel="modulepreload" href="js/settings.js">
+<link rel="modulepreload" href="js/socket.js">
+<link rel="modulepreload" href="js/store.js">
+<link rel="modulepreload" href="js/terminal.js">
+<link rel="modulepreload" href="js/termlook.js">
+<link rel="modulepreload" href="js/text.js">
+<link rel="modulepreload" href="js/ui.js">
+<link rel="modulepreload" href="js/updates.js">
+<link rel="modulepreload" href="js/viewport.js">
+<link rel="modulepreload" href="js/views/alldone.js">
+<link rel="modulepreload" href="js/views/cards.js">
+<link rel="modulepreload" href="js/views/chat.js">
+<link rel="modulepreload" href="js/views/composer.js">
+<link rel="modulepreload" href="js/views/drive.js">
+<link rel="modulepreload" href="js/views/frame.js">
+<link rel="modulepreload" href="js/views/inspector.js">
+<link rel="modulepreload" href="js/views/lead.js">
+<link rel="modulepreload" href="js/views/left.js">
+<link rel="modulepreload" href="js/views/mail.js">
+<link rel="modulepreload" href="js/views/node.js">
+<link rel="modulepreload" href="js/views/offers.js">
+<link rel="modulepreload" href="js/views/own.js">
+<link rel="modulepreload" href="js/views/palette.js">
+<link rel="modulepreload" href="js/views/project.js">
+<link rel="modulepreload" href="js/views/records.js">
+<link rel="modulepreload" href="js/views/results.js">
+<link rel="modulepreload" href="js/views/right.js">
+<link rel="modulepreload" href="js/views/sendmenu.js">
+<link rel="modulepreload" href="js/views/session.js">
+<link rel="modulepreload" href="js/views/settings.js">
+<link rel="modulepreload" href="js/views/sheet.js">
+<link rel="modulepreload" href="js/views/stats.js">
+<link rel="modulepreload" href="js/views/terminal.js">
+<link rel="modulepreload" href="js/views/termlook.js">
+<link rel="modulepreload" href="js/views/twocol.js">
+<link rel="modulepreload" href="js/wire.js">
+<link rel="modulepreload" href="js/words.js">
+<link rel="modulepreload" href="js/xtermstyle.js">
+<link rel="modulepreload" href="wire/validators.js">
 </head>
 <body>
 <div id="app" class="app" data-route="home">

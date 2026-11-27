@@ -68,6 +68,16 @@ for path in "${paths[@]}"; do
     esac
 done
 
+# index.html's preload list (D26, kept to app.js's imports by WebApp/tests/preload.test.mjs) names files embedded here:
+# a name that isn't would be a 404 at every load.
+if [[ -f $root/index.html ]]; then
+    while IFS= read -r href; do
+        found=""
+        for path in "${paths[@]}"; do [[ $path == "$href" ]] && found=1 && break; done
+        [[ -n $found ]] || refuse index.html "its modulepreload $href isn't a file embedded here"
+    done < <(grep -o '<link rel="modulepreload" href="[^"]*"' "$root/index.html" | sed 's/.*href="//; s/"$//')
+fi
+
 mkdir -p "$(dirname "$out")"
 # The stripped files, beside the output while it is made, and gone after (Ctrl-C too).
 stage=$out.stripped.$$
