@@ -20,7 +20,8 @@ struct ApprovalLinesReviewTests {
     static let pid: pid_t = 9_000_902
     /// A peer that fails both new lines and passes every line before them: the installed command line's code (the
     /// table), the server's uid, an ancestry of itself, a terminal no session holds, in the node's coalition and
-    /// carrying the session's variable (a Mac app shell card's process, or a node session's detached descendant).
+    /// carrying the session's variable (a node session's detached descendant that kept it; a Mac app shell card's
+    /// process is in the app's coalition instead, and only the environment line refuses it: `carrying` below).
     static let sessionLike = PeerFacts(pid: pid, uid: getuid(), cgroup: nil, ancestry: [.init(pid: pid, startTicks: 5)],
                                        terminal: .named("ttytest-review"), sessionMarker: true, underRunner: false,
                                        coalition: ApprovalVoiceTests.nodeCoalition)
@@ -258,10 +259,10 @@ struct ApprovalLinesReviewProcessTests {
     }
 
     /// Attack 3. An Apple platform binary started carrying the session's variable reads an EMPTY environment, not an
-    /// unreadable one (M2): `sessionMarker` false, and the environment line passes it. So does the user's own build
-    /// started with no environment at all (`env -i`). What stands in front for a platform binary is the code check
-    /// (the installed command line's cdhash, before every guard rail); here the table says yes to every peer, so
-    /// `callerRefusal` lets both through: the environment line tells nothing of a process whose environment reads empty.
+    /// unreadable one (M2): `sessionMarker` false, and the environment line passes it. What stands in front for a
+    /// platform binary is the code check (the installed command line's cdhash, before every guard rail); here the table
+    /// says yes to every peer, so `callerRefusal` lets it through: the environment line tells nothing of a process
+    /// whose environment reads empty.
     @Test func anEmptyEnvironmentPassesTheLineOnlyTheCodeCheckStandsInFront() async throws {
         #if canImport(Darwin)
         let launchd = try #require(Platform.Processes.coalition(1))
@@ -278,13 +279,9 @@ struct ApprovalLinesReviewProcessTests {
             #expect(facts.sessionMarker == false, "Apple's binary carrying the variable reads empty: \(facts)")
             #expect(refusal == nil, "\(String(describing: refusal))")
         }
-        let built = builtProducts.appendingPathComponent("vibeswitcher-mcp").path
-        try await with("/usr/bin/env", ["-i", built], environment: [marker], ready: built) { pid in
-            let (facts, refusal) = judged(pid)
-            #expect(facts.sessionMarker == false, "the user's build with no environment: \(facts)")
-            #expect(Platform.Processes.environment(pid)?.isEmpty == true)
-            #expect(refusal == nil, "\(String(describing: refusal))")
-        }
+        // The user's own build under `env -i` is left out: with no HOME (nor the scratch home `scripts/test.sh` sets) the
+        // built programs fall back to the account's real home before anything blocks (the blind check of 2026-11-27).
+        // It reads `[]` as M2 read the user's builds, and `[]` takes the same `sessionMarker` path as above.
         #endif
     }
 }
