@@ -192,10 +192,12 @@ struct ApprovalLinesProcessTests {
         var spawn = Platform.Spawn(executable: "/bin/sh", arguments: ["sh", "-c", "/bin/sleep 600 </dev/null >/dev/null 2>&1 & echo $! > \"$0\"", pidFile.path])
         spawn.group = .ownSession
         let shell = try spawn.start().get()
+        // The sleep stays in the shell's process group (its session's, `pgid == shell`), which it holds while it runs, so
+        // the group's number can't be given again before this: ended so even when its pid file can't be read below.
+        defer { kill(-shell, SIGKILL) }
         var status: Int32 = 0
         _ = await offPool { waitpid(shell, &status, 0) }
         let detached = try #require(pid_t(try String(contentsOf: pidFile, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)))
-        defer { kill(detached, SIGKILL) }
         try #require(await eventually(timeout: 60) { Platform.Processes.link(detached)?.parent == 1 })
         let (facts, refusal) = Self.refusal(of: detached, own: own)
         #expect(facts.coalition == own, "\(facts)")
