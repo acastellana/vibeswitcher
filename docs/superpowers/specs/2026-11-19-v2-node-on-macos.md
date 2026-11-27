@@ -1457,7 +1457,13 @@ Each step is small, keeps the app unchanged, and says what it needs from a real 
     review; the app and its update checked in the sandbox. The keeper's K4 waits on steps 10 and 11. Then, once step 11
     is on v2, the pins record's `format 2` (the keeper design's K4b, which lands only after this step's Mach form is on
     v2), whose own install script refuses, unconditionally, any commit that doesn't contain step 11's commit (the
-    floor, which the keeper's K5 raises to K4b's commit). Needs: this Mac's real signed hardened images.
+    floor, which the keeper's K5 raises to K4b's commit). **The keeper design's proof review of 2026-11-27 adds** (its
+    rows K4a-ii and K4c, and KA1 to KA12): each child and handover process runs the image's first statement (every
+    exception mask cleared, task and main thread, then the environment rule) before its proof, every host (the app's
+    included) spawning its parser and handover keeper with exactly the fixed list; a hardened image's parser refuses
+    `--parser-test-hooks`; each proof names its role and each receiver takes only its own; the server judges its host
+    by the handout's own message (the Mach form of the server's check above); and this step is offered only after the
+    keeper design's K-M16 trial part as well. Needs: this Mac's real signed hardened images.
 12. **The node's removal** (the keeper design's answer to its re-check's question 2): an `install-node-mac.sh` remove
     form that stops the node's agent first, then runs the keeper step's `--remove`, or `--remove --forget-store` when
     you ask it to forget the node's record, said before the password (`KeeperStepTests.theNodesRemovalRemovesTheKeeper`
