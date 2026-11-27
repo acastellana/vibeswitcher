@@ -550,6 +550,281 @@ rests on the same assumption. The handover keeper (`MacHandoverKeeper.swift`'s h
 the process proving itself, after its exec") and the Mac spec's "fixed at creation" sentence rest on it too; whether
 the handover keeper's order of reads is open to (b) wasn't looked at here.
 
+### K-M1, second part: (g) to (o), for the proof's redesign
+
+Taken 2026-11-27 on this Mac (macOS 27.2, SIP enabled), as the user, no `sudo`, no dialog, no debugger or
+process-inspection tool, from an agent's session in a scratch clone of `v2-mac-keeper-proof`, after the first part
+refuted the fixed token. Same probe and script (`bash scripts/mac-measure/pair-token.sh`), its first part unchanged (its
+lines reproduced in this run but for pids, pidversions and the probe's cdhash), with a second hardened image beside
+`facts-hardened`: [probes/pair-image.c](../../scripts/mac-measure/probes/pair-image.c), ad hoc signed with the Hardened
+Runtime under its own identifier (its own cdhash, `IMAGE's file` below), which does on the probe's word what the node's
+host does in some mode with descriptors it was started with: a line on descriptor 2, one read of descriptor 0 that
+doesn't wait, an answer on a descriptor it was named, a descriptor taken by `SCM_RIGHTS` and read once, a Mach message.
+Neither image is the node's host (a copy of the host started bare could touch `~/.vibeswitcher`). In the scenes (g),
+(h), (i) and (m) the maker is K-M1's (a pair made after its fork, one end sent with the hello over a connection, its
+own copy kept until the keeper holds the end), and **S** is the maker's forked child, holding a copy of the maker's end
+and doing nothing until told. The Mach trials (n) give the probe's port to a child as its bootstrap special port (set
+around the fork and restored at once, or named for `posix_spawn`); the children and images look nothing up through it.
+The run below is the second of two whole runs and three runs of the probe by hand; the lines were the same in each
+but for the pids, pidversions, cdhashes and (l)'s counts (first runs: 127 and 50 ends of file of 200, this run 62 and 14).
+
+```
+$ bash scripts/mac-measure/pair-token.sh
+## K-M1  27.2 (26B123), System Integrity Protection status: enabled.
+pair-token: CodeDirectory v=20500 size=436 flags=0x10002(adhoc,runtime) hashes=7+2 location=embedded
+PROGRAM (facts-hardened): CodeDirectory v=20500 size=312 flags=0x10002(adhoc,runtime) hashes=3+2 location=embedded
+IMAGE (pair-image): CodeDirectory v=20500 size=292 flags=0x10002(adhoc,runtime) hashes=3+2 location=embedded
+this probe's file cdhash=25c17cee63cbb36a
+PROGRAM's file cdhash=bd5977d7fff8c336
+IMAGE's file cdhash=712188d35768e0a6
+[… the first part, (controls) to (f), as in the row above but for the pids, pidversions and the probe's cdhash …]
+#### K-M1, second part: (g) to (o)
+== (g1) the whole write-then-exec, the silent image: the maker writes the request and execs PROGRAM; every point a keeper could ask the token
+  keeper pid=36555 pidversion=6448272; maker pid=36621 pidversion=6448357; third pid=36622 pidversion=6448358
+  at the receipt, before any request: LOCAL_PEERTOKEN pid=36621 pidversion=6448357 = the maker, as it was before any exec | LOCAL_PEERPID=36621 | Security: guest=0 valid=0 cdhash=25c17cee63cbb36a (this probe's file) hardened=yes
+  the maker writes the request on its end: done
+  the maker exec'd: it now runs PROGRAM
+  after the exec, before the keeper reads the request: LOCAL_PEERTOKEN pid=36621 pidversion=6448359 = the maker's pid, another pidversion (its image after the exec) | LOCAL_PEERPID=36621 | Security: guest=0 valid=0 cdhash=bd5977d7fff8c336 (PROGRAM's file) hardened=yes
+  the keeper read 3 bytes: req
+  bytes waiting on the keeper's end after the request: 0
+  after the keeper read the request: LOCAL_PEERTOKEN pid=36621 pidversion=6448359 = the maker's pid, another pidversion (its image after the exec) | LOCAL_PEERPID=36621 | Security: guest=0 valid=0 cdhash=bd5977d7fff8c336 (PROGRAM's file) hardened=yes
+  the keeper wrote its 3-byte reply
+  after the keeper's reply: LOCAL_PEERTOKEN pid=36621 pidversion=6448359 = the maker's pid, another pidversion (its image after the exec) | LOCAL_PEERPID=36621 | Security: guest=0 valid=0 cdhash=bd5977d7fff8c336 (PROGRAM's file) hardened=yes
+  the keeper wrote an 8-byte nonce on its end
+  the keeper read 0 of the answer's 8 bytes within 1 s
+  after a second round (a nonce) that nothing answered: LOCAL_PEERTOKEN pid=36621 pidversion=6448359 = the maker's pid, another pidversion (its image after the exec) | LOCAL_PEERPID=36621 | Security: guest=0 valid=0 cdhash=bd5977d7fff8c336 (PROGRAM's file) hardened=yes
+  the last read against the first read after the exec: the same pid and pidversion
+== (g2) the same, the nonce sent once the token names PROGRAM (before any reply); S, silent until now, answers it
+  keeper pid=36555 pidversion=6448272; maker pid=36727 pidversion=6448504; third pid=36728 pidversion=6448505
+  the maker writes the request on its end: done
+  the maker exec'd: it now runs PROGRAM
+  after the exec: LOCAL_PEERTOKEN pid=36727 pidversion=6448506 = the maker's pid, another pidversion (its image after the exec) | LOCAL_PEERPID=36727 | Security: guest=0 valid=0 cdhash=bd5977d7fff8c336 (PROGRAM's file) hardened=yes
+  the keeper read 3 bytes: req
+  the keeper wrote an 8-byte nonce on its end
+  S reads the nonce on its copy and writes it back: done
+  the keeper read the answer: the nonce, as sent
+  after the answer: LOCAL_PEERTOKEN pid=36728 pidversion=6448505 = S, the maker's forked holder (silent until told) | LOCAL_PEERPID=36728 | Security: guest=0 valid=0 cdhash=25c17cee63cbb36a (this probe's file) hardened=yes
+  this read against the first read after the exec: not the same
+== (g3) as (g2), IMAGE the exec'd image (the maker's end its descriptors 0, 2, 5); after S's answer IMAGE writes a line on its descriptor 2
+  keeper pid=36555 pidversion=6448272; maker pid=36729 pidversion=6448507; third pid=36730 pidversion=6448508
+  the maker writes the request on its end: done
+  the maker exec'd: it now runs <scratch>/bin/pair-image
+  after the exec: LOCAL_PEERTOKEN pid=36729 pidversion=6448509 = the maker's pid, another pidversion (its image after the exec) | LOCAL_PEERPID=36729 | Security: guest=0 valid=0 cdhash=712188d35768e0a6 (IMAGE's file) hardened=yes
+  the keeper read 3 bytes: req
+  the keeper wrote an 8-byte nonce on its end
+  S reads the nonce on its copy and writes it back: done
+  the keeper read the answer: the nonce, as sent
+  after the answer: LOCAL_PEERTOKEN pid=36730 pidversion=6448508 = S, the maker's forked holder (silent until told) | LOCAL_PEERPID=36730 | Security: guest=0 valid=0 cdhash=25c17cee63cbb36a (this probe's file) hardened=yes
+  IMAGE writes a line on its descriptor 2: done
+  after IMAGE's step: LOCAL_PEERTOKEN pid=36729 pidversion=6448509 = the maker's pid, another pidversion (its image after the exec) | LOCAL_PEERPID=36729 | Security: guest=0 valid=0 cdhash=712188d35768e0a6 (IMAGE's file) hardened=yes
+  this read against the first read after the exec: the same pid and pidversion
+  bytes waiting on the keeper's end after IMAGE's step: 39
+== (g4) as (g3), but S shuts the end's write side after its answer, then IMAGE writes its line on descriptor 2 (SIGPIPE ignored, as the maker left it)
+  keeper pid=36555 pidversion=6448272; maker pid=36735 pidversion=6448521; third pid=36736 pidversion=6448522
+  the maker writes the request on its end: done
+  the maker exec'd: it now runs <scratch>/bin/pair-image
+  after the exec: LOCAL_PEERTOKEN pid=36735 pidversion=6448523 = the maker's pid, another pidversion (its image after the exec) | LOCAL_PEERPID=36735 | Security: guest=0 valid=0 cdhash=712188d35768e0a6 (IMAGE's file) hardened=yes
+  the keeper read 3 bytes: req
+  the keeper wrote an 8-byte nonce on its end
+  S reads the nonce on its copy and writes it back: done
+  the keeper read the answer: the nonce, as sent
+  after the answer: LOCAL_PEERTOKEN pid=36736 pidversion=6448522 = S, the maker's forked holder (silent until told) | LOCAL_PEERPID=36736 | Security: guest=0 valid=0 cdhash=25c17cee63cbb36a (this probe's file) hardened=yes
+  S shuts the end's write side (shutdown SHUT_WR): done
+  IMAGE writes a line on its descriptor 2: failed errno=32 (Broken pipe)
+  after IMAGE's step: LOCAL_PEERTOKEN pid=36735 pidversion=6448523 = the maker's pid, another pidversion (its image after the exec) | LOCAL_PEERPID=36735 | Security: guest=0 valid=0 cdhash=712188d35768e0a6 (IMAGE's file) hardened=yes
+  this read against the first read after the exec: the same pid and pidversion
+  bytes waiting on the keeper's end after IMAGE's step: 0
+  the keeper's next read: end of file
+== (g5) as (g3), but after S's answer IMAGE reads its descriptor 0 once, without waiting (nothing there)
+  keeper pid=36555 pidversion=6448272; maker pid=36737 pidversion=6448524; third pid=36738 pidversion=6448525
+  the maker writes the request on its end: done
+  the maker exec'd: it now runs <scratch>/bin/pair-image
+  after the exec: LOCAL_PEERTOKEN pid=36737 pidversion=6448526 = the maker's pid, another pidversion (its image after the exec) | LOCAL_PEERPID=36737 | Security: guest=0 valid=0 cdhash=712188d35768e0a6 (IMAGE's file) hardened=yes
+  the keeper read 3 bytes: req
+  the keeper wrote an 8-byte nonce on its end
+  S reads the nonce on its copy and writes it back: done
+  the keeper read the answer: the nonce, as sent
+  after the answer: LOCAL_PEERTOKEN pid=36738 pidversion=6448525 = S, the maker's forked holder (silent until told) | LOCAL_PEERPID=36738 | Security: guest=0 valid=0 cdhash=25c17cee63cbb36a (this probe's file) hardened=yes
+  IMAGE reads its descriptor 0 once, not waiting: failed errno=35 (Resource temporarily unavailable)
+  after IMAGE's step: LOCAL_PEERTOKEN pid=36737 pidversion=6448526 = the maker's pid, another pidversion (its image after the exec) | LOCAL_PEERPID=36737 | Security: guest=0 valid=0 cdhash=712188d35768e0a6 (IMAGE's file) hardened=yes
+  this read against the first read after the exec: the same pid and pidversion
+  bytes waiting on the keeper's end after IMAGE's step: 0
+== (h) S holds a copy and stays silent while the genuine image (IMAGE) talks: its own request, its answer to the nonce; then the keeper's reply
+  keeper pid=36555 pidversion=6448272; maker pid=36739 pidversion=6448527; third pid=36740 pidversion=6448528
+  the maker exec'd: it now runs <scratch>/bin/pair-image
+  after the exec, before IMAGE writes: LOCAL_PEERTOKEN pid=36739 pidversion=6448529 = the maker's pid, another pidversion (its image after the exec) | LOCAL_PEERPID=36739 | Security: guest=0 valid=0 cdhash=712188d35768e0a6 (IMAGE's file) hardened=yes
+  IMAGE writes its request on descriptor 5: done
+  after IMAGE's request: LOCAL_PEERTOKEN pid=36739 pidversion=6448529 = the maker's pid, another pidversion (its image after the exec) | LOCAL_PEERPID=36739 | Security: guest=0 valid=0 cdhash=712188d35768e0a6 (IMAGE's file) hardened=yes
+  the keeper read 3 bytes: req
+  the keeper wrote an 8-byte nonce on its end
+  IMAGE reads the nonce on descriptor 5 and writes it back: done
+  the keeper read the answer: the nonce, as sent
+  after IMAGE's answer: LOCAL_PEERTOKEN pid=36739 pidversion=6448529 = the maker's pid, another pidversion (its image after the exec) | LOCAL_PEERPID=36739 | Security: guest=0 valid=0 cdhash=712188d35768e0a6 (IMAGE's file) hardened=yes
+  this read against the first read after the exec: the same pid and pidversion
+  the keeper wrote its 3-byte reply
+  S reads the keeper's reply on its copy: done
+  after S took the reply: LOCAL_PEERTOKEN pid=36740 pidversion=6448528 = S, the maker's forked holder (silent until told) | LOCAL_PEERPID=36740 | Security: guest=0 valid=0 cdhash=25c17cee63cbb36a (this probe's file) hardened=yes
+== (i) a nonce sent before the token names a pinned image: the maker (not exec'd) writes the request, answers the nonce, then execs PROGRAM
+  keeper pid=36555 pidversion=6448272; maker pid=36741 pidversion=6448530; third pid=36742 pidversion=6448531
+  the maker writes the request on its end: done
+  the keeper read 3 bytes: req
+  after the request, the maker not exec'd: LOCAL_PEERTOKEN pid=36741 pidversion=6448530 = the maker, as it was before any exec | LOCAL_PEERPID=36741 | Security: guest=0 valid=0 cdhash=25c17cee63cbb36a (this probe's file) hardened=yes
+  the keeper wrote an 8-byte nonce on its end
+  the maker reads the nonce and writes it back: done
+  the keeper read the answer: the nonce, as sent
+  after the answer, the maker not exec'd: LOCAL_PEERTOKEN pid=36741 pidversion=6448530 = the maker, as it was before any exec | LOCAL_PEERPID=36741 | Security: guest=0 valid=0 cdhash=25c17cee63cbb36a (this probe's file) hardened=yes
+  the maker exec'd: it now runs PROGRAM
+  after the maker's exec: LOCAL_PEERTOKEN pid=36741 pidversion=6448532 = the maker's pid, another pidversion (its image after the exec) | LOCAL_PEERPID=36741 | Security: guest=0 valid=0 cdhash=bd5977d7fff8c336 (PROGRAM's file) hardened=yes
+== (m) a keeper-made end, sent over the maker's pair once its token names IMAGE: who can be named on it
+  keeper pid=36555 pidversion=6448272; maker pid=36743 pidversion=6448533; third pid=36744 pidversion=6448534
+  the maker exec'd: it now runs <scratch>/bin/pair-image
+  on the maker's pair, after the exec: LOCAL_PEERTOKEN pid=36743 pidversion=6448535 = the maker's pid, another pidversion (its image after the exec) | LOCAL_PEERPID=36743 | Security: guest=0 valid=0 cdhash=712188d35768e0a6 (IMAGE's file) hardened=yes
+  the keeper made a pair and sent one end over its end of the maker's pair
+  S takes that end on its copy of the maker's end and writes a request on it: done
+  the keeper read 3 bytes: req
+  on the keeper-made end, after S's request: LOCAL_PEERTOKEN pid=36744 pidversion=6448534 = S, the maker's forked holder (silent until told) | LOCAL_PEERPID=36744 | Security: guest=0 valid=0 cdhash=25c17cee63cbb36a (this probe's file) hardened=yes
+  IMAGE writes a line on its descriptor 2 (the maker's end, not the keeper-made one): done
+  on the keeper-made end, after that line: LOCAL_PEERTOKEN pid=36744 pidversion=6448534 = S, the maker's forked holder (silent until told) | LOCAL_PEERPID=36744 | Security: guest=0 valid=0 cdhash=25c17cee63cbb36a (this probe's file) hardened=yes
+  S passes the keeper-made end to IMAGE over a socket IMAGE has as descriptor 6: done
+  IMAGE takes a descriptor on descriptor 6 and reads it once, not waiting: done
+  on the keeper-made end, after IMAGE took it and read once: LOCAL_PEERTOKEN pid=36743 pidversion=6448535 = the maker's pid, another pidversion (its image after the exec) | LOCAL_PEERPID=36743 | Security: guest=0 valid=0 cdhash=712188d35768e0a6 (IMAGE's file) hardened=yes
+== (j) which acts of a holder move the token: a pair made here, its other end held by two forked holders; before each act holder 1 writes a byte (the token then names holder 1)
+  keeper pid=36555 pidversion=6448272; holder 1 pid=36745 pidversion=6448536; holder 2 pid=36746 pidversion=6448537
+  holder 2: a 1-byte write (done) -> the token names holder 2
+  holder 2: a zero-length send (done) -> the token names holder 2
+  holder 2: a read that doesn't wait, nothing there (EAGAIN) (failed errno=35 (Resource temporarily unavailable)) -> the token names holder 2
+  holder 2: a peek that doesn't wait, nothing there (failed errno=35 (Resource temporarily unavailable)) -> the token names holder 2
+  holder 2: poll (done) -> the token names holder 2
+  holder 2: getsockopt SO_TYPE (done) -> the token names holder 1
+  holder 2: setsockopt SO_RCVTIMEO (what the handover keeper's limitIO does) (done) -> the token names holder 1
+  holder 2: getpeername (done) -> the token names holder 1
+  holder 2: ioctl FIONREAD (done) -> the token names holder 1
+  holder 2: fstat (done) -> the token names holder 1
+  holder 2: dup, then close the copy (done) -> the token names holder 1
+  holder 2: a peek with a byte there (done) -> the token names holder 2
+  holder 2: a read with a byte there (done) -> the token names holder 2
+  holder 2: a read that waits, entered, nothing there yet -> while it waits (asked for up to 1 s) the token names holder 2
+  holder 2: that read, ended by a byte from the keeper (done) -> the token names holder 2
+== (j) after the end's write side is shut (holder 1's shutdown SHUT_WR; SIGPIPE ignored)
+  holder 1: shutdown SHUT_WR (done) -> the token names holder 1
+  holder 2: a 1-byte write (EPIPE expected) (failed errno=32 (Broken pipe)) -> the token names holder 2
+  holder 2: a zero-length send (failed errno=32 (Broken pipe)) -> the token names holder 2
+  holder 1: a 1-byte write (failed errno=32 (Broken pipe)) -> the token names holder 1
+  bytes waiting on the keeper's end (no byte expected): 0
+== (j) after the end's read side is shut (holder 1's shutdown SHUT_RD)
+  holder 1: shutdown SHUT_RD (done) -> the token names holder 1
+  holder 2: a read that doesn't wait (done) -> the token names holder 2
+  holder 2: a read that would wait (done, at once) -> the token names holder 2
+== (k) the last to act has exited, another holder keeps the end open
+  holder 1 wrote a byte -> the token names holder 1
+  holder 1 exited and was reaped; holder 2 still holds the end
+  after holder 1's exit: LOCAL_PEERTOKEN refused errno=22 (Invalid argument)
+  poll: 1 revents=0x4
+  after holder 2 writes: LOCAL_PEERTOKEN pid=36752 pidversion=6448543 = holder 2 | LOCAL_PEERPID=36752 | Security: guest=0 valid=0 cdhash=25c17cee63cbb36a (this probe's file) hardened=yes
+== (l) the maker closes its copy of the sent end and its connection at once, before the keeper's accept
+  200 runs: the request read 138, end of file 62, nothing within 1 s 0, no descriptor in the hello 0
+== (l) the maker closes them after the keeper's accept, before its recvmsg
+  200 runs: the request read 186, end of file 14, nothing within 1 s 0, no descriptor in the hello 0
+== (l) the maker closes them once the keeper holds the end (K-M1's makers, and the handover keeper's rule)
+  200 runs: the request read 200, end of file 0, nothing within 1 s 0, no descriptor in the hello 0
+== (n0) Mach: the probe's port registered for its task (mach_ports_register); a forked child looks its registered ports up and sends to the first
+  the child's lookup: 0x0, 3 ports, the first isn't the probe's port name; its send: accepted by the kernel
+  the probe's port, once the child exited: no message within 5 s (0x10004003)
+== (n1) Mach: a live maker sends one message to the probe's port (its bootstrap special port, set at its fork); it doesn't exec
+  keeper pid=36555 pidversion=6448272; maker pid=37661 pidversion=6449759
+  the maker alive, not exec'd: the message "maker", its trailer's token pid=37661 pidversion=6449759 = the maker, as it was before any exec | Security: guest=0 valid=0 cdhash=25c17cee63cbb36a (this probe's file) hardened=yes
+== (n2) Mach: the maker sends, then execs PROGRAM; the message read only after the exec
+  keeper pid=36555 pidversion=6448272; maker pid=37662 pidversion=6449760
+  the maker exec'd: it now runs PROGRAM
+  read after the maker's exec: the message "maker", its trailer's token pid=37662 pidversion=6449760 = the maker, as it was before any exec | Security: guest=-67065
+== (n3) Mach: the maker sends, then exits; the message read only after its exit
+  keeper pid=36555 pidversion=6448272; maker pid=37663 pidversion=6449762
+  the maker exited and was reaped
+  read after the maker's exit: the message "maker", its trailer's token pid=37663 pidversion=6449762 = the maker, as it was before any exec | Security: guest=100003
+== (n4) Mach: the maker's forked child sends; the maker execs PROGRAM; read after the exec
+  keeper pid=36555 pidversion=6448272; maker pid=37664 pidversion=6449763; forked child pid=37665 pidversion=6449764
+  the maker exec'd: it now runs PROGRAM
+  read after the maker's exec: the message "child", its trailer's token pid=37665 pidversion=6449764 = the maker's forked child | Security: guest=0 valid=0 cdhash=25c17cee63cbb36a (this probe's file) hardened=yes
+== (n5) Mach: the maker execs IMAGE, whose own code sends to its bootstrap special port (the port crosses the exec)
+  keeper pid=36555 pidversion=6448272; maker pid=37666 pidversion=6449766
+  the maker exec'd: it now runs <scratch>/bin/pair-image
+  read once IMAGE ran: the message "image", its trailer's token pid=37666 pidversion=6449767 = the maker's pid, another pidversion (its image after the exec) | Security: guest=0 valid=0 cdhash=712188d35768e0a6 (IMAGE's file) hardened=yes
+== (n6) Mach: IMAGE started by posix_spawn from the probe (as a host starts its children), the probe's port named as its bootstrap special port
+  keeper pid=36555 pidversion=6448272; spawned image pid=37667 pidversion=6449769
+  read once the spawned image ran: the message "image", its trailer's token pid=37667 pidversion=6449769 = the image the probe spawned | Security: guest=0 valid=0 cdhash=712188d35768e0a6 (IMAGE's file) hardened=yes
+== (o) SCM_CREDS: a message on a pair carrying an SCM_CREDS control message of 96 zero bytes (this SDK names SCM_CREDS but defines no struct cmsgcred)
+  sendmsg with SCM_CREDS: refused errno=22 (Invalid argument)
+```
+
+**What each case says** (each line of the output above is one read; "names X" is `LOCAL_PEERTOKEN` read afresh):
+
+- **(g1) the whole write-then-exec, a silent image.** The maker writes the request and execs PROGRAM: at the receipt
+  the token names the maker as it was; after the exec, after the keeper reads the request, after its reply and after a
+  second round that nothing answers, it names PROGRAM (accepted by Security, hardened), every read the same pid and
+  pidversion as the first after the exec; no byte trails the request. A keeper reading the token at any of these points
+  serves the request. A second round goes unanswered by a silent image (0 of 8 bytes within 1 s).
+- **(g2) a nonce sent once the token names the image, answered by a silent copy-holder.** S reads the nonce on its copy
+  and writes it back; the keeper reads the nonce as sent, and the token then names **S** (this probe's code): a
+  copy-holder can answer, and is named for it.
+- **(g3) the same, then the image writes a line on its descriptor 2** (the maker's end): the token names the image
+  again, the same pid and pidversion as the first read; the line's 39 bytes trail the answer.
+- **(g4) the same, but S shuts the end's write side after its answer, then the image's line fails (`EPIPE`, SIGPIPE
+  ignored as the maker left it): the token names the image, the same pid and pidversion as the first read, no byte
+  trails the answer, and the keeper's next read is the end of file.** A request and a nonce's answer written by S, then
+  the end of file, with every token read naming the genuine image: what an honest exchange looks like, made by S.
+- **(g5) the same, but the image reads its descriptor 0 once without waiting** (`EAGAIN`, nothing there): the token
+  names the image, no byte trails. A failed read stamps as a failed write does.
+- **(h) a silent holder while the genuine image talks.** The image writes its own request and answers the nonce: every
+  read names the image; S, silent, is named by none. The keeper's reply is then read by S, and only then does the token
+  name S. A silent copy is invisible to every read, and can take the answer.
+- **(i) a nonce sent before the token names a pinned image.** The maker, not exec'd, writes the request and answers the
+  nonce (both reads name the maker as it was, this probe's code), then execs PROGRAM: the token then names PROGRAM. A
+  keeper that judges only after the answer serves it; one that asks the token before it sends the nonce refuses there.
+- **(m) a keeper-made end, sent over the maker's pair once its token names the image.** S takes it on its copy of the
+  maker's end and writes a request on it: the token of the keeper's other end names **S**. A line the image writes on
+  its descriptor 2 (the maker's end) doesn't move it. S passes the end to the image over a socket the image holds as
+  descriptor 6; the image takes it and reads it once without waiting: the token then names **the image**. An end made
+  after the exec can't be an inherited descriptor, but it reaches the image's name through any code of the image that
+  takes descriptors from a socket it didn't make and touches them.
+- **(j) which acts of a holder move the token.** They move it: a write, a zero-length send, a read or a peek with a
+  byte there, a read or a peek that doesn't wait with nothing there (`EAGAIN`), `poll`, a read that waits (named while
+  it waits, before any byte comes), a write or a zero-length send that fails with `EPIPE` once the write side is shut,
+  a read that returns the end of file after `shutdown(SHUT_RD)`. They don't: `getsockopt`, `setsockopt` (the handover
+  keeper's `limitIO`), `getpeername`, `ioctl(FIONREAD)`, `fstat`, `dup` and closing the copy, `shutdown` itself. So any
+  send, receive or `poll` by any holder, whether it moves a byte or fails, makes that holder the one named. (A send
+  refused with `EAGAIN` on a full buffer: not measured, the trial stalled in a first run and was dropped.)
+- **(k) the last to act has exited, another holder keeps the end open:** the token read is refused (`EINVAL`); `poll`
+  shows only `POLLOUT`. Once the other holder acts, it is named.
+- **(l) the end of file a first version of K-M1 saw.** The maker writes a request on its end, sends the other with the
+  hello, and closes its copy of the sent end and its connection: at once, before the keeper's `accept`, the keeper read
+  the end of file in place of the request in 62 of 200 runs (127 of 200 in a first run); after the `accept` and before
+  its `recvmsg`, in 14 of 200 (50 in a first run); once the keeper holds the end, in none of 200. A socket in flight
+  whose sender closed its copy loses what was written on its peer, as the handover keeper's comment says of its
+  re-check's flake (XNU's collection of descriptors in flight is the candidate, not read). A liveness rule, not a
+  security one: the sender keeps its copy until the receiver says it holds it.
+- **(n) a Mach message's audit trailer.** (n0) The registered ports (`mach_ports_register`) don't reach a forked child
+  on this Mac: its lookup gives three ports, the first not the probe's, and the probe's port receives nothing. Through
+  the bootstrap special port: (n1) a live maker's message is named the maker, accepted; **(n2) a message sent, then the
+  sender's exec, read after the exec: the trailer names the maker as it was when it sent (the old pidversion), and
+  Security refuses it (`-67065`)**; (n3) a message whose sender exited before it was read: refused (`100003`); (n4) a
+  message from the maker's forked child, read after the maker's exec: named the child, as itself; (n5) the image the
+  maker exec'd sends with its own code (the special port crosses the exec): named the image at the maker's pid with its
+  new pidversion, accepted, IMAGE's file, hardened; (n6) an image started by `posix_spawn` with the probe's port named
+  as its bootstrap special port: named and accepted. The trailer's token is the sender's as it was at the send, fixed
+  in the message: no later act of anyone moves it.
+- **(o) `SCM_CREDS`:** refused (`EINVAL`) on a pair; this SDK names it and defines no `struct cmsgcred`. A Unix socket
+  on this Mac carries no sender's credentials per message.
+
+**For the keeper's design.** (g4) and (g5) settle what (b) and (c) left open: a token read is "the process that last
+sent, received or polled on the other end, as it runs now", and a failed act stamps as a successful one does, leaving
+no byte. So whatever a keeper asks of a pair (the token at the receipt, after the request, after its own reply, after
+a nonce's answer, the same pid and pidversion at each, the end of file after), a copy-holder can write every byte and
+the genuine image, started with the end as one of its descriptors, can be made the last to act on it with one failed
+write or read, with nothing in the stream to show it. A keeper-made end (m) narrows this to an image that takes
+descriptors from sockets it didn't make; it doesn't close it. A Mach message's trailer (n2, n4, n5, n6) is fixed at
+the send. The design ([the keeper's design](../superpowers/specs/2026-11-27-v2-mac-keeper-design.md), "The proof after
+K-M1") takes it.
+
 ## The keyboard session of 2026-11-26
 
 The user ran part A of [the runbook](v2-mac-keyboard-session.md), guided step by step, from 19:29 to 19:38 (local

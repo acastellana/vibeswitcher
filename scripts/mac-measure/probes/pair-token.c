@@ -10,7 +10,13 @@
 // trial, sequenced over pipes; the keeper reads or writes its end only where the trial says so. No dialog, no debugger,
 // no root, nothing read of a process this one didn't start.
 //
-//   pair-token SOCKET_PATH PROGRAM   (PROGRAM: a hardened image taking --sleep SECONDS, the maker's exec target)
+//   pair-token SOCKET_PATH PROGRAM [IMAGE]   (PROGRAM: a hardened image taking --sleep SECONDS, the maker's exec target;
+//                                             IMAGE: pair-image, the hardened image that acts, for the second part)
+//
+// The second part, (g) to (o) (2026-11-27, the proof's redesign after K-M1 refuted the fixed token), is at the end of
+// this file: the whole write-then-exec with every point a keeper could ask the token, a silent holder, a nonce round,
+// a keeper-made end, which acts of a holder move the token, the token once the last to act exited, the end of file a
+// first run saw, a Mach message's audit trailer, and SCM_CREDS.
 #include <Security/Security.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -18,10 +24,12 @@
 #include <mach/mach.h>
 #include <poll.h>
 #include <signal.h>
+#include <spawn.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
@@ -30,15 +38,16 @@
 
 typedef struct { pid_t pid; int version; } who_t;
 
-static const char *program;
+static const char *program, *image;
 static char *program_real;  // PROGRAM's path with its links resolved (/tmp is /private/tmp), as proc_pidpath gives it
 static struct sockaddr_un address = {.sun_family = AF_UNIX};
 static int listener = -1;
-static CFDataRef own_file_cdhash, program_cdhash;
+static CFDataRef own_file_cdhash, program_cdhash, image_cdhash;
 
 // Who the trial's processes are, for the labels.
-static who_t keeper, maker, child, third;
-static int have_child, have_third;
+static who_t keeper, maker, child, third, spawned;
+static int have_child, have_third, have_spawned;
+static const char *child_name = "the maker's forked child", *third_name = "the third process";
 
 static void die(const char *what) { fprintf(stderr, "pair-token: %s: %s\n", what, strerror(errno)); exit(1); }
 
@@ -76,8 +85,9 @@ static const char *label(who_t w) {
     static char text[160];
     if (same(w, maker)) return "the maker, as it was before any exec";
     if (w.pid == maker.pid) return "the maker's pid, another pidversion (its image after the exec)";
-    if (have_child && same(w, child)) return "the maker's forked child";
-    if (have_third && same(w, third)) return "the third process";
+    if (have_child && same(w, child)) return child_name;
+    if (have_third && same(w, third)) return third_name;
+    if (have_spawned && same(w, spawned)) return "the image the probe spawned";
     if (same(w, keeper)) return "this process (the keeper)";
     snprintf(text, sizeof text, "none of the trial's processes");
     return text;
@@ -126,6 +136,7 @@ static void security(audit_token_t token) {
         print_cdhash(cdhash);
         if (cdhash && own_file_cdhash && CFEqual(cdhash, own_file_cdhash)) printf(" (this probe's file)");
         else if (cdhash && program_cdhash && CFEqual(cdhash, program_cdhash)) printf(" (PROGRAM's file)");
+        else if (cdhash && image_cdhash && CFEqual(cdhash, image_cdhash)) printf(" (IMAGE's file)");
         int hardened = (flags & 0x1) && (flags & 0x10000) && !(flags & (0x4 | 0x10000000));
         printf(" hardened=%s", word ? (hardened ? "yes" : "no") : "unread");
         if (info) CFRelease(info);
@@ -135,14 +146,15 @@ static void security(audit_token_t token) {
     CFRelease(data);
 }
 
-// The token of `fd`'s peer, asked now (a fresh getsockopt each time), labelled, with Security's answer.
-static void token(const char *when, int fd) {
+// The token of `fd`'s peer, asked now (a fresh getsockopt each time), labelled, with Security's answer; returns whose
+// it is (pid 0 when refused).
+static who_t token_who(const char *when, int fd) {
     audit_token_t token;
     socklen_t size = sizeof token;
     printf("  %s: LOCAL_PEERTOKEN ", when);
     if (getsockopt(fd, SOL_LOCAL, LOCAL_PEERTOKEN, &token, &size) != 0) {
         printf("refused errno=%d (%s)\n", errno, strerror(errno));
-        return;
+        return (who_t){0, 0};
     }
     who_t w = of(token);
     printf("pid=%d pidversion=%d = %s", w.pid, w.version, label(w));
@@ -152,7 +164,10 @@ static void token(const char *when, int fd) {
     else printf(" | LOCAL_PEERPID refused errno=%d", errno);
     security(token);
     printf("\n");
+    return w;
 }
+
+static void token(const char *when, int fd) { (void)token_who(when, fd); }
 
 static void who_line(void) {
     printf("  keeper pid=%d pidversion=%d; maker pid=%d pidversion=%d", keeper.pid, keeper.version, maker.pid, maker.version);
@@ -599,11 +614,746 @@ static void trial_f(int maker_last, const char *title) {
     have_child = 0;
 }
 
+// ======================================================================================================================
+// K-M1's second part (2026-11-27, the proof's redesign): (g) to (o). The first part above is unchanged, so its row still
+// reproduces. IMAGE is pair-image (probes/pair-image.c): a hardened image with its own cdhash that, on the probe's word,
+// does on its descriptors what the host does in some mode (a line on descriptor 2, a read of descriptor 0, an answer on
+// a descriptor it was named, a descriptor taken and read). Every step is sequenced over pipes; nothing waits on a clock
+// but the bounded waits named in the lines (a read with a limit, the token asked again for at most 1 s).
+// ======================================================================================================================
+
+static const char *how(char status, char err) {
+    static char text[96];
+    if (status == 'o') return "done";
+    if (status == 'b') return "entered";
+    snprintf(text, sizeof text, "failed errno=%d (%s)", err, strerror(err));
+    return text;
+}
+
+// One step asked of a process over its pipes, its result printed.
+static void step(const char *who, int to, int from, char code, const char *what) {
+    put(to, &code, 1);
+    char r[2];
+    get(from, r, 2);
+    printf("  %s %s: %s\n", who, what, how(r[0], r[1]));
+}
+
+// A holder: its copy of an end (`end`), steps read on `in`, each result (status, errno) on `out`. `give`: a socket to
+// pass a taken descriptor over ('G').
+static void holder_loop(int end, int in, int out, int give) {
+    char code;
+    int taken = -1;
+    while (read(in, &code, 1) == 1) {
+        int ok = 1;
+        char bytes[1024];
+        memset(bytes, 'x', sizeof bytes);
+        switch (code) {
+        case 'w': ok = write(end, "x", 1) == 1; break;                               // a 1-byte write
+        case 'v': ok = write(end, "req", 3) == 3; break;                             // a request
+        case 'W': ok = send(end, bytes, 0, 0) == 0; break;                           // a zero-length send
+        case 'n': ok = recv(end, bytes, 1, MSG_DONTWAIT) >= 0; break;                // a read that doesn't wait
+        case 'p': ok = recv(end, bytes, 1, MSG_PEEK | MSG_DONTWAIT) >= 0; break;     // a peek that doesn't wait
+        case 'P': { struct pollfd p = {.fd = end, .events = POLLIN | POLLOUT}; ok = poll(&p, 1, 0) >= 0; break; }
+        case 'g': { int type; socklen_t n = sizeof type; ok = getsockopt(end, SOL_SOCKET, SO_TYPE, &type, &n) == 0; break; }
+        case 's': { struct timeval t = {.tv_sec = 2}; ok = setsockopt(end, SOL_SOCKET, SO_RCVTIMEO, &t, sizeof t) == 0; break; }
+        case 'm': { struct sockaddr_un a; socklen_t n = sizeof a; ok = getpeername(end, (struct sockaddr *)&a, &n) == 0; break; }
+        case 'i': { int n; ok = ioctl(end, FIONREAD, &n) == 0; break; }
+        case 'f': { struct stat st; ok = fstat(end, &st) == 0; break; }
+        case 'd': { int copy = dup(end); ok = copy >= 0 && close(copy) == 0; break; }
+        case 'S': ok = shutdown(end, SHUT_WR) == 0; break;
+        case 'R': ok = shutdown(end, SHUT_RD) == 0; break;
+        case 'r': {                                                                   // a read that waits
+            char entered[2] = {'b', 0};
+            put(out, entered, 2);
+            ok = read(end, bytes, 1) >= 0;
+            break;
+        }
+        case 'a': {                                                                   // an answer: 8 bytes back
+            struct timeval t = {.tv_sec = 2};
+            setsockopt(end, SOL_SOCKET, SO_RCVTIMEO, &t, sizeof t);
+            size_t got = 0;
+            while (got < 8) { ssize_t n = read(end, bytes + got, 8 - got); if (n <= 0) break; got += (size_t)n; }
+            ok = got == 8 && write(end, bytes, 8) == 8;
+            break;
+        }
+        case 'A': {                                                                   // the keeper's 3-byte reply
+            struct timeval t = {.tv_sec = 2};
+            setsockopt(end, SOL_SOCKET, SO_RCVTIMEO, &t, sizeof t);
+            size_t got = 0;
+            while (got < 3) { ssize_t n = read(end, bytes + got, 3 - got); if (n <= 0) break; got += (size_t)n; }
+            ok = got == 3;
+            break;
+        }
+        case 'k': {                                                                   // a descriptor taken, a request on it
+            taken = receive_fd(end);
+            ok = taken >= 0 && write(taken, "req", 3) == 3;
+            break;
+        }
+        case 'G': ok = taken >= 0 && give >= 0; if (ok) send_fd(give, "f", 1, taken); break;
+        case 'q': _exit(0);
+        default: errno = EINVAL; ok = 0;
+        }
+        char r[2] = {ok ? 'o' : 'e', (char)(ok ? 0 : errno)};
+        put(out, r, 2);
+    }
+    _exit(0);
+}
+
+// Moves `fd` above the low numbers, so a dup2 onto 0 to 6 never overwrites another descriptor still needed.
+static int high(int fd) { int moved = fcntl(fd, F_DUPFD, 30); close(fd); return moved; }
+
+// --- the scenes: a maker (attacker code) that makes a pair and sends one end as K-M1's makers do, a silent holder S
+// forked from it with a copy of the maker's end, and the maker's exec of PROGRAM (silent) or IMAGE (talking) ---------
+typedef struct { pid_t m, s; int to_m, from_m, to_s, from_s, to_i, from_i, exec_read, end; } scene_t;
+
+static scene_t scene_start(int with_give) {
+    int mo[2], mr[2], so[2], sr[2], io[2], ir[2], ex[2], q[2] = {-1, -1};
+    if (pipe(mo) || pipe(mr) || pipe(so) || pipe(sr) || pipe(io) || pipe(ir)) die("pipe");
+    closed_on_exec_pipe(ex);
+    pid_t m = fork();
+    if (m == 0) {
+        close(mo[1]); close(mr[0]); close(so[1]); close(sr[0]); close(io[1]); close(ir[0]); close(ex[0]);
+        tell_who(mr[1]);
+        int end = make_and_send(mo[0]);
+        if (with_give && socketpair(AF_UNIX, SOCK_STREAM, 0, q) != 0) die("socketpair (give)");
+        pid_t s = fork();
+        if (s == 0) {
+            close(mo[0]); close(mr[1]); close(io[0]); close(ir[1]); close(ex[1]);
+            if (q[0] >= 0) close(q[0]);
+            tell_who(sr[1]);
+            holder_loop(end, so[0], sr[1], q[1]);
+        }
+        close(so[0]); close(sr[1]);
+        if (q[1] >= 0) close(q[1]);
+        char code;
+        while (read(mo[0], &code, 1) == 1) {
+            int ok = 1;
+            char bytes[8];
+            if (code == 'v') ok = write(end, "req", 3) == 3;
+            else if (code == 'a') {
+                size_t got = 0;
+                while (got < 8) { ssize_t n = read(end, bytes + got, 8 - got); if (n <= 0) break; got += (size_t)n; }
+                ok = got == 8 && write(end, bytes, 8) == 8;
+            } else if (code == 'X') {
+                execl(program, program, "--sleep", "30", (char *)NULL);
+                _exit(127);
+            } else if (code == 'x') {
+                // IMAGE with the maker's end as its descriptors 0, 2 and 5, its steps on 3 and 4, the give socket on 6.
+                int e = high(end), i = high(io[0]), r = high(ir[1]), g = q[0] >= 0 ? high(q[0]) : -1;
+                dup2(e, 0); dup2(e, 2); dup2(e, 5); dup2(i, 3); dup2(r, 4);
+                if (g >= 0) dup2(g, 6);
+                close(e); close(i); close(r);
+                if (g >= 0) close(g);
+                execl(image, image, "act", (char *)NULL);
+                _exit(127);
+            } else if (code == 'q') _exit(0);
+            char res[2] = {ok ? 'o' : 'e', (char)(ok ? 0 : errno)};
+            put(mr[1], res, 2);
+        }
+        _exit(0);
+    }
+    close(mo[0]); close(mr[1]); close(so[0]); close(sr[1]); close(io[0]); close(ir[1]); close(ex[1]);
+    scene_t c = {.m = m, .to_m = mo[1], .from_m = mr[0], .to_s = so[1], .from_s = sr[0], .to_i = io[1], .from_i = ir[0], .exec_read = ex[0]};
+    maker = hear_who(mr[0]);
+    keeper = own();
+    c.end = receive_end();
+    say(mo[1]);
+    third = hear_who(sr[0]);
+    have_third = 1;
+    third_name = "S, the maker's forked holder (silent until told)";
+    who_line();
+    return c;
+}
+
+static void scene_exec(scene_t *c, char code) {
+    put(c->to_m, &code, 1);
+    await_exec(c->exec_read);
+}
+
+static void scene_end(scene_t *c) {
+    kill(c->m, SIGTERM);
+    waitpid(c->m, NULL, 0);
+    char q = 'q';
+    put(c->to_s, &q, 1);
+    while (waitpid(-1, NULL, WNOHANG) > 0) {}
+    close(c->to_m); close(c->from_m); close(c->to_s); close(c->from_s); close(c->to_i); close(c->from_i); close(c->exec_read);
+    close(c->end);
+    have_third = 0;
+    third_name = "the third process";
+}
+
+// The keeper's reads and writes on its end, each said.
+static void keeper_reads_request(int end) {
+    struct pollfd p = {.fd = end, .events = POLLIN};
+    char bytes[3];
+    if (poll(&p, 1, 2000) != 1) { printf("  the keeper's read of the request: nothing within 2 s\n"); return; }
+    ssize_t n = read(end, bytes, 3);
+    if (n <= 0) printf("  the keeper's read of the request: %s\n", n == 0 ? "end of file" : strerror(errno));
+    else printf("  the keeper read %zd bytes: %.*s\n", n, (int)n, bytes);
+}
+
+static void keeper_pending(int end, const char *when) {
+    int n = 0;
+    ioctl(end, FIONREAD, &n);
+    printf("  bytes waiting on the keeper's end %s: %d\n", when, n);
+}
+
+static unsigned char nonce[8];
+
+static void keeper_sends_nonce(int end) {
+    arc4random_buf(nonce, sizeof nonce);
+    if (write(end, nonce, 8) != 8) die("the nonce");
+    printf("  the keeper wrote an 8-byte nonce on its end\n");
+}
+
+static void keeper_reads_answer(int end) {
+    unsigned char bytes[8];
+    size_t got = 0;
+    while (got < 8) {
+        struct pollfd p = {.fd = end, .events = POLLIN};
+        if (poll(&p, 1, 1000) != 1) break;
+        ssize_t n = read(end, bytes + got, 8 - got);
+        if (n <= 0) break;
+        got += (size_t)n;
+    }
+    if (got == 8) printf("  the keeper read the answer: %s\n", memcmp(bytes, nonce, 8) == 0 ? "the nonce, as sent" : "8 bytes, not the nonce");
+    else printf("  the keeper read %zu of the answer's 8 bytes within 1 s\n", got);
+}
+
+static void compare(const char *what, who_t first, who_t now) {
+    printf("  %s against the first read after the exec: %s\n", what,
+           first.pid && same(first, now) ? "the same pid and pidversion" : "not the same");
+}
+
+static void trial_g(void) {
+    printf("== (g1) the whole write-then-exec, the silent image: the maker writes the request and execs PROGRAM; every point a keeper could ask the token\n");
+    scene_t c = scene_start(0);
+    token("at the receipt, before any request", c.end);
+    step("the maker", c.to_m, c.from_m, 'v', "writes the request on its end");
+    scene_exec(&c, 'X');
+    who_t first = token_who("after the exec, before the keeper reads the request", c.end);
+    keeper_reads_request(c.end);
+    keeper_pending(c.end, "after the request");
+    token("after the keeper read the request", c.end);
+    if (write(c.end, "ans", 3) != 3) die("the reply");
+    printf("  the keeper wrote its 3-byte reply\n");
+    token("after the keeper's reply", c.end);
+    keeper_sends_nonce(c.end);
+    keeper_reads_answer(c.end);
+    who_t last = token_who("after a second round (a nonce) that nothing answered", c.end);
+    compare("the last read", first, last);
+    scene_end(&c);
+
+    printf("== (g2) the same, the nonce sent once the token names PROGRAM (before any reply); S, silent until now, answers it\n");
+    c = scene_start(0);
+    step("the maker", c.to_m, c.from_m, 'v', "writes the request on its end");
+    scene_exec(&c, 'X');
+    first = token_who("after the exec", c.end);
+    keeper_reads_request(c.end);
+    keeper_sends_nonce(c.end);
+    step("S", c.to_s, c.from_s, 'a', "reads the nonce on its copy and writes it back");
+    keeper_reads_answer(c.end);
+    last = token_who("after the answer", c.end);
+    compare("this read", first, last);
+    scene_end(&c);
+
+    const char *titles[] = {
+        "== (g3) as (g2), IMAGE the exec'd image (the maker's end its descriptors 0, 2, 5); after S's answer IMAGE writes a line on its descriptor 2",
+        "== (g4) as (g3), but S shuts the end's write side after its answer, then IMAGE writes its line on descriptor 2 (SIGPIPE ignored, as the maker left it)",
+        "== (g5) as (g3), but after S's answer IMAGE reads its descriptor 0 once, without waiting (nothing there)",
+    };
+    for (int k = 0; k < 3; k++) {
+        printf("%s\n", titles[k]);
+        c = scene_start(0);
+        step("the maker", c.to_m, c.from_m, 'v', "writes the request on its end");
+        scene_exec(&c, 'x');
+        first = token_who("after the exec", c.end);
+        keeper_reads_request(c.end);
+        keeper_sends_nonce(c.end);
+        step("S", c.to_s, c.from_s, 'a', "reads the nonce on its copy and writes it back");
+        keeper_reads_answer(c.end);
+        token("after the answer", c.end);
+        if (k == 1) step("S", c.to_s, c.from_s, 'S', "shuts the end's write side (shutdown SHUT_WR)");
+        if (k < 2) step("IMAGE", c.to_i, c.from_i, 'e', "writes a line on its descriptor 2");
+        else step("IMAGE", c.to_i, c.from_i, '0', "reads its descriptor 0 once, not waiting");
+        last = token_who("after IMAGE's step", c.end);
+        compare("this read", first, last);
+        keeper_pending(c.end, "after IMAGE's step");
+        if (k == 1) {
+            char byte;
+            ssize_t n = recv(c.end, &byte, 1, MSG_DONTWAIT);
+            printf("  the keeper's next read: %s\n", n == 0 ? "end of file" : n > 0 ? "a byte" : strerror(errno));
+        }
+        scene_end(&c);
+    }
+}
+
+static void trial_h(void) {
+    printf("== (h) S holds a copy and stays silent while the genuine image (IMAGE) talks: its own request, its answer to the nonce; then the keeper's reply\n");
+    scene_t c = scene_start(0);
+    scene_exec(&c, 'x');
+    token("after the exec, before IMAGE writes", c.end);
+    step("IMAGE", c.to_i, c.from_i, 'r', "writes its request on descriptor 5");
+    who_t first = token_who("after IMAGE's request", c.end);
+    keeper_reads_request(c.end);
+    keeper_sends_nonce(c.end);
+    step("IMAGE", c.to_i, c.from_i, 'a', "reads the nonce on descriptor 5 and writes it back");
+    keeper_reads_answer(c.end);
+    who_t answered = token_who("after IMAGE's answer", c.end);
+    compare("this read", first, answered);
+    if (write(c.end, "ans", 3) != 3) die("the reply");
+    printf("  the keeper wrote its 3-byte reply\n");
+    step("S", c.to_s, c.from_s, 'A', "reads the keeper's reply on its copy");
+    token("after S took the reply", c.end);
+    scene_end(&c);
+}
+
+static void trial_i(void) {
+    printf("== (i) a nonce sent before the token names a pinned image: the maker (not exec'd) writes the request, answers the nonce, then execs PROGRAM\n");
+    scene_t c = scene_start(0);
+    step("the maker", c.to_m, c.from_m, 'v', "writes the request on its end");
+    keeper_reads_request(c.end);
+    token("after the request, the maker not exec'd", c.end);
+    keeper_sends_nonce(c.end);
+    step("the maker", c.to_m, c.from_m, 'a', "reads the nonce and writes it back");
+    keeper_reads_answer(c.end);
+    token("after the answer, the maker not exec'd", c.end);
+    scene_exec(&c, 'X');
+    token("after the maker's exec", c.end);
+    scene_end(&c);
+}
+
+static void trial_m(void) {
+    printf("== (m) a keeper-made end, sent over the maker's pair once its token names IMAGE: who can be named on it\n");
+    scene_t c = scene_start(1);
+    scene_exec(&c, 'x');
+    token("on the maker's pair, after the exec", c.end);
+    int made[2];
+    if (socketpair(AF_UNIX, SOCK_STREAM, 0, made) != 0) die("socketpair (keeper's)");
+    send_fd(c.end, "k", 1, made[1]);
+    close(made[1]);
+    printf("  the keeper made a pair and sent one end over its end of the maker's pair\n");
+    step("S", c.to_s, c.from_s, 'k', "takes that end on its copy of the maker's end and writes a request on it");
+    keeper_reads_request(made[0]);
+    token("on the keeper-made end, after S's request", made[0]);
+    step("IMAGE", c.to_i, c.from_i, 'e', "writes a line on its descriptor 2 (the maker's end, not the keeper-made one)");
+    token("on the keeper-made end, after that line", made[0]);
+    step("S", c.to_s, c.from_s, 'G', "passes the keeper-made end to IMAGE over a socket IMAGE has as descriptor 6");
+    step("IMAGE", c.to_i, c.from_i, 'f', "takes a descriptor on descriptor 6 and reads it once, not waiting");
+    token("on the keeper-made end, after IMAGE took it and read once", made[0]);
+    close(made[0]);
+    scene_end(&c);
+}
+
+// --- (j) and (k): which acts of a holder move the token; the token once the last to act has exited -----------------
+typedef struct { pid_t h1, h2; int t1, f1, t2, f2, end; } holders_t;
+
+static holders_t holders_start(void) {
+    int pair[2], a[2], b[2], c[2], d[2];
+    if (socketpair(AF_UNIX, SOCK_STREAM, 0, pair) != 0 || pipe(a) || pipe(b) || pipe(c) || pipe(d)) die("holders");
+    holders_t h = {.end = pair[1]};
+    h.h1 = fork();
+    if (h.h1 == 0) { close(pair[1]); close(a[1]); close(b[0]); close(c[0]); close(c[1]); close(d[0]); close(d[1]); tell_who(b[1]); holder_loop(pair[0], a[0], b[1], -1); }
+    h.h2 = fork();
+    if (h.h2 == 0) { close(pair[1]); close(c[1]); close(d[0]); close(a[0]); close(a[1]); close(b[0]); close(b[1]); tell_who(d[1]); holder_loop(pair[0], c[0], d[1], -1); }
+    close(pair[0]); close(a[0]); close(b[1]); close(c[0]); close(d[1]);
+    h.t1 = a[1]; h.f1 = b[0]; h.t2 = c[1]; h.f2 = d[0];
+    child = hear_who(h.f1);
+    third = hear_who(h.f2);
+    have_child = have_third = 1;
+    child_name = "holder 1";
+    third_name = "holder 2";
+    keeper = own();
+    maker = (who_t){0, 0};
+    return h;
+}
+
+static void holders_end(holders_t *h) {
+    char q = 'q';
+    write(h->t1, &q, 1); write(h->t2, &q, 1);
+    waitpid(h->h1, NULL, 0); waitpid(h->h2, NULL, 0);
+    close(h->t1); close(h->f1); close(h->t2); close(h->f2); close(h->end);
+    have_child = have_third = 0;
+    child_name = "the maker's forked child";
+    third_name = "the third process";
+}
+
+static void drain(int end) {
+    char bytes[4096];
+    while (recv(end, bytes, sizeof bytes, MSG_DONTWAIT) > 0) {}
+}
+
+// Holder 1 writes a byte (the token then names it), the keeper drains its end; then holder 2's act, and the token.
+static void act_line(holders_t *h, char code, const char *what) {
+    char w = 'w', r[2];
+    put(h->t1, &w, 1); get(h->f1, r, 2);
+    drain(h->end);
+    put(h->t2, &code, 1);
+    get(h->f2, r, 2);
+    audit_token_t t;
+    socklen_t n = sizeof t;
+    printf("  holder 2: %s (%s) -> ", what, how(r[0], r[1]));
+    if (getsockopt(h->end, SOL_LOCAL, LOCAL_PEERTOKEN, &t, &n) != 0) printf("token refused errno=%d\n", errno);
+    else printf("the token names %s\n", label(of(t)));
+    drain(h->end);
+}
+
+static const char *named_now(int end) {
+    audit_token_t t;
+    socklen_t n = sizeof t;
+    if (getsockopt(end, SOL_LOCAL, LOCAL_PEERTOKEN, &t, &n) != 0) return "nobody (refused)";
+    return label(of(t));
+}
+
+static void trial_j(void) {
+    printf("== (j) which acts of a holder move the token: a pair made here, its other end held by two forked holders; before each act holder 1 writes a byte (the token then names holder 1)\n");
+    holders_t h = holders_start();
+    printf("  keeper pid=%d pidversion=%d; holder 1 pid=%d pidversion=%d; holder 2 pid=%d pidversion=%d\n", keeper.pid, keeper.version, child.pid, child.version, third.pid, third.version);
+    act_line(&h, 'w', "a 1-byte write");
+    act_line(&h, 'W', "a zero-length send");
+    act_line(&h, 'n', "a read that doesn't wait, nothing there (EAGAIN)");
+    act_line(&h, 'p', "a peek that doesn't wait, nothing there");
+    act_line(&h, 'P', "poll");
+    act_line(&h, 'g', "getsockopt SO_TYPE");
+    act_line(&h, 's', "setsockopt SO_RCVTIMEO (what the handover keeper's limitIO does)");
+    act_line(&h, 'm', "getpeername");
+    act_line(&h, 'i', "ioctl FIONREAD");
+    act_line(&h, 'f', "fstat");
+    act_line(&h, 'd', "dup, then close the copy");
+    {   // a peek and a read with a byte there
+        char w = 'w', r[2], p = 'p', n = 'n';
+        put(h.t1, &w, 1); get(h.f1, r, 2); drain(h.end);
+        if (write(h.end, "y", 1) != 1) die("write");
+        put(h.t2, &p, 1); get(h.f2, r, 2);
+        printf("  holder 2: a peek with a byte there (%s) -> the token names %s\n", how(r[0], r[1]), named_now(h.end));
+        put(h.t1, &w, 1); get(h.f1, r, 2); drain(h.end);
+        put(h.t2, &n, 1); get(h.f2, r, 2);
+        printf("  holder 2: a read with a byte there (%s) -> the token names %s\n", how(r[0], r[1]), named_now(h.end));
+    }
+    {   // a read that waits: the token asked while it waits (for at most 1 s), then after a byte ends the wait
+        char w = 'w', rr = 'r', r[2];
+        put(h.t1, &w, 1); get(h.f1, r, 2); drain(h.end);
+        put(h.t2, &rr, 1); get(h.f2, r, 2);  // 'b': holder 2 says it is about to read
+        const char *seen = named_now(h.end);
+        for (int i = 0; i < 500 && strcmp(seen, "holder 2") != 0; i++) { usleep(2000); seen = named_now(h.end); }
+        printf("  holder 2: a read that waits, entered, nothing there yet -> while it waits (asked for up to 1 s) the token names %s\n", seen);
+        if (write(h.end, "y", 1) != 1) die("write");
+        get(h.f2, r, 2);
+        printf("  holder 2: that read, ended by a byte from the keeper (%s) -> the token names %s\n", how(r[0], r[1]), named_now(h.end));
+    }
+    holders_end(&h);
+
+    printf("== (j) after the end's write side is shut (holder 1's shutdown SHUT_WR; SIGPIPE ignored)\n");
+    h = holders_start();
+    {
+        char w = 'w', S = 'S', r[2];
+        put(h.t1, &w, 1); get(h.f1, r, 2); drain(h.end);
+        put(h.t1, &S, 1); get(h.f1, r, 2);
+        printf("  holder 1: shutdown SHUT_WR (%s) -> the token names %s\n", how(r[0], r[1]), named_now(h.end));
+        char ops[] = {'w', 'W'};
+        const char *names[] = {"a 1-byte write (EPIPE expected)", "a zero-length send"};
+        for (int k = 0; k < 2; k++) {
+            put(h.t2, &ops[k], 1); get(h.f2, r, 2);
+            printf("  holder 2: %s (%s) -> the token names %s\n", names[k], how(r[0], r[1]), named_now(h.end));
+        }
+        char x = 'w';
+        put(h.t1, &x, 1); get(h.f1, r, 2);
+        printf("  holder 1: a 1-byte write (%s) -> the token names %s\n", how(r[0], r[1]), named_now(h.end));
+        keeper_pending(h.end, "(no byte expected)");
+    }
+    holders_end(&h);
+
+    printf("== (j) after the end's read side is shut (holder 1's shutdown SHUT_RD)\n");
+    h = holders_start();
+    {
+        char w = 'w', R = 'R', n = 'n', rr = 'r', r[2];
+        put(h.t1, &w, 1); get(h.f1, r, 2); drain(h.end);
+        put(h.t1, &R, 1); get(h.f1, r, 2);
+        printf("  holder 1: shutdown SHUT_RD (%s) -> the token names %s\n", how(r[0], r[1]), named_now(h.end));
+        put(h.t2, &n, 1); get(h.f2, r, 2);
+        printf("  holder 2: a read that doesn't wait (%s) -> the token names %s\n", how(r[0], r[1]), named_now(h.end));
+        put(h.t1, &w, 1); get(h.f1, r, 2);
+        put(h.t2, &rr, 1); get(h.f2, r, 2); get(h.f2, r, 2);
+        printf("  holder 2: a read that would wait (%s, at once) -> the token names %s\n", how(r[0], r[1]), named_now(h.end));
+    }
+    holders_end(&h);
+
+    printf("== (k) the last to act has exited, another holder keeps the end open\n");
+    h = holders_start();
+    {
+        char w = 'w', q = 'q', r[2];
+        put(h.t1, &w, 1); get(h.f1, r, 2); drain(h.end);
+        printf("  holder 1 wrote a byte -> the token names %s\n", named_now(h.end));
+        put(h.t1, &q, 1);
+        waitpid(h.h1, NULL, 0);
+        printf("  holder 1 exited and was reaped; holder 2 still holds the end\n");
+        token("after holder 1's exit", h.end);
+        struct pollfd p = {.fd = h.end, .events = POLLIN | POLLOUT};
+        int got = poll(&p, 1, 0);
+        printf("  poll: %d revents=0x%x\n", got, p.revents);
+        put(h.t2, &w, 1); get(h.f2, r, 2);
+        token("after holder 2 writes", h.end);
+        drain(h.end);
+        h.h1 = 0;
+        write(h.t2, &q, 1);
+        waitpid(h.h2, NULL, 0);
+        close(h.t1); close(h.f1); close(h.t2); close(h.f2); close(h.end);
+        have_child = have_third = 0;
+        child_name = "the maker's forked child";
+        third_name = "the third process";
+    }
+}
+
+// A descriptor taken from a connection's one message, or -1 (the message came without one).
+static int receive_fd_soft(int socket) {
+    char bytes[64];
+    struct iovec io = {.iov_base = bytes, .iov_len = sizeof bytes};
+    char control[CMSG_SPACE(sizeof(int))];
+    struct msghdr message = {.msg_iov = &io, .msg_iovlen = 1, .msg_control = control, .msg_controllen = sizeof control};
+    if (recvmsg(socket, &message, 0) <= 0) return -1;
+    struct cmsghdr *header = CMSG_FIRSTHDR(&message);
+    if (!header || header->cmsg_type != SCM_RIGHTS) return -1;
+    int fd;
+    memcpy(&fd, CMSG_DATA(header), sizeof fd);
+    return fd;
+}
+
+// --- (l) the end of file a first version of K-M1 saw: the sent end closed by its maker while still in flight --------
+static void trial_l(int mode, int runs, const char *title) {
+    int requests = 0, ends = 0, nothing = 0, none = 0;
+    for (int i = 0; i < runs; i++) {
+        int to[2], from[2];
+        if (pipe(to) || pipe(from)) die("pipe");
+        pid_t m = fork();
+        if (m == 0) {
+            close(to[1]); close(from[0]);
+            int connection = connect_to_keeper();
+            int pair[2];
+            if (socketpair(AF_UNIX, SOCK_STREAM, 0, pair) != 0) die("socketpair");
+            if (write(pair[0], "req", 3) != 3) die("write");
+            send_fd(connection, "vibeswitcher-keeper-v1\n", 23, pair[1]);
+            if (mode > 0) hear(to[0]);   // 1: the keeper accepted; 2: the keeper holds the end
+            close(pair[1]);
+            close(connection);
+            say(from[1]);
+            hear(to[0]);
+            _exit(0);
+        }
+        close(to[0]); close(from[1]);
+        int connection = -1, end = -1;
+        if (mode == 0) { hear(from[0]); connection = accept(listener, NULL, NULL); end = receive_fd_soft(connection); }
+        if (mode == 1) { connection = accept(listener, NULL, NULL); say(to[1]); hear(from[0]); end = receive_fd_soft(connection); }
+        if (mode == 2) { connection = accept(listener, NULL, NULL); end = receive_fd_soft(connection); say(to[1]); hear(from[0]); }
+        close(connection);
+        struct pollfd p = {.fd = end, .events = POLLIN};
+        char bytes[3];
+        if (end < 0) none++;
+        else if (poll(&p, 1, 1000) != 1) nothing++;
+        else {
+            ssize_t n = read(end, bytes, 3);
+            if (n == 3) requests++; else if (n == 0) ends++; else nothing++;
+        }
+        close(end);
+        say(to[1]);
+        waitpid(m, NULL, 0);
+        close(to[1]); close(from[0]);
+    }
+    printf("== %s\n  %d runs: the request read %d, end of file %d, nothing within 1 s %d, no descriptor in the hello %d\n", title, runs, requests, ends, nothing, none);
+}
+
+// --- (n) a Mach message's audit trailer: the sender's token as it was when it sent ---------------------------------
+// The probe's port reaches its children as their bootstrap special port, which fork, posix_spawn and exec carry: the
+// probe sets its own to that port around each fork (and restores it at once), or names it for a spawn
+// (posix_spawnattr_setspecialport_np). The children here and the images they exec look nothing up through it. (n0)
+// first: the registered ports (mach_ports_register), which this probe tried first.
+static mach_port_t registered = MACH_PORT_NULL, saved_bootstrap = MACH_PORT_NULL;
+
+static void mach_make(void) {
+    if (mach_port_allocate(mach_task_self(), MACH_PORT_RIGHT_RECEIVE, &registered) != KERN_SUCCESS) die("mach_port_allocate");
+    if (mach_port_insert_right(mach_task_self(), registered, registered, MACH_MSG_TYPE_MAKE_SEND) != KERN_SUCCESS) die("insert_right");
+    if (task_get_special_port(mach_task_self(), TASK_BOOTSTRAP_PORT, &saved_bootstrap) != KERN_SUCCESS) die("task_get_special_port");
+}
+
+static pid_t fork_with_port(void) {
+    if (task_set_special_port(mach_task_self(), TASK_BOOTSTRAP_PORT, registered) != KERN_SUCCESS) die("task_set_special_port");
+    pid_t m = fork();
+    if (m != 0 && task_set_special_port(mach_task_self(), TASK_BOOTSTRAP_PORT, saved_bootstrap) != KERN_SUCCESS) die("restore");
+    return m;
+}
+
+static int mach_send_to(mach_port_t port, const char *tag) {
+    if (!MACH_PORT_VALID(port)) return 0;
+    struct { mach_msg_header_t header; char body[8]; } message;
+    memset(&message, 0, sizeof message);
+    message.header.msgh_bits = MACH_MSGH_BITS(MACH_MSG_TYPE_COPY_SEND, 0);
+    message.header.msgh_size = sizeof message;
+    message.header.msgh_remote_port = port;
+    strncpy(message.body, tag, sizeof message.body - 1);
+    return mach_msg(&message.header, MACH_SEND_MSG | MACH_SEND_TIMEOUT, sizeof message, 0, MACH_PORT_NULL, 5000, MACH_PORT_NULL) == KERN_SUCCESS;
+}
+
+static void mach_send_or_say(const char *tag) {
+    mach_port_t port = MACH_PORT_NULL;
+    task_get_special_port(mach_task_self(), TASK_BOOTSTRAP_PORT, &port);
+    if (!mach_send_to(port, tag)) printf("  (%s: the send failed)\n", tag);
+}
+
+static void mach_receive(const char *when) {
+    struct { mach_msg_header_t header; char body[8]; mach_msg_audit_trailer_t trailer; } message;
+    memset(&message, 0, sizeof message);
+    kern_return_t got = mach_msg(&message.header,
+                                 MACH_RCV_MSG | MACH_RCV_TIMEOUT | MACH_RCV_TRAILER_TYPE(MACH_MSG_TRAILER_FORMAT_0) | MACH_RCV_TRAILER_ELEMENTS(MACH_RCV_TRAILER_AUDIT),
+                                 0, sizeof message, registered, 5000, MACH_PORT_NULL);
+    if (got != KERN_SUCCESS) { printf("  %s: no message within 5 s (0x%x)\n", when, got); return; }
+    who_t w = of(message.trailer.msgh_audit);
+    printf("  %s: the message \"%.7s\", its trailer's token pid=%d pidversion=%d = %s", when, message.body, w.pid, w.version, label(w));
+    security(message.trailer.msgh_audit);
+    printf("\n");
+}
+
+static void trial_n(void) {
+    mach_make();
+    {
+        printf("== (n0) Mach: the probe's port registered for its task (mach_ports_register); a forked child looks its registered ports up and sends to the first\n");
+        mach_ports_register(mach_task_self(), &registered, 1);
+        pid_t c = fork();
+        if (c == 0) {
+            mach_port_array_t ports = NULL;
+            mach_msg_type_number_t count = 0;
+            kern_return_t kr = mach_ports_lookup(mach_task_self(), &ports, &count);
+            int sent = kr == KERN_SUCCESS && count > 0 && mach_send_to(ports[0], "child");
+            printf("  the child's lookup: 0x%x, %u ports, the first %s the probe's port name; its send: %s\n", kr, count,
+                   count > 0 && ports[0] == registered ? "is" : "isn't", sent ? "accepted by the kernel" : "failed");
+            _exit(0);
+        }
+        waitpid(c, NULL, 0);
+        mach_receive("the probe's port, once the child exited");
+        mach_ports_register(mach_task_self(), NULL, 0);
+    }
+    const char *titles[] = {
+        "== (n1) Mach: a live maker sends one message to the probe's port (its bootstrap special port, set at its fork); it doesn't exec",
+        "== (n2) Mach: the maker sends, then execs PROGRAM; the message read only after the exec",
+        "== (n3) Mach: the maker sends, then exits; the message read only after its exit",
+        "== (n4) Mach: the maker's forked child sends; the maker execs PROGRAM; read after the exec",
+        "== (n5) Mach: the maker execs IMAGE, whose own code sends to its bootstrap special port (the port crosses the exec)",
+    };
+    for (int k = 0; k < 5; k++) {
+        printf("%s\n", titles[k]);
+        int to[2], from[2], ex[2], cw[2];
+        if (pipe(to) || pipe(from) || pipe(cw)) die("pipe");
+        closed_on_exec_pipe(ex);
+        have_child = k == 3;
+        pid_t m = fork_with_port();
+        if (m == 0) {
+            close(to[1]); close(from[0]); close(ex[0]); close(cw[0]);
+            tell_who(from[1]);
+            if (k == 3) {
+                pid_t c = fork();
+                if (c == 0) { close(ex[1]); close(to[0]); tell_who(cw[1]); mach_send_or_say("child"); sleep(30); _exit(0); }
+                close(cw[1]);
+            } else if (k != 4) mach_send_or_say("maker");
+            say(from[1]);
+            hear(to[0]);
+            if (k == 1 || k == 3) exec_program();
+            if (k == 4) { execl(image, image, "mach", (char *)NULL); _exit(127); }
+            _exit(0);
+        }
+        close(to[0]); close(from[1]); close(ex[1]); close(cw[1]);
+        maker = hear_who(from[0]);
+        keeper = own();
+        if (k == 3) { child = hear_who(cw[0]); }
+        hear(from[0]);
+        who_line();
+        if (k == 0) mach_receive("the maker alive, not exec'd");
+        say(to[1]);
+        if (k == 1 || k == 3 || k == 4) await_exec(ex[0]);
+        if (k == 2) { waitpid(m, NULL, 0); printf("  the maker exited and was reaped\n"); }
+        if (k == 1) mach_receive("read after the maker's exec");
+        if (k == 2) mach_receive("read after the maker's exit");
+        if (k == 3) mach_receive("read after the maker's exec");
+        if (k == 4) mach_receive("read once IMAGE ran");
+        if (k != 2) { kill(m, SIGTERM); waitpid(m, NULL, 0); }
+        if (k == 3) kill(child.pid, SIGTERM);
+        close(to[1]); close(from[0]); close(ex[0]); close(cw[0]);
+        have_child = 0;
+    }
+    printf("== (n6) Mach: IMAGE started by posix_spawn from the probe (as a host starts its children), the probe's port named as its bootstrap special port\n");
+    int report[2];
+    if (pipe(report)) die("pipe");
+    posix_spawn_file_actions_t actions;
+    posix_spawn_file_actions_init(&actions);
+    posix_spawn_file_actions_adddup2(&actions, report[1], 4);
+    posix_spawnattr_t attributes;
+    posix_spawnattr_init(&attributes);
+    posix_spawnattr_setspecialport_np(&attributes, registered, TASK_BOOTSTRAP_PORT);
+    pid_t spawned_pid;
+    char *args[] = {(char *)image, "mach", "4", NULL};
+    extern char **environ;
+    if (posix_spawn(&spawned_pid, image, &actions, &attributes, args, environ) != 0) die("posix_spawn");
+    posix_spawn_file_actions_destroy(&actions);
+    posix_spawnattr_destroy(&attributes);
+    close(report[1]);
+    spawned = hear_who(report[0]);
+    have_spawned = 1;
+    keeper = own();
+    printf("  keeper pid=%d pidversion=%d; spawned image pid=%d pidversion=%d\n", keeper.pid, keeper.version, spawned.pid, spawned.version);
+    mach_receive("read once the spawned image ran");
+    kill(spawned_pid, SIGTERM);
+    waitpid(spawned_pid, NULL, 0);
+    close(report[0]);
+    have_spawned = 0;
+    mach_port_mod_refs(mach_task_self(), registered, MACH_PORT_RIGHT_RECEIVE, -1);
+}
+
+// --- (o) whether a Unix socket carries a sender's credentials per message (SCM_CREDS) on this Mac -------------------
+#define CREDS_SIZE 96
+static void trial_o(void) {
+    printf("== (o) SCM_CREDS: a message on a pair carrying an SCM_CREDS control message of 96 zero bytes (this SDK names SCM_CREDS but defines no struct cmsgcred)\n");
+    int pair[2];
+    if (socketpair(AF_UNIX, SOCK_STREAM, 0, pair) != 0) die("socketpair");
+    char control[CMSG_SPACE(CREDS_SIZE)];
+    memset(control, 0, sizeof control);
+    char byte = 'c';
+    struct iovec io = {.iov_base = &byte, .iov_len = 1};
+    struct msghdr message = {.msg_iov = &io, .msg_iovlen = 1, .msg_control = control, .msg_controllen = sizeof control};
+    struct cmsghdr *header = CMSG_FIRSTHDR(&message);
+    header->cmsg_level = SOL_SOCKET;
+    header->cmsg_type = SCM_CREDS;
+    header->cmsg_len = CMSG_LEN(CREDS_SIZE);
+    ssize_t sent = sendmsg(pair[0], &message, 0);
+    if (sent < 0) printf("  sendmsg with SCM_CREDS: refused errno=%d (%s)\n", errno, strerror(errno));
+    else {
+        char back[CMSG_SPACE(CREDS_SIZE) + 64];
+        struct msghdr in = {.msg_iov = &io, .msg_iovlen = 1, .msg_control = back, .msg_controllen = sizeof back};
+        ssize_t got = recvmsg(pair[1], &in, MSG_DONTWAIT);
+        struct cmsghdr *h = got > 0 ? CMSG_FIRSTHDR(&in) : NULL;
+        printf("  sendmsg with SCM_CREDS: sent %zd; received %zd, control %s", sent, got, h ? "present" : "none");
+        if (h) printf(" (level %d type %d len %u)", h->cmsg_level, h->cmsg_type, (unsigned)h->cmsg_len);
+        printf("\n");
+    }
+    close(pair[0]); close(pair[1]);
+}
+
+static void part_two(void) {
+    printf("#### K-M1, second part: (g) to (o)\n");
+    trial_g();
+    trial_h();
+    trial_i();
+    trial_m();
+    trial_j();
+    trial_l(0, 200, "(l) the maker closes its copy of the sent end and its connection at once, before the keeper's accept");
+    trial_l(1, 200, "(l) the maker closes them after the keeper's accept, before its recvmsg");
+    trial_l(2, 200, "(l) the maker closes them once the keeper holds the end (K-M1's makers, and the handover keeper's rule)");
+    trial_n();
+    trial_o();
+}
+
 int main(int argc, char **argv) {
     setvbuf(stdout, NULL, _IOLBF, 0);
-    if (argc != 3) { fprintf(stderr, "usage: pair-token SOCKET_PATH PROGRAM\n"); return 64; }
+    if (argc != 3 && argc != 4) { fprintf(stderr, "usage: pair-token SOCKET_PATH PROGRAM [IMAGE]\n"); return 64; }
     signal(SIGPIPE, SIG_IGN);
     program = argv[2];
+    image = argc == 4 ? argv[3] : NULL;
     program_real = realpath(program, NULL);
     if (strlen(argv[1]) >= sizeof address.sun_path) { fprintf(stderr, "socket path too long\n"); return 1; }
     strcpy(address.sun_path, argv[1]);
@@ -616,6 +1366,12 @@ int main(int argc, char **argv) {
     printf("\nPROGRAM's file cdhash=");
     print_cdhash(program_cdhash);
     printf("\n");
+    if (image) {
+        image_cdhash = file_cdhash(image);
+        printf("IMAGE's file cdhash=");
+        print_cdhash(image_cdhash);
+        printf("\n");
+    }
     listener = socket(AF_UNIX, SOCK_STREAM, 0);
     unlink(argv[1]);
     if (bind(listener, (struct sockaddr *)&address, sizeof address) != 0 || listen(listener, 4) != 0) die("bind/listen");
@@ -637,6 +1393,7 @@ int main(int argc, char **argv) {
     trial_e(SHUT_READ_FORMER, "(e) a former holder's shutdown(SHUT_RD)");
     trial_f(0, "(f) a connection: the connector writes, then its forked child holding a copy writes last");
     trial_f(1, "(f) a connection: the connector writes, its forked child writes, the connector writes last");
+    if (image) part_two();
     unlink(argv[1]);
     return 0;
 }

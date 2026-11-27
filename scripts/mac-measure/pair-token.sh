@@ -6,7 +6,9 @@
 # one this script started (its children and theirs); nothing is shown on screen, nothing is loaded, no task port is
 # taken (each process reads its own audit token), no port is bound (one Unix socket in the scratch folder), no sudo.
 # The probe (probes/pair-token.c) is ad hoc signed with the Hardened Runtime; its makers exec facts-hardened, the
-# measurements' hardened image (M6, M7).
+# measurements' hardened image (M6, M7), and, for the second part ((g) to (o), the proof's redesign), pair-image
+# (probes/pair-image.c), a hardened image that acts on its descriptors, signed under its own identifier so its cdhash is
+# neither's. Neither is the node's host: a copy of the host started bare could touch the account's ~/.vibeswitcher.
 #
 #   bash scripts/mac-measure/pair-token.sh      prints the probe's lines, home, account name and scratch folder cut
 source "$(dirname "$0")/lib.sh"
@@ -16,12 +18,15 @@ p=$mm_root/scripts/mac-measure/probes
 b=$mm_bin
 /usr/bin/clang -O1 -Wall -framework Security -framework CoreFoundation -o "$b/pair-token" "$p/pair-token.c" || mm_stop "pair-token didn't build"
 /usr/bin/codesign -s - -o runtime -f "$b/pair-token" 2> /dev/null || mm_stop "codesign failed"
+/usr/bin/clang -O1 -Wall -o "$b/pair-image" "$p/pair-image.c" || mm_stop "pair-image didn't build"
+/usr/bin/codesign -s - -o runtime -i dev.vibeswitcher.measure.pair-image -f "$b/pair-image" 2> /dev/null || mm_stop "codesign failed"
 /bin/cp "$b/facts" "$b/facts-hardened"
 /usr/bin/codesign -s - -o runtime -f "$b/facts-hardened" 2> /dev/null || mm_stop "codesign failed"
 {
 echo "## K-M1  $(/usr/bin/sw_vers -productVersion) ($(/usr/bin/sw_vers -buildVersion)), $(/usr/bin/csrutil status)"
 /usr/bin/codesign -dv "$b/pair-token" 2>&1 | /usr/bin/grep -E '^CodeDirectory' | /usr/bin/sed 's/^/pair-token: /'
 /usr/bin/codesign -dv "$b/facts-hardened" 2>&1 | /usr/bin/grep -E '^CodeDirectory' | /usr/bin/sed 's/^/PROGRAM (facts-hardened): /'
-"$b/pair-token" "$tool_scratch/k.sock" "$b/facts-hardened"
+/usr/bin/codesign -dv "$b/pair-image" 2>&1 | /usr/bin/grep -E '^CodeDirectory' | /usr/bin/sed 's/^/IMAGE (pair-image): /'
+"$b/pair-token" "$tool_scratch/k.sock" "$b/facts-hardened" "$b/pair-image"
 } > "$mm_out/pair-token.txt" 2>&1
 /usr/bin/sed -e "s#$mm_root#<clone>#g" -e "s#$tool_scratch#<scratch>#g" -e "s#$HOME#~#g" -e "s#$(/usr/bin/id -un)#<user>#g" "$mm_out/pair-token.txt"
