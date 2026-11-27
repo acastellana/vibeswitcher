@@ -174,6 +174,7 @@ agent's session) and the user's keyboard session of 2026-11-26 (K-LA-1 to K-LA-7
 VibeSwitcher shell card, not Terminal.app). **Settled, not built**: `ApprovalVoice` has neither new line yet;
 `NodeSystem.approvalMeasured` stays false until the two lines are built, the independent review that precedes any
 switch-on has read them, and the user says go.
+**Built, off (2026-11-27, branch `v2-mac-approval-lines`):** both lines are in `ApprovalVoice.callerRefusal` (`ApprovalLinesTests`), each as this table words it, still off behind `NodeSystem.approvalMeasured`; the review owed reads them.
 
 **What carries the guarantee for a state change: the dialog alone.** (A read asks no dialog: for reads these lines
 are the whole gate, which K-ESC-1 to 3 now show an escape passes; "Open for the user: the Mac's reads" below.) Every
