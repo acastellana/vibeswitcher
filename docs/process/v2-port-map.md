@@ -445,6 +445,10 @@ Where main's change met `v2` code it didn't know, changed in this merge:
   `readLimit` told by its metadata).
 - `VibeNode/Engine/RoomWatch.swift`: `MacLoad.steady` is gone, so the node's room watch judges by `MacLoad.room` (the
   table above).
+- `v2`'s lints and checks on main's code, each red in the merge's first full suite: the host's socket refusal through
+  `Platform.Stdio.error` (StdioWriteLint); `--handover-proof` and `--handover-probe-key` refused for a checked node
+  (`MacCheckedReCheckTests`); `HomePathLintTests.allowed` keeps `v2`'s `ownsLaunchers` and `config` beside main's
+  `role`; `HandoverProofTests`' stand-in build by `installScript` (ShebangWriteLint).
 
 What main added that doesn't build on Linux, changed in this merge: `import CryptoKit` and `import Darwin` out of
 `HostHandover.swift` and `HostRole.swift`; `Darwin.close` to `Sys.close`; `OSStatus` to `Int32`; main's `identity`'s
