@@ -5121,3 +5121,6 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-27 12:31 Released the-mac-s-load's worker (idle since its done report on 6c671120) while its audit runs
 - 2026-11-27 12:31 Automatically (auto_advance): Started the audit of the-mac-s-load at 6c671120 (Its review is audit. (audited: it changes 912 lines outside tests, over risk_lines (400), as the risk check found.)). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
 - 2026-11-27 12:31 Update: Session host: a vault whose Keychain key can't be read is no longer started over (in main; active after an install and a cold host start) — **What changed** (on main, `2b929ab6`..`0044b1b2`, three commits). After this morning's power-loss restart the session host could not read its vault key from the Keychain, treated that as "the vault f…
+- 2026-11-27 12:32 Audit of the-mac-s-load: complete, clean, round 2: 2 Important closed, 9 Nit (1 open)
+- 2026-11-27 12:34 Audit of fix-refusedgit-swift-333: complete, clean, round 1: 3 Nit open
+- 2026-11-27 12:35 Audit of the-lead-s-records-2: complete, clean, round 1: 7 Nit open
