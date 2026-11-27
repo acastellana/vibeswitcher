@@ -20,7 +20,9 @@ struct RefusedGitSudoTests {
                           "--chroot /", "--role role", "--type type", "--command-timeout 60", "--other-user root", "--user root",
                           "-nu root", "-nD /var/empty", "-EHC 3", "-bh localhost", "-n -D /var/empty", "-D /var/empty -u root", "-h -u root", "--chdir=/var/empty",
                           "-D/var/empty", "-nuroot", "-D /var/empty --",
-                          "-hlocalhost", "--host=localhost", "--use root", "--command-t 60", "-E --preserve-env=PATH -u root"]
+                          "-hlocalhost", "--host=localhost", "--use root", "--command-t 60", "-E --preserve-env=PATH -u root",
+                          // A variable sudo sets is one word, whatever its letters (the blind check's `LANG=C`).
+                          "LANG=C", "X=a", "-D /var/empty LANG=C", "-u root V=t"]
 
     @Test func eachOfSudosValuedOptionsTakesItsValue() {
         for line in Self.finding {
