@@ -186,3 +186,9 @@ Evidence: 2026-11-27. host.log: "the vault started over: the app key on stdin wa
 Task: find-why-the-team
 Check: task turn-this-incident-into-22 turns it into a check that runs before merge.
 
+## 2026-11-27 20:12:12 When AC power returned after a battery hold, held work resumed all at once and the Mac's load went to 230 on 12 cores; the app's main thread froze 14 times in 5 minutes, up to 24.8 s
+
+Evidence: 2026-11-27. Battery hold from 19:54 (9%), released on AC at about 20:04 ("Released: on AC power, after 10 min"); four workers told by the lead to resume at the same moment, two audits and the queued merges released by auto_advance. Hang reports hang-20261127-200139 through hang-20261127-200431 in ~/.vibeswitcher/debug: 1-minute load 21.4 at 20:01:39, 83.2 at 20:02:01, 142.1, 154.7, 182.0, 186.3, 198.0, 207.0, 208.4, 217.6, 224.6, 223.3, 229.8 by 20:04:31; stuck 2.8 s to 24.8 s each, the lead's chat shown; most marked 'likely starvation', two 'real work' with TeamRows.rows on top. The load fell back to 9 (1-minute) by 20:11. The load gate judged room from a low reading at the release, so nothing staggered the starts.
+
+Check: task turn-this-incident-into-23 turns it into a check that runs before merge.
+
