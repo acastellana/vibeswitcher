@@ -263,14 +263,24 @@ final class HostClient: ObservableObject {
     /// program of your account can replace VibeSwitcher's Keychain keys (it can't read them; 2026-11-26), so the alert
     /// says so before it offers the button. A vault that started over (`AppProof.vaultStartedOver`) says that in its
     /// own words: its key is the one replaced, or the Keychain was reset, or its file moved or deleted (one alert for
-    /// a file that doesn't open and one that's gone).
+    /// a file that doesn't open and one that's gone). A vault whose key the Keychain didn't give the host
+    /// (`AppProof.vaultKeyUnreadable`) says that: its file is kept, and teaching the host runs a vault in memory only.
     static func keyResetAlert(reason: String, live: Int) -> NSAlert {
         let alert = NSAlert()
         alert.alertStyle = .warning
         let off = "The project lead's tools, updating the host in place and ending sessions from the app are off until it does."
         let next = live > 0 ? "To teach the host this app's key, end every session (\(live) running) and reopen VibeSwitcher."
             : "The change is logged in ~/.vibeswitcher/debug/host.log."
-        if reason == AppProof.vaultStartedOver {
+        if reason == AppProof.vaultKeyUnreadable {
+            alert.messageText = "The session host couldn't read the team vault's key from your Keychain."
+            alert.informativeText = "The session host keeps the team's vault sealed in ~/.vibeswitcher/lead/vault.sealed with a "
+                + "key from your Keychain, and the Keychain didn't give it that key (~/.vibeswitcher/debug/host.log names the "
+                + "Keychain's status). The vault wasn't opened, and it isn't lost: the file is kept as it is, nothing is written "
+                + "over it or moved. " + off + "\n\nTeaching the host this app's key starts a vault in memory only: what the "
+                + "team holds in it from then on (roles, audits, seals) is gone at the host's next restart, until the session "
+                + "host can read its key again; a host started once it can opens vault.sealed as it was last sealed. Check "
+                + "first: open Keychain Access and look at the item \u{201C}VibeSwitcher lead vault\u{201D}. " + next
+        } else if reason == AppProof.vaultStartedOver {
             alert.messageText = "The team's vault could not be opened and was started again."
             alert.informativeText = "The session host keeps the team's vault sealed with a key from your Keychain, and the "
                 + "sealed file no longer opens with it, or is no longer there: what the vault held can't be read, and it holds "

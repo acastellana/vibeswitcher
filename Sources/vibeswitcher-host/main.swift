@@ -144,6 +144,8 @@ func vaultKeyResult() -> VaultStorage.KeyRead? {
     if let read = vaultKeyRead { return read }
     let read = role.vaultKey { VaultStorage.keychainKey() }
     vaultKeyRead = .some(read)
+    // Which status kept the key (never the key): a host without it can't open the vault, seal it, or take a handover.
+    if let status = read?.failure { HostServer.note("vault key: Keychain status \(status)", logPath: config.logPath) }
     return read
 }
 func vaultKey() -> VaultStorage.Key? { vaultKeyResult()?.read }
@@ -184,7 +186,8 @@ do {
 // the key was there already, `VaultStorage.Key.made`): that one waits
 // for your confirmation through the app (`LeadVault.Book.awaitsAppKey`).
 if arguments.contains(HostStart.appKeyFlag), let key = HostStart.appKeyFromStdin(), let vault = config.vault, !vault.adoptAppKey(key) {
-    log(vault.awaitsAppKey ? "the vault started over: the app key on stdin waits for your confirmation"
+    log(vault.keyUnread ? "the vault's key couldn't be read from the Keychain: the app key on stdin waits for your confirmation"
+        : vault.awaitsAppKey ? "the vault started over: the app key on stdin waits for your confirmation"
         : "the app key on stdin isn't the one the vault holds: kept the vault's")
 }
 

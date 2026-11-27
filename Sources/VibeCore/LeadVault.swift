@@ -720,14 +720,33 @@ extension LeadVault {
         }
 
         /// A vault as it was saved (`saved`, from `onChange` or `serialized`), or a new one when there's none or it
-        /// doesn't read. `startingOver`: a new one stands in for one that was kept but couldn't be read.
-        public init(restoring saved: Data? = nil, startingOver: Bool = false) {
+        /// doesn't read. `startingOver`: a new one stands in for one that was kept but couldn't be read. `keyUnread`:
+        /// a new one stands in, in memory only, for one whose Keychain key couldn't be read (`keyUnread`): not started
+        /// over, since what was kept was never tried.
+        public init(restoring saved: Data? = nil, startingOver: Bool = false, keyUnread: Bool = false) {
             if let saved, let state = Self.state(saved) {
                 self.state = state
             } else {
                 state = State(senderKey: SymmetricKey(size: .bits256).withUnsafeBytes { Data($0) })
-                if startingOver { state.startedOver = Date().timeIntervalSince1970 }
+                if keyUnread {
+                    held = true
+                } else if startingOver {
+                    state.startedOver = Date().timeIntervalSince1970
+                }
             }
+        }
+
+        /// The vault's Keychain key couldn't be read (2026-11-27), and you haven't confirmed the app's key yet: what was
+        /// kept may still open once the key reads, so the vault hasn't started over; it waits for you as one that did
+        /// (`awaitsAppKey`), and the host says why (`AppProof.vaultKeyUnreadable`). In memory only, never handed over
+        /// as part of the vault (a build after reads its own key).
+        private var held = false
+
+        /// `held`: the vault's Keychain key couldn't be read, and it waits for your confirmation.
+        public var keyUnread: Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            return held && state.appKey == nil
         }
 
         private static func state(_ data: Data) -> State? {
@@ -752,7 +771,7 @@ extension LeadVault {
         public var awaitsAppKey: Bool {
             lock.lock()
             defer { lock.unlock() }
-            return state.startedOver != nil && state.appKey == nil
+            return (state.startedOver != nil || held) && state.appKey == nil
         }
 
         /// `awaitsAppKey` of the vault `data` encodes (`onChange`'s, `serialized`): what its saver asks, since
@@ -774,12 +793,14 @@ extension LeadVault {
         /// A vault that started over and holds no key (`awaitsAppKey`) takes one only `replacing`: the app's
         /// `replaceAppKey`, which you confirm. Its sealed file stopped opening under the Keychain key, which another
         /// program of your account can replace (2026-11-26): the key the app passes at the host's start, or enrolls,
-        /// would otherwise go in unseen, and the vault be sealed under the replaced key from then on.
+        /// would otherwise go in unseen, and the vault be sealed under the replaced key from then on. So does one whose
+        /// Keychain key couldn't be read (`keyUnread`): once you confirm, it has started over (in memory only).
         @discardableResult
         public func adoptAppKey(_ key: Data, replacing: Bool = false) -> Bool {
             lock.lock()
             var changed = false
-            if state.appKey == nil && state.startedOver == nil || replacing, state.appKey != key, key.count == AppProof.keySize {
+            if state.appKey == nil && state.startedOver == nil && !held || replacing, state.appKey != key, key.count == AppProof.keySize {
+                if held && state.appKey == nil && state.startedOver == nil { state.startedOver = Date().timeIntervalSince1970 }
                 state.appKey = key
                 changed = true
             }

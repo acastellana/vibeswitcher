@@ -2199,6 +2199,11 @@ private final class Driver: NSObject, NSApplicationDelegate {
             alert.layout()
             return alert.window
         }),
+        ("vault-key-unreadable", { _ in
+            let alert = HostClient.keyResetAlert(reason: AppProof.vaultKeyUnreadable, live: 0)
+            alert.layout()
+            return alert.window
+        }),
     ] }
 
     /// The `menu-bar-dots` sheet's sessions: made up, one in each status a dot can show.

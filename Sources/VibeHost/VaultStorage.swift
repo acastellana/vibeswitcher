@@ -71,7 +71,22 @@ public struct VaultStorage {
         // didn't open, opened as something that isn't a vault, or isn't there): only a true first start, with no file
         // and a key made on this start (or none at all), takes the app's key unasked.
         let reads = saved.map(LeadVault.Book.reads) ?? false
-        let book = LeadVault.Book(restoring: saved, startingOver: !reads && (there || missing))
+        // A key the Keychain didn't give (`keyUnreadable`) is no vault that doesn't open: the file was never tried, and
+        // may open once the key reads (2026-11-27: a cold start after a power cut found the vault's key unreadable, and
+        // the vault started over in its place). Not started over, nothing written or set aside (there's no key to save
+        // with): the vault waits for your confirmation, in memory only, and the log says which status kept the key.
+        let unread = key == nil && keyUnreadable != nil && !reads
+        let book = LeadVault.Book(restoring: saved, startingOver: !unread && !reads && (there || missing), keyUnread: unread)
+        if key == nil {
+            let log = HostLog(path: logPath)
+            if let status = keyUnreadable, unread {
+                log.note("vault: \(file.lastPathComponent) \(there ? "kept as it is" : "isn't there"): its key couldn't be read from the "
+                    + "Keychain (Keychain status \(status)); in memory only, nothing it holds survives a restart, and it waits for your confirmation")
+            } else {
+                log.note("vault: in memory only (no key from the Keychain\(keyUnreadable.map { ", Keychain status \($0)" } ?? "")): "
+                    + "nothing it holds survives a restart")
+            }
+        }
         if key != nil {
             // A file there that isn't a vault under this key (a handed-over vault doesn't read it) is never saved over,
             // nor one that opens when the vault waiting for your answer came from memory (a build before without a key),

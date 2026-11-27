@@ -328,6 +328,8 @@ public final class HostServer {
                 return .ok
             }
             refusal = "That isn't the key this session host knows for VibeSwitcher."
+        } else if config.vault?.keyUnread == true {
+            refusal = AppProof.vaultKeyUnreadable
         } else if config.vault?.awaitsAppKey == true {
             refusal = AppProof.vaultStartedOver
         } else {
@@ -344,7 +346,8 @@ public final class HostServer {
         guard client.runsAppCode, appKey == nil, key.count == AppProof.keySize else { return }
         if let vault = config.vault {
             guard vault.adoptAppKey(key) else {
-                return log.note("host: the vault started over: the app's key waits for your confirmation, \(HostLog.peer(client.peerPID))")
+                let why = vault.keyUnread ? "the vault's key couldn't be read from the Keychain" : "the vault started over"
+                return log.note("host: \(why): the app's key waits for your confirmation, \(HostLog.peer(client.peerPID))")
             }
         } else {
             looseAppKey = SymmetricKey(data: key)
