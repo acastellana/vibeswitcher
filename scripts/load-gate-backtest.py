@@ -130,7 +130,8 @@ def load_merges(stats, until=None):
         raw["_t"] = dt.datetime.fromisoformat(raw["t"])
         if until is not None and raw["_t"] > until:
             continue
-        ran = raw.get("first_run") is not None
+        # A first run that hung is written without first_run (LoadRecorder's MergeSample: `case .hung`), yet it ran.
+        ran = raw.get("first_run") is not None or raw.get("result") == "hung"
         raw["_ran"] = ran
         raw["_bad"] = ran and (raw.get("first_run") == "failed" or raw.get("reran") is not None
                                or raw.get("result") in ("failed", "hung"))
@@ -611,11 +612,12 @@ def selftest():
         (09:41 holds a slot): 4; the longest idle stretch 09:06-09:07: 2 (09:41 breaks 09:40-09:42).
         False room on the load: 09:00 (09:01 overloads): 1. 09:08 is clear (its window's last sample, 09:11, is
         within 2 minutes of its end); 09:09-09:11 and 09:41-09:43 are unknown (a gap, the end of the file).
-    merges-2026-01-05.jsonl: 09:03:30 failed its first run and reran, 09:20 passed.
-        (a) has room at 09:00, 3.5 minutes before the failing one: 1 merge false room.
+    merges-2026-01-05.jsonl: 09:03:30 failed its first run and reran, 09:20 passed, 09:42:30 hung on its first run
+        (the recorder writes no first_run for that: it ran, and it counts as bad).
+        (a) has room at 09:00, 3.5 minutes before the failing one: 1 merge false room; it refuses 09:40-09:42.
     (b) 1-minute <= 24 refuses 09:01, 09:02, 09:04, 09:40: 4; idle 1 (09:40). False room on the load: 09:00 and 09:03
-        (09:04 overloads): 2 moments in 2 runs, 1 new (09:03, which (a) refused). On merges: 09:00 and 09:03, 1 new,
-        1 distinct merge.
+        (09:04 overloads): 2 moments in 2 runs, 1 new (09:03, which (a) refused). On merges: 09:00 and 09:03 before the
+        failing one, 09:41 and 09:42 before the hung one: 4, 3 new, 2 distinct merges.
     (c30) the 5-minute ignored while idle (09:06-09:11, 09:40, 09:42, 09:43) or within 30 minutes of the 09:40 boot:
         refuses 09:01-09:05 (09:03 and 09:05: not idle, the 5-minute 45 and 40 > 24) and 09:40 (300): 6; gives back
         09:06, 09:07, 09:41 (in the boot window, slot or not), 09:42: 4; idle refused 1.
@@ -629,6 +631,8 @@ def selftest():
     a, b, c, d, g = (got["results"][k] for k in ("a", "b", "c30", "d", "cG"))
     expected = [
         ("samples", len(got["samples"]), 16),
+        ("merge runs ran", sum(1 for m in got["merges"] if m["_ran"]), 3),
+        ("merge runs bad", sum(1 for m in got["merges"] if m["_bad"]), 2),
         ("a refused", a["refused"], 10.0),
         ("a refused idle", a["refused_idle"], 4.0),
         ("a longest idle", a["longest_idle"], 2.0),
@@ -639,9 +643,9 @@ def selftest():
         ("b false load", b["false_load"], 2),
         ("b false load runs", b["false_load_runs"], 2),
         ("b false load new", b["false_load_new"], 1),
-        ("b false merge", b["false_merge"], 2),
-        ("b false merge new", b["false_merge_new"], 1),
-        ("b false merge distinct", b["false_merge_distinct"], 1),
+        ("b false merge", b["false_merge"], 4),
+        ("b false merge new", b["false_merge_new"], 3),
+        ("b false merge distinct", b["false_merge_distinct"], 2),
         # (c30): idle moments use the 1-minute; 09:40 (300) still refuses. 09:05 isn't idle: 40 > 24 refuses.
         ("c30 refused", c["refused"], 6.0),
         ("c30 given back", c["given_back"], 4.0),
