@@ -241,6 +241,17 @@ struct KeeperLintTests {
         return problems
     }
 
+    /// Every symbolic link below `folder` (the build folders aside), by its path from the repository: a link in the
+    /// keeper's package could bring in a file the import rule never reads (the walk lists regular files alone).
+    static func links(below folder: URL) -> [String] {
+        guard let walk = FileManager.default.enumerator(at: folder, includingPropertiesForKeys: [.isSymbolicLinkKey]) else { return [] }
+        return walk.compactMap { $0 as? URL }
+            .filter { (try? $0.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true }
+            .map { String($0.standardizedFileURL.path.dropFirst(repo.standardizedFileURL.path.count + 1)) }
+            .filter { !$0.hasPrefix("Keeper/.build/") && !$0.hasPrefix("Keeper/.swiftpm/") }
+            .sorted()
+    }
+
     static func read(_ path: String) -> String? { try? String(contentsOf: repo.appendingPathComponent(path), encoding: .utf8) }
 
     static func keeperSources() -> [String: String] {
@@ -251,6 +262,7 @@ struct KeeperLintTests {
 
     @Test func theKeeperPackageNamesNoDependency() {
         #expect(Self.dependencyProblems(manifest: Self.read("Keeper/Package.swift"), sources: Self.keeperSources()) == [])
+        #expect(Self.links(below: Self.keeper) == [], "a symbolic link in the keeper's package")
     }
 
     @Test func theKeeperLinksOnlyVibeKeep() {
@@ -330,6 +342,17 @@ struct KeeperLintTests {
         #expect(Self.linkProblems(manifest: none) == ["vibeswitcher-keeper links [], not [VibeKeep] alone"])
         let linked = Self.goodManifest.replacingOccurrences(of: #".target(name: "VibeKeep")"#, with: #".target(name: "VibeKeep", dependencies: ["Z"])"#)
         #expect(Self.linkProblems(manifest: linked) == [#"VibeKeep names ["Z"]"#])
+    }
+
+    @Test func theLinkRuleFindsALinkAndPassesFiles() throws {
+        let scratch = Scratch()
+        let folder = scratch.url("keeper-links")
+        try FileManager.default.createDirectory(at: folder.appendingPathComponent("Sources/VibeKeep"), withIntermediateDirectories: true)
+        try "import Foundation\n".write(to: folder.appendingPathComponent("Sources/VibeKeep/A.swift"), atomically: true, encoding: .utf8)
+        #expect(Self.links(below: folder).isEmpty)
+        try FileManager.default.createSymbolicLink(at: folder.appendingPathComponent("Sources/VibeKeep/B.swift"),
+                                                   withDestinationURL: folder.appendingPathComponent("Sources/VibeKeep/A.swift"))
+        #expect(Self.links(below: folder).count == 1)
     }
 
     @Test func theRepositoryRuleNeedsBothHalves() {
