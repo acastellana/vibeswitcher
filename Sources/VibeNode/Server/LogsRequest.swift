@@ -2,7 +2,7 @@ import Foundation
 import VibeCore
 
 /// The node's logs as `vibeswitcher logs` reads them (Sources/vibeswitcher-cli/Logs.swift asks these, so the command line
-/// and the `logs` kind read the same files the same way and mask each line with the same code, `masked`):
+/// and the `logs` kind read the same files the same way and mask their lines with the same code, `masked`):
 /// - the server's and the host's log (their stderr): the node unit's journal (`journalctl --user -u UNIT`, its fixed
 ///   path and the tools' environment; a scratch node's stand-in `<root>/v2/test/journalctl`), or the detached host's
 ///   `<root>/v2/host.log` where pid 1 isn't systemd;
@@ -14,8 +14,94 @@ public enum NodeLogs {
     public static let tailBytes = 512 * 1024
 
     /// One line of a log as anything outside the node may see it: its secrets masked (`Redaction.secrets`), then inert
-    /// (no control character, no terminal escape, at most 1000 characters). The one masking of every log line shown.
+    /// (no control character, no terminal escape, at most 1000 characters). The one masking of every log line shown,
+    /// with `masked(_:last:)`, which a log's lines go through.
     public static func masked(_ text: String) -> String { ConfigSeal.inert(Redaction.secrets(in: text), limit: 1000) }
+
+    /// A log's last `count` lines as anything outside the node may see them: each `masked`, and a private key printed
+    /// over several lines (PEM, PGP: from a `-----BEGIN … PRIVATE KEY-----` line through its `-----END … PRIVATE
+    /// KEY-----` line) masked whole, as `Redaction.secrets` masks it in one text (the review's P-C8-1: each line masked
+    /// alone left the key's body). A line that begins inside a key shows `•••` for it, then what follows its END line's
+    /// label, masked: so each line of the key's body is `•••`, and its BEGIN and END lines are masked as before. A key
+    /// with no END masks every line after it; lines before an END with no BEGIN above it (a key whose start was cut off)
+    /// are masked too. The lines before the last `count` are read only for where a key begins.
+    public static func masked(_ lines: [String], last count: Int) -> [String] {
+        var inside = KeyBlock.startsInside(lines)
+        let first = max(0, lines.count - max(0, count))
+        for line in lines[..<first] { inside = KeyBlock.scan(line, inside: inside).inside }
+        return lines[first...].map { line in
+            let scanned = KeyBlock.scan(line, inside: inside)
+            defer { inside = scanned.inside }
+            guard let rest = scanned.rest else { return masked(line) }
+            return masked(Self.keyMask + rest)
+        }
+    }
+
+    static let keyMask = "•••"
+
+    /// Where a private key's block begins and ends in a log's lines, as `Redaction.privateKeys` and `keyEnd` find it in
+    /// one text: `-----BEGIN [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----` to the next `-----END <the same shape>`.
+    enum KeyBlock {
+        private static let begin = Array("-----BEGIN ".utf8), end = Array("-----END ".utf8), dashes = Array("-----".utf8)
+        private static let name = Array("PRIVATE KEY".utf8), blockName = Array("PRIVATE KEY BLOCK".utf8)
+
+        /// The labels in `text`, in order: whether each is an END, and where it ends (a UTF-8 offset).
+        static func labels(_ text: String) -> [(isEnd: Bool, end: Int)] {
+            guard text.contains("-----") else { return [] }
+            let u = Array(text.utf8)
+            var found: [(Bool, Int)] = []
+            var i = 0
+            while i + 5 <= u.count {
+                if u[i] == 45, let (isEnd, stop) = label(u, i) {
+                    found.append((isEnd, stop))
+                    i = stop
+                } else {
+                    i += 1
+                }
+            }
+            return found
+        }
+
+        private static func has(_ word: [UInt8], _ u: [UInt8], at i: Int) -> Bool {
+            i >= 0 && i + word.count <= u.count && u[i..<(i + word.count)].elementsEqual(word)
+        }
+
+        private static func label(_ u: [UInt8], _ i: Int) -> (Bool, Int)? {
+            let isEnd: Bool
+            if has(begin, u, at: i) { isEnd = false } else if has(end, u, at: i) { isEnd = true } else { return nil }
+            let from = i + (isEnd ? end.count : begin.count)
+            var j = from
+            while j < u.count && ((65...90).contains(u[j]) || (48...57).contains(u[j]) || u[j] == 32) { j += 1 }
+            guard (j - from >= name.count && has(name, u, at: j - name.count))
+                    || (j - from >= blockName.count && has(blockName, u, at: j - blockName.count)),
+                  has(dashes, u, at: j) else { return nil }
+            return (isEnd, j + dashes.count)
+        }
+
+        /// Whether the lines begin inside a key: their first label is an END (its BEGIN was before them).
+        static func startsInside(_ lines: [String]) -> Bool {
+            for line in lines { if let first = labels(line).first { return first.isEnd } }
+            return false
+        }
+
+        /// `line` read on from `inside` (whether a key's block is open at its start): whether one is open at its end,
+        /// and, when it began inside one, what follows the label of the END that closes it ("" when none does).
+        static func scan(_ line: String, inside: Bool) -> (inside: Bool, rest: String?) {
+            var open = inside
+            var closedAt: Int?
+            for found in labels(line) {
+                if open, found.isEnd {
+                    open = false
+                    if inside, closedAt == nil { closedAt = found.end }
+                } else if !open, !found.isEnd {
+                    open = true
+                }
+            }
+            guard inside else { return (open, nil) }
+            guard let closedAt else { return (open, "") }
+            return (open, String(decoding: Array(line.utf8)[closedAt...], as: UTF8.self))
+        }
+    }
 
     /// The file's last `count` lines (of its last `tailBytes`), each `masked`, never through a link; why not when it
     /// can't be read ("not there yet", "couldn't be read …"). Only a regular file is read: opened without waiting (a
@@ -33,7 +119,7 @@ public enum NodeLogs {
         var lines = String(decoding: data, as: UTF8.self).split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
         // A partial first line when the read began mid-file.
         if start > 0, !lines.isEmpty { lines.removeFirst() }
-        return .success(lines.suffix(count).map(masked))
+        return .success(masked(lines, last: count))
     }
 
     /// The node unit's journal lines, newest last, each `masked` and stamped: `journalctl --user -u UNIT -n N -o json`,
@@ -45,9 +131,8 @@ public enum NodeLogs {
         guard let ran = run(journalctl, arguments), ran.status == 0 else { return .failure(.init("journalctl --user didn't answer")) }
         let stamp = ISO8601DateFormatter()
         let entries = NodeJournal.entries(json: ran.output).filter { $0.identifier != NodeJournal.identifier }
-        return .success(entries.suffix(count).map { entry in
-            masked((entry.time.map { stamp.string(from: $0) + " " } ?? "") + (entry.message ?? ""))
-        })
+        // Stamped first: a stamp holds no key's label, so the key's lines are found as in the messages alone.
+        return .success(masked(entries.map { entry in (entry.time.map { stamp.string(from: $0) + " " } ?? "") + (entry.message ?? "") }, last: count))
     }
 
     /// The host's session log: the user's host writes `<VibePaths.root>/debug/host.log` (`vibeswitcher-host`'s `--log`

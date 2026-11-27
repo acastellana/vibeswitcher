@@ -59,6 +59,45 @@ struct NodeLogsTests {
         #expect(!source.contains("Redaction.") && !source.contains("ConfigSeal.inert(Redaction"), "Logs.swift masks with code of its own")
     }
 
+    /// The command line's output (`vibeswitcher logs --sessions`, built, on a scratch node) changes only for a private
+    /// key printed over several lines (the review's P-C8-1): each line of its body prints `  •••` where it printed
+    /// whole; its BEGIN and END lines, and every other line, print as each did masked alone.
+    @Test func theCommandLineMasksAKeyOverSeveralLinesWhole() async throws {
+        let folder = scratch.url("cli")
+        let root = folder.appendingPathComponent("vibeswitcher")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let body = (0..<3).map { "MIIEv\($0)QIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQC" }
+        let lines = ["session 39c587b5 started", "-----BEGIN " + "PRIVATE KEY-----"] + body
+            + ["-----END " + "PRIVATE KEY-----", "exported \(Self.planted[0])", "session 39c587b5 ended"]
+        try (lines.joined(separator: "\n") + "\n").write(to: root.appendingPathComponent("host.log"), atomically: true, encoding: .utf8)
+        let ran = try await run(commandLine, ["logs", "--sessions", "--lines", "20"], environment: scratchEnvironment(folder), limit: 60)
+        #expect(ran.status == 0, "\(ran.errors)")
+        let printed = ran.output.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        let shown = Array(printed.drop { !$0.hasPrefix("the host's session log") }.dropFirst().prefix(lines.count))
+        // What each line printed masked alone, as the command line printed them before.
+        let alone = lines.map { "  " + NodeLogs.masked($0) }
+        var expected = alone
+        for index in 2...4 { expected[index] = "  •••" }
+        #expect(shown == expected, "\(printed)")
+        #expect(alone[2...4].allSatisfy { $0 != "  •••" } && alone[1] == "  •••" && alone[5] == "  •••")
+        #expect(!body.contains { ran.output.contains($0) } && !ran.output.contains(Self.planted[0]))
+    }
+
+    /// The masking of a key over several lines, on its own: a key cut off at the read's start (an END with no BEGIN above
+    /// it) masks the lines before it, one with no END masks every line after it, and a key above the last lines asked
+    /// still masks those of its body among them; lines with no key are each `masked` alone.
+    @Test func aKeysBlockIsMaskedAcrossLines() {
+        let begin = "-----BEGIN RSA " + "PRIVATE KEY-----", end = "-----END RSA " + "PRIVATE KEY-----"
+        #expect(NodeLogs.masked(["a", "b \(Self.planted[0])"], last: 10) == ["a", NodeLogs.masked("b \(Self.planted[0])")])
+        #expect(NodeLogs.masked(["body1", "body2", end, "after"], last: 10) == ["•••", "•••", "•••", "after"])
+        #expect(NodeLogs.masked(["before", begin, "body1", "body2"], last: 10) == ["before", "•••", "•••", "•••"])
+        #expect(NodeLogs.masked(["before", begin, "body1", "body2", end, "after"], last: 3) == ["•••", "•••", "after"])
+        #expect(NodeLogs.masked(["x", begin, "body", end + " then " + begin, "body2", end, "y"], last: 10) == ["x", "•••", "•••", "••• then •••", "•••", "•••", "y"])
+        // A label that isn't a private key's opens nothing.
+        #expect(NodeLogs.masked(["-----BEGIN CERTIFICATE-----", "cert", "-----END CERTIFICATE-----"], last: 10)
+                == ["-----BEGIN CERTIFICATE-----", "cert", "-----END CERTIFICATE-----"].map(NodeLogs.masked))
+    }
+
     /// The journal (a scratch node's stand-in, or the system's by its path with the tools' environment): its entries'
     /// messages masked and stamped, the command line's own left out; why not when there is no journal or it didn't answer.
     @Test func theJournalIsReadAndMasked() throws {
