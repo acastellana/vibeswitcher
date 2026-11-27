@@ -146,14 +146,24 @@ public final class HostServer {
     }
 
     public func start() throws {
-        queue.setSpecific(key: Self.queueKey, value: true)
-        lockFD = open(config.lockPath, O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
-        guard lockFD >= 0 else { throw Failure.lock(errno) }
-        guard flock(lockFD, LOCK_EX | LOCK_NB) == 0 else {
-            Darwin.close(lockFD)
-            lockFD = -1
+        try start(holdingLock: Self.takeLock(at: config.lockPath))
+    }
+
+    /// The lock at `path`, taken: the descriptor that holds it. `Failure.alreadyRunning` when another host holds it.
+    public static func takeLock(at path: String) throws -> Int32 {
+        let fd = open(path, O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
+        guard fd >= 0 else { throw Failure.lock(errno) }
+        guard flock(fd, LOCK_EX | LOCK_NB) == 0 else {
+            Darwin.close(fd)
             throw Failure.alreadyRunning
         }
+        return fd
+    }
+
+    /// Starts serving, holding its lock through `lock` (`takeLock`, on `Config.lockPath`): this host's from now on.
+    public func start(holdingLock lock: Int32) throws {
+        queue.setSpecific(key: Self.queueKey, value: true)
+        lockFD = lock
         // Holding the lock: any socket file left behind is stale.
         listenFD = try UnixSocket.listen(path: config.socketPath)
         serve()

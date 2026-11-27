@@ -16,18 +16,21 @@ func value(after flag: String) -> String? {
     guard let index = arguments.firstIndex(of: flag), arguments.indices.contains(index + 1) else { return nil }
     return arguments[index + 1]
 }
-let lockPath = value(after: "--lock") ?? VibePaths.hostLock.path
-// The user's host, not a scratch host on its own lock (which runs beside it, and leaves its files alone).
-let ownsLaunchers = lockPath == VibePaths.hostLock.path
+// Which host this is (see `HostRole`): its folder, its lock, and whether it's the account's own host.
+let role = HostRole(environment: ProcessInfo.processInfo.environment, fallbackHome: NSHomeDirectory(),
+                    lockArgument: value(after: "--lock"), accountHome: HostRole.accountHome)
+let lockPath = role.lockPath
+// On its folder's own lock, not a scratch host on a lock of its own (which runs beside it, and leaves its files alone).
+let ownsLaunchers = role.holdsRootLock
 
-// As the probe of a handover (see `HostHandover`): only whether this build can take over, and for the user's host
+// As the probe of a handover (see `HostHandover`): only whether this build can take over, and for the account's host
 // whether it gets the same vault key.
-HostHandover.probeIfAsked(arguments) { ownsLaunchers ? VaultStorage.keychainKey() : nil }
+HostHandover.probeIfAsked(arguments) { role.vaultKey { VaultStorage.keychainKey() } }
 
 signal(SIGPIPE, SIG_IGN)
 signal(SIGHUP, SIG_IGN)
 
-VibePaths.ensurePrivateDirectories()
+VibePaths.ensurePrivateDirectories(root: role.root)
 let environment = ProcessInfo.processInfo.environment
 // What a fresh Terminal session would inherit from launchd; the login shell adds the rest.
 let inherited = ["HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "PATH", "LANG", "LC_ALL", "LC_CTYPE", "SSH_AUTH_SOCK",
@@ -37,7 +40,7 @@ let executable = Bundle.main.executablePath ?? arguments[0]
 let build = HostBuild.id(ofExecutableAt: executable)
 // Sessions are started through a launcher (see `PTYSpawn`). Not the app's copy: an update replaces that file while
 // this host keeps running, and this host must keep starting its own build. A private copy, named by build.
-let launchers = VibePaths.root.appendingPathComponent("host", isDirectory: true)
+let launchers = role.root.appendingPathComponent("host", isDirectory: true)
 let launcher = launchers.appendingPathComponent("launcher-\(build)").path
 func ensureLauncher() -> String {
     try? FileManager.default.createDirectory(at: launchers, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
@@ -50,7 +53,7 @@ func ensureLauncher() -> String {
     return launcher
 }
 var config = HostServer.Config(
-    socketPath: value(after: "--socket") ?? VibePaths.hostSocket.path,
+    socketPath: value(after: "--socket") ?? role.root.appendingPathComponent("host.sock").path,
     lockPath: lockPath,
     shell: shell,
     launcher: ensureLauncher(),
@@ -74,7 +77,7 @@ if ownsLaunchers || arguments.contains("--end-orphaned-tool-servers") {
 config.parser.testHooks = !ownsLaunchers && arguments.contains("--parser-test-hooks")
 if let limit = value(after: "--parser-stall-limit").flatMap(TimeInterval.init), limit > 0 { config.parser.stallLimit = limit }
 // The user's host logs its sessions (see `HostLog`); a scratch host only where it's told to.
-config.logPath = value(after: "--log") ?? (ownsLaunchers ? VibePaths.root.appendingPathComponent("debug/host.log").path : nil)
+config.logPath = value(after: "--log") ?? (ownsLaunchers ? role.root.appendingPathComponent("debug/host.log").path : nil)
 // What a build this one hands over to is started with: the same, without this start's handover.
 let handoverFlags: [String: Bool] = ["--handover": true, "--handover-fallback": true, "--handover-fail-restore": false,
                                      "--handover-fallback-app": true, "--app-executable": true, HostHandover.proofFlag: true,
@@ -109,11 +112,11 @@ func goBack(_ statePath: String, _ error: Error) -> Never {
 // The build before handed its sessions over, by executing this one in its place (same process). Read before the
 // server is made: what it kept in memory (`HostServer.secretsForHandover`) can go into this one's config.
 let handoverPath = value(after: "--handover")
-// The vault's Keychain key, for the user's host only, read once and only when first asked.
+// The vault's Keychain key, for the account's host only, read once and only when first asked.
 var vaultKeyRead: SymmetricKey??
 func vaultKey() -> SymmetricKey? {
     if let read = vaultKeyRead { return read }
-    let key = ownsLaunchers ? VaultStorage.keychainKey() : nil
+    let key = role.vaultKey { VaultStorage.keychainKey() }
     vaultKeyRead = .some(key)
     return key
 }
@@ -123,7 +126,7 @@ if let handoverPath {
     do {
         // A test of the fallback: as if this build couldn't read the state.
         if arguments.contains("--handover-fail-restore") { throw HostHandover.Failure.unreadable("--handover-fail-restore") }
-        let received = try HostHandover.receive(from: handoverPath, lockPath: lockPath, userHost: ownsLaunchers,
+        let received = try HostHandover.receive(from: handoverPath, lockPath: lockPath, userHost: role.isAccountHost,
                                                 proof: value(after: HostHandover.proofFlag), logPath: config.logPath, key: vaultKey)
         restoredSecrets = received.secrets
         restoring = received.state
@@ -136,12 +139,10 @@ if let handoverPath {
 // A fresh launch must not let a script designate itself as the app and replace a keyless host's key.
 config.appExecutable = (restoring != nil ? value(after: "--app-executable") : nil)
     ?? URL(fileURLWithPath: executable).deletingLastPathComponent().appendingPathComponent("VibeSwitcher").path
-// The lead's vault: the user's host keeps it sealed under ~/.vibeswitcher/lead with its Keychain key; a scratch host
-// (on its own lock) keeps one in memory only, never touching the user's.
+// The lead's vault: the account's host keeps it sealed under ~/.vibeswitcher/lead with its Keychain key; any other host
+// keeps one in memory only, never touching the account's (see `HostRole.vault`).
 // After a handover, the vault is the one the build before held in memory (its secrets), not what's on disk.
-let vaultFile = VibePaths.root.appendingPathComponent("lead/vault.sealed")
-config.vault = ownsLaunchers ? VaultStorage(file: vaultFile, key: vaultKey(), logPath: config.logPath).book(handedOver: restoredSecrets)
-    : LeadVault.Book(restoring: restoredSecrets)
+config.vault = role.vault(lockFD: -1, key: vaultKey(), handedOver: restoredSecrets, logPath: config.logPath)
 // The app that started this host gives it its key on stdin (see `AppProof`), and says so: taken while the vault
 // holds none, but not by a vault that started over (its file no longer opens under the Keychain key): that one waits
 // for your confirmation through the app (`LeadVault.Book.awaitsAppKey`).
@@ -156,7 +157,7 @@ server.onExit = { exit(0) }
 if let vault = config.vault { server.secretsForHandover = { vault.serialized } }
 // The user's host proves to the build it hands over to that the handover is its own (see `HostHandover.receive`).
 server.handoverKey = vaultKey()
-server.handoverNeedsKey = ownsLaunchers
+server.handoverNeedsKey = role.isAccountHost
 // A test of the secret channel: these bytes are handed over, and the next build says whether it got them.
 let testSecret = value(after: "--handover-test-secret").map { Data($0.utf8) }
 if let testSecret { server.secretsForHandover = { testSecret } }
@@ -217,8 +218,8 @@ for name in (try? FileManager.default.contentsOfDirectory(atPath: launchers.path
 }
 // Earlier versions kept the user's sealing key and the teams in files any of the team could read: gone.
 if ownsLaunchers {
-    try? FileManager.default.removeItem(at: VibePaths.root.appendingPathComponent("steer/sender.key"))
-    try? FileManager.default.removeItem(at: VibePaths.root.appendingPathComponent("lead/teams"))
+    try? FileManager.default.removeItem(at: role.root.appendingPathComponent("steer/sender.key"))
+    try? FileManager.default.removeItem(at: role.root.appendingPathComponent("lead/teams"))
 }
 FileHandle.standardError.write(Data("vibeswitcher-host: started \(Date())\n".utf8))
 dispatchMain()

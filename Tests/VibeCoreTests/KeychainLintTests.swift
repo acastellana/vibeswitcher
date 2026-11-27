@@ -32,7 +32,7 @@ struct KeychainLintTests {
     }
 
     /// The app's Keychain store is made by the app alone (its one client); every other client, a default one too, has
-    /// its own key or none. The host's vault key is read only by the user's own host (`ownsLaunchers`).
+    /// its own key or none. The host's vault key is read only by the account's own host (`HostRole.vaultKey`).
     @Test func onlyTheAppMakesItsKeychainStore() throws {
         #expect(Self.files(in: "Sources", matching: #"KeychainStore\("#) == ["Sources/VibeSwitcher/AppDelegate.swift"])
         // The ElevenLabs key's store too: the app makes it, once; every test has a memory one.
@@ -41,7 +41,8 @@ struct KeychainLintTests {
         #expect(host.lines.contains { $0.contains("appKey: @escaping () -> SymmetricKey? = { nil }") })
         #expect(Self.files(in: "Sources", matching: #"VaultStorage\.keychainKey\("#) == ["Sources/vibeswitcher-host/main.swift"])
         let main = try #require(Self.code(in: "Sources").first { $0.path == "Sources/vibeswitcher-host/main.swift" })
-        #expect(main.lines.filter { $0.contains("VaultStorage.keychainKey(") }.allSatisfy { $0.contains("ownsLaunchers ?") })
+        let reads = main.lines.filter { $0.contains("VaultStorage.keychainKey(") }
+        #expect(!reads.isEmpty && reads.allSatisfy { $0.contains("role.vaultKey { VaultStorage.keychainKey() }") })
     }
 
     /// In the tests, only the live test touches the Keychain or the app's store, and it runs only when asked for.
