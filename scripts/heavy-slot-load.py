@@ -255,6 +255,7 @@ def analyse(data):
         if s.known:
             by.setdefault(min(s.held, 3), []).append(s.one)
     out["anchor"] = {k: (sum(v) / len(v), pct(v, 0.9), len(v)) for k, v in sorted(by.items())}
+    out["median_by_held"] = {k: pct(v, 0.5) for k, v in sorted(by.items())}
     # Slot-minutes by kind, over-share by kind, single-holder load by kind.
     slot_min = {k: 0.0 for k in ALL_KINDS}
     over = {k: 0.0 for k in ALL_KINDS}
@@ -279,6 +280,17 @@ def analyse(data):
             over_limit += s.weight
             for k in set(kinds):
                 over_limit_with[k] += s.weight
+    # How concentrated the over-share is: from samples over load 48 and over 100, and by day.
+    conc = {"over48": 0.0, "over100": 0.0, "by_day": {}}
+    for i, s in enumerate(data.samples):
+        o = data.over_share(i) * s.weight
+        if s.known and s.one > 48:
+            conc["over48"] += o
+        if s.known and s.one > 100:
+            conc["over100"] += o
+        day = s.t.strftime("%m-%d")
+        conc["by_day"][day] = conc["by_day"].get(day, 0.0) + o
+    out["concentration"] = conc
     out["slot_minutes"] = slot_min
     out["over_share"] = over
     out["over_share_total"] = over_total
@@ -414,6 +426,15 @@ def analyse(data):
             else:
                 row[ph] += cpu
     out["where"] = where
+    # The top groups at the samples over load 48, by command name only (never a folder): CPU summed, in core-samples,
+    # and how many samples name each.
+    by_command = {}
+    for s in data.samples:
+        for g in s.top:
+            c = by_command.setdefault(g.get("command") or "?", [0.0, 0])
+            c[0] += float(g.get("cpu") or 0) / 100
+            c[1] += 1
+    out["top_commands"] = sorted(((k, v[0], v[1]) for k, v in by_command.items()), key=lambda x: -x[1])
     out["with_top"] = with_top
     out["phase_cpu"] = phase_cpu
     out["folder_phase"] = folder_phase
@@ -504,6 +525,12 @@ def report(data, out=sys.stdout):
     p("anchor, the load review's table (unweighted): the 1-minute by heavy slots held")
     for k, (mean, p90, n) in a["anchor"].items():
         p(f"  {k}{'+' if k == 3 else ''} held: mean {mean:5.1f}, p90 {p90:5.1f}, {n} samples")
+    p("  median 1-minute by slots held: " + ", ".join(f"{k}{'+' if k == 3 else ''} held {v:.1f}" for k, v in a["median_by_held"].items()))
+    c = a["concentration"]
+    total = a["over_share_total"] or 1
+    p(f"over-share from samples over load 48: {c['over48']:.0f} ({100 * c['over48'] / total:.0f}%), over 100: "
+      f"{c['over100']:.0f} ({100 * c['over100'] / total:.0f}%); the days with the most: " + ", ".join(
+        f"{d} {v:.0f}" for d, v in sorted(c["by_day"].items(), key=lambda kv: -kv[1])[:4]))
     p()
     p(f"slot-minutes by kind ({a['held_minutes']:.0f} min with a slot held; over-share load-minutes "
       f"{a['over_share_total']:.0f}; minutes with a slot held and the 1-minute over T: {a['over_limit_held']:.0f})")
@@ -549,6 +576,8 @@ def report(data, out=sys.stdout):
       f"with no other slot held (its loops fill only up to 2 x cores, so over T they aren't the ones adding)")
     p()
     p(f"top groups (samples over load 48: {a['with_top']}): CPU by phase, in cores (summed % / 100, x the samples)")
+    p("  the top groups by command (core-samples, samples naming it), the first 12:")
+    p("    " + ", ".join(f"{k} {cpu:.0f} ({n})" for k, cpu, n in a["top_commands"][:12]))
     tot = sum(a["phase_cpu"].values()) or 1
     for ph, cpu in sorted(a["phase_cpu"].items(), key=lambda kv: -kv[1]):
         p(f"  {ph:14} {cpu / 100:8.0f} core-samples  {100 * cpu / tot:3.0f}%")
@@ -644,6 +673,12 @@ def selftest():
         # 10:06 (60) and 10:08 (40), the load run alone at both.
         ("load-run alone over T", a["load_runs"]["alone_over"], 2.0),
         ("single merge mean", round(a["single"]["merge"]["mean"], 6), 17.0),
+        # Over load 48: 10:06 (51), 10:10 (33), 10:13 (61) = 145 of 240; over 100 none.
+        ("over-share over 48", round(a["concentration"]["over48"], 6), 145.0),
+        ("over-share over 100", a["concentration"]["over100"], 0.0),
+        ("top commands", [(k, round(c, 6), n) for k, c, n in a["top_commands"]],
+         [("bash", 9.0, 1), ("swift-frontend", 7.0, 2), ("swiftpm-testing", 3.0, 1), ("Browser", 1.0, 1)]),
+        ("median by held", a["median_by_held"][0], 4),
         ("refused", a["refused"]["all"], 4.0),
         ("refused held", a["refused"]["held"], 4.0),
         ("refused with ours outside", a["refused"]["held_top_outside"], 1.0),
