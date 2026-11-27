@@ -77,11 +77,12 @@ public struct PeerFacts: Equatable, Sendable {
     /// its coalition `proc_pidinfo`'s, its environment `KERN_PROCARGS2`'s). `token`: the sender as the socket named it;
     /// when its pid now names another process (it ended and its number was given again), nothing is readable. The
     /// environment and the coalition are read before the token's check of the first link, so that check binds them to
-    /// the token's process too: once it holds, the process lived with that pid through both reads. `cgroupRoot`: a
-    /// scratch server's test's (`ServerArguments.testCgroupRoot`), from which its cgroup lines are read (`rerooted`);
-    /// nil, as the user's node's server always has it: the lines as `/proc` gives them. `runnersAbove`: the runners a
-    /// scratch server's test runs under (`ServerArguments.testRunnerAbove`: the server's own, `runners(above:)`),
-    /// which aren't counted as this process's; none, as the user's node's server always has it: every runner counts.
+    /// the token's process too: once it holds, the process lived with that pid through both reads; when it fails, neither
+    /// is given (nil), as the ancestry isn't. `cgroupRoot`: a scratch server's test's (`ServerArguments.testCgroupRoot`),
+    /// from which its cgroup lines are read (`rerooted`); nil, as the user's node's server always has it: the lines as
+    /// `/proc` gives them. `runnersAbove`: the runners a scratch server's test runs under (`ServerArguments.testRunnerAbove`:
+    /// the server's own, `runners(above:)`), which aren't counted as this process's; none, as the user's node's server
+    /// always has it: every runner counts.
     public static func read(pid: pid_t, token: Platform.PeerToken? = nil, cgroupRoot: String? = nil, runnersAbove: [Ancestor] = []) -> PeerFacts {
         var uid: uid_t?
         if case .record(let record) = Platform.Processes.record(pid) { uid = record.uid }
@@ -121,7 +122,7 @@ public struct PeerFacts: Equatable, Sendable {
         let cgroup = Platform.Processes.cgroup(pid).map { lines in cgroupRoot.map { rerooted(lines, at: $0) } ?? lines }
         return PeerFacts(pid: pid, uid: uid, cgroup: cgroup, ancestry: readable ? ancestry : nil,
                          terminal: readable ? terminal : .unreadable,
-                         sessionMarker: environment.map { $0.contains { $0.hasPrefix(sessionMarkerName + "=") } },
+                         sessionMarker: readable ? environment.map { $0.contains { $0.hasPrefix(sessionMarkerName + "=") } } : nil,
                          underRunner: underRunner, commandLine: Platform.Processes.arguments(pid),
                          coalition: readable ? coalition : nil)
     }
