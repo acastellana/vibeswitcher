@@ -4,7 +4,8 @@
 // (`session.draft`), and `vibeswitcher send SESSION` in a terminal shows it whole and asks for the typed code.
 //
 // What gets a Run, as the app's: a block in a shell language (bash, sh, zsh, shell, console…), or with no language whose
-// first line is typed at a prompt (`$ `, `!`); none with a character that draws nothing or moves what is drawn (controls,
+// first line is typed at a prompt (`$ `, `!`) or whose only line reads as one plain command (`untagged`, main's aa652c58:
+// a known command word or a path first, not a sentence); none with a character that draws nothing or moves what is drawn (controls,
 // format characters, blank-looking fillers, any space but a plain one), a heredoc, an open quote, or a long blank run that
 // pushes the rest of a line out of sight. Several lines run joined with `&&` only when each stands on its own; a block
 // whose lines mean something only together (the app runs it from a script file) gets no Run on the page.
@@ -63,6 +64,7 @@ export function runnable(code, language) {
   const lines = code.split('\n').map((line) => line.trim());
   const first = lines.find((line) => line) || '';
   const marked = first.startsWith('!') || first.startsWith('$ ');
+  if (!lang && !marked) return untagged(lines);
   if (!(lang ? SHELLS.has(lang) : marked)) return null;
   const consoleBlock = lang === 'console' || lang === 'terminal';
   const commands = [];
@@ -84,4 +86,57 @@ export function runnable(code, language) {
   if (commands.length > 1 && !commands.every(joinsCleanly)) return null;
   const command = commands.join(' && ');
   return { command, prompt: '! ' + command };
+}
+
+// A block with no language (a bare fence) whose only line reads as one plain shell command (the app's
+// `RunnableCommand.untagged`, main's aa652c58): drafted as that line's tagged block would be. On 2026-11-18 a lead
+// showed `cd …/prototype && python3 -m http.server …` in a bare fence and the block had only Copy.
+function untagged(lines) {
+  const content = lines.filter((line) => line);
+  if (content.length !== 1) return null;
+  const line = content[0];
+  if (!readsAsTyped(line) || !readsAsCommand(line)) return null;
+  return { command: line, prompt: '! ' + line };
+}
+
+// The programs that risk something (the app's `riskyPrograms`): they run too, from the draft `vibeswitcher send` asks
+// a code for, as every Run does.
+const RISKY = ['rm', 'rmdir', 'mv', 'cp', 'dd', 'mkfs', 'diskutil', 'sudo', 'su', 'doas', 'chmod', 'chown', 'chgrp', 'kill',
+  'killall', 'pkill', 'shutdown', 'reboot', 'halt', 'curl', 'wget', 'eval', 'exec', 'source', '.', 'sh', 'bash',
+  'zsh', 'fish', 'python', 'python3', 'node', 'ruby', 'perl', 'osascript', 'launchctl', 'defaults', 'security',
+  'ssh', 'scp', 'rsync', 'env', 'xargs', 'nohup', 'command', 'builtin', 'find', 'truncate', 'shred', 'crontab'];
+
+// Words that start a command line (the app's `commandWords`): the programs people run from a chat's code blocks, and
+// the risky ones.
+export const COMMAND_WORDS = new Set([...RISKY,
+  'cd', 'pushd', 'ls', 'cat', 'echo', 'printf', 'pwd', 'open', 'mkdir', 'touch', 'ln', 'du', 'df', 'stat', 'file',
+  'head', 'tail', 'less', 'more', 'grep', 'rg', 'sed', 'awk', 'jq', 'yq', 'sort', 'uniq', 'wc', 'diff', 'tree',
+  'which', 'type', 'man', 'export', 'unset', 'set', 'time', 'watch', 'sleep', 'test', 'true', 'false', 'ps', 'lsof',
+  'top', 'htop', 'tmux', 'screen', 'tar', 'zip', 'unzip', 'gzip', 'gunzip', 'ping', 'dig', 'nc', 'nslookup',
+  'git', 'gh', 'npm', 'npx', 'pnpm', 'yarn', 'bun', 'bunx', 'deno', 'pip', 'pip3', 'pipx', 'uv', 'uvx', 'poetry',
+  'pytest', 'tox', 'gem', 'bundle', 'rails', 'rake', 'go', 'cargo', 'rustc', 'rustup', 'swift', 'swiftc',
+  'xcodebuild', 'xcrun', 'make', 'cmake', 'ninja', 'docker', 'docker-compose', 'podman', 'kubectl', 'helm',
+  'terraform', 'brew', 'java', 'mvn', 'gradle', 'php', 'composer', 'dotnet', 'flutter', 'dart', 'sqlite3', 'psql',
+  'mysql', 'redis-cli', 'hugo', 'jekyll', 'mkdocs', 'ffmpeg', 'ollama', 'claude', 'codex', 'code', 'vim', 'nvim',
+  'nano', 'pbcopy', 'pbpaste', 'say', 'caffeinate', 'http', 'vs-shell', 'vs-heavy', 'vs-wallet', 'passage',
+]);
+
+const PATH_WORD = /^[A-Za-z0-9/._~+@-]+$/;
+
+// `NAME=value`: an environment assignment before the command.
+const isAssignment = (word) => /^[A-Za-z_][A-Za-z0-9_]*=/.test(word);
+
+// Whether one line reads as a command rather than prose (the app's `readsAsCommand`): after any `NAME=value` words, its
+// first word is a known command or a path (`/…`, `./…`, `../…`, `~/…`, or `dir/file.ext`), and it doesn't end like a
+// sentence (a letter, then `.`, `:`, `?`, `!` or `,`).
+export function readsAsCommand(line) {
+  const first = line.split(' ').filter(Boolean).find((word) => !isAssignment(word));
+  if (!first) return false;
+  if (/\p{L}[.:?!,]$/u.test(line)) return false;
+  if (COMMAND_WORDS.has(first)) return true;
+  if (!first.includes('/') || !PATH_WORD.test(first)) return false;
+  if (['/', './', '../', '~/'].some((start) => first.startsWith(start))) return first.length > 1;
+  // A relative path names a file to run: `scripts/build-app.sh`, not `and/or`.
+  const name = first.split('/').at(-1);
+  return name.slice(1).includes('.') && !name.endsWith('.');
 }

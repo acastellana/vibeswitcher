@@ -1,0 +1,1 @@
+{"ok":true,"re":"g3-3","result":{"counts":false,"recorded":"vault","said":"recorded in the vault as yours; `vibeswitcher status` doesn't count it yet (the device keys track's slices 14 and 15 change its reader), so the marks stay until `vibeswitcher status --ack` in a terminal"},"v":1}

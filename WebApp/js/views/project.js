@@ -30,6 +30,7 @@ import { waysFor, sendArgs, sentWords } from '../sendways.js';
 import { heldSummary, itemLabel } from '../heldconfig.js';
 import { sendMenu } from './sendmenu.js';
 import { composer as messageBox, keepFor } from './composer.js';
+import { allDoneView, unseenAllDone, dismissAllDone } from './alldone.js';
 
 // The line marks: a diamond for a question (filled while open, an outline once answered), a check for a result, a
 // small dot for a status update.
@@ -229,6 +230,18 @@ export function projectView(app, { sheet }) {
   };
   // Notes drafted for a lead, this page's only: the line that tells it from a terminal.
   const notes = new Map();
+  // What Dismiss on a project's all-done card did, by project, for its mark's id: { id, text, failed }.
+  const doneSaid = new Map();
+  async function dismissDone(project, mark) {
+    doneSaid.set(project, { id: mark.id, text: t('adDismissed') });
+    const asked = dismissAllDone(store, project, mark);
+    drawn = '';
+    render();
+    const result = await asked;
+    if (!result.ok) doneSaid.set(project, { id: mark.id, text: t('adDismissFailed', { why: result.why }), failed: true });
+    drawn = '';
+    render();
+  }
   let drawn = '';
   let lastProject = null;
   let lastLevel = null;
@@ -536,8 +549,11 @@ export function projectView(app, { sheet }) {
     const extra = cards.filter((card) => !['question', 'approval'].includes(card.kind));
     const mine = notes.get(route.id) || [];
     const pushes = stack.receipts();
+    // The all-done mark (views/alldone.js): its card at the conversation's end until dismissed, then what that did.
+    const done = unseenAllDone(board);
+    const said = board?.allDone && doneSaid.get(route.id)?.id === board.allDone.id ? doneSaid.get(route.id) : null;
     const key = JSON.stringify([route.id, route.show, lines.map((line) => [line.key, line.answer, line.state, line.delivered, line.replaceable]), extra.map((card) => [card.id, card.seen]), mine, waiting, lang(), store.acts(),
-      lead?.told || null, [...changing], pushes, stack.el.hidden]);
+      lead?.told || null, [...changing], pushes, stack.el.hidden, done, said, store.can('seen')]);
     if (key === drawn) return;
     const box = scrollBox();
     const { atEnd, reading } = seen;
@@ -578,6 +594,13 @@ export function projectView(app, { sheet }) {
         children.push(h('div', { class: 'note' }, h('p', { class: 'mine' + (entry.state === 'refused' ? ' refused' : '') }, entry.text),
           h('p', { class: 'confirm-note' + (entry.state === 'refused' ? ' refused' : '') }, noteState(lead, entry))));
       }
+    }
+    if (done && !asks) {
+      children.push(h('div', { class: 'lead-all-done', data: { anchor: 'all-done' } },
+        allDoneView(done, { className: 'all-done', dismiss: store.can('seen') ? () => dismissDone(route.id, done) : null }),
+        said?.failed ? h('p', { class: 'confirm-note refused', role: 'status' }, said.text) : null));
+    } else if (said && !said.failed && !asks) {
+      children.push(h('p', { class: 'receipt all-done-said', role: 'status' }, icon('check', 12), ' ', said.text));
     }
     col.replaceChildren(...children);
     const changedView = lastProject !== route.id || lastLevel !== route.show;

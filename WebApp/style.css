@@ -1011,6 +1011,10 @@ textarea.answer-input { max-height: 200px; line-height: var(--lh-body); resize: 
 .notices li { display: flex; align-items: flex-start; gap: var(--s-4); padding: var(--s-4) var(--s-5); border-radius: var(--r-2); background: var(--fill); }
 .notices .icon { margin-top: var(--s-1); color: var(--ink-2); }
 .node-says { margin-bottom: var(--s-3); }
+.logs-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--s-3); margin-bottom: var(--s-4); }
+.logs-actions { display: flex; align-items: center; gap: var(--s-3); }
+.logs-actions .block-copy { opacity: 1; } /* the log's Copy stands beside Refresh, not over a block until pointed at */
+.log-lines { max-height: 60vh; overflow: auto; padding: var(--s-4) var(--s-5); border-radius: var(--r-2); background: var(--fill); font-family: var(--mono); font-size: var(--t-code); line-height: var(--lh-code); white-space: pre-wrap; overflow-wrap: anywhere; } /* the log as text, newest last, its own scroll */
 .lines { display: grid; gap: var(--s-2); color: var(--ink-2); font-size: var(--t-caption); overflow-wrap: anywhere; }
 /* A build: what the node says of it, the hash after it, quiet (D18). Technical details: pids, the node's name, its
    state folder, folded. A path: shortened, whole on hover. */
@@ -1160,6 +1164,12 @@ kbd { padding: 1px var(--s-3); border-radius: var(--r-1); box-shadow: var(--e-1-
 
 .options.read-only { list-style: none; }
 .options.read-only .option { padding: var(--s-3) var(--s-5); background: transparent; box-shadow: var(--e-1-in); cursor: default; }
+.options.ticks { list-style: none; } /* a multi-select's rows: each a label, its box first, ticked in place */
+.option-tick { cursor: pointer; }
+.ticks-words { width: 100%; margin-top: var(--s-3); }
+.ticks-actions { display: flex; justify-content: flex-end; margin-top: var(--s-4); }
+.whole-share { color: var(--ink-3); font-variant-numeric: tabular-nums; } /* how much of a long card is in, quietly */
+.card.too-large .whole-again { margin-top: var(--s-3); }
 .card-command { display: grid; gap: var(--s-2); padding: var(--s-4) var(--s-5); border-radius: var(--r-2); box-shadow: var(--e-1-in); }
 .card-command-label { color: var(--ink-3); font-size: var(--t-caption); }
 .card-command code { overflow-wrap: anywhere; user-select: all; }
@@ -1303,6 +1313,10 @@ kbd { padding: 1px var(--s-3); border-radius: var(--r-1); box-shadow: var(--e-1-
 .look-colour { width: 28px; height: var(--ctl-s); padding: 0; border: 1px solid var(--line); border-radius: var(--r-1); background: none; cursor: pointer; }
 .look-colour:disabled { cursor: default; opacity: 0.9; }
 .terminal-pane.is-bell .terminal-screen { animation: bell-flash var(--dur-2) var(--ease-out); }
+/* P4: find in the terminal, the chat's find bar across the pane's top (its padding undone), over the screen. */
+.terminal-find-slot { flex: none; margin: calc(-1 * var(--s-4)) calc(-1 * var(--s-2)) 0 calc(-1 * var(--s-5)); }
+.terminal-find-slot:has(> .terminal-find:not([hidden])) { margin-bottom: var(--s-3); }
+.terminal-pane:has(> .placeholder:not([hidden])) > .terminal-find-slot { display: none; }
 @keyframes bell-flash { from { filter: brightness(1.6); } to { filter: none; } }
 @media (prefers-reduced-motion: reduce) { .terminal-pane.is-bell .terminal-screen { animation: none; outline: 2px solid var(--accent); } }
 @media (max-width: 600px) { .look-row { grid-template-columns: minmax(0, 1fr); } .look-note { grid-column: 1; } }
@@ -1317,6 +1331,13 @@ kbd { padding: 1px var(--s-3); border-radius: var(--r-1); box-shadow: var(--e-1-
 .all-done-bullets { margin: 0 0 var(--s-2) var(--s-6); padding: 0; }
 .all-done-cost { font-size: var(--t-caption); opacity: .8; margin: var(--s-2) 0; }
 .all-done-tasks li.merged { font-weight: var(--w-medium); }
+/* P-s1: the card's Dismiss beside its title, in the lead conversation; what it did, in a line, once dismissed. */
+.all-done-head { display: flex; align-items: baseline; gap: var(--s-3); }
+.all-done .board-group-head { display: flex; align-items: baseline; gap: var(--s-3); }
+.all-done .board-task-when { font-weight: var(--w-regular); }
+.all-done-head > .section-title { flex: 1; min-width: 0; }
+.lead-all-done { margin-top: var(--s-4); }
+.receipt.all-done-said { align-self: auto; display: flex; align-items: center; gap: var(--s-2); margin-top: var(--s-4); }
 
 /* The composer's + (views/chat.js): an image from this device, or the line that sends one on the node. */
 .composer-attach { flex: none; width: var(--ctl-l); height: var(--ctl-l); }

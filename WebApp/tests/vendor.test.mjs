@@ -27,7 +27,7 @@ test('nothing is vendored that the README doesn’t name', () => {
 });
 
 test('the README records each tarball’s version and its registry SHA-512', () => {
-  for (const [name, version] of [['@xterm/xterm', '6.0.0'], ['@xterm/addon-fit', '0.11.0']]) {
+  for (const [name, version] of [['@xterm/xterm', '6.0.0'], ['@xterm/addon-fit', '0.11.0'], ['@xterm/addon-search', '0.16.0']]) {
     const row = readme.split('\n').find((line) => line.startsWith(`| \`${name}\` |`));
     assert.ok(row, `${name}'s row`);
     assert.match(row, new RegExp(`\\| ${version.replaceAll('.', '\\.')} \\| https://registry\\.npmjs\\.org/\\S+-${version.replaceAll('.', '\\.')}\\.tgz \\| \`sha512-[A-Za-z0-9+/]{86}==\` \\|`));

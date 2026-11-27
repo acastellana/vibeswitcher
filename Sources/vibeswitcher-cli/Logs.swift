@@ -13,10 +13,8 @@ import VibeNode
 /// Every line printed inert, its secrets masked again.
 enum LogsCommand {
     static let usage = "usage: vibeswitcher logs [--lines N] [--sessions]"
-    static let defaultLines = 40
-    static let maxLines = 2000
-    /// The most of a log's end read for its last lines.
-    static let tailBytes = 512 * 1024
+    static let defaultLines = NodeLogs.defaultLines
+    static let maxLines = NodeLogs.maxLines
 
     struct Asked: Equatable {
         var lines = LogsCommand.defaultLines
@@ -74,41 +72,22 @@ enum LogsCommand {
     private static func print(_ lines: [String]) { for line in lines { Say.out(line) } }
     private static func shown(_ path: String) -> String { ConfigSeal.inert(path, limit: 400) }
 
-    /// The host's session log: the user's host writes `<root>/debug/host.log` (`vibeswitcher-host`'s `--log` default),
-    /// a scratch node's host the `--log` its test gave (`<root>/host.log`).
-    static func sessionLog(_ context: NodeContext) -> String {
-        context.isScratch ? context.root.appendingPathComponent("host.log").path : VibePaths.root.appendingPathComponent("debug/host.log").path
-    }
+    /// The host's session log (`NodeLogs.sessionLog`, the page's `logs` read the same).
+    static func sessionLog(_ context: NodeContext) -> String { NodeLogs.sessionLog(root: context.root, scratch: context.isScratch) }
 
-    /// One line printed: inert, its secrets masked.
-    static func line(_ text: String) -> String { "  " + ConfigSeal.inert(Redaction.secrets(in: text), limit: 1000) }
+    /// One line printed: indented, masked by `NodeLogs.masked` (the `logs` kind's masking, the same code).
+    static func line(_ text: String) -> String { "  " + NodeLogs.masked(text) }
 
-    /// The file's last `lines` lines (of its last `tailBytes`), never through a link; why not, as a line, when it can't
-    /// be read.
+    /// The file's last `lines` lines (`NodeLogs.tail`), printed; why not, as a line, when it can't be read.
     static func tail(_ path: String, lines count: Int) -> [String] {
-        let fd = open(path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
-        guard fd >= 0 else { return ["  (\(errno == ENOENT ? "not there yet" : "couldn't be read: errno \(errno)"))"] }
-        let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
-        guard let size = try? handle.seekToEnd() else { return ["  (couldn't be read)"] }
-        let start = size > UInt64(tailBytes) ? size - UInt64(tailBytes) : 0
-        try? handle.seek(toOffset: start)
-        let data = (try? handle.readToEnd()) ?? Data()
-        var lines = String(decoding: data, as: UTF8.self).split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
-        // A partial first line when the read began mid-file.
-        if start > 0, !lines.isEmpty { lines.removeFirst() }
-        let last = lines.suffix(count)
-        return last.isEmpty ? ["  (empty)"] : last.map(line)
+        switch NodeLogs.tail(path, lines: count) {
+        case .failure(let why): return ["  (\(why.reason))"]
+        case .success(let lines): return lines.isEmpty ? ["  (empty)"] : lines.map { "  " + $0 }
+        }
     }
 
-    /// The node unit's journal lines, newest last: `journalctl --user -u UNIT -n N -o json` (a scratch node's stand-in).
+    /// The node unit's journal lines, newest last (`NodeLogs.journal`, by the context's tools).
     static func journal(_ context: NodeContext, lines count: Int) -> Result<[String], NodeFacts.Failure> {
-        guard let journalctl = context.journalctl else { return .failure(.init(NodeContext.noStandIn)) }
-        let arguments = ["--user", "-o", "json", "--no-pager", "-n", String(count), "-u", VoiceRule.nodeUnit, "_UID=\(getuid())"]
-        guard let ran = context.runTool(journalctl, arguments), ran.status == 0 else { return .failure(.init("journalctl --user didn't answer")) }
-        let stamp = ISO8601DateFormatter()
-        let entries = NodeJournal.entries(json: ran.output).filter { $0.identifier != NodeJournal.identifier }
-        return .success(entries.suffix(count).map { entry in
-            line((entry.time.map { stamp.string(from: $0) + " " } ?? "") + (entry.message ?? ""))
-        })
+        NodeLogs.journal(context.journalctl, lines: count, run: context.runTool).map { $0.map { "  " + $0 } }
     }
 }

@@ -82,8 +82,8 @@ private final class WiredWorld: @unchecked Sendable {
     var host: String { "127.0.0.1:\(port)" }
     var origin: String { "http://127.0.0.1:\(port)" }
 
-    init(_ limits: WebLimits = NodeWebListener.limits, files: [String: WebAsset] = [:]) throws {
-        web = NodeWebListener(port: 0, assets: StubAssets(files: files), gate: gate, handler: hub, queue: queue, clock: time.clock(),
+    init(_ limits: WebLimits = NodeWebListener.limits, files: [String: WebAsset] = [:], assets: WebAssetSource? = nil) throws {
+        web = NodeWebListener(port: 0, assets: assets ?? StubAssets(files: files), gate: gate, handler: hub, queue: queue, clock: time.clock(),
                               limits: limits, hello: { admission in
                                   NodeWire.line(["kind": NodeWire.Value.string("hello"), "auth": admission.auth]).dropLast()
                               })
@@ -525,5 +525,92 @@ extension WebListenerTests {
             #expect(asked.value == ["listen loopback", "listen loopback", "release loopback"], "\(asked.value)")
         }
 
+    }
+}
+
+extension WebListenerTests {
+    /// The page's first load through the node's own listener and its embedded files (the design review's D26: a cold
+    /// load on a slow link). A browser asks for the page, then for everything the page names, then for what each module
+    /// it got imports, round by round. With the preload list, every module is named by the page: two rounds; and the
+    /// text comes gzipped to a browser that takes it. Every answer keeps the headers the security reviews pinned, once.
+    struct FirstLoad {
+        static let chrome = "gzip, deflate, br, zstd"
+        static let policyPort: UInt16 = 47999
+
+        struct Load {
+            var requests = 0
+            var bytes = 0
+            var rounds = 0
+            var gzipped = 0
+        }
+
+        /// The static imports of a module's text, as paths resolved against `path` (dynamic `import()` isn't one).
+        static func imports(_ text: String, of path: String) -> [String] {
+            let pattern = #"(?m)^\s*(?:import|export)\s[^'"`;]*?from\s*['"]([^'"]+)['"]|^\s*import\s*['"]([^'"]+)['"]"#
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+            let range = NSRange(text.startIndex..., in: text)
+            return regex.matches(in: text, range: range).compactMap { match in
+                let spec = [1, 2].compactMap { Range(match.range(at: $0), in: text).map { String(text[$0]) } }.first
+                return spec.flatMap { URL(string: $0, relativeTo: URL(string: "http://page\(path)"))?.path }
+            }
+        }
+
+        /// A cold load as a browser makes it, `acceptEncoding` sent with each request: what it asked, in how many rounds.
+        fileprivate func load(_ world: WiredWorld, source: WebAssetSource, acceptEncoding: String?) throws -> Load {
+            var load = Load()
+            var asked: Set<String> = []
+            var round = ["/"]
+            while !round.isEmpty {
+                load.rounds += 1
+                var next: [String] = []
+                for path in round where asked.insert(path).inserted {
+                    let client = try world.connect()
+                    client.send("GET \(path) HTTP/1.1\r\nHost: \(world.host)\r\n" + (acceptEncoding.map { "Accept-Encoding: \($0)\r\n" } ?? "") + "\r\n")
+                    let head = try #require(client.head(), "\(path)")
+                    let body = client.rest()
+                    load.requests += 1
+                    load.bytes += head.utf8.count + body.count
+                    #expect(head.hasPrefix("HTTP/1.1 200 "), "\(path): \(head)")
+                    // The pinned headers, once each, whichever form the body takes.
+                    let lines = head.components(separatedBy: "\r\n")
+                    let policy = WebSecurityHeaders.policy(port: Self.policyPort)
+                    for line in ["Cross-Origin-Resource-Policy: same-origin", "X-Content-Type-Options: nosniff", "Content-Security-Policy: \(policy)",
+                                 "Cross-Origin-Opener-Policy: same-origin", "X-Frame-Options: DENY", "Referrer-Policy: no-referrer"] {
+                        #expect(lines.filter { $0 == line }.count == 1, "\(path): \(line) in \(head)")
+                    }
+                    for name in ["Cross-Origin-Resource-Policy", "X-Content-Type-Options", "Content-Security-Policy", "Content-Type", "ETag", "Content-Encoding", "Vary"] {
+                        #expect(lines.filter { $0.lowercased().hasPrefix(name.lowercased() + ":") }.count <= 1, "\(path): \(name) twice in \(head)")
+                    }
+                    let encoding = lines.first { $0.hasPrefix("Content-Encoding: ") }
+                    if encoding != nil { load.gzipped += 1 }
+                    // What the page and its modules name, read from the file as the browser decodes it.
+                    let text = String(decoding: try #require(source.asset(path: path)).body, as: UTF8.self)
+                    if path == "/" {
+                        let named = try NSRegularExpression(pattern: #"\s(?:src|href)="(/_/[^"]+)""#)
+                        next += named.matches(in: text, range: NSRange(text.startIndex..., in: text)).compactMap { Range($0.range(at: 1), in: text).map { String(text[$0]) } }
+                    } else if path.hasSuffix(".js") || path.hasSuffix(".mjs") {
+                        next += Self.imports(text, of: path)
+                    }
+                }
+                round = next.filter { !asked.contains($0) }
+            }
+            return load
+        }
+
+        @Test func theFirstLoadAsksForEveryModuleAtOnceAndTakesTheTextGzipped() throws {
+            let source = EmbeddedAssets(port: Self.policyPort)
+            let world = try WiredWorld(assets: source)
+            let plain = try load(world, source: source, acceptEncoding: nil)
+            let packed = try load(world, source: source, acceptEncoding: Self.chrome)
+            let said = "D26 first load: \(plain.requests) requests, \(plain.bytes) bytes on the wire without gzip, \(plain.rounds) rounds; "
+                + "with Chrome's Accept-Encoding \(packed.requests) requests (\(packed.gzipped) gzipped), \(packed.bytes) bytes, \(packed.rounds) rounds"
+            print(said)
+            #expect(plain.requests > 60, "\(said)")
+            #expect(packed.requests == plain.requests, "\(said)")
+            // The page, then everything at once: no module waits for the one that imports it.
+            #expect(plain.rounds == 2 && packed.rounds == 2, "\(said)")
+            #expect(packed.bytes * 100 / plain.bytes < 35, "\(said)")
+            #expect(packed.gzipped > 60, "\(said)")
+        }
     }
 }

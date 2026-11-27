@@ -125,5 +125,5 @@ test('a card too large for the page is drawn as such, with the command that show
   const state = (cards) => ({ sessions: new Map(), leads: new Map(), cards: new Map(cards.map((c) => [c.id, c])), cardKeys: new Map(), plugins: null });
   const told = changes(summarize(state([])), summarize(state([{ ...card(), plugin: { plugin: 'probe', session: card().plugin.session, title: 'A probe asked for' }, tooLarge: { bytes: 1, command: 'vibeswitcher questions' } }])));
   assert.equal(told.length, 1);
-  assert.equal(told[0].body, 'A card too large for the page: read it with vibeswitcher questions');
+  assert.equal(told[0].body, 'A long card: open the page to read it whole.', 'nothing of what it asks, and no command: the page reads it whole');
 });

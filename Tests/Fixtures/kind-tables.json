@@ -35,6 +35,9 @@
       "buildsBeforeListing",
       "commit"
     ],
+    "claude.autoupdate" : [
+      "on"
+    ],
     "config.accept" : [
       "card",
       "code"
@@ -49,6 +52,9 @@
     ],
     "hooks.remove" : [
       "agents"
+    ],
+    "journal.ack" : [
+
     ],
     "lead" : [
       "folder",
@@ -84,6 +90,11 @@
       "op",
       "rename",
       "unset"
+    ],
+    "project.new" : [
+      "goal",
+      "location",
+      "name"
     ],
     "prompt-audit" : [
       "do",
@@ -135,6 +146,7 @@
     ],
     "session.reply" : [
       "choice",
+      "choices",
       "options",
       "question",
       "session",
@@ -160,6 +172,10 @@
     ],
     "tell.retract" : [
       "action"
+    ],
+    "update" : [
+      "commit",
+      "rollback"
     ],
     "web.confirm" : [
       "code",
@@ -197,6 +213,7 @@
     "build.switch" : "switch your node to another build",
     "chat.image" : "do chat.image for you",
     "chat.page" : "do chat.page for you",
+    "claude.autoupdate" : "turn Claude Code's self-update on or off",
     "config.accept" : "accept a change to a watched file",
     "config.held" : "do config.held for you",
     "draft" : "do draft for you",
@@ -204,7 +221,9 @@
     "hold" : "hold a lead's question for you",
     "hooks.install" : "install VibeSwitcher's hooks",
     "hooks.remove" : "remove VibeSwitcher's hooks",
+    "journal.ack" : "acknowledge the starts, stops and restarts the journal shows",
     "lead" : "start a project's lead for you",
+    "logs" : "do logs for you",
     "mail" : "do mail for you",
     "no.such.kind" : "do no.such.kind for you",
     "passkey.ask" : "do passkey.ask for you",
@@ -217,6 +236,7 @@
     "plugin.on" : "turn a plugin on for this node",
     "plugin.remove" : "remove a plugin from this node",
     "presets.edit" : "edit your launch presets",
+    "project.new" : "make a new project and start its lead for you",
     "prompt-audit" : "change a project's prompt-audit reminder",
     "push" : "push a lead's branch for you",
     "push.decline" : "decline a lead's push",
@@ -255,6 +275,7 @@
     "term.close" : "do term.close for you",
     "term.open" : "do term.open for you",
     "unsubscribe" : "do unsubscribe for you",
+    "update" : "install another build and switch your node to it",
     "update.check" : "do update.check for you",
     "web.confirm" : "confirm a web page's pairing",
     "web.open" : "open the web page to a device",
@@ -300,6 +321,9 @@
       "buildsBeforeListing",
       "commit"
     ],
+    "claude.autoupdate" : [
+      "on"
+    ],
     "config.accept" : [
       "batch",
       "card",
@@ -315,6 +339,9 @@
     ],
     "hooks.remove" : [
       "agents"
+    ],
+    "journal.ack" : [
+
     ],
     "lead" : [
       "folder",
@@ -350,6 +377,11 @@
       "op",
       "rename",
       "unset"
+    ],
+    "project.new" : [
+      "goal",
+      "location",
+      "name"
     ],
     "prompt-audit" : [
       "do",
@@ -399,6 +431,7 @@
     ],
     "session.reply" : [
       "choice",
+      "choices",
       "options",
       "question",
       "session",
@@ -424,6 +457,10 @@
     ],
     "tell.retract" : [
       "action"
+    ],
+    "update" : [
+      "commit",
+      "rollback"
     ],
     "web.confirm" : [
       "code",
@@ -480,6 +517,7 @@
     "build.switch" : true,
     "chat.image" : false,
     "chat.page" : false,
+    "claude.autoupdate" : true,
     "config.accept" : true,
     "config.held" : false,
     "draft" : true,
@@ -487,7 +525,9 @@
     "hold" : true,
     "hooks.install" : true,
     "hooks.remove" : true,
+    "journal.ack" : true,
     "lead" : true,
+    "logs" : false,
     "mail" : false,
     "no.such.kind" : true,
     "passkey.ask" : false,
@@ -500,6 +540,7 @@
     "plugin.on" : true,
     "plugin.remove" : true,
     "presets.edit" : true,
+    "project.new" : true,
     "prompt-audit" : true,
     "push" : true,
     "push.decline" : true,
@@ -538,6 +579,7 @@
     "term.close" : true,
     "term.open" : true,
     "unsubscribe" : false,
+    "update" : true,
     "update.check" : false,
     "web.confirm" : true,
     "web.open" : true,
@@ -562,16 +604,19 @@
     "base.keep",
     "build.seal",
     "build.switch",
+    "claude.autoupdate",
     "config.accept",
     "hold",
     "hooks.install",
     "hooks.remove",
+    "journal.ack",
     "lead",
     "plugin.add",
     "plugin.off",
     "plugin.on",
     "plugin.remove",
     "presets.edit",
+    "project.new",
     "prompt-audit",
     "push",
     "push.decline",
@@ -589,6 +634,7 @@
     "stop",
     "tell",
     "tell.retract",
+    "update",
     "web.confirm",
     "web.open",
     "web.passkey.add",
@@ -624,6 +670,10 @@
       "keepsResult" : true,
       "rerun" : false
     },
+    "claude.autoupdate" : {
+      "keepsResult" : true,
+      "rerun" : true
+    },
     "config.accept" : {
       "keepsResult" : true,
       "rerun" : false
@@ -637,6 +687,10 @@
       "rerun" : true
     },
     "hooks.remove" : {
+      "keepsResult" : true,
+      "rerun" : true
+    },
+    "journal.ack" : {
       "keepsResult" : true,
       "rerun" : true
     },
@@ -661,6 +715,10 @@
       "rerun" : true
     },
     "presets.edit" : {
+      "keepsResult" : true,
+      "rerun" : false
+    },
+    "project.new" : {
       "keepsResult" : true,
       "rerun" : false
     },
@@ -732,6 +790,10 @@
       "keepsResult" : true,
       "rerun" : false
     },
+    "update" : {
+      "keepsResult" : true,
+      "rerun" : false
+    },
     "web.confirm" : {
       "keepsResult" : true,
       "rerun" : false
@@ -758,6 +820,7 @@
     "start",
     "stop",
     "lead",
+    "project.new",
     "questions",
     "draft",
     "draft.clear",
@@ -776,6 +839,7 @@
     "hooks.remove",
     "build.switch",
     "build.seal",
+    "update",
     "subscribe",
     "unsubscribe",
     "web.open",
@@ -820,7 +884,10 @@
     "presets.edit",
     "recent",
     "brief",
+    "logs",
     "update.check",
+    "journal.ack",
+    "claude.autoupdate",
     "approve.list",
     "approve",
     "plugin.list",
@@ -852,6 +919,7 @@
     "build.switch" : "user",
     "chat.image" : "anyone",
     "chat.page" : "anyone",
+    "claude.autoupdate" : "user",
     "config.accept" : "user",
     "config.held" : "user",
     "draft" : "webDraft",
@@ -859,7 +927,9 @@
     "hold" : "user",
     "hooks.install" : "user",
     "hooks.remove" : "user",
+    "journal.ack" : "user",
     "lead" : "user",
+    "logs" : "webRead",
     "mail" : "webRead",
     "passkey.ask" : "webPaired",
     "passkey.registered" : "webPaired",
@@ -871,6 +941,7 @@
     "plugin.on" : "user",
     "plugin.remove" : "user",
     "presets.edit" : "user",
+    "project.new" : "user",
     "prompt-audit" : "user",
     "push" : "user",
     "push.decline" : "user",
@@ -909,6 +980,7 @@
     "term.close" : "webTerminal",
     "term.open" : "webTerminal",
     "unsubscribe" : "anyone",
+    "update" : "user",
     "update.check" : "user",
     "web.confirm" : "user",
     "web.open" : "user",
@@ -943,6 +1015,7 @@
     "mail",
     "recent",
     "brief",
+    "logs",
     "plugin.list"
   ],
   "webKindsDraft" : [
@@ -975,6 +1048,7 @@
     "mail",
     "recent",
     "brief",
+    "logs",
     "plugin.list"
   ]
 }
