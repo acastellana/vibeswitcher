@@ -9,7 +9,8 @@ import Testing
 // the Mac and with no host: who may send them (`Principal`, the voice rule, the Mac's closed rule and its Touch ID rule),
 // their arguments (unknown, extra and malformed refused, nothing taken from a caller that names a path or a program),
 // and each one's act on scratch seams: a scratch builds folder and a fake installer, no journal written, a scratch Claude
-// config. The whole recorded request on a scratch host (the vault's record first) is Linux's.
+// config. The whole recorded request (the vault's record first, then the act) has no test here: it needs a scratch
+// host's vault, which the Mac's runner has none of, and none is written for Linux yet.
 
 /// A host that is never there.
 private struct NoHost: HostDialer {
@@ -171,7 +172,7 @@ struct GuardedKindsTests {
             requests.queue.async { requests.approvalJudgment(request, from: facts, token: ApprovalVoiceTests.token(pid)) { done.value = $0 } }
             _ = await eventually(timeout: 60) { done.value != nil }
             let reply = try #require(done.value, "\(name): no answer")
-            #expect(!reply.ok, "\(name): \(reply)")
+            #expect(!reply.ok && reply.error?.message.contains("has no dialog the Mac can show") == true, "\(name): \(reply)")
         }
         #expect(person.asked.isEmpty, "\(person.asked)")
     }
@@ -316,6 +317,50 @@ struct GuardedKindsTests {
         guard case .refused(.refused, let why) = request.plan(.init(commit: Self.commit)) else { Issue.record("not refused"); return }
         #expect(why.contains("a change you haven't accepted"), "\(why)")
         #expect(!world.ran)
+    }
+
+    /// The server's image proves its own build as the command line's does, by its own name (`vibeswitcher-server`):
+    /// taken past the layout check where the command line's name would be refused (the advisor's check of G3: with the
+    /// command line's name alone, a real node's server never had an installer).
+    @Test func theServersOwnImageIsLookedForByItsName() throws {
+        let prefix = scratch.url("server-image")
+        let bin = prefix.appendingPathComponent(Self.commit + "/bin")
+        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+        let server = bin.appendingPathComponent(UpdateInstall.serverProgram)
+        try writeClosedOnExec("#!/bin/sh\n", to: server, mode: 0o700)
+        guard case .failure(let asCommandLine) = NodeFolders.installedBuild(executable: server.path, prefix: prefix.path) else { Issue.record("taken"); return }
+        #expect(asCommandLine.text.contains("not <prefix>/<commit>/bin/"), "\(asCommandLine.text)")
+        let asServer = NodeFolders.installedBuild(executable: server.path, prefix: prefix.path, program: UpdateInstall.serverProgram)
+        if case .failure(let refused) = asServer { #expect(!refused.text.contains("not <prefix>/<commit>/bin/"), "\(refused.text)") }
+    }
+
+    /// No build the host runs (its notes name none): refused, nothing installed, as the command line refuses it.
+    @Test func anUpdateWithNoRunningBuildIsRefused() throws {
+        let world = try UpdateWorld(scratch)
+        guard case .refused(.refused, let why) = plan(world, installer: .test(program: world.installer), running: nil).plan(.init(commit: Self.commit)) else {
+            Issue.record("not refused"); return
+        }
+        #expect(why.contains("names no build"), "\(why)")
+        #expect(!world.ran)
+    }
+
+    /// The server's look of the builds folder is the command line's too (`config held`, the engine's look): when it can't
+    /// be had (no engine, or a look that fails), the update is refused, never let through (the advisor's check of G3).
+    @Test func theServersHeldLookFailsClosed() async throws {
+        let requests = requests()
+        let home = scratch.url("held-home").path
+        #expect(requests.updateHeld(home: home)() != nil, "no engine: let through")
+        let root = scratch.url("held-root")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        requests.engine = LeadEngine(root: root, nodeRoot: nil, link: requests.link, clock: nil)
+        let held = Locked<StartRefusal?>(nil)
+        let done = Locked(false)
+        DispatchQueue.global().async {
+            held.value = requests.updateHeld(home: home)()
+            done.value = true
+        }
+        _ = await eventually(timeout: 120) { done.value }
+        #expect(done.value && held.value != nil, "a look with no vault let the update through")
     }
 
     /// The server's act refuses before any plan without an install root, and takes its installer from itself alone.
