@@ -280,8 +280,8 @@ final class HostClient: ObservableObject {
                 + "vault\u{201D} (when it was modified); if you didn't move or delete the vault's file, look for "
                 + "~/.vibeswitcher/lead/vault.sealed; and don't teach the host until you're sure what changed it. A file there "
                 + "that didn't open is kept as it was, at ~/.vibeswitcher/lead/vault.sealed, and nothing is saved over it until "
-                + "you answer. Teaching the host this app's key starts the vault anew, sealed with whatever key your Keychain gives the session host now, "
-                + "and sets whatever file is there aside beside it as vault.sealed.didnt-open-<date> (if your Keychain gives "
+                + "you answer. Teaching the host this app's key starts the vault anew, sealed with whatever key your Keychain "
+                + "gives the session host now, and sets whatever file is there aside beside it as vault.sealed.didnt-open-<date> (if your Keychain gives "
                 + "none, the vault lives in memory only and the old file stays where it is). " + next
         } else {
             alert.messageText = "The session host doesn't recognise this VibeSwitcher."
