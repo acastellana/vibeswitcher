@@ -663,6 +663,7 @@ export const ES = {
   teWatchingToTypeIntoThis: "Mirando. Para escribir en esta sesión, ejecuta ",
   teInATerminal: " en una terminal.",
   teShowChat: "Mostrar el chat",
+  teFindInTerminal: "Buscar en la terminal",
   teTryAgain: "Reintentar",
   teTerminal: "Terminal",
   teNeedsWatch: "Ver una terminal requiere que confirmes esta página en tu terminal: ejecuta vibeswitcher web y vuelve a vincularla.",

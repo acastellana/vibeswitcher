@@ -675,6 +675,7 @@ const EN = {
   teWatchingToTypeIntoThis: "Watching. To type into this session, run ",
   teInATerminal: " in a terminal.",
   teShowChat: "Show Chat",
+  teFindInTerminal: "Find in terminal",
   teTryAgain: "Try Again",
   teTerminal: "Terminal",
   teNeedsWatch: "Watching a terminal needs this page confirmed in your terminal: run vibeswitcher web and pair it again.",

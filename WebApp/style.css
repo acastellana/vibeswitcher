@@ -1313,6 +1313,10 @@ kbd { padding: 1px var(--s-3); border-radius: var(--r-1); box-shadow: var(--e-1-
 .look-colour { width: 28px; height: var(--ctl-s); padding: 0; border: 1px solid var(--line); border-radius: var(--r-1); background: none; cursor: pointer; }
 .look-colour:disabled { cursor: default; opacity: 0.9; }
 .terminal-pane.is-bell .terminal-screen { animation: bell-flash var(--dur-2) var(--ease-out); }
+/* P4: find in the terminal, the chat's find bar across the pane's top (its padding undone), over the screen. */
+.terminal-find-slot { flex: none; margin: calc(-1 * var(--s-4)) calc(-1 * var(--s-2)) 0 calc(-1 * var(--s-5)); }
+.terminal-find-slot:has(> .terminal-find:not([hidden])) { margin-bottom: var(--s-3); }
+.terminal-pane:has(> .placeholder:not([hidden])) > .terminal-find-slot { display: none; }
 @keyframes bell-flash { from { filter: brightness(1.6); } to { filter: none; } }
 @media (prefers-reduced-motion: reduce) { .terminal-pane.is-bell .terminal-screen { animation: none; outline: 2px solid var(--accent); } }
 @media (max-width: 600px) { .look-row { grid-template-columns: minmax(0, 1fr); } .look-note { grid-column: 1; } }
