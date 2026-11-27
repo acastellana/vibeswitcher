@@ -666,6 +666,10 @@ const EN = {
   leMergedUntested: "Merged {commit} at {time}, no tests ran",
   // js/views/alldone.js
   adAllTasksFinished: "All tasks finished",
+  adDismiss: "Dismiss",
+  adDismissTitle: "Mark it seen: “all done” leaves this project and the left column. The lead’s chat keeps the summary.",
+  adDismissed: "Dismissed. The summary stays in the lead’s chat.",
+  adDismissFailed: "Not dismissed: {why}",
   adWritingAShortSummaryOf: "Writing a short summary of what was done…",
   // js/views/terminal.js
   teWatchingToTypeIntoThis: "Watching. To type into this session, run ",

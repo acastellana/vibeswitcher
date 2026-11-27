@@ -654,6 +654,10 @@ export const ES = {
   leMergedUntested: "Fusionada {commit} a las {time}, no se ejecutaron pruebas",
   // js/views/alldone.js
   adAllTasksFinished: "Todas las tareas terminadas",
+  adDismiss: "Descartar",
+  adDismissTitle: "Marcarlo como visto: «todo hecho» deja de mostrarse en este proyecto y en la columna izquierda. El chat del líder guarda el resumen.",
+  adDismissed: "Descartado. El resumen sigue en el chat del líder.",
+  adDismissFailed: "No se descartó: {why}",
   adWritingAShortSummaryOf: "Escribiendo un breve resumen de lo hecho…",
   // js/views/terminal.js
   teWatchingToTypeIntoThis: "Mirando. Para escribir en esta sesión, ejecuta ",
