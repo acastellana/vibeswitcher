@@ -274,7 +274,9 @@ struct ApprovalLinesReviewProcessTests {
             return (facts, Self.voice(own: launchd).callerRefusal(peer: V.token(pid), facts: facts, live: LiveSessions(), uid: getuid()))
         }
         let marker = "\(PeerFacts.sessionMarkerName)=\(UUID().uuidString)"
-        try await with("/bin/sleep", ["600"], environment: [marker, "PATH=/usr/bin:/bin"], ready: "/bin/sleep") { pid in
+        // A scratch HOME too, as every program a test starts has one (Apple's sleep reads none).
+        let home = "HOME=\(scratch.url("home").path)"
+        try await with("/bin/sleep", ["600"], environment: [marker, "PATH=/usr/bin:/bin", home], ready: "/bin/sleep") { pid in
             let (facts, refusal) = judged(pid)
             #expect(facts.sessionMarker == false, "Apple's binary carrying the variable reads empty: \(facts)")
             #expect(refusal == nil, "\(String(describing: refusal))")

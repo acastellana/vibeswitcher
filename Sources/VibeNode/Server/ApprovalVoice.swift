@@ -152,7 +152,8 @@ public struct ApprovalVoice: Sendable {
 
     /// The environment line's refusals, each saying what the user does instead: the command line from Terminal, or
     /// the page. The Mac app's shell cards carry the variable, so the user's own command line typed in one is refused
-    /// here, reads included (the spec's row 3).
+    /// here, the user's own reads included (the `.user` and `.webRead` ones; anyone's kinds never reach this: the
+    /// spec's row 3).
     public static let carriesSession = "it carries \(PeerFacts.sessionMarkerName), as a VibeSwitcher session's process does (the Mac app's shell cards "
         + "and agent sessions included): run the command line from Terminal, or use the page"
     public static let environmentUnread = "its environment can't be read, so whether it carries \(PeerFacts.sessionMarkerName) can't be told: "
