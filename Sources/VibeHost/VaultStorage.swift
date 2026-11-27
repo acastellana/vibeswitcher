@@ -15,6 +15,9 @@ public struct VaultStorage {
     /// `key` was made on this start, the Keychain holding none before (`Key.made`): only then is a missing vault file a
     /// first start. False for a key that was there already.
     public let keyIsNew: Bool
+    /// Why there's no `key`: the Keychain's status when reading it failed (`KeyRead.failure`); nil when there's a key,
+    /// or none was read (a test's keyless vault).
+    public let keyUnreadable: OSStatus?
     /// The host's log, for a save that failed (the file's name and why, never what's in it); nil logs nothing.
     private let logPath: String?
     private let sync: (Int32) -> Bool
@@ -24,8 +27,10 @@ public struct VaultStorage {
     private let holdsLock: () -> Bool
 
     /// `keyIsNew`: said by whoever read the key (`Key.made`), never assumed.
-    public init(file: URL, key: SymmetricKey?, keyIsNew: Bool, logPath: String? = nil, holdsLock: @escaping () -> Bool = { true }) {
-        self.init(file: file, key: key, keyIsNew: keyIsNew, logPath: logPath, sync: VibePaths.syncToDisk, holdsLock: holdsLock) {
+    public init(file: URL, key: SymmetricKey?, keyIsNew: Bool, keyUnreadable: OSStatus? = nil, logPath: String? = nil,
+                holdsLock: @escaping () -> Bool = { true }) {
+        self.init(file: file, key: key, keyIsNew: keyIsNew, keyUnreadable: keyUnreadable, logPath: logPath, sync: VibePaths.syncToDisk,
+                  holdsLock: holdsLock) {
             DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + $0, execute: $1)
         }
     }
@@ -35,12 +40,13 @@ public struct VaultStorage {
         self.init(file: file, key: key, keyIsNew: true, logPath: logPath)
     }
 
-    init(file: URL, key: SymmetricKey?, keyIsNew: Bool = true, logPath: String? = nil,
+    init(file: URL, key: SymmetricKey?, keyIsNew: Bool = true, keyUnreadable: OSStatus? = nil, logPath: String? = nil,
          sync: @escaping (Int32) -> Bool = VibePaths.syncToDisk, holdsLock: @escaping () -> Bool = { true },
          retryLater: @escaping (TimeInterval, @escaping () -> Void) -> Void) {
         self.file = file
         self.key = key
         self.keyIsNew = keyIsNew
+        self.keyUnreadable = keyUnreadable
         self.logPath = logPath
         self.sync = sync
         self.holdsLock = holdsLock
@@ -227,11 +233,34 @@ public struct VaultStorage {
         }
     }
 
+    /// What reading the vault's key from the Keychain came to: its key (`found`), or the status that kept it from the
+    /// host (`failure`): any answer but the item with its 32 bytes, or no item and a new one added. Which status is said
+    /// in host.log (never the key): a read that fails is not a vault that doesn't open (2026-11-27, see `book`).
+    public enum KeyRead {
+        case found(Key)
+        case unreadable(OSStatus)
+
+        public var read: Key? {
+            if case .found(let key) = self { return key }
+            return nil
+        }
+
+        public var key: SymmetricKey? { read?.key }
+
+        public var failure: OSStatus? {
+            if case .unreadable(let status) = self { return status }
+            return nil
+        }
+    }
+
+    /// The status a read gives for an item whose data isn't a 32-byte key (the Keychain itself said success).
+    public static let notAKey = errSecDecode
+
     /// The vault's key from the login Keychain, made the first time (`Key.made`: only when the Keychain said it had
     /// none and took the new one; every other key is one that was there). Never asks you (the host has no window to
-    /// ask from): nil when the Keychain won't give it without asking (a rebuilt host without the stable signing
-    /// identity, see scripts/setup-signing.sh), and then nothing is saved.
-    public static func keychainKey(service: String = keychainService, account: String = "vault") -> Key? {
+    /// ask from): `unreadable`, with the Keychain's status, when it won't give it without asking (a rebuilt host the
+    /// item doesn't trust, a locked keychain, see scripts/setup-signing.sh), and then nothing is saved.
+    public static func keychainKey(service: String = keychainService, account: String = "vault") -> KeyRead {
         SecKeychainSetUserInteractionAllowed(false)
         defer { SecKeychainSetUserInteractionAllowed(true) }
         let item: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
@@ -241,13 +270,17 @@ public struct VaultStorage {
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
         let status = SecItemCopyMatching(query as CFDictionary, &found)
-        if status == errSecSuccess, let data = found as? Data, data.count == 32 { return Key(SymmetricKey(data: data), made: false) }
-        guard status == errSecItemNotFound else { return nil }
+        if status == errSecSuccess {
+            guard let data = found as? Data, data.count == 32 else { return .unreadable(notAKey) }
+            return .found(Key(SymmetricKey(data: data), made: false))
+        }
+        guard status == errSecItemNotFound else { return .unreadable(status) }
         let data = SymmetricKey(size: .bits256).withUnsafeBytes { Data($0) }
         var add = item
         add[kSecValueData as String] = data
         add[kSecAttrLabel as String] = "VibeSwitcher lead vault"
-        return SecItemAdd(add as CFDictionary, nil) == errSecSuccess ? Key(SymmetricKey(data: data), made: true) : nil
+        let added = SecItemAdd(add as CFDictionary, nil)
+        return added == errSecSuccess ? .found(Key(SymmetricKey(data: data), made: true)) : .unreadable(added)
     }
 
     public static func removeKeychainKey(service: String, account: String = "vault") {

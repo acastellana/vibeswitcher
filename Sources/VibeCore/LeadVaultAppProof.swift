@@ -32,6 +32,11 @@ public enum AppProof {
     public static let vaultStartedOver = "The team's vault could not be opened and was started again, so the session host "
         + "takes VibeSwitcher's key only once you confirm it."
 
+    /// The session host's refusal of the app's proof while it couldn't read its vault's key from the Keychain
+    /// (`LeadVault.Book.keyUnread`): the vault's file is kept as it is, and nothing started over on its own.
+    public static let vaultKeyUnreadable = "The session host couldn't read the team vault's key from your Keychain: it keeps "
+        + "the vault's sealed file as it is, and takes VibeSwitcher's key, for a vault in memory only, once you confirm it."
+
     /// The app's key in the login Keychain, made the first time (see `AppKeyStore`). The app may ask you (it has a
     /// window to ask from): a rebuild without the stable signing identity (scripts/setup-signing.sh) is another
     /// program to the Keychain. Nil when there's none to be had (you said no): the app then isn't the app to the host.

@@ -138,13 +138,15 @@ if handoverPath == nil {
 }
 // The vault's Keychain key, for the account's host only, read once and only when first asked: whether it was made
 // on this read is known from that one read alone (a second finds the one the first made).
-var vaultKeyRead: VaultStorage.Key??
-func vaultKey() -> VaultStorage.Key? {
+// Nil for any host but the account's, which reads none.
+var vaultKeyRead: VaultStorage.KeyRead??
+func vaultKeyResult() -> VaultStorage.KeyRead? {
     if let read = vaultKeyRead { return read }
-    let key = role.vaultKey { VaultStorage.keychainKey() }
-    vaultKeyRead = .some(key)
-    return key
+    let read = role.vaultKey { VaultStorage.keychainKey() }
+    vaultKeyRead = .some(read)
+    return read
 }
+func vaultKey() -> VaultStorage.Key? { vaultKeyResult()?.read }
 var restoring: HostHandover.State?
 var restoredSecrets: Data?
 if let handoverPath {
@@ -168,7 +170,8 @@ config.appExecutable = (restoring != nil ? value(after: "--app-executable") : ni
 // keeps one in memory only, never touching the account's (see `HostRole.vault`).
 // After a handover, the vault is the one the build before held in memory (its secrets), not what's on disk.
 do {
-    config.vault = try role.vault(lockFD: restoring?.lockFD ?? heldLock, key: vaultKey(), handedOver: restoredSecrets, logPath: config.logPath)
+    config.vault = try role.vault(lockFD: restoring?.lockFD ?? heldLock, key: vaultKey(), keyUnreadable: vaultKeyResult()?.failure,
+                                  handedOver: restoredSecrets, logPath: config.logPath)
 } catch {
     // The account's host no longer on the lock file at its path: it doesn't run (see `HostRole.vault`).
     HostServer.note("host: \(error); this one (build \(build)) exits", logPath: config.logPath)
