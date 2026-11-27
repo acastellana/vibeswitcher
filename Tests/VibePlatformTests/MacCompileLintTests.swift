@@ -14,9 +14,12 @@ import VibePlatform
 struct MacCompileLintTests {
     static let repo = PlatformLintTests.repo
 
-    /// What the Mac job compiles.
+    /// What the Mac job compiles: the keeper's package (`Keeper/Sources`, which the repository's package names by path:
+    /// what slice K0 moved there from VibePlatform and VibeCore, and the keeper itself) too.
+    static let sources = ["Sources", "Keeper/Sources"]
     static let folders = ["Sources/VibeCore", "Sources/VibeHost", "Sources/VibeNode", "Sources/VibePlatform", "Sources/vibeswitcher-cli",
                           "Sources/vibeswitcher-server", "Sources/vibeswitcher-host", "Sources/vibeswitcher-hook", "Sources/vibeswitcher-mcp",
+                          "Keeper/Sources",
                           "Tests/VibePlatformTests", "Tests/VibeCoreTests", "Tests/VibeNodeTests", "Tests/VibeHostTests", "Tests/VibeSwitcherTests"]
 
     /// Each spelling, and what to use instead, with simple word boundaries: Unicode's don't break at a "." between
@@ -152,7 +155,7 @@ struct MacCompileLintTests {
     static func linuxOnlyNames(_ files: [(path: String, text: String)]) -> [String: String] {
         var linux: [String: String] = [:], other: Set<String> = []
         for file in files {
-            let linuxFile = file.path.hasSuffix("+Linux.swift"), mask = linuxOnly(file.text), source = file.path.hasPrefix("Sources/")
+            let linuxFile = file.path.hasSuffix("+Linux.swift"), mask = linuxOnly(file.text), source = sources.contains { file.path.hasPrefix($0 + "/") }
             for (index, line) in file.text.components(separatedBy: "\n").enumerated() {
                 if linuxFile || mask[index] {
                     guard source else { continue }
@@ -183,23 +186,24 @@ struct MacCompileLintTests {
         return found
     }
 
-    /// Every Swift file under `folders`, as (path, text).
-    static func swiftFiles(_ folders: [String]) -> [(path: String, text: String)] {
+    /// Every Swift file under `folders` (of the repository, or of `root`, a test's tree), as (path, text).
+    static func swiftFiles(_ folders: [String], root: URL = repo) -> [(path: String, text: String)] {
         folders.flatMap { folder in
-            (FileManager.default.subpaths(atPath: repo.appendingPathComponent(folder).path) ?? []).sorted().filter { $0.hasSuffix(".swift") }.compactMap { file in
+            (FileManager.default.subpaths(atPath: root.appendingPathComponent(folder).path) ?? []).sorted().filter { $0.hasSuffix(".swift") }.compactMap { file in
                 let path = "\(folder)/\(file)"
-                return (try? String(contentsOf: repo.appendingPathComponent(path), encoding: .utf8)).map { (path, $0) }
+                return (try? String(contentsOf: root.appendingPathComponent(path), encoding: .utf8)).map { (path, $0) }
             }
         }
     }
 
-    /// Every file the Mac compiles, with its violations; VibePlatform's `+Linux` files are Linux's.
-    static func files() -> [(path: String, violations: [String])] {
+    /// Every file the Mac compiles (in the repository, or in `root`, a test's tree), with its violations; the platform
+    /// layers' `+Linux` files are Linux's.
+    static func files(root: URL = repo) -> [(path: String, violations: [String])] {
         // Declared on Linux alone: from every source (the Mac app's too, whose declarations are the Mac's) and every
         // test file the Mac builds (a test's own helper of the same name is the Mac's).
-        let linuxNames = linuxOnlyNames(swiftFiles(["Sources"] + folders.filter { $0.hasPrefix("Tests/") }))
+        let linuxNames = linuxOnlyNames(swiftFiles(sources + folders.filter { $0.hasPrefix("Tests/") }, root: root))
         var found: [(path: String, violations: [String])] = []
-        for file in swiftFiles(folders) where !file.path.hasSuffix("+Linux.swift") && !file.path.hasSuffix("MacCompileLintTests.swift") {
+        for file in swiftFiles(folders, root: root) where !file.path.hasSuffix("+Linux.swift") && !file.path.hasSuffix("MacCompileLintTests.swift") {
             let lines = Self.violations(in: file.text) + Self.uses(of: linuxNames, in: file.text)
             if !lines.isEmpty { found.append((file.path, lines)) }
         }
@@ -210,6 +214,21 @@ struct MacCompileLintTests {
         let found = Self.files()
         let said = found.map { "\($0.path):\n  " + $0.violations.joined(separator: "\n  ") }.joined(separator: "\n")
         #expect(found.isEmpty, "\(said)")
+    }
+
+    /// The keeper's package is read: its real files are among the compiled ones, and in a sample tree's `Keeper/Sources`
+    /// a Glibc-only spelling and a use of a name only its `+Linux` file declares are both found.
+    @Test func theKeepersSourcesAreCovered() throws {
+        #expect(Self.swiftFiles(Self.folders).contains { $0.path == "Keeper/Sources/VibeKeep/NodePins.swift" })
+        let tree = try TestScriptLinuxTests.scratch("mac-compile-keeper")
+        defer { try? FileManager.default.removeItem(at: tree) }
+        let folder = tree.appendingPathComponent("Keeper/Sources/VibeKeep")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try "enum KeepInotify { static func watch() {} }\n".write(to: folder.appendingPathComponent("Watch+Linux.swift"), atomically: true, encoding: .utf8)
+        try "import Foundation\n_ = pipe2(&fds, 0)\nKeepInotify.watch()\n".write(to: folder.appendingPathComponent("Planted.swift"), atomically: true, encoding: .utf8)
+        let found = Self.files(root: tree)
+        #expect(found.map(\.path) == ["Keeper/Sources/VibeKeep/Planted.swift"], "\(found)")
+        #expect(found.first?.violations.map { $0.prefix(while: { $0 != ":" }) } == ["2", "3"], "\(found)")
     }
 
     /// The lint fires where the Mac would fail to compile, and not in Linux's blocks, strings or comments.

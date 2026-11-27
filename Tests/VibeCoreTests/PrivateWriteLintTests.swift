@@ -7,6 +7,8 @@ import Testing
 /// launch prompts, all readable by another account in staff). Every raw call in Sources is counted here, by file, with
 /// why it may stay raw; a new one fails until it goes through the helper or is added with its reason.
 struct PrivateWriteLintTests {
+    private let scratch = Scratch()
+
     /// Raw calls per file, and why.
     static let allowed: [String: (count: Int, why: String)] = [
         "Sources/VibeCore/Paths.swift": (2, "the helper itself (ensurePrivate's createDirectory, writePrivate's createFile)"),
@@ -66,7 +68,7 @@ struct PrivateWriteLintTests {
     }
 
     @Test func everyRawWriteIsOnTheList() {
-        let found = Self.rawCalls(in: KeychainLintTests.code(in: "Sources"))
+        let found = Self.rawCalls(in: KeychainLintTests.code(in: KeychainLintTests.sources))
         for (path, count) in found.sorted(by: { $0.key < $1.key }) {
             let allowed = Self.allowed[path]?.count ?? 0
             #expect(count <= allowed, "\(path): \(count) raw .write(to:/createFile(/createDirectory( call(s), \(allowed) allowed. Under ~/.vibeswitcher or .vibeswitcher/, use VibePaths.writePrivate and VibePaths.ensurePrivate; anywhere else, add it to PrivateWriteLintTests.allowed with why")
@@ -79,11 +81,21 @@ struct PrivateWriteLintTests {
 
     /// The writers this change moved onto the helper have no raw call left.
     @Test func theMovedWritersUseTheHelper() {
-        let found = Self.rawCalls(in: KeychainLintTests.code(in: "Sources"))
+        let found = Self.rawCalls(in: KeychainLintTests.code(in: KeychainLintTests.sources))
         for path in ["Sources/VibeSwitcher/FocusLog.swift", "Sources/VibeSwitcher/Sidebar.swift", "Sources/VibeCore/LeadWorkflow.swift",
                      "Sources/VibeCore/LeadVault.swift", "Sources/VibeCore/LeadLaunch.swift"] {
             #expect(found[path] == nil, "\(path)")
         }
+    }
+
+    /// The keeper's package is read (`KeychainLintTests.sources`): a raw write planted in a sample tree's
+    /// `Keeper/Sources` is counted.
+    @Test func theKeepersSourcesAreCovered() throws {
+        let tree = scratch.url("private-write-keeper")
+        let planted = tree.appendingPathComponent("Keeper/Sources/VibeKeep/Planted.swift")
+        try FileManager.default.createDirectory(at: planted.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try "import Foundation\ntry data.write(to: url)\n".write(to: planted, atomically: true, encoding: .utf8)
+        #expect(Self.rawCalls(in: KeychainLintTests.code(in: KeychainLintTests.sources, root: tree)) == ["Keeper/Sources/VibeKeep/Planted.swift": 1])
     }
 
     /// The check finds what it's for.

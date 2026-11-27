@@ -89,11 +89,14 @@ struct PrivateNamesLintTests {
         return exampleDomains.contains { domain == $0 || domain.hasSuffix("." + $0) }
     }
 
-    /// "Sources/…/File.swift:12 (the address)" for each address under Sources/ or Tests/ of `root` whose domain
-    /// isn't an example one and that `allowed` doesn't list, in order.
+    /// The code an address is looked for in: the package's sources and tests, and the keeper's package (slice K0's).
+    static let codeFolders = ["Sources/", "Keeper/", "Tests/"]
+
+    /// "Sources/…/File.swift:12 (the address)" for each address under `codeFolders` of `root` whose domain isn't an
+    /// example one and that `allowed` doesn't list, in order.
     static func emails(under root: URL, allowed: Set<String>) throws -> [String] {
         var found: [String] = []
-        for file in try SecretShapeLintTests.files(under: root) where file.hasPrefix("Sources/") || file.hasPrefix("Tests/") {
+        for file in try SecretShapeLintTests.files(under: root) where codeFolders.contains(where: { file.hasPrefix($0) }) {
             guard let data = FileManager.default.contents(atPath: root.appendingPathComponent(file).path),
                   let text = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) else { continue }
             for match in email.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
@@ -119,10 +122,10 @@ struct PrivateNamesLintTests {
     }
 
     /// A real-looking address is found in a doc comment and a test; an example domain, a URL's user part, an allowed
-    /// address and a file outside Sources/ and Tests/ are not.
+    /// address and a file outside Sources/, Keeper/ and Tests/ are not.
     @Test func anAddressOnARealDomainIsFoundAndExamplesAreNot() throws {
         let root = temp.url("emails")
-        for folder in ["Sources/Core", "Tests/CoreTests", "docs"] {
+        for folder in ["Sources/Core", "Keeper/Sources/VibeKeep", "Tests/CoreTests", "docs"] {
             try FileManager.default.createDirectory(at: root.appendingPathComponent(folder), withIntermediateDirectories: true)
         }
         #expect(Git.run(["init", "-q"], in: root.path).ok)
@@ -135,11 +138,13 @@ struct PrivateNamesLintTests {
         try "login(\"\\n\(other)\")\n".write(to: root.appendingPathComponent("Tests/CoreTests/LoginTests.swift"),
                                           atomically: true, encoding: .utf8)
         try "Mail \(real)\n".write(to: root.appendingPathComponent("docs/notes.md"), atomically: true, encoding: .utf8)
+        try "// Mail \(real)\n".write(to: root.appendingPathComponent("Keeper/Sources/VibeKeep/Planted.swift"), atomically: true, encoding: .utf8)
 
         let allowed = Self.allowed(in: "# exceptions\ngit@github.com   # a remote\n\n")
         #expect(allowed == ["git@github.com"])
         #expect(try Self.emails(under: root, allowed: allowed)
-            == ["Sources/Core/Account.swift:1 (\(real))", "Tests/CoreTests/LoginTests.swift:1 (\(other))"])
+            == ["Keeper/Sources/VibeKeep/Planted.swift:1 (\(real))", "Sources/Core/Account.swift:1 (\(real))",
+                "Tests/CoreTests/LoginTests.swift:1 (\(other))"])
         #expect(try Self.emails(under: root, allowed: []).contains("Sources/Core/Account.swift:3 (git@github.com)"))
     }
 }

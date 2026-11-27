@@ -94,6 +94,11 @@ bash scripts/test.sh --filter 'AccessibilityLint|AgentExportLint|ArchitectureDoc
 bash scripts/test.sh --filter 'LintTests/'   # the same suites, as AGENTS.md runs them: every `…LintTests` type
 ```
 
+The keeper's package (`Keeper/Sources`, slice K0's) is read as the platform layer it was moved from is:
+CloseOnExecLint, DeviceNumberLint, ElapsedGuardLint, HomePathLint, KeychainLint, MacCompileLint, PrivateWriteLint,
+SandboxLint and StdioWriteLint scan it, PrivateNamesLint's address check reads `Keeper/`, and PlatformLint's SIGPIPE rule
+reads the keeper's main; each has a test that a violation planted in a `Keeper/Sources` sample is caught.
+
 | Lint | What it catches |
 | --- | --- |
 | `AccessibilityLint` | An SF Symbol the app shows that's neither named for VoiceOver nor hidden from it. |

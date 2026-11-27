@@ -7,6 +7,8 @@ import Testing
 /// ~/.vibeswitcher/debug/app.log, the log the lead reads for 'main thread stuck' after an install. A path is looked up
 /// where it's used (`VibePaths.root` is computed), so it's the scratch home's whenever the code runs on one.
 struct HomePathLintTests {
+    private let scratch = Scratch()
+
     /// Kept once per process, and correct so: each is the top-level code of an executable of its own (the host, the
     /// hook), which runs once at its start, on the home that process was started with.
     static let allowed: Set<String> = [
@@ -74,12 +76,27 @@ struct HomePathLintTests {
         return count
     }
 
+    /// Each value kept once per process in the sources (`KeychainLintTests.sources`, the keeper's package's too) of the
+    /// repository or of `root`, a test's tree, as "PATH: NAME".
+    static func kept(root: URL = KeychainLintTests.repo) -> [String] {
+        KeychainLintTests.code(in: KeychainLintTests.sources, root: root).flatMap { file in homeOnce(in: file.lines).map { "\(file.path): \($0)" } }
+    }
+
     @Test func noPathUnderTheHomeIsKeptOncePerProcess() {
-        let kept = KeychainLintTests.code(in: "Sources").flatMap { file in Self.homeOnce(in: file.lines).map { "\(file.path): \($0)" } }
+        let kept = Self.kept()
         #expect(Set(kept).subtracting(Self.allowed).sorted() == [],
                 "worked out once per process from the home folder: look it up where it's used (a computed var), so a test on a scratch home never gets the user's")
         // The allowed ones are still there (a rename would leave a stale entry that excuses nothing).
         #expect(Self.allowed.subtracting(kept).sorted() == [])
+    }
+
+    /// The keeper's package is read: a home path kept once, planted in a sample tree's `Keeper/Sources`, is found.
+    @Test func theKeepersSourcesAreCovered() throws {
+        let tree = scratch.url("home-path-keeper")
+        let planted = tree.appendingPathComponent("Keeper/Sources/VibeKeep/Planted.swift")
+        try FileManager.default.createDirectory(at: planted.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try "enum Planted {\n    static let file = NSHomeDirectory() + \"/x\"\n}\n".write(to: planted, atomically: true, encoding: .utf8)
+        #expect(Self.kept(root: tree) == ["Keeper/Sources/VibeKeep/Planted.swift: file"])
     }
 
     /// The lint tells a value kept once from one looked up each time.

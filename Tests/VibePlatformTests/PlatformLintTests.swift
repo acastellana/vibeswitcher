@@ -10,7 +10,9 @@ import VibePlatform
 struct PlatformLintTests {
     static let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
 
-    /// The portable targets' folders.
+    /// The portable targets' folders. Not the keeper's package (`Keeper/Sources`, slice K0): like VibePlatform it is a
+    /// platform layer of its own, with its `+Darwin` and `+Linux` files, its imports held to Foundation, Security and the
+    /// C library by `KeeperLintTests`; its program's main is read by the SIGPIPE rule below (`executables`).
     static let folders = ["Sources/VibeCore", "Sources/VibeHost", "Sources/vibeswitcher-host", "Sources/vibeswitcher-hook",
                           "Sources/vibeswitcher-mcp", "Sources/VibeNode", "Sources/vibeswitcher-cli", "Sources/vibeswitcher-server"]
     /// The Mac's own files, each wrapped whole in `#if canImport(Darwin)`.
@@ -190,14 +192,16 @@ struct PlatformLintTests {
 
     // MARK: SIGPIPE in the executables
 
-    /// The executables' mains (`Sources/vibeswitcher*/main.swift`: the host, the hook, the tool server, and the command
-    /// line and the server once they exist).
-    static func executables() -> [String] {
-        let sources = repo.appendingPathComponent("Sources")
-        return ((try? FileManager.default.contentsOfDirectory(atPath: sources.path)) ?? []).sorted()
-            .filter { $0.hasPrefix("vibeswitcher") }
-            .map { "Sources/\($0)/main.swift" }
-            .filter { FileManager.default.fileExists(atPath: repo.appendingPathComponent($0).path) }
+    /// The executables' mains (`Sources/vibeswitcher*/main.swift`: the host, the hook, the tool server, the command
+    /// line and the server; and `Keeper/Sources/vibeswitcher*/main.swift`, the keeper's, slice K0's), in the repository
+    /// or in `root`, a test's tree.
+    static func executables(root: URL = repo) -> [String] {
+        ["Sources", "Keeper/Sources"].flatMap { folder in
+            ((try? FileManager.default.contentsOfDirectory(atPath: root.appendingPathComponent(folder).path)) ?? []).sorted()
+                .filter { $0.hasPrefix("vibeswitcher") }
+                .map { "\(folder)/\($0)/main.swift" }
+                .filter { FileManager.default.fileExists(atPath: root.appendingPathComponent($0).path) }
+        }
     }
 
     /// Mode dispatches that are calls: each returns only when this process isn't in that mode (the host's four, the
@@ -270,7 +274,9 @@ struct PlatformLintTests {
     static func sigpipeProblems(_ text: String, hardening: [String] = []) -> [String] {
         var problems: [String] = []
         var hardened = 0
-        for statement in topLevelStatements(text) where !statement[0].hasPrefix("import ") {
+        // A compiler directive is no statement (`#if canImport(Glibc)` around an import, the keeper's main's); what a
+        // block holds is read as its own lines.
+        for statement in topLevelStatements(text) where !statement[0].hasPrefix("import ") && !statement[0].hasPrefix("#") {
             // The server's hardening statements, each in its place in their canonical order: none of them writes.
             if statement.count == 1, hardened < hardening.count, statement[0] == hardening[hardened] {
                 hardened += 1
@@ -304,11 +310,28 @@ struct PlatformLintTests {
     @Test func everyExecutableSettlesSIGPIPEBeforeItWrites() throws {
         let mains = Self.executables()
         #expect(mains.contains("Sources/vibeswitcher-hook/main.swift") && mains.contains("Sources/vibeswitcher-mcp/main.swift")
-                && mains.contains("Sources/vibeswitcher-host/main.swift") && mains.contains("Sources/vibeswitcher-server/main.swift"), "\(mains)")
+                && mains.contains("Sources/vibeswitcher-host/main.swift") && mains.contains("Sources/vibeswitcher-server/main.swift")
+                && mains.contains("Keeper/Sources/vibeswitcher-keeper/main.swift"), "\(mains)")
         for main in mains {
             let text = try String(contentsOf: Self.repo.appendingPathComponent(main), encoding: .utf8)
             #expect(Self.sigpipeProblems(text, hardening: main == "Sources/vibeswitcher-server/main.swift" ? Self.serverHardening : []) == [], "\(main)")
         }
+    }
+
+    /// The keeper's package is read: a main planted in a sample tree's `Keeper/Sources/vibeswitcher-*` is an executable
+    /// the rule reads, and one that writes before it settles SIGPIPE breaks it.
+    @Test func theKeepersMainIsAnExecutable() throws {
+        let tree = try TestScriptLinuxTests.scratch("platform-keeper")
+        defer { try? FileManager.default.removeItem(at: tree) }
+        let main = tree.appendingPathComponent("Keeper/Sources/vibeswitcher-keeper/main.swift")
+        try FileManager.default.createDirectory(at: main.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try "import Foundation\nprint(1)\nsignal(SIGPIPE, SIG_IGN)\n".write(to: main, atomically: true, encoding: .utf8)
+        #expect(Self.executables(root: tree) == ["Keeper/Sources/vibeswitcher-keeper/main.swift"])
+        #expect(Self.sigpipeProblems(try String(contentsOf: main, encoding: .utf8)).count == 1)
+        // A directive around an import is no statement; what a block holds still is.
+        let directives = "import Foundation\n#if canImport(Glibc)\nimport Glibc\n#endif\n"
+        #expect(Self.sigpipeProblems(directives + "signal(SIGPIPE, SIG_IGN)\n") == [])
+        #expect(Self.sigpipeProblems(directives + "#if os(Linux)\nprint(1)\n#endif\nsignal(SIGPIPE, SIG_IGN)\n").count == 1)
     }
 
     /// The server's first statements before SIGPIPE (the engine plan's E1, canonical, in this order; the traced
