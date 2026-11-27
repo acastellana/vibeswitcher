@@ -5151,3 +5151,8 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-27 12:54 Automatically (auto_advance): Cleaned up fix-refusedgit-swift-333 (freed 1.8 GB of build output and temporary folders). It stays done.
 - 2026-11-27 12:54 Automatically (auto_advance): Cleaned up the-mac-s-load (freed 1.8 GB of build output and temporary folders). It stays done.
 - 2026-11-27 12:54 Update: Three fixes in main: one records commit where there were many, the git guard reads sudo's options, and the load-gate review (active after an install) — Merged as one batch on one full test run; each passed its own audit first.
+- 2026-11-27 13:08 Folded turn-this-incident-into-22 into find-why-the-team: that task carries its work
+- 2026-11-27 13:08 Planned the-host-s-vault: The host's vault key is readable by a rebuilt host: find why the app's Keychain key survives a rebuild and the host's doesn't, on scratch keychains, and fix it (review audit, for security)
+- 2026-11-27 13:08 Started a worker on the-host-s-vault
+- 2026-11-27 13:08 Automatically (auto_advance): Started a worker on the-host-s-vault (The host's vault key is readable by a rebuilt host: find why the app's Keychain key survives a rebuild and the host's doesn't, on scratch keychains, and fix it).
+- 2026-11-27 13:09 Planned v2-node-kinds-the-2: v2 node kinds the guarded track needs first (G3): the `update` kind, the journal's ack kind and Claude Code's self-update switch, as kinds (in a clone; a branch for v2)
