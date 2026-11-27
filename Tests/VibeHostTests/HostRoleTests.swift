@@ -176,6 +176,33 @@ struct HostRoleTests {
         }
     }
 
+    /// On the account's own home, its lock file made a link (to a file the caller can rename into its place later):
+    /// the host doesn't start on it, so it never runs as the account's host with the key read and its vault, or a
+    /// handover proof, standing on a lock that isn't the file at its path. Nor on one replaced between its taking and
+    /// the check.
+    @Test func aLinkedOrReplacedLockStartsNoAccountsHost() throws {
+        let role = role(["HOME": account.path])
+        let target = role.root.appendingPathComponent("target")
+        #expect(FileManager.default.createFile(atPath: target.path, contents: nil))
+        try FileManager.default.createSymbolicLink(atPath: role.lockPath, withDestinationPath: target.path)
+        if let fd = try? role.takeLock() {
+            Darwin.close(fd)
+            Issue.record("the account's host took its lock through a link")
+        }
+        try FileManager.default.removeItem(atPath: role.lockPath)
+        try FileManager.default.removeItem(at: target)
+        // Taken, then moved aside (another file in its place): refused.
+        let racer = HostRole(environment: ["HOME": account.path], fallbackHome: account.path, lockArgument: nil,
+                             accountHome: account.path, afterTaking: { path in
+            try? FileManager.default.moveItem(atPath: path, toPath: path + ".aside")
+            FileManager.default.createFile(atPath: path, contents: nil)
+        })
+        if let fd = try? racer.takeLock() {
+            Darwin.close(fd)
+            Issue.record("the account's host kept a lock that isn't the file at its path")
+        }
+    }
+
     /// Known, and the next task in these files (not this one's): on the account's own home, the vault file moved aside
     /// and the host started again, it's a first start once more and takes the key on stdin unasked, though the
     /// Keychain's key was there already (a vault had been sealed under it). The rule proposed: a key that was there

@@ -119,7 +119,7 @@ let handoverPath = value(after: "--handover")
 var heldLock: Int32 = -1
 if handoverPath == nil {
     do {
-        heldLock = try HostServer.takeLock(at: lockPath)
+        heldLock = try role.takeLock()
     } catch HostServer.Failure.alreadyRunning {
         HostServer.note("host: another host holds the lock; this one (build \(build)) exits", logPath: config.logPath)
         exit(0)

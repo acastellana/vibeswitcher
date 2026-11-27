@@ -15,6 +15,7 @@ public struct HostRole {
     public let holdsRootLock: Bool
     /// The account's own host: the only one that reads the vault's Keychain item and seals the vault under it.
     public let isAccountHost: Bool
+    private let afterTaking: ((String) -> Void)?
 
     /// `environment` and `fallbackHome`: as `VibePaths.root(environment:fallbackHome:)` takes them. `lockArgument`:
     /// `--lock`'s value. `accountHome`: the account's home from the user database (`accountHome`).
@@ -25,6 +26,14 @@ public struct HostRole {
     /// HOME or CFFIXED_USER_HOME on another folder, a `--lock` of its own, the account's home unknown) is a scratch
     /// host for the vault: it never reads the Keychain's key, and keeps its vault in memory only.
     public init(environment: [String: String], fallbackHome: String, lockArgument: String?, accountHome: String?) {
+        self.init(environment: environment, fallbackHome: fallbackHome, lockArgument: lockArgument, accountHome: accountHome,
+                  afterTaking: nil)
+    }
+
+    /// `afterTaking`: a test's own step between the lock's taking and its check (`takeLock`).
+    init(environment: [String: String], fallbackHome: String, lockArgument: String?, accountHome: String?,
+         afterTaking: ((String) -> Void)?) {
+        self.afterTaking = afterTaking
         let given = VibePaths.root(environment: environment, fallbackHome: fallbackHome)
         let rootLock = given.appendingPathComponent("host.lock").path
         let lockPath = lockArgument ?? rootLock
@@ -53,6 +62,14 @@ public struct HostRole {
         guard let entry = getpwuid(getuid()), let dir = entry.pointee.pw_dir else { return nil }
         let home = String(cString: dir)
         return home.hasPrefix("/") ? home : nil
+    }
+
+    /// A fresh start's lock (`HostServer.takeLock` on `lockPath`): the descriptor that holds it. `main.swift` takes it
+    /// before the vault's key or file is read.
+    public func takeLock() throws -> Int32 {
+        let fd = try HostServer.takeLock(at: lockPath)
+        afterTaking?(lockPath)
+        return fd
     }
 
     /// The vault's key, `read` (the Keychain's) for the account's host alone: nil for any other, which never reads it.
