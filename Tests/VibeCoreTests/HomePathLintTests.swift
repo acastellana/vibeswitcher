@@ -11,6 +11,8 @@ struct HomePathLintTests {
     /// hook), which runs once at its start, on the home that process was started with.
     static let allowed: Set<String> = [
         "Sources/vibeswitcher-host/main.swift: role",
+        "Sources/vibeswitcher-host/main.swift: ownsLaunchers",
+        "Sources/vibeswitcher-host/main.swift: config",
         "Sources/vibeswitcher-hook/main.swift: stateURL",
     ]
 

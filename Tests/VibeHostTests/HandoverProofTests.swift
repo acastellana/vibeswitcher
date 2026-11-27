@@ -373,7 +373,7 @@ struct HandoverSenderTests {
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let ran = folder.appendingPathComponent("ran").path
         let build = folder.appendingPathComponent("build").path
-        FileManager.default.createFile(atPath: build, contents: Data("#!/bin/sh\ntouch '\(ran)'\nexit 1\n".utf8), attributes: [.posixPermissions: 0o755])
+        try installScript("#!/bin/sh\ntouch '\(ran)'\nexit 1\n", atPath: build)
         let client = try TestClient(host)
         let seq = client.send(.handover(executable: build))
         #expect(await eventually { client.reply(to: seq) != nil })
