@@ -5020,3 +5020,6 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-27 07:32 Released a-config-seal-look's worker (idle since its done report on 933c9706) while its audit runs
 - 2026-11-27 07:32 Automatically (auto_advance): Started the audit of a-config-seal-look at 933c9706 (Its review is audit). Released its worker, idle since its done report, while the audit runs: its Mac slot and memory are free, its worktree and branch stay.
 - 2026-11-27 07:36 Audit of a-config-seal-look: complete, clean, round 1: 2 Nit open, 2 Pre-existing open
+- 2026-11-27 07:40 Automatically (auto_advance): Nudged fix-main-swift-58's worker: its turn ended at 07:39 without a report reaching you, so VibeSwitcher sent it the standard prompt (report done or blocked now, and stay until the report answers). It's sent once: if it stops again without reporting, you're told.
+- 2026-11-27 07:56 Pipeline held: a-config-seal-look ready to merge with none landing; cause: a merge in progress
+- 2026-11-27 07:56 Merged a-config-seal-look: A config seal look that fails or times out counts as held: no gate passes on a stale record (build 335cc1521a43)
