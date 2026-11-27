@@ -323,6 +323,21 @@ struct LoadRecorderTests {
         #expect(busy.top != nil)
     }
 
+    /// A process holding two slots (a lead's tool server running a merge and an audit, each note naming its pid): its
+    /// tree is counted once, on the first slot, and the second says whose count includes it; another holder's is its own.
+    @Test func aTreeHoldingTwoSlotsIsCountedOnce() throws {
+        let since = Date(timeIntervalSince1970: 1_793_000_000)
+        let holders = [TestLock.Holder(slot: 1, note: "pid 101, VibeSwitcher's merge test of abc in /r/proj, since 10:00", since: since),
+                       TestLock.Holder(slot: 2, note: "pid 100, scripts/test.sh in /r/proj, since 10:00", since: since),
+                       TestLock.Holder(slot: 3, note: "pid 101, VibeSwitcher's audit of t in /r/proj, since 10:00", since: since)]
+        let recorder = LoadRecorder(folder: temp.url("stats"), sources: sources(load: 20, processes: { Self.table }, holders: holders))
+        let sample = try recorder.write(census: [], at: since.addingTimeInterval(60))
+        #expect(sample.heavy.held.map(\.runnable) == [1 + 3 + 2 + 2 + 1 + 1, 10, nil], "\(sample.heavy.held)")
+        #expect(sample.heavy.held.map(\.sameTreeAs) == [nil, nil, 1], "\(sample.heavy.held)")
+        let line = try LoadStats.line(sample)
+        #expect(line.contains("\"same_tree_as\":1,\"slot\":3") && !line.contains("\"runnable\":8,\"same_tree_as\""), "\(line)")
+    }
+
     /// Lines from before the CPU's idle share and the runnable threads were recorded (a holder without them too) decode
     /// unchanged; a new line decodes with them.
     @Test func linesWithoutTheNewFieldsStillDecode() throws {

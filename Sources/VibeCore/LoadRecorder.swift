@@ -176,9 +176,13 @@ public struct LoadSample: Codable, Equatable, Sendable {
             /// How long it has held the slot, in minutes.
             public var minutes: Int?
             /// The runnable threads in its process tree at the sample (`LoadRecorder.runnable(in:holder:)`); nil when
-            /// its note names no process, its tree is gone, the process table couldn't be read, and in lines from before
-            /// it was recorded.
+            /// its note names no process, its tree is gone, the process table couldn't be read, its tree is counted on
+            /// another slot (`sameTreeAs`), and in lines from before it was recorded.
             public var runnable: Int? = nil
+            /// The slot held by the same process, whose `runnable` counts this one's tree too: a lead's tool server
+            /// holds a slot for each merge or audit it runs, in itself, and the process table can't tell their runs
+            /// apart. Counted once, so the holders' sum is the threads in their trees. Nil when it has a tree of its own.
+            public var sameTreeAs: Int? = nil
         }
     }
 
@@ -506,8 +510,17 @@ public final class LoadRecorder: @unchecked Sendable {
         }
         if let processes {
             sample.runnable = processes.reduce(0) { $0 + $1.runnable }
+            // A process holding several slots (a lead's tool server's merge and audits) has one tree: counted once, on
+            // the first of its slots.
+            var counted: [Int32: Int] = [:]
             for (index, holder) in heavy.holders.enumerated() where index < sample.heavy.held.count {
-                sample.heavy.held[index].runnable = holder.pid.flatMap { Self.runnable(in: processes, holder: $0) }
+                guard let pid = holder.pid else { continue }
+                if let slot = counted[pid] {
+                    sample.heavy.held[index].sameTreeAs = slot
+                    continue
+                }
+                counted[pid] = holder.slot
+                sample.heavy.held[index].runnable = Self.runnable(in: processes, holder: pid)
             }
         }
         sample.costMs = (Double(clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID) - started) / 1e4).rounded() / 100
