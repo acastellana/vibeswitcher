@@ -68,9 +68,14 @@ public struct HostRole {
         return home.hasPrefix("/") ? home : nil
     }
 
-    /// The socket it listens on: `socketArgument` (`--socket`'s value), else its root's `host.sock`.
+    /// The socket it listens on: `socketArgument` (`--socket`'s value), else its root's `host.sock`. Not a host on
+    /// another lock on the account's own folder with no `--socket`: that one isn't the folder's host, and listening
+    /// unlinks what's at the path first, so it would take the account's host's socket. Nil then: `main.swift` doesn't
+    /// start. A host on a lock of its own elsewhere (the sandbox's, on its own home) keeps its folder's `host.sock`.
     public func socketPath(argument socketArgument: String?) -> String? {
-        socketArgument ?? root.appendingPathComponent("host.sock").path
+        if let socketArgument { return socketArgument }
+        if !holdsRootLock, onAccountFolder { return nil }
+        return root.appendingPathComponent("host.sock").path
     }
 
     /// A fresh start's lock (`HostServer.takeLock` on `lockPath`, never through a link): the descriptor that holds it.
