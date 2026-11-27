@@ -5140,3 +5140,14 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-27 12:53 Merged the-mac-s-load: The Mac's load gate: backtest better rules against the recorded load samples and recommend one (report only) (in a batch: the-lead-s-records-2, fix-refusedgit-swift-333, the-mac-s-load landed on one test run) (build c08b3a3f8520)
 - 2026-11-27 12:53 Flaky in the batch the-lead-s-records-2, fix-refusedgit-swift-333, the-mac-s-load: pastedImagesAndTheirTextArriveOnce(_:) failed the first test run and passed its rerun (the failing tests only); merged on the rerun
 - 2026-11-27 12:53 Planned fix-the-flaky-test-29: pastedImagesAndTheirTextArriveOnce(_:) flaked in the-mac-s-load's merge
+- 2026-11-27 12:53 Automatically (auto_advance): Merged the-lead-s-records-2 at 1bf88bf4 (its passing audit), fix-refusedgit-swift-333 at e4855e21 (its passing audit), the-mac-s-load at 49b9b879 (its passing audit) into main as one batch, on 1 test run for 3 tasks.
+- 2026-11-27 12:53 Started a worker on the-load-gate-reads
+- 2026-11-27 12:53 Automatically (auto_advance): Started a worker on the-load-gate-reads (The load gate reads the 1-minute average alone while nothing heavy and no team session runs (rule cI of the load-gate review)), its after tasks done (the-mac-s-load).
+- 2026-11-27 12:54 Started a worker on why-a-heavy-slot
+- 2026-11-27 12:54 Automatically (auto_advance): Started a worker on why-a-heavy-slot (Why a heavy slot loads the Mac beyond its share of cores: measure where the load of a build or test run comes from, and name the fixes (report only)), its after tasks done (the-mac-s-load).
+- 2026-11-27 12:54 Started a worker on fix-the-flaky-test-29
+- 2026-11-27 12:54 Automatically (auto_advance): Started a worker on fix-the-flaky-test-29 (Fix the flaky test pastedImagesAndTheirTextArriveOnce(_:)).
+- 2026-11-27 12:54 Automatically (auto_advance): Cleaned up the-lead-s-records-2 (freed 1.8 GB of build output and temporary folders). It stays done.
+- 2026-11-27 12:54 Automatically (auto_advance): Cleaned up fix-refusedgit-swift-333 (freed 1.8 GB of build output and temporary folders). It stays done.
+- 2026-11-27 12:54 Automatically (auto_advance): Cleaned up the-mac-s-load (freed 1.8 GB of build output and temporary folders). It stays done.
+- 2026-11-27 12:54 Update: Three fixes in main: one records commit where there were many, the git guard reads sudo's options, and the load-gate review (active after an install) — Merged as one batch on one full test run; each passed its own audit first.
