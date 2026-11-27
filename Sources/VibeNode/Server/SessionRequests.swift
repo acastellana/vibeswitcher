@@ -334,8 +334,20 @@ extension Requests {
         if let text, text.utf8.count > Self.sendLimit {
             return reply(.init(re: request.id, error: .init(.badArgs, "too long to type as an answer")))
         }
-        let shown = request.args?["question"]?.string
-        let shownOptions = request.args?["options"]?.array?.map { $0.string ?? "" }
+        // What binds the reply to the question shown: a wrong form of either is bad-args, not taken as none given (the
+        // review's P-C5-3: that would skip the check). Absent or null, it is not given.
+        let shown: String?
+        switch request.args?["question"] {
+        case nil, .null?: shown = nil
+        case .string(let question)?: shown = question
+        default: return reply(.init(re: request.id, error: .init(.badArgs, "session.reply's question is the question's words, as shown")))
+        }
+        let shownOptions: [String]?
+        switch request.args?["options"] {
+        case nil, .null?: shownOptions = nil
+        case .array(let list)? where list.allSatisfy({ $0.string != nil }): shownOptions = list.compactMap(\.string)
+        default: return reply(.init(re: request.id, error: .init(.badArgs, "session.reply's options are a list of the options' words, as shown")))
+        }
         let session: HostSession
         switch hostedSession(request.args?["session"]?.string, for: "session.reply", id: request.id) {
         case .failure(let refusal): return reply(refusal)
