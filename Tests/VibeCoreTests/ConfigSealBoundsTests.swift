@@ -151,7 +151,6 @@ struct ConfigSealBoundsTests: LeadTeamFixture {
         @discardableResult
         func enter() -> Int { lock.lock(); defer { lock.unlock() }; now += 1; all += 1; most = max(most, now); return all }
         func leave() { lock.lock(); now -= 1; lock.unlock() }
-        var active: Int { lock.lock(); defer { lock.unlock() }; return now }
         var peak: Int { lock.lock(); defer { lock.unlock() }; return most }
         var calls: Int { lock.lock(); defer { lock.unlock() }; return all }
     }
@@ -181,8 +180,8 @@ struct ConfigSealBoundsTests: LeadTeamFixture {
         Thread { _ = look(); done.signal() }.start()
         #expect(await offPool { entered.wait(timeout: .now() + hangGuard) } == .success)
         for _ in 0..<2 { Thread { _ = look(); done.signal() }.start() }
-        // The two later looks either hash beside the first or wait for it: either way, it's let go then.
-        #expect(await eventually { overlap.active == 3 || book.looksWaiting == 2 })
+        // The two later looks either hash beside the first (and are done) or wait for it: either way, it's let go then.
+        #expect(await eventually { overlap.calls == 3 || book.looksWaiting == 2 })
         release.signal()
         for _ in 0..<3 { #expect(await offPool { done.wait(timeout: .now() + hangGuard) } == .success) }
         #expect(overlap.peak == 1, "\(overlap.peak) looks hashed at once")
