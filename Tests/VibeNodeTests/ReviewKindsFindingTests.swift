@@ -155,9 +155,8 @@ struct LogsReadsInFlightTests {
         try FileManager.default.createDirectory(at: test, withIntermediateDirectories: true)
         let go = test.appendingPathComponent("go").path
         let standIn = test.appendingPathComponent("journalctl")
-        try "#!/bin/sh\nwhile [ ! -e '\(go)' ]; do /bin/sleep 0.05; done\necho '{\"MESSAGE\":\"read\",\"SYSLOG_IDENTIFIER\":\"vibeswitcher-node\"}'\n"
-            .write(to: standIn, atomically: true, encoding: .utf8)
-        #expect(chmod(standIn.path, 0o700) == 0)
+        try writeClosedOnExec("#!/bin/sh\nwhile [ ! -e '\(go)' ]; do /bin/sleep 0.05; done\necho '{\"MESSAGE\":\"read\",\"SYSLOG_IDENTIFIER\":\"vibeswitcher-node\"}'\n",
+                              to: standIn, mode: 0o700)
         defer { FileManager.default.createFile(atPath: go, contents: Data()) }
         let replies = Locked<[String: NodeWire.Reply]>([:])
         let count = NodeLogs.readsInFlight + 1
