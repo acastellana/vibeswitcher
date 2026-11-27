@@ -8,7 +8,7 @@ import Testing
 // terminal's alone for every page (`.terminalOnly`) until the device keys track's slices 14 and 15. What runs here, on
 // the Mac and with no host: who may send them (`Principal`, the voice rule, the Mac's closed rule and its Touch ID rule),
 // their arguments (unknown, extra and malformed refused, nothing taken from a caller that names a path or a program),
-// and each one's act on scratch seams: a scratch builds folder and a fake installer, a scratch journal, a scratch Claude
+// and each one's act on scratch seams: a scratch builds folder and a fake installer, no journal written, a scratch Claude
 // config. The whole recorded request on a scratch host (the vault's record first) is Linux's.
 
 /// A host that is never there.

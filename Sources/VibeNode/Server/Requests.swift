@@ -135,9 +135,6 @@ public final class Requests: @unchecked Sendable {
     /// its manager, set at the server's start (`ServerStart`); a test's fake. Nil: `update` installs nothing (it is
     /// refused). Never a request's.
     public var updateInstaller: UpdateInstall.Installer?
-    /// Where `journal.ack` writes (`JournalWriter`): the user's node's journal, set at the server's start; a test's
-    /// scratch journal. Nil: refused.
-    public var journalWriter: JournalWriter?
     /// The web's gate and tokens (the live plan's I1, `NodeLive`): what `web.open` and `web.revoke` act on; none:
     /// both are refused.
     public var web: WebAccess?
