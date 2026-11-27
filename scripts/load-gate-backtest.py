@@ -6,7 +6,7 @@ Read-only: it opens the recorder's files for reading and writes nothing. Standar
     python3 -I scripts/load-gate-backtest.py                 # every day in ~/.vibeswitcher/stats
     python3 -I scripts/load-gate-backtest.py --stats DIR     # another folder of load-*.jsonl / merges-*.jsonl
     python3 -I scripts/load-gate-backtest.py --top           # also the top process groups' evidence
-    python3 -I scripts/load-gate-backtest.py --until 2026-11-27T11:27   # the data as the review saw it
+    python3 -I scripts/load-gate-backtest.py --until 2026-11-27T11:28   # the data as the review saw it
     python3 -I scripts/load-gate-backtest.py --selftest      # the hand-checked fixture, Tests/Fixtures/load-gate
 
 Inputs (LoadRecorder.swift): load-YYYY-MM-DD.jsonl, one LoadSample about every minute (`load` [1, 5, 15],
@@ -120,7 +120,10 @@ def load_samples(stats, threshold, boost_threshold, until=None):
 
 
 def load_merges(stats, until=None):
+    """One entry per test run: a batched merge's tasks each have a line sharing the batch's run, kept once (its
+    first line; any line's failure counts for the run)."""
     merges = []
+    batches = {}
     for raw in read_jsonl(sorted(glob.glob(os.path.join(stats, "merges-*.jsonl")))):
         if not raw.get("t"):
             continue
@@ -131,6 +134,13 @@ def load_merges(stats, until=None):
         raw["_ran"] = ran
         raw["_bad"] = ran and (raw.get("first_run") == "failed" or raw.get("reran") is not None
                                or raw.get("result") in ("failed", "hung"))
+        batch = raw.get("batch")
+        if batch:
+            if batch in batches:
+                batches[batch]["_bad"] = batches[batch]["_bad"] or raw["_bad"]
+                batches[batch]["_ran"] = batches[batch]["_ran"] or ran
+                continue
+            batches[batch] = raw
         merges.append(raw)
     merges.sort(key=lambda m: m["_t"])
     return merges
@@ -408,7 +418,7 @@ def report(stats, threshold, boost_threshold, top, out=sys.stdout, until=None):
     days = days_covered(samples)
     first, last = samples[0].t, samples[-1].t
     print(f"samples {len(samples)}, {first:%Y-%m-%d %H:%M} to {last:%Y-%m-%d %H:%M}, covered {days * 24:.1f} h "
-          f"({days:.2f} days of samples); merges {len(merges)} ({sum(1 for m in merges if m['_ran'])} ran tests, "
+          f"({days:.2f} days of samples); merge test runs {len(merges)}, a batch once ({sum(1 for m in merges if m['_ran'])} ran tests, "
           f"{sum(1 for m in merges if m['_bad'])} failed or reran)", file=out)
     print(f"boosted {sum(s.weight for s in samples if s.boost) / 60:.1f} h; overload = 1-minute > 2 x T in force; "
           f"boots seen {len({s.boot_at for s in samples if s.boot_at})}; idle {sum(s.weight for s in samples if s.idle) / 60:.1f} h",
@@ -595,10 +605,10 @@ def selftest():
       09:00 10 10 1 1 | 09:01 60 20 1 1 | 09:02 70 40 1 1 | 09:03 20 45 1 1 (the 2026-10-28 dip) | 09:04 80 50 1 1
       09:05 10 40 1 1 | 09:06 8 30 0 0 | 09:07 6 26 0 0 | 09:08 5 22 | 09:09 5 20 | 09:10 5 18 | 09:11 5 16
       -- 29-minute gap, swap 2048 -> 0 MB: a restart, first sampled 09:40 --
-      09:40 300 150 0 0 | 09:41 20 100 0 0 | 09:42 10 70 0 0 | 09:43 9 20 0 0
+      09:40 300 150 0 0 | 09:41 20 100 0 1 (a merge's slot) | 09:42 10 70 0 0 | 09:43 9 20 0 0
     Every sample weighs 1 minute (09:11 and 09:43 too: one stands before a long gap, the other is the last).
-    (a) max(1,5) <= 24 refuses 09:01-09:07 (7) and 09:40-09:42 (3): 10. Idle among them: 09:06, 09:07, 09:40-09:42: 5;
-        the longest idle stretch 09:40-09:42: 3 (the gap breaks it from 09:06-09:07).
+    (a) max(1,5) <= 24 refuses 09:01-09:07 (7) and 09:40-09:42 (3): 10. Idle among them: 09:06, 09:07, 09:40, 09:42
+        (09:41 holds a slot): 4; the longest idle stretch 09:06-09:07: 2 (09:41 breaks 09:40-09:42).
         False room on the load: 09:00 (09:01 overloads): 1. 09:08 is clear (its window's last sample, 09:11, is
         within 2 minutes of its end); 09:09-09:11 and 09:41-09:43 are unknown (a gap, the end of the file).
     merges-2026-01-05.jsonl: 09:03:30 failed its first run and reran, 09:20 passed.
@@ -606,9 +616,11 @@ def selftest():
     (b) 1-minute <= 24 refuses 09:01, 09:02, 09:04, 09:40: 4; idle 1 (09:40). False room on the load: 09:00 and 09:03
         (09:04 overloads): 2 moments in 2 runs, 1 new (09:03, which (a) refused). On merges: 09:00 and 09:03, 1 new,
         1 distinct merge.
-    (c30) the 5-minute ignored while idle (09:06-09:11, 09:40-09:43) or within 30 minutes of the 09:40 boot: refuses
-        09:01-09:05 (09:03 and 09:05: not idle, the 5-minute 45 and 40 > 24) and 09:40 (300): 6; gives back 09:06,
-        09:07, 09:41, 09:42: 4; idle refused 1. (d) is the same here: the idle moments are the slot-free ones.
+    (c30) the 5-minute ignored while idle (09:06-09:11, 09:40, 09:42, 09:43) or within 30 minutes of the 09:40 boot:
+        refuses 09:01-09:05 (09:03 and 09:05: not idle, the 5-minute 45 and 40 > 24) and 09:40 (300): 6; gives back
+        09:06, 09:07, 09:41 (in the boot window, slot or not), 09:42: 4; idle refused 1.
+    (cG) the boot clause only while no slot is held: 09:41 is refused too (the 5-minute 100): 7 refused, 3 given back.
+    (d) the 5-minute only while a slot is held: the same as (cG) here, 7.
     """
     here = os.path.dirname(os.path.abspath(__file__))
     stats = os.path.join(os.path.dirname(here), "Tests", "Fixtures", "load-gate", "stats")
@@ -618,8 +630,8 @@ def selftest():
     expected = [
         ("samples", len(got["samples"]), 16),
         ("a refused", a["refused"], 10.0),
-        ("a refused idle", a["refused_idle"], 5.0),
-        ("a longest idle", a["longest_idle"], 3.0),
+        ("a refused idle", a["refused_idle"], 4.0),
+        ("a longest idle", a["longest_idle"], 2.0),
         ("a false load", a["false_load"], 1),
         ("a false merge", a["false_merge"], 1),
         ("b refused", b["refused"], 4.0),
@@ -634,10 +646,10 @@ def selftest():
         ("c30 refused", c["refused"], 6.0),
         ("c30 given back", c["given_back"], 4.0),
         ("c30 refused idle", c["refused_idle"], 1.0),
-        # (d) is (c) here: the idle moments are the slot-free ones.
-        ("d refused", d["refused"], 6.0),
-        # (cG): no slot is held after the fixture's boot, so it is (c30) here.
-        ("cG refused", g["refused"], 6.0),
+        # (d) and (cG) refuse 09:41 too: a slot is held there, so the 5-minute (100) counts.
+        ("d refused", d["refused"], 7.0),
+        ("cG refused", g["refused"], 7.0),
+        ("cG given back", g["given_back"], 3.0),
         ("boots", len({s.boot_at for s in got["samples"] if s.boot_at}), 1),
     ]
     failed = [(name, value, want) for name, value, want in expected if value != want]
@@ -653,7 +665,7 @@ def main():
     parser.add_argument("--threshold", type=float, default=None, help="the normal load_threshold (default 2 x cores)")
     parser.add_argument("--boost-threshold", type=float, default=36.0)
     parser.add_argument("--top", action="store_true", help="also print the top process groups' evidence")
-    parser.add_argument("--until", help="leave out samples and merges after this local time, 2026-11-27T11:27")
+    parser.add_argument("--until", help="leave out samples and merges after this local time, 2026-11-27T11:28")
     parser.add_argument("--selftest", action="store_true")
     args = parser.parse_args()
     if args.selftest:

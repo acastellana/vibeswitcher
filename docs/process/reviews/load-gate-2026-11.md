@@ -21,8 +21,8 @@ ran no bench and changed no code in Sources/. Reproduce it with
 
 - **Data:** ~/.vibeswitcher/stats/load-2026-11-14.jsonl through load-2026-11-27.jsonl (to 11:27). That is 14,364
   samples covering 239.9 hours: 10.0 days of samples across 13.5 calendar days, the rest being sleep. Of those hours,
-  204 were boosted. Beside them, merges-*.jsonl holds 493 merges: 466 ran their tests and 43 of those failed their first
-  run or reran. The recorder keeps 14 days (`LoadStats.keepDays`), so **neither 2026-10-19 nor 2026-10-28 17:38 is in
+  204 were boosted. Beside them, merges-*.jsonl holds 493 merge lines. Counting a batch's shared test run once, that is 467 runs: 446
+  ran their tests and 33 of those failed their first run or reran. The recorder keeps 14 days (`LoadStats.keepDays`), so **neither 2026-10-19 nor 2026-10-28 17:38 is in
   the files**. The 10-28 shape (a dip of the 1-minute under the threshold while a heavy slot is held and the 5-minute
   is high) is rebuilt by hand in the fixture.
 - **Threshold in force (T):** 36 when the sample says boost, otherwise 2 × cores = 24. mac-limits.json lies outside
@@ -48,35 +48,35 @@ ran no bench and changed no code in Sources/. Reproduce it with
 
 Minutes over the 10.0 days of samples, except "/day", which is per 24 hours of samples.
 
-| Rule | What it says | Refused | /day | Idle | No team | Free | Longest idle | Back | FR load (runs, new) | FR merge (merges, new) |
+| Rule | What it says | Refused | /day | Idle | No team | Free | Longest idle | Back | FR load (runs, new) | FR merge (test runs, new) |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | --- | ---: | --- | --- |
-| a | max(1, 5) ≤ T: **today, the baseline** | 1158 | 116 | 11 | 42 | 20 | 10 m, 11-27 11:04 | 0 | 301 (94, 0) | 128 (41, 0) |
-| b | the 1-minute only | 846 | 85 | 5 | 22 | 0 | 5 m, 11-27 11:04 | 312 | 382 (121, **81**) | 143 (43, **15**) |
-| c | (a), but the 5-minute ignored while idle or ≤ 30 min after boot (≤ 15 min: the same) | 1147 | 115 | 5 | 32 | 14 | 5 m, 11-27 11:04 | 11 | 301 (94, 0) | 128 (41, 0) |
-| **cG** | **(c), but the boot clause only while no heavy slot is held: recommended** | 1152 | 115 | 5 | 36 | 14 | 5 m, 11-27 11:04 | 6 | 301 (94, 0) | 128 (41, 0) |
-| cB | (a), but the 5-minute ignored ≤ 30 min after boot only | 1147 | 115 | 5 | 32 | 14 | 5 m | 11 | 301 (94, 0) | 128 (41, 0) |
-| cI | (a), but the 5-minute ignored while idle only | 1152 | 115 | 5 | 36 | 14 | 5 m | 6 | 301 (94, 0) | 128 (41, 0) |
-| d | committed: (a) while a heavy slot is held, otherwise the 1-minute (team sessions don't count) | 1138 | 114 | 5 | 36 | 0 | 5 m | 20 | 302 (94, 1) | 129 (41, 1) |
-| d′ | (d), and no room while every heavy slot is held | 1880 | 188 | 5 | 36 | 0 | 5 m | 20 | 190 (72, 1) | 109 (32, 1) |
-| k3 | the 1-minute ≤ T at every sample of the last 3 minutes | 1869 | 187 | 8 | 37 | 276 | 8 m | 52 | 253 (77, 8) | 110 (28, 0) |
-| k5 | the same over 5 minutes | 2301 | 230 | 10 | 45 | 390 | 10 m | 14 | 207 (59, 1) | 106 (26, 0) |
-| g | (a), but the 5-minute ignored once the 1-minute has stayed ≤ T/2 for 3 minutes | 1144 | 114 | 10 | 33 | 19 | 9 m | 14 | 301 (94, 0) | 128 (41, 0) |
-| h | (g), and only while no heavy slot is held | 1156 | 116 | 10 | 41 | 19 | 9 m | 1 | 301 (94, 0) | 128 (41, 0) |
-| f24 | max(1, 5) ≤ 24 always: 2 × cores | 1772 | 177 | 12 | 47 | 60 | 10 m | 0 | 196 (58, 0) | 106 (30, 0) |
-| f36 | max(1, 5) ≤ 36 always: 3 × cores | 1086 | 109 | 11 | 42 | 15 | 10 m | 72 | 312 (96, 11) | 132 (41, 4) |
+| a | max(1, 5) ≤ T: **today, the baseline** | 1158 | 116 | 11 | 42 | 20 | 10 m, 11-27 11:04 | 0 | 301 (94, 0) | 128 (31, 0) |
+| b | the 1-minute only | 846 | 85 | 5 | 22 | 0 | 5 m, 11-27 11:04 | 312 | 382 (121, **81**) | 143 (33, **15**) |
+| c | (a), but the 5-minute ignored while idle or ≤ 30 min after boot (≤ 15 min: the same) | 1147 | 115 | 5 | 32 | 14 | 5 m, 11-27 11:04 | 11 | 301 (94, 0) | 128 (31, 0) |
+| **cG** | **(c), but the boot clause only while no heavy slot is held: recommended** | 1152 | 115 | 5 | 36 | 14 | 5 m, 11-27 11:04 | 6 | 301 (94, 0) | 128 (31, 0) |
+| cB | (a), but the 5-minute ignored ≤ 30 min after boot only | 1147 | 115 | 5 | 32 | 14 | 5 m | 11 | 301 (94, 0) | 128 (31, 0) |
+| cI | (a), but the 5-minute ignored while idle only | 1152 | 115 | 5 | 36 | 14 | 5 m | 6 | 301 (94, 0) | 128 (31, 0) |
+| d | committed: (a) while a heavy slot is held, otherwise the 1-minute (team sessions don't count) | 1138 | 114 | 5 | 36 | 0 | 5 m | 20 | 302 (94, 1) | 129 (31, 1) |
+| d′ | (d), and no room while every heavy slot is held | 1880 | 188 | 5 | 36 | 0 | 5 m | 20 | 190 (72, 1) | 109 (25, 1) |
+| k3 | the 1-minute ≤ T at every sample of the last 3 minutes | 1869 | 187 | 8 | 37 | 276 | 8 m | 52 | 253 (77, 8) | 110 (24, 0) |
+| k5 | the same over 5 minutes | 2301 | 230 | 10 | 45 | 390 | 10 m | 14 | 207 (59, 1) | 106 (23, 0) |
+| g | (a), but the 5-minute ignored once the 1-minute has stayed ≤ T/2 for 3 minutes | 1144 | 114 | 10 | 33 | 19 | 9 m | 14 | 301 (94, 0) | 128 (31, 0) |
+| h | (g), and only while no heavy slot is held | 1156 | 116 | 10 | 41 | 19 | 9 m | 1 | 301 (94, 0) | 128 (31, 0) |
+| f24 | max(1, 5) ≤ 24 always: 2 × cores | 1772 | 177 | 12 | 47 | 60 | 10 m | 0 | 196 (58, 0) | 106 (25, 0) |
+| f36 | max(1, 5) ≤ 36 always: 3 × cores | 1086 | 109 | 11 | 42 | 15 | 10 m | 72 | 312 (96, 11) | 132 (31, 4) |
 | e | real CPU use (idle share from host_processor_info ticks) | not judgeable: no CPU field is recorded (see [the CPU signal](#e-the-cpu-signal)) | | | | | | | | |
 
 Columns: **Idle** is refused while idle. **No team** is refused with no team session (heavy slots may be held).
 **Free** is refused while free. **Longest idle** is the longest stretch refused while idle. **Back** is the minutes of
-room where (a) refused. **FR** is false-room moments, then (runs of consecutive moments or distinct merges, new versus
-(a)).
+room where (a) refused. **FR** is false-room moments, then (runs of consecutive moments or distinct test runs, new versus
+(a)). A batched merge's tasks share one test run and count once.
 
 Also printed by the script:
 
 - **Merge load waits:** in 14 days only 2 merges waited for the load, 570 s in all. Rule (b) would have let them go
   after 302 s. Every other rule changes nothing for them.
-- **Merge first runs that failed or reran, by max(1, 5) at their start:** 17/318 (5%) under 12; 12/89 (13%) at 12–24;
-  13/51 (25%) at 24–36; 1/5 at 36–72; 0/3 over 72.
+- **Merge first runs that failed or reran, by max(1, 5) at their start:** 16/314 (5%) under 12; 8/80 (10%) at 12–24;
+  8/45 (18%) at 24–36; 1/4 at 36–72; 0/3 over 72 (a batch's run once).
 - **The 1-minute load by heavy slots held:** 0 held, mean 4.5 (p90 6.6; 6,993 samples); 1 held, 9.7 (p90 16.1); 2 held,
   19.9 (p90 38.5); 3 held, **44.6 (p90 101.2; 1,090 samples)**.
 - **Overload onsets:** 128. None of them followed 5 minutes with the Mac idle.
@@ -107,7 +107,7 @@ Also printed by the script:
    5-minute was already under 36). (cB), the boot clause alone, matches (c). The idle clause adds nothing measurable,
    since the Mac was idle only right after the restart. (cG) keeps it anyway: it covers an app restart or a quiet
    night that a boot clock wouldn't, and no build of ours can be pausing when no slot is held and no team runs.
-4. **(d), the committed-work rule, buys 9 more minutes for one new false-room moment.** It gives back 20 minutes. The
+4. **(d), the committed-work rule, buys 14 more minutes than (cG) for one new false-room moment.** It gives back 20 minutes. The
    extra ones are moments with team sessions open, no slot held, the 1-minute low and the 5-minute high (11-15 22:35,
    11-19 15:08–15:10, 11-26 08:57, and others). One of them, 11-14 01:13 (the 1-minute 3.9, the 5-minute 26.7, 2 team
    sessions, no slot held), was followed by an overload within 5 minutes. A worker's own build started outside a slot
@@ -116,12 +116,13 @@ Also printed by the script:
    to 253 and 207. Like (h), the variant (g) gives back 14 minutes for no new false room. But a 3-minute pause in our
    own build would fool it, which is the case the user's history rules out. It isn't recommended.
 6. **(d′), no room while every heavy slot is held, is the strongest lever on overloads, in the other direction.** It
-   cuts false room on the load from 301 to 190 and failing merges from 41 to 32. The cost is 72 more minutes refused a
+   cuts false room on the load from 301 to 190 and failing test runs from 31 to 25. The cost is 72 more minutes refused a
    day. The load by heavy slots held says why: the Mac averages 4.5 with no slot held, 9.7 with 1, 19.9 with 2, and
    44.6 with 3 (p90 101). The third slot, boost's heavy_slots 3, is where the overloads come from.
 7. **(f), 2 × cores against 3 × cores.** Going from f24 to f36 gives back 686 minutes (69 a day). In exchange it allows
    116 more false-room moments on the load (196 → 312, 17% of the moments it gives back) and 26 more on merges (106 →
-   132). Merges started at max(1, 5) 24–36 failed or reran their first run 25% of the time, against 5% under 12. Today
+   132). Merge test runs started at max(1, 5) 24–36 failed or reran their first run 18% of the time (8 of 45), against 10% at
+   12–24 and 5% under 12. Today
    boost already runs at 36 for 85% of the sampled hours, so the 116 refused minutes a day are mostly against 36. This
    report recommends no threshold change. Raising the threshold buys time with merge failures, and the next task
    should not touch it.
@@ -195,7 +196,8 @@ minutes too unless no build or test holds a slot and either nothing of ours runs
 (`LeadToolset.steadyLoad`, `MacLoad.steady`): start_worker's and audit's refusals, auto_advance's starts, the room
 watch (LeadWaits, LeadWitness, LeadPipelineWatch, LeadRemotePoller), merge's load wait, and the Team view's line. The
 clause can apply only when the caller knows the census and the holders. Where one doesn't (`MacLoad.steady()` in the
-app's Team line), it uses max(1, 5) as today.
+app's Team line), it uses max(1, 5) as today. TestLock and vs-heavy read only the 1-minute load, for a job's width and
+its stall watch, and StallWatch reads `MacLoad.oneMinute()`. None of them judges room, and (cG) doesn't change them.
 
 **What the lead is told.**
 - In a refusal on the 5-minute: "the Mac's load is 70 (its 5-minute average; the last minute's is 6), over
@@ -208,7 +210,8 @@ app's Team line), it uses max(1, 5) as today.
 - The Team view's spoken line ("the greater of the last minute's and the last 5 minutes'") says the same.
 
 **Tests for that task.**
-- The 11-27 restart as a fixture: room from the first minute the 1-minute is ≤ 36.
+- The 11-27 restart as a fixture: room 11:09–11:13, refused 11:14–11:17 (a slot held, the 5-minute over 36), room
+  from 11:18.
 - The 10-28 shape stays refused: a slot held, the 1-minute 20, the 5-minute 45. This holds within 30 minutes of a boot
   too.
 - Team sessions open, no slot held, the 5-minute high, more than 30 minutes after a boot: refused.
