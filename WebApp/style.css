@@ -1333,9 +1333,11 @@ kbd { padding: 1px var(--s-3); border-radius: var(--r-1); box-shadow: var(--e-1-
 .all-done-tasks li.merged { font-weight: var(--w-medium); }
 /* P-s1: the card's Dismiss beside its title, in the lead conversation; what it did, in a line, once dismissed. */
 .all-done-head { display: flex; align-items: baseline; gap: var(--s-3); }
+.all-done .board-group-head { display: flex; align-items: baseline; gap: var(--s-3); }
+.all-done .board-task-when { font-weight: var(--w-regular); }
 .all-done-head > .section-title { flex: 1; min-width: 0; }
 .lead-all-done { margin-top: var(--s-4); }
-.receipt.all-done-said { align-self: auto; margin-top: var(--s-4); }
+.receipt.all-done-said { align-self: auto; display: flex; align-items: center; gap: var(--s-2); margin-top: var(--s-4); }
 
 /* The composer's + (views/chat.js): an image from this device, or the line that sends one on the node. */
 .composer-attach { flex: none; width: var(--ctl-l); height: var(--ctl-l); }
