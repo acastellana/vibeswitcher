@@ -80,6 +80,15 @@ struct GuardedKindsTests {
         }
     }
 
+    /// What a page is told of `journal.ack` matches what it does (the G3 review's N2): it records, the server writes no
+    /// journal entry and clears no mark, and the marks stay until `status --ack` in a terminal.
+    @Test func journalAcksReasonSaysTheMarksStay() throws {
+        let spec = try #require(KindSpec.spec("journal.ack"))
+        guard case .terminalOnly(let why) = spec.page else { Issue.record("\(spec.page)"); return }
+        #expect(!why.contains("clears the marks"), "\(why)")
+        #expect(why.contains("the marks stay until vibeswitcher status --ack in a terminal"), "\(why)")
+    }
+
     // MARK: Who may send them
 
     /// A page is refused each of them, whatever its rights, an acting page's (`web_acts` on) too: with the terminal's

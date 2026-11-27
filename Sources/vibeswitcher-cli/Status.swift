@@ -332,7 +332,8 @@ enum StatusCommand {
         let action = UUID().uuidString.lowercased()
         let outcome = TypedWord.ask(code: NodeIds.code(action: action), what: JournalAck.what)
         guard outcome == .typed else { return Say.refused(TypedWord.refusal(outcome)) }
-        // The entry the server's `journal.ack` writes too (`JournalAck.entry`), through the same writer (`JournalWriter`).
+        // The acknowledgment's entry (`JournalAck.entry`), through the command line's writer (`JournalWriter`): the server's
+        // `journal.ack` writes none, only the vault's record.
         guard context.writeJournal(JournalAck.entry(action: action)) else {
             Say.err("vibeswitcher: the acknowledgment couldn't be written to the journal")
             return 1

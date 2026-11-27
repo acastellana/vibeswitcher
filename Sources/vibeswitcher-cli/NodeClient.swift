@@ -135,7 +135,7 @@ struct NodeContext {
     func writeJournal(_ fields: [(name: String, value: String)]) -> Bool {
         guard let socket = journalSocket else { return false }
         let patience = isScratch ? 10 : Self.journalPatience
-        // The writer the server's `journal.ack` uses too.
+        // The command line's own writer: the server's `journal.ack` writes no journal entry.
         let context = self
         let writer = JournalWriter(send: { Platform.Journal.send($0, to: socket) }, read: { context.sentEntries(nonce: $0) },
                                    patience: patience, pause: isScratch ? 0.01 : Self.journalPause)
