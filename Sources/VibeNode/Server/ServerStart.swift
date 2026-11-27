@@ -166,6 +166,16 @@ public enum ServerStart {
         requests.nodeRoot = parsed.nodeRoot
         // Where `build.switch` finds the builds: the account's own install folder on the node, a test's on a scratch node.
         requests.installRoot = accountHome.map { NodeFolders.defaultPrefix(accountHome: $0) } ?? parsed.testInstallRoot
+        // G3's kinds on the user's Linux node only (a scratch server, and the Mac's, have neither): `update`'s install,
+        // install-node of the build this server's own image is (`/proc/self/exe`, as the command line proves its own) in a
+        // scope of the user's manager; `journal.ack`'s journal.
+        if parsed.node, !Platform.CodeIdentity.isAvailable, let accountHome,
+           case .success(let build) = NodeFolders.installedBuild(executable: "/proc/self/exe", prefix: NodeFolders.defaultPrefix(accountHome: accountHome)) {
+            requests.updateInstaller = .script(own: build.folder, scope: UpdateInstall.systemdRun)
+        }
+        if parsed.node, !Platform.CodeIdentity.isAvailable, let journalctl = Platform.Service.journalctl {
+            requests.journalWriter = .system(journalctl: journalctl)
+        }
         // Check for Updates on the user's node (`UpdateWatch`): a scratch server asks GitHub nothing.
         if parsed.node, let accountHome {
             let updates = UpdateWatch(file: root.appendingPathComponent("update-check.json"), running: commit,

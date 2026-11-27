@@ -34,6 +34,9 @@
       "buildsBeforeListing",
       "commit"
     ],
+    "claude.autoupdate" : [
+      "on"
+    ],
     "config.accept" : [
       "card",
       "code"
@@ -48,6 +51,9 @@
     ],
     "hooks.remove" : [
       "agents"
+    ],
+    "journal.ack" : [
+
     ],
     "lead" : [
       "folder",
@@ -166,6 +172,10 @@
     "tell.retract" : [
       "action"
     ],
+    "update" : [
+      "commit",
+      "rollback"
+    ],
     "web.confirm" : [
       "code",
       "phrase"
@@ -202,6 +212,7 @@
     "build.switch" : "switch your node to another build",
     "chat.image" : "do chat.image for you",
     "chat.page" : "do chat.page for you",
+    "claude.autoupdate" : "turn Claude Code's self-update on or off",
     "config.accept" : "accept a change to a watched file",
     "config.held" : "do config.held for you",
     "draft" : "do draft for you",
@@ -209,6 +220,7 @@
     "hold" : "hold a lead's question for you",
     "hooks.install" : "install VibeSwitcher's hooks",
     "hooks.remove" : "remove VibeSwitcher's hooks",
+    "journal.ack" : "acknowledge the starts, stops and restarts the journal shows",
     "lead" : "start a project's lead for you",
     "logs" : "do logs for you",
     "mail" : "do mail for you",
@@ -262,6 +274,7 @@
     "term.close" : "do term.close for you",
     "term.open" : "do term.open for you",
     "unsubscribe" : "do unsubscribe for you",
+    "update" : "install another build and switch your node to it",
     "update.check" : "do update.check for you",
     "web.confirm" : "confirm a web page's pairing",
     "web.open" : "open the web page to a device",
@@ -306,6 +319,9 @@
       "buildsBeforeListing",
       "commit"
     ],
+    "claude.autoupdate" : [
+      "on"
+    ],
     "config.accept" : [
       "batch",
       "card",
@@ -321,6 +337,9 @@
     ],
     "hooks.remove" : [
       "agents"
+    ],
+    "journal.ack" : [
+
     ],
     "lead" : [
       "folder",
@@ -437,6 +456,10 @@
     "tell.retract" : [
       "action"
     ],
+    "update" : [
+      "commit",
+      "rollback"
+    ],
     "web.confirm" : [
       "code",
       "phrase"
@@ -492,6 +515,7 @@
     "build.switch" : true,
     "chat.image" : false,
     "chat.page" : false,
+    "claude.autoupdate" : true,
     "config.accept" : true,
     "config.held" : false,
     "draft" : true,
@@ -499,6 +523,7 @@
     "hold" : true,
     "hooks.install" : true,
     "hooks.remove" : true,
+    "journal.ack" : true,
     "lead" : true,
     "logs" : false,
     "mail" : false,
@@ -552,6 +577,7 @@
     "term.close" : true,
     "term.open" : true,
     "unsubscribe" : false,
+    "update" : true,
     "update.check" : false,
     "web.confirm" : true,
     "web.open" : true,
@@ -576,10 +602,12 @@
     "base.keep",
     "build.seal",
     "build.switch",
+    "claude.autoupdate",
     "config.accept",
     "hold",
     "hooks.install",
     "hooks.remove",
+    "journal.ack",
     "lead",
     "plugin.add",
     "plugin.off",
@@ -604,6 +632,7 @@
     "stop",
     "tell",
     "tell.retract",
+    "update",
     "web.confirm",
     "web.open",
     "web.passkey.add",
@@ -639,6 +668,10 @@
       "keepsResult" : true,
       "rerun" : false
     },
+    "claude.autoupdate" : {
+      "keepsResult" : true,
+      "rerun" : true
+    },
     "config.accept" : {
       "keepsResult" : true,
       "rerun" : false
@@ -652,6 +685,10 @@
       "rerun" : true
     },
     "hooks.remove" : {
+      "keepsResult" : true,
+      "rerun" : true
+    },
+    "journal.ack" : {
       "keepsResult" : true,
       "rerun" : true
     },
@@ -751,6 +788,10 @@
       "keepsResult" : true,
       "rerun" : false
     },
+    "update" : {
+      "keepsResult" : true,
+      "rerun" : false
+    },
     "web.confirm" : {
       "keepsResult" : true,
       "rerun" : false
@@ -796,6 +837,7 @@
     "hooks.remove",
     "build.switch",
     "build.seal",
+    "update",
     "subscribe",
     "unsubscribe",
     "web.open",
@@ -842,6 +884,8 @@
     "brief",
     "logs",
     "update.check",
+    "journal.ack",
+    "claude.autoupdate",
     "approve.list",
     "approve",
     "plugin.list",
@@ -873,6 +917,7 @@
     "build.switch" : "user",
     "chat.image" : "anyone",
     "chat.page" : "anyone",
+    "claude.autoupdate" : "user",
     "config.accept" : "user",
     "config.held" : "user",
     "draft" : "webDraft",
@@ -880,6 +925,7 @@
     "hold" : "user",
     "hooks.install" : "user",
     "hooks.remove" : "user",
+    "journal.ack" : "user",
     "lead" : "user",
     "logs" : "webRead",
     "mail" : "webRead",
@@ -932,6 +978,7 @@
     "term.close" : "webTerminal",
     "term.open" : "webTerminal",
     "unsubscribe" : "anyone",
+    "update" : "user",
     "update.check" : "user",
     "web.confirm" : "user",
     "web.open" : "user",

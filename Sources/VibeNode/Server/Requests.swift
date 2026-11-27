@@ -131,6 +131,13 @@ public final class Requests: @unchecked Sendable {
     var approveBatches: [ApproveBatch] = []
     /// The waits a `build.switch` runs on (a test's shorter ones).
     public var switchTiming = SwitchRequest.Timing()
+    /// What runs `update`'s install (`UpdateInstall.Installer`): the user's node's own build's install-node in a scope of
+    /// its manager, set at the server's start (`ServerStart`); a test's fake. Nil: `update` installs nothing (it is
+    /// refused). Never a request's.
+    public var updateInstaller: UpdateInstall.Installer?
+    /// Where `journal.ack` writes (`JournalWriter`): the user's node's journal, set at the server's start; a test's
+    /// scratch journal. Nil: refused.
+    public var journalWriter: JournalWriter?
     /// The web's gate and tokens (the live plan's I1, `NodeLive`): what `web.open` and `web.revoke` act on; none:
     /// both are refused.
     public var web: WebAccess?
@@ -508,6 +515,9 @@ public final class Requests: @unchecked Sendable {
         case "hooks.install", "hooks.remove": hooks(request, reply: reply)
         case "build.switch": buildSwitch(request, reply: reply)
         case "build.seal": buildSeal(request, reply: reply)
+        case "update": update(request, reply: reply)
+        case "journal.ack": journalAck(request, reply: reply)
+        case "claude.autoupdate": claudeAutoUpdate(request, reply: reply)
         case "web.open", "web.revoke":
             if request.kind == "web.open", request.args?["tailnet"]?.bool == true { return webOpenTailnet(request, reply: reply) }
             guard let web else { return reply(.init(re: request.id, error: .init(.refused, "this server has no web listener"))) }
@@ -1163,7 +1173,7 @@ public final class Requests: @unchecked Sendable {
         return SwitchRequest.doing(session, status: scanned?.status, since: scanned?.statusSince, now: Date())
     }
 
-    private func buildSwitch(_ request: NodeWire.Request, reply: @escaping (NodeWire.Reply) -> Void) {
+    func buildSwitch(_ request: NodeWire.Request, reply: @escaping (NodeWire.Reply) -> Void) {
         guard let commit = request.args?["commit"]?.string else {
             return reply(.init(re: request.id, error: .init(.badArgs, "build.switch needs commit, 40 lowercase hex digits")))
         }

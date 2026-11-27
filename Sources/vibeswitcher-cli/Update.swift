@@ -39,9 +39,6 @@ import VibeNode
 enum UpdateCommand {
     static let usage = "usage: vibeswitcher update [COMMIT] [--long]"
 
-    /// How long the install is waited for at most.
-    static let installWait: TimeInterval = 3 * 60 * 60
-
     static func run(_ arguments: [String]) -> Int32 {
         var named: String?
         var installer: String?
@@ -119,13 +116,10 @@ enum UpdateCommand {
         if !blockers.isEmpty {
             return Say.refused("update can't run now: " + SwitchRequest.blockedText(blockers) + ". Nothing was asked, installed or switched.")
         }
-        var script = installer ?? ""
+        // The install script this build's own, before anything is asked (`UpdateInstall.run` checks it again).
         if installer == nil {
             guard let own else { return Say.refused("update: a scratch node's update needs --test-installer or --test-build") }
-            switch SwitchSealCheck.installScript(prefix: prefix, own: own) {
-            case .failure(let refused): return Say.refused(refused.text)
-            case .success(let path): script = path
-            }
+            if case .failure(let refused) = SwitchSealCheck.installScript(prefix: prefix, own: own) { return Say.refused(refused.text) }
         }
         // What stays held: the home's held config, as `config held` shows it (the vault's look of now). The builds
         // folder must be the accepted one, nothing of it held, the same before and after that look: so the script run
@@ -137,11 +131,8 @@ enum UpdateCommand {
             held = (result.card?["config"]?["items"]?.array ?? []).compactMap { $0["name"]?.string }
         }
         guard let held else { return Say.refused("update: the server couldn't say which changes wait for your accept: nothing was asked or run") }
-        if installer == nil {
-            guard !held.contains(SwitchSeal.buildsName), SwitchSeal.listingLines(prefix) == looked else {
-                return Say.refused("update: the builds folder has a change you haven't accepted (`vibeswitcher config held`): nothing was asked or run, "
-                                   + "as its install script may not be the one you accepted")
-            }
+        if installer == nil, let refused = UpdateInstall.buildsRefusal(heldNames: held, looked: looked, now: SwitchSeal.listingLines(prefix)) {
+            return Say.refused(refused.text)
         }
         // Two lines; the whole of it with --long.
         let aheadBy = target == offered ? status.update?["aheadBy"]?.int : nil
@@ -151,52 +142,17 @@ enum UpdateCommand {
         let said = TypedWord.said(approval: client.approvalRule, action: action, what: what)
         guard case .success(let typed) = said else { return Say.refused(said.refusal) }
 
-        // The install, the builds folder read around it: still as the vault's look found it (the code took a while).
-        let before = SwitchSeal.listingLines(prefix)
-        if installer == nil, before != looked {
-            return Say.refused("update: the builds folder changed while the code was asked: nothing was run or switched (`vibeswitcher config held`)")
+        // The install (`UpdateInstall.run`, the server's `update` kind's too): the builds folder read around it, still as
+        // the vault's look found it (the code took a while), install-node opened as listed, its bytes in sealed memory, run
+        // in a scope of the user's manager; a failed install switches nothing and leaves no new folder.
+        let how: UpdateInstall.Installer = installer.map { .test(program: $0) } ?? .script(own: own ?? "", scope: scope)
+        let installed: UpdateInstall.Done
+        switch UpdateInstall.run(commit: target, prefix: prefix, installer: how, looked: installer == nil ? looked : nil, home: accountHome,
+                                 scratch: context.isScratch, hold: { hold(testHold, $0) }, say: { Say.out($0) }) {
+        case .failure(let refused): return Say.refused(refused.text)
+        case .success(let done): installed = done
         }
-        let folder = (prefix as NSString).appendingPathComponent(target)
-        let existed = FileManager.default.fileExists(atPath: folder)
-        // The script opened as the listing just read lists it, and run through that descriptor (never its path again).
-        var scriptFD: Int32 = -1
-        if installer == nil {
-            hold(testHold, "before-open")
-            switch SwitchSealCheck.openScript(script, prefix: prefix, listing: before) {
-            case .failure(let refused): return Say.refused(refused.text)
-            case .success(let fd): scriptFD = fd
-            }
-            hold(testHold, "after-open")
-        }
-        defer { if scriptFD >= 0 { Sys.close(scriptFD) } }
-        // Its bytes, as listed, in sealed memory: what runs, whatever is written to the file from now on.
-        var copy: Platform.ProcessSelf.SealedCopy?
-        if installer == nil {
-            switch SwitchSealCheck.sealedScript(scriptFD, script: script, prefix: prefix, listing: before) {
-            case .failure(let refused): return Say.refused(refused.text)
-            case .success(let made): copy = made
-            }
-            hold(testHold, "after-copy")
-        }
-        defer { if let copy { Sys.close(copy.fd) } }
-        let started = Platform.Clock.steadyDate()
-        Say.out("installing \(target) (each step below is install-node's)…")
-        let installed = install(script: script, fd: scriptFD, copy: copy, scope: scope, test: installer != nil, commit: target, prefix: prefix,
-                                home: accountHome, scratch: context.isScratch)
-        let took = Int(Platform.Clock.steadyDate().timeIntervalSince(started))
-        guard installed == 0 else {
-            if !existed, FileManager.default.fileExists(atPath: folder) { try? FileManager.default.removeItem(atPath: folder) }
-            return Say.refused("update: the install of \(target) failed (exit \(installed), after \(took) s): nothing was switched"
-                               + (existed ? "" : "; the folder it made is removed"))
-        }
-        Say.out("installed \(target) in \(took / 60) min \(took % 60) s")
-        let afterLines = SwitchSeal.listingLines(prefix)
-        let after = SwitchSeal.listingHash(lines: afterLines)
-        let others = SwitchSealCheck.installChange(before: SwitchSeal.entries(lines: before), after: SwitchSeal.entries(lines: afterLines), commit: target)
-        if !others.isEmpty {
-            Say.out("the builds folder changed beyond this install (" + others.joined(separator: "; ") + "): it stays held for `vibeswitcher config held`")
-        }
-        let seen = others.isEmpty ? (before, after) : nil
+        let seen = installed.seen.map { ($0.beforeListing, $0.after) }
 
         // The switch, the builds folder sealed first by the server when its checks pass.
         let hostPid = status.host?.pid.map { pid_t($0) }
@@ -283,52 +239,5 @@ enum UpdateCommand {
         let go = (folder as NSString).appendingPathComponent("go-" + point)
         let deadline = Platform.Clock.steadyDate().addingTimeInterval(60)
         while !FileManager.default.fileExists(atPath: go), Platform.Clock.steadyDate() < deadline { usleep(50_000) }
-    }
-
-    /// install-node for `commit` in `prefix` (or a scratch node's stand-in, `test`), its output on this terminal: its
-    /// exit status (-1 when it couldn't be started or didn't end in `installWait`). install-node runs from `fd`, the
-    /// script as opened and checked (`/dev/fd/N`: its path still resolves to the file, for its own checks), under
-    /// `scope` (`systemd-run --user --scope`: a scope of its own in the user's manager), its environment emptied again
-    /// inside.
-    static func install(script: String, fd: Int32, copy: Platform.ProcessSelf.SealedCopy?, scope: String, test: Bool, commit: String, prefix: String,
-                        home: String, scratch: Bool) -> Int32 {
-        var spawn: Platform.Spawn
-        if test {
-            spawn = Platform.Spawn(executable: script, arguments: [script, commit, prefix])
-        } else {
-            // As its header says to run it: nothing of this shell's environment shapes it. `--repo none`: no courtesy
-            // check of a checkout (the commit is the node's check's), where the script takes it (a build's script before it
-            // wants to run inside a clean checkout: this terminal's folder, then). A scratch node's build's script: its
-            // prefix named. From the sealed copy with `--self` where the script takes it; else (an older install-node)
-            // from the checked descriptor, said.
-            let text = copy?.withBytes { String(decoding: $0, as: UTF8.self) } ?? ""
-            let takesNone = text.contains("[[ $repo != none ]]")
-            let sealed = copy.map { _ in text.contains(SwitchSealCheck.takesSelf) } ?? false
-            if !sealed { Say.out("this build's install-node runs from its checked file (it takes no --self): a write to it now would be read") }
-            let runs = sealed ? (copy?.fd ?? fd) : fd
-            let tail = (scratch ? ["--prefix", prefix] : (takesNone ? ["--repo", "none"] : [])) + (sealed ? ["--self", script] : [])
-            let inner = ["/usr/bin/env", "-i", "HOME=\(home)", "PATH=/usr/bin:/bin", "/bin/bash", "/dev/fd/\(runs)", commit] + tail
-            spawn = Platform.Spawn(executable: scope, arguments: SwitchSealCheck.scopeArguments(runner: scope, command: inner))
-            // systemd-run's own: the manager's place, and nothing else of this shell's.
-            spawn.environment = ["XDG_RUNTIME_DIR=/run/user/\(getuid())", "PATH=/usr/bin:/bin"]
-            spawn.keep = [runs]
-        }
-        // Nothing to read from this terminal, and none to control: a session of its own.
-        spawn.stdin = .path("/dev/null", flags: O_RDONLY)
-        spawn.group = .ownSession
-        guard case .success(let pid) = spawn.start() else { return -1 }
-        let deadline = Platform.Clock.steadyDate().addingTimeInterval(installWait)
-        var status: Int32 = 0
-        while true {
-            let ended = waitpid(pid, &status, WNOHANG)
-            if ended == pid { break }
-            if ended < 0, errno != EINTR { return -1 }
-            if Platform.Clock.steadyDate() > deadline {
-                kill(-pid, SIGTERM)  // its session's group: its id is its pid
-                return -1
-            }
-            usleep(200_000)
-        }
-        return (status & 0x7f) == 0 ? (status >> 8) & 0xff : 128 + (status & 0x7f)
     }
 }

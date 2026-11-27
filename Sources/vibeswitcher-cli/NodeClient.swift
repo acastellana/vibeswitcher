@@ -134,12 +134,12 @@ struct NodeContext {
     @discardableResult
     func writeJournal(_ fields: [(name: String, value: String)]) -> Bool {
         guard let socket = journalSocket else { return false }
-        let nonce = UUID().uuidString.lowercased()
-        guard Platform.Journal.send(fields + [(NodeJournal.entryField, nonce)], to: socket) else { return false }
         let patience = isScratch ? 10 : Self.journalPatience
-        let written = NodeJournal.awaitEntry(nonce: nonce, patience: patience, pause: isScratch ? 0.01 : Self.journalPause,
-                                             awake: MacTime.real.awake, sleep: { usleep(useconds_t($0 * 1_000_000)) },
-                                             read: { sentEntries(nonce: nonce) })
+        // The writer the server's `journal.ack` uses too.
+        let context = self
+        let writer = JournalWriter(send: { Platform.Journal.send($0, to: socket) }, read: { context.sentEntries(nonce: $0) },
+                                   patience: patience, pause: isScratch ? 0.01 : Self.journalPause)
+        guard let written = writer.write(fields) else { return false }
         let event = fields.first { $0.name == "VIBESWITCHER_EVENT" }?.value ?? "?"
         if let why = NodeJournal.notCounted(written, event: event, patience: patience) { Say.err("vibeswitcher: \(why)") }
         return written == .recorded

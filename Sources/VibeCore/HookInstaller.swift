@@ -182,7 +182,7 @@ public enum HookInstaller {
 
     /// Reads the file, changes its config and writes back only the `hooks` value, unless nothing changed. When the
     /// file changes between the read and the write (Claude or the user saving it), the edit starts over from it.
-    static func edit(_ url: URL, backup: Bool, change: ([String: Any]) -> [String: Any]) throws {
+    static func edit(_ url: URL, backup: Bool, member key: String = "hooks", change: ([String: Any]) -> [String: Any]) throws {
         let target = try fileBehindLinks(url)
         for attempt in 1...3 {
             let stamp = Stamp(of: target)
@@ -190,7 +190,7 @@ public enum HookInstaller {
             let current = try parse(data, path: url.path)
             let changed = change(current)
             if Platform.sameJSON(changed, current) { return }
-            let updated = try replacingHooks(in: data, with: changed["hooks"])
+            let updated = try replacingMember(key, in: data, with: changed[key])
             guard Platform.sameJSON(try parse(updated, path: url.path), changed) else {
                 throw CocoaError(.fileWriteUnknown, userInfo: [NSFilePathErrorKey: url.path])
             }
@@ -202,6 +202,13 @@ public enum HookInstaller {
                 continue
             }
         }
+    }
+
+    /// One top-level member of an agent's config (`key`, its other members and bytes kept) changed as `edit` changes the
+    /// hooks: the file behind a link edited, a change made meanwhile started over from, no backup. Claude Code's
+    /// self-update switch's (`env`, `ClaudeAutoUpdate`).
+    public static func edit(_ url: URL, member key: String, change: ([String: Any]) -> [String: Any]) throws {
+        try edit(url, backup: false, member: key, change: change)
     }
 
     static func readConfig(_ url: URL) -> [String: Any]? { try? readConfigThrowing(url) }
@@ -278,14 +285,17 @@ public enum HookInstaller {
     /// `data`, a JSON object, with only its top-level `hooks` value replaced by `hooks`: added after the last member
     /// when there's none, taken out when `hooks` is nil. Every other byte stays, so numbers such as `0.1` and `1e3`,
     /// the order of the keys and the spacing come back exactly as they were.
-    static func replacingHooks(in data: Data, with hooks: Any?) throws -> Data {
+    static func replacingHooks(in data: Data, with hooks: Any?) throws -> Data { try replacingMember("hooks", in: data, with: hooks) }
+
+    /// `data`, a JSON object, with only its top-level `key` value replaced, as `replacingHooks` does for `hooks`.
+    static func replacingMember(_ key: String, in data: Data, with hooks: Any?) throws -> Data {
         let bytes = [UInt8](data)
         guard let object = try JSONObjectSpans(bytes) else {
             // An empty file: the whole of it is ours to write.
             guard let hooks else { return data }
-            return try json(["hooks": hooks], indent: "") + Data("\n".utf8)
+            return try json([key: hooks], indent: "") + Data("\n".utf8)
         }
-        let found = object.members.indices.filter { object.members[$0].key == "hooks" }
+        let found = object.members.indices.filter { object.members[$0].key == key }
         guard found.count <= 1 else { throw CocoaError(.fileReadCorruptFile) }
         var result = bytes
         switch (found.first, hooks) {
@@ -306,10 +316,10 @@ public enum HookInstaller {
         case (nil, let hooks?):
             if let last = object.members.last {
                 let indent = indentation(at: last.keyStart, in: bytes) ?? "  "
-                let member = Data(",\n\(indent)\"hooks\": ".utf8) + (try json(hooks, indent: indent))
+                let member = Data(",\n\(indent)\"\(key)\": ".utf8) + (try json(hooks, indent: indent))
                 result.insert(contentsOf: member, at: last.value.upperBound)
             } else {
-                let member = Data("\n  \"hooks\": ".utf8) + (try json(hooks, indent: "  ")) + Data("\n".utf8)
+                let member = Data("\n  \"\(key)\": ".utf8) + (try json(hooks, indent: "  ")) + Data("\n".utf8)
                 result.replaceSubrange(object.open + 1..<object.close, with: member)
             }
         }

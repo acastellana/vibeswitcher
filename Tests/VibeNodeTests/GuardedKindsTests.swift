@@ -196,7 +196,7 @@ struct GuardedKindsTests {
             #expect(asked.error?.code == NodeWire.Code.badArgs.rawValue, "\(name): \(asked)")
         }
         for key in ["prefix", "installRoot", "scope", "program", "script", "path", "own"] {
-            let reply = RequestArguments.refusal(NodeWire.Request(id: "x", kind: "update", args: ["commit": .string(Self.commit), key: .string("/tmp/x")]))
+            let reply = RequestArguments.refusal(NodeWire.Request(id: "x", kind: "update", args: ["commit": .string(Self.commit), key: .string("/somewhere/else")]))
             #expect(reply?.error?.code == NodeWire.Code.badArgs.rawValue, "\(key)")
         }
         #expect(RequestArguments.taken["update"] == ["commit", "rollback"])
@@ -237,7 +237,7 @@ struct GuardedKindsTests {
             ranFile = base.appendingPathComponent("installer-ran").path
             installer = base.appendingPathComponent("fake-install-node").path
             let script = "#!/bin/sh\necho \"$1 $2\" > '\(ranFile)'\nmkdir -p \"$2/$1/bin\"\necho \"$1 2026-11-27T00:00:00Z\" >> \"$2/installs\"\nexit \(exit)\n"
-            FileManager.default.createFile(atPath: installer, contents: Data(script.utf8), attributes: [.posixPermissions: 0o700])
+            try writeClosedOnExec(script, to: URL(fileURLWithPath: installer), mode: 0o700)
         }
     }
 
@@ -297,7 +297,7 @@ struct GuardedKindsTests {
         }
         #expect(already.outcome == "already" && already.installed == false)
         #expect(!world.ran)
-        let failing = try UpdateWorld(Scratch(), exit: 3)
+        let failing = try UpdateWorld(scratch, exit: 3)
         guard case .refused(.refused, let why) = plan(failing, installer: .test(program: failing.installer)).plan(.init(commit: Self.commit)) else {
             Issue.record("a failed install not refused"); return
         }

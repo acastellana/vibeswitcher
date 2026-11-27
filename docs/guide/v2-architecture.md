@@ -50,8 +50,7 @@ refuses a state-changing kind (CLIChangeLint). On the server:
    the user's kinds pass `Voice.judge`, then, for a state change, the hands check (`Voice.handsRefusal`).
 4. **Checks** (`Requests.voiced`). An action this server has answered, or is doing now, is answered so first (its
    kept reply, or `beingDoneNow`). A recorded kind needs an action id (a UUID). Every argument must be one the kind
-   takes (`RequestArguments`). The node must not be stopping, and the host link must be welcomed. A card's kind needs
-   its code; `approve` needs its batch.
+   takes (`RequestArguments`). The node must not be stopping, and the host link must be welcomed. A card's kind needs its code; `approve` needs its batch.
 5. **Vault record** (`LeadVaultV2.recordUserAction`, in the host). If the vault doesn't take it, the action isn't done.
    An action it holds already from an earlier server (a retry, `Requests.retry`), asked with the arguments it was
    recorded with (other arguments get nothing), is answered from its record's outcome (done: the recorded result when its kind keeps one, a kind's
@@ -120,11 +119,9 @@ and the program's size; it starts off. `plugin remove` withdraws its cards, stop
   by a long-lived thread, in its own cgroup when the server's is writable; no terminal, in `/`, `HOME=/nonexistent`, an
   environment built from nothing, `VIBESWITCHER_PLUGIN_DATA` only with `data: true`.
 - **Checks** (`PluginFiles`, at the add and every start): 64 MiB at most; an ELF's interpreter, RUNPATH, RPATH and
-  path-named libraries root's all the way, no `$ORIGIN`, audit library, filter or loader config; a script's `#!` one
-  of a few root-owned interpreters, at most one flag token.
+  path-named libraries root's all the way, no `$ORIGIN`, audit library, filter or loader config; a script's `#!` one of a few root-owned interpreters, at most one flag token.
 - **Protocol v1**: a JSON object a line, 256 KiB at most; the node asks (`hello`, `file`, `card`, `perform`,
-  `page.answer`, `settings.check`, `withdrawn`), the plugin answers. 10 s unanswered or an answer out of shape ends the
-  program and withdraws its cards; `plugin list` says why.
+  `page.answer`, `settings.check`, `withdrawn`), the plugin answers. 10 s unanswered or an answer out of shape ends the program and withdraws its cards; `plugin list` says why.
 - **Filing**: `vs-<name>` (a wrapper in `<root>/plugins/bin`, last on Linux sessions' PATH) runs `vs-ask <id> --`,
   which sends `plugin.file`: only from a live session the user opened, 4 waiting at most, then busy.
 - **Page** (`PluginPage`): `perform` may answer a page, served once by the core on 127.0.0.1 with an HttpOnly
@@ -178,6 +175,7 @@ first": the vault records it before it is done. "Card code": its code is checked
 | `build.switch` | the user's terminal | yes | yes |  | `Requests.act` | `buildsAfter`, `buildsBeforeListing`, `commit` | `WireKinds.BuildSwitch` | its result |  | the terminal's alone |
 | `chat.image` | anyone of the uid |  |  |  | the live hub |  | the page's (WireSchema) |  |  |  |
 | `chat.page` | anyone of the uid |  |  |  | the live hub |  | the page's (WireSchema) |  |  |  |
+| `claude.autoupdate` | the user's terminal | yes | yes |  | `Requests.act` | `on` | `WireKinds.ClaudeAutoUpdateSwitch` | its result; done again |  | the terminal's alone |
 | `config.accept` | the user's terminal | yes | yes | yes | `Requests.act` | `batch`, `card`, `code` | `WireKinds.ConfigAccept` | its result | yes | yes |
 | `config.held` | the user's terminal |  |  |  | `Requests.act` |  | `WireKinds.ConfigHeld` |  |  | yes |
 | `draft` | a page that drafts | yes |  |  | `draft` |  | the page's (WireSchema) |  |  |  |
@@ -185,6 +183,7 @@ first": the vault records it before it is done. "Card code": its code is checked
 | `hold` | the user's terminal | yes | yes | yes | `Requests.act` | `card`, `code` | `WireKinds.Hold` | its result |  | yes |
 | `hooks.install` | the user's terminal | yes | yes |  | `Requests.act` | `agents`, `codex` | `WireKinds.HooksInstall` | its result; done again | yes | the terminal's alone |
 | `hooks.remove` | the user's terminal | yes | yes |  | `Requests.act` | `agents` | `WireKinds.HooksRemove` | its result; done again |  | yes |
+| `journal.ack` | the user's terminal | yes | yes |  | `Requests.act` | none | `WireKinds.JournalAck` | its result; done again |  | the terminal's alone |
 | `lead` | the user's terminal | yes | yes |  | `Requests.act` | `folder`, `goal`, `initialized`, `replace`, `resume`, `takeHead` | `WireKinds.Lead` | its result |  | yes |
 | `logs` | the user's terminal, or a page that reads |  |  |  | `Requests.act` |  | `WireKinds.Logs` |  |  |  |
 | `mail` | the user's terminal, or a page that reads |  |  |  | `Requests.act` |  | `WireKinds.Mail` |  |  |  |
@@ -237,6 +236,7 @@ first": the vault records it before it is done. "Card code": its code is checked
 | `term.close` | a page's terminal (a page only) | yes |  |  | the terminal relay |  | the page's (WireSchema) |  |  |  |
 | `term.open` | a page's terminal (a page only) | yes |  |  | the terminal relay |  | the page's (WireSchema) |  |  |  |
 | `unsubscribe` | anyone of the uid |  |  |  | the live hub |  | the page's (WireSchema) |  |  |  |
+| `update` | the user's terminal | yes | yes |  | `Requests.act` | `commit`, `rollback` | `WireKinds.Update` | its result |  | the terminal's alone |
 | `update.check` | the user's terminal |  |  |  | `Requests.act` |  | `WireKinds.UpdateCheck` |  |  | yes |
 | `web.confirm` | the user's terminal | yes | yes |  | `Requests.act` | `code`, `phrase` | `WireKinds.WebConfirm` | its result |  | the terminal's alone |
 | `web.open` | the user's terminal | yes | yes |  | `Requests.act` | `localhost`, `tailnet` | `WireKinds.WebOpen` | done, no result |  | the terminal's alone |
