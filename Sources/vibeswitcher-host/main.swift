@@ -169,7 +169,8 @@ do {
     exit(1)
 }
 // The app that started this host gives it its key on stdin (see `AppProof`), and says so: taken while the vault
-// holds none, but not by a vault that started over (its file no longer opens under the Keychain key): that one waits
+// holds none, but not by a vault that started over (its file no longer opens under the Keychain key, or is gone though
+// the key was there already, `VaultStorage.Key.made`): that one waits
 // for your confirmation through the app (`LeadVault.Book.awaitsAppKey`).
 if arguments.contains(HostStart.appKeyFlag), let key = HostStart.appKeyFromStdin(), let vault = config.vault, !vault.adoptAppKey(key) {
     log(vault.awaitsAppKey ? "the vault started over: the app key on stdin waits for your confirmation"

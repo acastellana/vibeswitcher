@@ -7,7 +7,7 @@ import VibeCore
 /// with a key from your login Keychain. The Keychain gives that key, without asking you, only to the binary that
 /// created it (the host); anything else that asks (`security find-generic-password`, a worker's script) makes macOS
 /// ask you first. A file that was changed, or sealed with another key, doesn't open: the vault starts empty, and the
-/// file is kept as it was (see `book`).
+/// file is kept as it was (see `book`). A file that's gone while its key was there already starts over the same way.
 public struct VaultStorage {
     public let file: URL
     /// Nil: no key (the Keychain didn't give it without asking): the vault lives in memory only.
@@ -51,21 +51,28 @@ public struct VaultStorage {
     /// that it starts over when there was one it can't read); it saves itself after each change when there's a key.
     /// A vault that started over saves nothing while it waits for your answer (`Book.awaitsAppKey`): the file that
     /// didn't open stays as it was until you teach the host the app's key, and is then set aside beside it
-    /// (`setAsideSuffix`), never sealed over.
+    /// (`setAsideSuffix`), never sealed over. A missing file under a key the Keychain had already (`keyIsNew` false)
+    /// starts over too, not as a first start: whatever file is there by the time you answer is set aside the same way.
     public func book(handedOver: Data? = nil) -> LeadVault.Book {
         let handedOver = handedOver.flatMap { LeadVault.Book.reads($0) ? $0 : nil }
         let opened = load()
         let saved = handedOver ?? opened
         let there = FileManager.default.fileExists(atPath: file.path)
-        // Started over whenever a vault file was there and what came of it doesn't read (it didn't open, or opened as
-        // something that isn't a vault): only a first start, with no file, takes the app's key unasked.
+        // No file though the Keychain's key was there already (`keyIsNew` false): a vault had been sealed under it, and
+        // its file was moved or deleted since (or its folder replaced). Not a first start.
+        let missing = !there && key != nil && !keyIsNew
+        // Started over whenever a vault file was there, or should have been, and what came of it doesn't read (it
+        // didn't open, opened as something that isn't a vault, or isn't there): only a true first start, with no file
+        // and a key made on this start (or none at all), takes the app's key unasked.
         let reads = saved.map(LeadVault.Book.reads) ?? false
-        let book = LeadVault.Book(restoring: saved, startingOver: !reads && there)
+        let book = LeadVault.Book(restoring: saved, startingOver: !reads && (there || missing))
         if key != nil {
             // A file there that isn't a vault under this key (a handed-over vault doesn't read it) is never saved over,
-            // nor one that opens when the vault waiting for your answer came from memory (a build before without a key).
-            let unopened = there && (!(opened.map(LeadVault.Book.reads) ?? false) || book.awaitsAppKey)
-            let saver = Saver(storage: self, log: HostLog(path: logPath), later: retryLater, setAside: unopened)
+            // nor one that opens when the vault waiting for your answer came from memory (a build before without a key),
+            // nor one that appears while a vault waits for your answer (a file put back): each is set aside first.
+            let unopened = there && !(opened.map(LeadVault.Book.reads) ?? false) || book.awaitsAppKey
+            let saver = Saver(storage: self, log: HostLog(path: logPath), later: retryLater, setAside: unopened,
+                              missing: missing)
             book.onChange = { saver.save($0) }
             // What came from memory goes to disk at once only where no vault opens (none there yet, or one that didn't
             // open, set aside first): a vault that opens is never saved over by the handover itself, only by a change
@@ -135,11 +142,16 @@ public struct VaultStorage {
         /// The lock was seen lost: nothing is saved from then on.
         private var lockLost = false
 
-        init(storage: VaultStorage, log: HostLog, later: @escaping (TimeInterval, @escaping () -> Void) -> Void, setAside: Bool) {
+        /// The vault started over because its file wasn't there (its key was): said so in the log.
+        private let missing: Bool
+
+        init(storage: VaultStorage, log: HostLog, later: @escaping (TimeInterval, @escaping () -> Void) -> Void, setAside: Bool,
+             missing: Bool) {
             self.storage = storage
             self.log = log
             self.later = later
             self.setAside = setAside
+            self.missing = missing
         }
 
         func save(_ data: Data) {
@@ -168,7 +180,10 @@ public struct VaultStorage {
             }
             if !answered {
                 guard !LeadVault.Book.awaitsAppKey(data) else {
-                    if !toldHeld { log.note("vault: \(name) didn't open; kept as it is, nothing saved until you answer") }
+                    if !toldHeld {
+                        log.note(missing ? "vault: \(name) isn't there though its key is; nothing saved until you answer"
+                            : "vault: \(name) didn't open; kept as it is, nothing saved until you answer")
+                    }
                     toldHeld = true
                     return
                 }
@@ -176,7 +191,7 @@ public struct VaultStorage {
             }
             do {
                 if setAside {
-                    if let aside = try storage.setAside() { log.note("vault: \(name) didn't open; set aside as \(aside)") }
+                    if let aside = try storage.setAside() { log.note("vault: \(name) not opened; set aside as \(aside)") }
                     setAside = false
                 }
                 try storage.save(data)

@@ -262,7 +262,8 @@ final class HostClient: ObservableObject {
     /// check first, and with no session live (`live`), the button that teaches the host this app's key. Another
     /// program of your account can replace VibeSwitcher's Keychain keys (it can't read them; 2026-11-26), so the alert
     /// says so before it offers the button. A vault that started over (`AppProof.vaultStartedOver`) says that in its
-    /// own words: its key is the one replaced, or the Keychain was reset.
+    /// own words: its key is the one replaced, or the Keychain was reset, or its file moved or deleted (one alert for
+    /// a file that doesn't open and one that's gone).
     static func keyResetAlert(reason: String, live: Int) -> NSAlert {
         let alert = NSAlert()
         alert.alertStyle = .warning
@@ -272,15 +273,16 @@ final class HostClient: ObservableObject {
         if reason == AppProof.vaultStartedOver {
             alert.messageText = "The team's vault could not be opened and was started again."
             alert.informativeText = "The session host keeps the team's vault sealed with a key from your Keychain, and the "
-                + "sealed file no longer opens with it: what the vault held can't be read, and it holds no key for this VibeSwitcher "
-                + "yet. " + off + "\n\nThis happens after a Keychain reset, and it can also mean another program on this Mac "
-                + "replaced the vault's key. Check first: if you didn't reset your Keychain, open Keychain Access and look at "
-                + "the item \u{201C}VibeSwitcher lead vault\u{201D} (when it was modified), and don't teach the host until "
-                + "you're sure what changed it. The file that didn't open is kept as it was, at "
-                + "~/.vibeswitcher/lead/vault.sealed, and nothing is saved over it until you answer. Teaching the host "
+                + "sealed file no longer opens with it, or is no longer there: what the vault held can't be read, and it holds "
+                + "no key for this VibeSwitcher yet. " + off + "\n\nThis happens after a Keychain reset, and it can also mean "
+                + "another program on this Mac replaced the vault's key, or moved or deleted the vault's file. Check first: if "
+                + "you didn't reset your Keychain, open Keychain Access and look at the item \u{201C}VibeSwitcher lead "
+                + "vault\u{201D} (when it was modified); if you didn't move or delete it, look for ~/.vibeswitcher/lead/vault.sealed; "
+                + "and don't teach the host until you're sure what changed it. A file there that didn't open is "
+                + "kept as it was, at ~/.vibeswitcher/lead/vault.sealed, and nothing is saved over it until you answer. Teaching the host "
                 + "this app's key starts the vault anew, sealed with whatever key your Keychain gives the session host now, "
-                + "and sets the old file aside beside it as vault.sealed.didnt-open-<date> (if your Keychain gives none, "
-                + "the vault lives in memory only and the old file stays where it is). " + next
+                + "and sets whatever file is there aside beside it as vault.sealed.didnt-open-<date> (if your Keychain gives "
+                + "none, the vault lives in memory only and the old file stays where it is). " + next
         } else {
             alert.messageText = "The session host doesn't recognise this VibeSwitcher."
             alert.informativeText = reason + " " + off + "\n\nThis happens after VibeSwitcher is reinstalled or your "
