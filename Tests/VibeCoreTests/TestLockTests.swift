@@ -989,21 +989,32 @@ struct TestLockTests {
     /// The caller's folder or its mac-limits.json can't be read: the narrower share, never a wider one. The count is
     /// then the highest of Settings' default and the slots the lock folder shows were taken (its test-build-N.lock
     /// files: a reader that could read its count made them): 3 there, the share 4, not the default's 6.
-    @Test(arguments: ["garbage", "unreadable", "no folder"]) func theScriptsSlotFailsTowardTheNarrowerShare(_ broken: String) async throws {
-        var session = try sessionHome("session", limits: broken == "garbage" ? "{heavySlots: 3" : #"{"heavySlots": 3}"#)
-        let limits = url("session").appendingPathComponent(".vibeswitcher/mac-limits.json")
-        switch broken {
-        case "unreadable": try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: limits.path)
-        case "no folder": session["HOME"] = url("nowhere").path; session["CFFIXED_USER_HOME"] = url("nowhere").path
-        default: break
-        }
-        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: limits.path) }
+    @Test(arguments: ["garbage", "unreadable", "unreadable folder"]) func theScriptsSlotFailsTowardTheNarrowerShare(_ broken: String) async throws {
+        let session = try sessionHome("session", limits: broken == "garbage" ? "{heavySlots: 3" : #"{"heavySlots": 3}"#)
+        let folder = url("session").appendingPathComponent(".vibeswitcher"), limits = folder.appendingPathComponent("mac-limits.json")
+        let unreadable = broken == "unreadable" ? limits : broken == "unreadable folder" ? folder : nil
+        if let unreadable { try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: unreadable.path) }
+        // Readable again, so the scratch can be removed.
+        defer { if let unreadable { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: unreadable.path) } }
         let locks = TestLock(directory: url("script-locks").path)
         try FileManager.default.createDirectory(atPath: locks.directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         FileManager.default.createFile(atPath: locks.slotPath(3), contents: nil)
         let (said, swift) = try await scriptRun("A", environment: session)
-        #expect(said.contains("vs-heavy: VS_HEAVY_CORES 4 of 12 cores: "), "\(said)")
+        #expect(said.contains("vs-heavy: couldn't read "), "\(said)")
+        #expect(said.contains("vs-heavy: VS_HEAVY_CORES 4 of 12 cores: what was free as it started (load 12.0, 0 of the other 2 slots held)"), "\(said)")
         #expect(swift.contains(" cores=4 "), "\(swift)")
+    }
+
+    /// A session whose VibeSwitcher folder isn't there (Settings never set) counts Settings' default, as the app does:
+    /// not unread. A merge's scratch home is such a one.
+    @Test func theScriptsSlotWithNoFolderCountsTheDefault() async throws {
+        var session = try sessionHome("session", limits: nil)
+        session["HOME"] = url("nowhere").path
+        session["CFFIXED_USER_HOME"] = url("nowhere").path
+        let (said, swift) = try await scriptRun("A", environment: session)
+        #expect(!said.contains("vs-heavy: couldn't read "), "\(said)")
+        #expect(said.contains("vs-heavy: VS_HEAVY_CORES 6 of 12 cores: what was free as it started (load 12.0, 0 of the other 1 slot held)"), "\(said)")
+        #expect(swift.contains(" cores=6 "), "\(swift)")
     }
 
     /// Inside Codex's sandbox (CODEX_SANDBOX set in its commands) swift build and swift test leave SwiftPM's own sandbox

@@ -6,7 +6,12 @@
 # VIBESWITCHER_HEAVY_SLOTS (a project's heavy_slots gives its sessions that), else Settings' Mac-wide count
 # (~/.vibeswitcher/mac-limits.json's heavySlots: 1 to the cores, the cores ÷ 6 while unset, 2 on a 12-core Mac); while
 # Boost mode is on (boost.json says so and was written in the last 150 s) it's raised to boost's heavySlots (1 to the
-# cores): the same count the leads' merges and audits take (`MacLimits.heavySlotsInForce`). While every slot is held, this
+# cores): the same count the leads' merges and audits take (`MacLimits.heavySlotsInForce`). Those files are the ones in
+# VIBESWITCHER_HEAVY_ROOT when a caller that moved its own homes to scratch names its caller's folder there
+# (scripts/test.sh: under its scratch VIBESWITCHER_HOME a worker's run counted the cores ÷ 6, 2 slots of 6 cores, with 3
+# set: 2026-11 heavy slot review, fix 2a); it's read here and not passed on to COMMAND. When that folder or a file of it
+# that's there can't be read, the count is the higher of what could be read and the slots the lock folder shows taken
+# (its highest test-build-k.lock): the narrower share, never a wider one. While every slot is held, this
 # run waits in line (first come, first served, with merges and audits too), saying its place ("2nd in line, behind merge
 # of x (vibeswitcher)") and who holds each slot (pid, what, where, which project, how long: "long" past 30 min, and
 # "idle 40 min" once its work has used almost no CPU for 10 min or more: only said, never acted on), again each time
@@ -127,20 +132,47 @@ ncpu=${VIBESWITCHER_HEAVY_NCPU:-}
 ncpu=$(( 10#$ncpu ))
 own=${VIBESWITCHER_HEAVY_SLOTS:-}
 [[ $own =~ ^[0-9]+$ ]] && (( 10#$own >= 1 )) && own=$(( 10#$own )) || own=""
-# VibeSwitcher's folder, as VibePaths.root finds it: VIBESWITCHER_HOME, else .vibeswitcher in the home.
-vs_root=${VIBESWITCHER_HOME:-}
-[[ $vs_root == /* ]] || { vs_home=${CFFIXED_USER_HOME:-}; [[ $vs_home == /* ]] || vs_home=${HOME:-}; vs_root=$vs_home/.vibeswitcher; }
+# VibeSwitcher's folder, whose Settings and boost give the count: the one a caller names in VIBESWITCHER_HEAVY_ROOT
+# (scripts/test.sh, its caller's), else as VibePaths.root finds it: VIBESWITCHER_HOME, else .vibeswitcher in the home.
+# VIBESWITCHER_HEAVY_ROOT is for this lookup alone: COMMAND (the tests, on their scratch home) doesn't get it.
+if [[ -n ${VIBESWITCHER_HEAVY_ROOT+set} ]]; then
+    vs_root=$VIBESWITCHER_HEAVY_ROOT root_named=1
+    unset VIBESWITCHER_HEAVY_ROOT
+else
+    root_named=""
+    vs_root=${VIBESWITCHER_HOME:-}
+    [[ $vs_root == /* ]] || { vs_home=${CFFIXED_USER_HOME:-}; [[ $vs_home == /* ]] || vs_home=${HOME:-}; vs_root=$vs_home/.vibeswitcher; }
+fi
+# The highest slot the lock folder has a file for (1 with none): the most slots a reader has counted here.
+shown=1
+for file in "$lock_dir"/test-build-[0-9]*.lock; do
+    [[ -e $file && $file =~ /test-build-([0-9]+)\.lock$ ]] && (( 10#${BASH_REMATCH[1]} > shown )) && shown=$(( 10#${BASH_REMATCH[1]} ))
+done
 # Settings' count and boost's, read as MacLimits.current and BoostState.load read them (clamped, a stale boost.json off).
+# A named folder that's there and can't be read (or no folder named: ""), or a mac-limits.json or boost.json there that
+# can't be read or isn't a JSON object, is unread: then the count is at least the highest slot the lock folder has a
+# file for (a reader that could read its count made it), so the share is narrower, never wider. A folder or file that
+# isn't there is Settings unset, or no boost, as the app takes it (a merge's scratch home has none). Prints "SLOTS LIMIT", then on a line of its own what it couldn't read, if anything.
 slots=$(/usr/bin/perl -MJSON::PP -e '
-    my ($root, $ncpu, $own) = @ARGV;
-    sub json { open(my $h, "<", shift) or return undef; local $/; my $j = eval { JSON::PP->new->decode(scalar <$h>) }; ref $j eq "HASH" ? $j : undef }
+    my ($root, $ncpu, $own, $named, $locks) = @ARGV;
+    my @unread;
+    push @unread, "the folder $root" if $named ne "" && !($root =~ m{^/} && (!-e $root || (-d _ && -r _ && -x _)));
+    sub json {
+        my $file = shift;
+        return undef unless -e $file;
+        my $j;
+        if (open(my $h, "<", $file)) { local $/; $j = eval { JSON::PP->new->decode(scalar <$h>) }; }
+        return $j if ref $j eq "HASH";
+        push @unread, $file;
+        return undef;
+    }
     sub count { my ($v, $default) = @_; return $default unless defined $v && !ref $v && $v =~ /^-?[0-9]+$/; $v < 1 ? 1 : $v > $ncpu ? $ncpu : $v + 0 }
     my $default = int($ncpu / 6) || 1;
-    my $limits = json("$root/mac-limits.json");
+    my $limits = @unread ? undef : json("$root/mac-limits.json");
     my $slots = $own ne "" ? $own : count($limits ? $limits->{heavySlots} : undef, $default);
     my $set = $limits ? $limits->{loadThreshold} : undef;
     my $limit = defined $set && !ref $set && $set =~ /^[0-9]+(\.[0-9]+)?$/ && $set > 0 ? $set + 0 : 2 * $ncpu;
-    my $boost = json("$root/boost.json");
+    my $boost = @unread && $unread[0] eq "the folder $root" ? undef : json("$root/boost.json");
     # As Swift decodes it: on a JSON true, why, limits an object and at a number, else no boost.
     if ($boost && JSON::PP::is_bool($boost->{on}) && $boost->{on} && defined $boost->{why} && !ref $boost->{why}
         && ref $boost->{limits} eq "HASH" && defined $boost->{at} && $boost->{at} =~ /^[0-9]+(\.[0-9]+)?$/
@@ -151,17 +183,25 @@ slots=$(/usr/bin/perl -MJSON::PP -e '
         $boosted = 36 unless defined $boosted && !ref $boosted && $boosted =~ /^[0-9]+(\.[0-9]+)?$/ && $boosted > 0;
         $limit = $boosted if $boosted > $limit;
     }
-    print "$slots $limit";
-' "$vs_root" "$ncpu" "$own" 2>/dev/null)
+    my $shown = count($locks, 1);
+    $slots = $shown if @unread && $shown > $slots;
+    print "$slots $limit\n" . (@unread ? join(", ", @unread) : "");
+' "$vs_root" "$ncpu" "$own" "$root_named" "$shown" 2>/dev/null)
+unread=""
+[[ $slots == *$'\n'* ]] && { unread=${slots#*$'\n'}; slots=${slots%%$'\n'*}; }
 # load_threshold (as MacLimits.loadLimit, raised while boosted): above it, a run's silence isn't counted (--stall).
 load_limit=${slots#* }
 slots=${slots%% *}
 [[ $load_limit =~ ^[0-9]+(\.[0-9]+)?$ ]] || load_limit=$(( 2 * ncpu ))
 if ! [[ $slots =~ ^[0-9]+$ ]] || (( 10#$slots < 1 )); then
+    # Nothing read at all: as unread, the higher of the default and the slots the lock folder shows.
     slots=${own:-$(( ncpu / 6 ))}
     (( slots >= 1 )) || slots=1
+    (( shown > slots && shown <= ncpu )) && slots=$shown
+    unread="the settings ($vs_root)"
 fi
 slots=$(( 10#$slots ))
+[[ -z $unread ]] || echo "vs-heavy: couldn't read $unread: counting $slots slots, the higher of what was read and the slots the lock folder shows taken." >&2
 # A slot's share of the cores: ÷ slots, rounded up, at least 2.
 cores=$(( (ncpu + slots - 1) / slots ))
 (( cores >= 2 )) || cores=2
@@ -185,8 +225,9 @@ slot_file() { (( $1 == 1 )) && echo "$lock_dir/test-build.lock" || echo "$lock_d
 # run is over. VIBESWITCHER_HEAVY_LOAD stands in for the load (tests).
 give_width() {
     local floor=$1 mine=$2 files=() k said
-    # Every slot: its count's, and any other in the folder. Under a merge's or test.sh's scratch HOME, Settings' and
-    # boost's counts aren't read here (the cores ÷ 6), and a slot past that count held by another run would go uncounted.
+    # Every slot: its count's, and any other in the folder. Under a merge's scratch HOME, Settings' and boost's counts
+    # aren't read here (the cores ÷ 6; the merge gave its share as FLOOR), and a slot past that count held by another run
+    # would go uncounted. scripts/test.sh names its caller's folder (VIBESWITCHER_HEAVY_ROOT), so its count is read.
     for (( k = 1; k <= slots; k++ )); do files+=("$(slot_file "$k")"); done
     for file in "$lock_dir"/test-build-[0-9]*.lock; do
         [[ -e $file && $file =~ /test-build-([0-9]+)\.lock$ ]] && (( 10#${BASH_REMATCH[1]} > slots )) && files+=("$file")

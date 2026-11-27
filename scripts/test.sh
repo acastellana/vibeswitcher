@@ -295,6 +295,19 @@ if [[ -n $preferences_only ]]; then
     exit
 fi
 
+# The caller's VibeSwitcher folder, before the homes move, as vs-heavy and VibePaths.root find it (VIBESWITCHER_HOME,
+# else .vibeswitcher in CFFIXED_USER_HOME or HOME; in a session VIBESWITCHER_HOME is usually unset): its Settings and
+# Boost give the slot count. Given to vs-heavy alone (VIBESWITCHER_HEAVY_ROOT, which it doesn't pass on), so the tests
+# keep the scratch home. Under the scratch VIBESWITCHER_HOME vs-heavy counted the cores ÷ 6, not Settings' 3: 2 slots
+# of 6 cores on 12, slot 3 never taken (2026-11 heavy slot review, fix 2a). With no home to go by, "": vs-heavy then
+# counts it unread, the narrower share.
+heavy_root=${VIBESWITCHER_HOME:-}
+if [[ $heavy_root != /* ]]; then
+    heavy_root=${CFFIXED_USER_HOME:-}
+    [[ $heavy_root == /* ]] || heavy_root=${HOME:-}
+    [[ $heavy_root == /* ]] && heavy_root=$heavy_root/.vibeswitcher || heavy_root=""
+fi
+unset VIBESWITCHER_HEAVY_ROOT
 export HOME=$tool_scratch/home CFFIXED_USER_HOME=$tool_scratch/home VIBESWITCHER_HOME=$tool_scratch/home/.vibeswitcher
 # Only --perf runs the benches, whatever the caller's environment holds.
 unset VIBESWITCHER_PERF
@@ -320,7 +333,7 @@ else
     # A test a core, then at most the run's width (`suite_width`, `slot_width` above).
     suite_width
     # Both on the width vs-heavy gives the run, VS_HEAVY_CORES (scripts/lib/swift-jobs.sh), and so are the tests.
-    Resources/bin/vs-heavy --as scripts/test.sh bash -c 'slot_width; heavy_swift build || { : > "$VS_BUILD_FAILED_MARK"; exit 1; }; heavy_swift test "$@"' scripts/test.sh "$@"
+    VIBESWITCHER_HEAVY_ROOT=$heavy_root Resources/bin/vs-heavy --as scripts/test.sh bash -c 'slot_width; heavy_swift build || { : > "$VS_BUILD_FAILED_MARK"; exit 1; }; heavy_swift test "$@"' scripts/test.sh "$@"
     status=$?
     check_preferences "$preferences_before" "$defaults_before" || status=1
     # Even when the build or a test failed: they don't need the build, and their result is worth having. Not in --perf.
