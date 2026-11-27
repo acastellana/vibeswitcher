@@ -4971,3 +4971,8 @@ Turn what's a real bug into a task (one already on the board needs nothing); rea
 - 2026-11-27 03:14 Started a worker on v2-device-keys-slice-8
 - 2026-11-27 03:24 Audit of a-host-started-on: complete, clean, round 1: 2 Nit open, 1 Pre-existing open
 - 2026-11-27 03:24 Planned fix-main-swift-58: Fix main.swift:58: Read, not run: a host started with `--lock <anothe… (review audit, for security)
+- 2026-11-27 03:44 Pipeline held: a-host-started-on ready to merge with none landing; cause: a merge in progress
+- 2026-11-27 03:44 Merged a-host-started-on: A host started on another home can't seal a vault under the real key (the fresh-start variant of the handover gap) (build 335cc1521a43)
+- 2026-11-27 03:44 Flaky in a-host-started-on's merge: aHostStartedOnAnotherHomeSealsNothing() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
+- 2026-11-27 03:44 Planned fix-the-flaky-test-27: aHostStartedOnAnotherHomeSealsNothing() flaked in a-host-started-on's merge
+- 2026-11-27 03:44 Automatically (auto_advance): Planned tasks wait to start: the Mac has only 12.1 GB of disk free, under the 16.1 GB a new worker waits for: the load runs' floor (floor_gb=15 in scripts/test-under-load.sh, in GiB: 16.1 GB) plus disk_headroom_gb (0 GB in workflow.md), the room the tasks in flight still need to run their load check. They start by themselves once there's room again; meanwhile merge and cleanup finished tasks (cleanup frees their worktrees). Freeing other space on the disk is the user's call: tell them if it stays this full.
