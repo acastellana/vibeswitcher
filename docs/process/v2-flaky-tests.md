@@ -22,16 +22,21 @@ later, never to skip it.
 | `PasskeyPageCheckTests.thePageActsWithAPasskeyAtConfirm` (Act row, "the recorded line isn't shown") | the Linux CI (`v2 linux`, the run on `18e2699a`); passed on `bf99e707` and locally | the act was done (the card closed) and a reply frame carried `recorded`, but the page never showed it. Reading: the page's socket reconnected while the passkey's resend was in flight (a level change's `paired` comes then), so the request went again and its answer was the kept reply of a repeat, which carried no `recorded` (it is kept before the passkey's line is added), while the first reply, on the old socket, was seen by the check's frame log only. A product bug: a repeat now carries the line the act was recorded with (`Requests.recordedLines`; PasskeyTests' repeat). The check also waited on the pill's 8 s, sampled every 50 ms from a sampler installed after `page.go`: it now keeps every line the pill draws (a MutationObserver), waits for the reply's line, says when the page was loaded again, and prints the lines it saw | 2026-11-25 |
 | `FastExitTests.quickCommandsKeepTheirOutputAndExitCode` | the Mac's CI (`v2 macos`, host job, the run on `568df3b5`; passed on `6d606884`) | one of its 30 sessions started at once failed with `spawnFailed`, which said nothing of why: `PTYSpawn` dropped the terminal's errno when `openpty` failed (the Mac's openpty is serialized for this already, `Terminals+Darwin.swift`). It now says it (`noTerminal(errno)`), so the next one names its cause (out of terminals or descriptors on a 3-core runner with the other suites' sessions) | 2026-11-26 |
 | `TerminalRelayTests.aSlowClientIsResynced` (:78) | the Linux CI's core job (`v2 linux`, 120b0279) | its first step, `node.spawn`, got no answer from the scratch node's host in 60 s ("the session host didn't answer its connector"): the host was starved, not wrong; the core job runs four tests at once on four cores and most of them start a scratch node (54 files, about 500 nodes or hosts made). No test change: what to do about the job's load is proposed separately | 2026-11-26 |
+| `SteerNowTests.theCommandLineSteersAWorkingSession` (:188) | the Linux CI's core job (`v2 linux`, 969fa2a6, at three tests at once) | its scratch node's first spawn went unanswered for 60 s, as TerminalRelayTests' did: see "Under load on the runner" | 2026-11-27 |
 
 ## Under load on the runner
 
-The Linux CI's core job runs `VibeCoreTests` and `VibeNodeTests` on four cores. Most of those tests start a scratch node,
-and five suites run the page checks' Chrome. From 2026-11-26 the job runs three tests at once, not four
-(`SWT_EXPERIMENTAL_MAXIMUM_PARALLELIZATION_WIDTH: 3` in its test step), which leaves a core for the hosts, servers and
-parsers they start. Its runs then were no slower when red than when green (857 to 1,073 s of tests): the waits that
-ran out came from heavy tests overlapping, not from the job growing. If such waits come back within five runs, the
-next step is the five page-check suites in a job of their own (its own build, run beside core). With that, or a runner
-with more cores, the width goes back to four.
+The Linux CI's core job runs `VibeCoreTests` and `VibeNodeTests` on four cores, most of their tests starting a scratch
+node. Now and then a freshly started scratch node's first spawn went unanswered for 60 s ("the session host didn't
+answer its connector": TerminalRelayTests on 120b0279, SteerNowTests on 969fa2a6), and a few waits ran out (A10, the
+witness's no-tools test, whose own causes were found and fixed above). Three tests at once instead of four
+(2026-11-26) cost 40 to 55 % more test time (1,204 and 1,355 s against 857 to 1,073 s) and didn't stop it. Since
+2026-11-27 the four browser page-check suites (PageCheckTests, PasskeyPageCheckTests, ActingPageCheckTests,
+RealPageCheckTests: Chrome and a scratch node each) run in a job of their own (`pages`), and core is back to four at
+once. A scratch node's start and first spawn measured locally under load (4 cores, load 12): 1.5 to 1.9 s and under
+50 ms, so the 60 s is no ordinary start; a first spawn that fails now says what the host was doing (its log's tail,
+timed, whether it and its server run, and the machine's load: `ScratchNode.spawn`), so the next one shows where the time
+went.
 
 ## Under the thread sanitizer
 
@@ -56,6 +61,7 @@ Taken off the list above (or never on it) once their cause was found and fixed; 
 
 | Test | Cause | Fix |
 | --- | --- | --- |
+| `BrokenPipeProbeTests.aChildRunsSIGPIPENamesItsWriterAndTheFlakeLogKeepsIt` (:56, :57, :78, the Mac's CI core job on 969fa2a6) | the write hook held the writer 1 s for the SIGPIPE handler's snapshot (e79b28ac); the Mac raises a pipe's SIGPIPE on the process, the child's run-loop thread took it, and on the loaded 3-core runner its handler ran later than that: "no thread of 5 was in a write" | the hook holds the writer up to 10 s, as `snapshotLines` waits, only while the probe's handler is SIGPIPE's (which then runs); the Mac's CI only |
 | `NodeAcceptanceTests` A10 (:246, `v2 linux` core on ff7d80b8: the fake's `mode` "idle" after "input refused") | the test read the fake's state once, right after the refusal; the fake draws its prompt and saves its state after (`draw`, then `save_state`), so the page can show the prompt before the state says `permission`, and on a loaded runner the refusal came in between | the test waits for the state to say `permission` before it types; 10 runs under load 48 and 10 on 4 cores |
 | `WitnessTests.aSessionWhoseToolsNeverConnectedIsEnded` (:212, :213, `v2 linux` core on ff7d80b8's rerun: neither ended nor told in 60 s) | the role sweep hands the witness the vault's roster times (`makeRoleSweep`'s `tools`), replacing what the test put in `toolTimes`: a sweep under way, or one the refresh started once its 6 s were up, landed before the witness looked, and the roster has no times for this worker | the test waits for no sweep under way, takes the sweep away and then gives the times; 10 runs under load 48 and 10 on 4 cores |
 | `MacCheckedSessionsTests.aCheckedNodesSessionHasTheUsersEnvironmentAndNotTheStarters` and `MacCheckedSessionsRoundTests.nothingTheStarterPlantsReachesASession` (the Mac's CI, host job: one or the other on 6d606884, 568df3b5 and 35499e25, `PATH=…/sbin:` without `/vs-login-marker`) | the session printed its environment and ended before the test attached; an ended session's replay is its drawn screen, 80 columns wide, so the 300-character `PATH=` line broke at its 80th column (`…/usr/sbin:/sbin:`) and the marker was on the next line. Which test lost the race varied run to run | the session waits for a line the test types once attached, then prints (`MacCheckedSessionsTests.printOnceAttached`), and says whether its shell was a login one and its home's files; run on the Mac's CI only |

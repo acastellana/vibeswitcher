@@ -80,16 +80,51 @@ jobs:
       - name: Versions
         run: |
           swift --version
+          bash scripts/ci/check-versions.sh swift node
+      - name: Tests
+        # Without the browser page checks, which have a job of their own (`pages`): with them, four tests at once on the
+        # runner's four cores starved a scratch host now and then into a 60 s wait (2026-11-26 and 27), and three at
+        # once cost 40 to 55 % more time without stopping it (docs/process/v2-flaky-tests.md, "Under load on the runner").
+        run: bash scripts/test.sh --filter 'VibeCoreTests|VibeNodeTests' --skip 'PageCheckTests'
+  pages:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Check the workflows
+        run: bash scripts/ci/check-workflows.sh
+      - name: Swift, the version in .swift-version
+        run: |
+          wanted=$(cat .swift-version)
+          if swift --version 2>&1 | grep -q "Swift version $wanted "; then
+            echo "the image's Swift is $wanted"
+            exit 0
+          fi
+          sudo apt-get update
+          sudo apt-get install -y gnupg2 libcurl4-openssl-dev libsqlite3-dev libxml2-dev libz3-dev
+          cd "$RUNNER_TEMP"
+          curl -fsSLO https://download.swift.org/swiftly/linux/swiftly-1.2.0-x86_64.tar.gz
+          echo "0b26b568811404374c7d7f07276b6aad4145db5d1893a45f307de6a94ca8d9c3  swiftly-1.2.0-x86_64.tar.gz" | sha256sum -c -
+          tar zxf swiftly-1.2.0-x86_64.tar.gz
+          ./swiftly init --assume-yes --quiet-shell-followup --skip-install
+          . "$HOME/.local/share/swiftly/env.sh"
+          swiftly install --use --assume-yes "$wanted"
+          echo "$HOME/.local/share/swiftly/bin" >> "$GITHUB_PATH"
+          # swiftly's `swift` reads its own folder from these, not from HOME: scripts/test.sh runs on a scratch HOME,
+          # and without them a runner whose image lacks this Swift ran no Swift test (v2 linux, platform, 1e377af0).
+          echo "SWIFTLY_HOME_DIR=$HOME/.local/share/swiftly" >> "$GITHUB_ENV"
+          echo "SWIFTLY_BIN_DIR=$HOME/.local/share/swiftly/bin" >> "$GITHUB_ENV"
+          echo "SWIFTLY_TOOLCHAINS_DIR=$HOME/.local/share/swiftly/toolchains" >> "$GITHUB_ENV"
+      - name: Versions
+        run: |
+          swift --version
           bash scripts/ci/check-versions.sh swift node chrome
       - name: Tests
-        # Three tests at once, not one a core (scripts/test.sh's default): most of this job's tests start a scratch node
-        # (a host, its server child and their parsers) or the page checks' Chrome, and four of them at once on the
-        # runner's four cores starved one now and then into a 60 s wait (2026-11-26: A10, the witness's no-tools test, the
-        # relay's spawn). Back to four once that load is gone: the page checks in a job of their own
-        # (docs/process/v2-flaky-tests.md, "Under load on the runner"), or a runner with more cores.
-        env:
-          SWT_EXPERIMENTAL_MAXIMUM_PARALLELIZATION_WIDTH: 3
-        run: bash scripts/test.sh --filter 'VibeCoreTests|VibeNodeTests'
+        # The browser page checks (PageCheckTests, PasskeyPageCheckTests, ActingPageCheckTests, RealPageCheckTests:
+        # Chrome and a scratch node each), apart from core's scratch nodes since 2026-11-27.
+        run: bash scripts/test.sh --filter 'PageCheckTests'
   host:
     runs-on: ubuntu-24.04
     timeout-minutes: 90

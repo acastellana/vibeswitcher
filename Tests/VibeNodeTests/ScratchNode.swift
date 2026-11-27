@@ -387,7 +387,15 @@ final class ScratchNode: @unchecked Sendable {
     func spawn(_ command: String, cwd: String? = nil, label: String = "Test", agent: String? = nil) async throws -> HostSession {
         let request = SpawnRequest(cwd: cwd ?? home.path, command: command, env: [:], cols: 100, rows: 30, keepShell: false,
                                    label: label, agent: agent)
-        let reply = try await offPool { [socket] in try HostCall.request(.spawn(request), socket: socket, appKey: nil, timeout: 60) }
+        let reply: HostEvent
+        do {
+            reply = try await offPool { [socket] in try HostCall.request(.spawn(request), socket: socket, appKey: nil, timeout: 60) }
+        } catch {
+            // What the host was doing meanwhile (its log's tail, timed), whether it and its server run, and the machine's
+            // load: a first spawn that went unanswered for 60 s on a loaded runner said nothing more (SteerNowTests,
+            // TerminalRelayTests, v2 linux core, 2026-11-26 and 27).
+            throw HostCall.Failure(description: "\(error); \(upState(last: "the spawn of \(label)"))")
+        }
         guard case .spawned(let session) = reply else { throw HostCall.Failure(description: "the scratch host didn't start the session: \(reply)") }
         return session
     }
