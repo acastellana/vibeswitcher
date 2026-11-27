@@ -34,10 +34,9 @@ struct MacSealFix2Tests {
         let home = try home()
         try MacSealListTests.write(". ~/.cargo/env\n", home + "/.zshenv")
         let names = Set(MacSealList.watched(home: home, uid: getuid()).map(\.name))
-        // The startup files' twins are main's rows in `ConfigSeal.homeFiles` (phase 1's J3), on every Mac: what a Mac
-        // node's vault watches (`homeWatched(macList:)`) has each, by its path.
-        let paths = Set(ConfigSeal.homeWatched(home: home, macList: true).map(\.path))
-        for file in [".zshenv", ".zprofile", ".zshrc", ".zlogin", ".zlogout"] { #expect(paths.contains(home + "/\(file).zwc"), "~/\(file).zwc") }
+        for file in [".zshenv", ".zprofile", ".zshrc", ".zlogin", ".zlogout"] { #expect(names.contains("~/\(file).zwc"), "~/\(file).zwc") }
+        // No twin of a twin: main's own twin rows in `ConfigSeal.homeFiles` (phase 1's J3) are none of the Mac list's files.
+        #expect(!names.contains { $0.lowercased().hasSuffix(".zwc.zwc") }, "\(names.sorted())")
         #expect(names.contains("~/.cargo/env.zwc"))
         var linux: [ConfigSeal.Watched] = []
         var seen: Set<String> = []

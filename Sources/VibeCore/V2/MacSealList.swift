@@ -71,15 +71,13 @@ public enum MacSealList {
     }
 
     /// The zsh startup files whose compiled twins are rows (`<file>.zwc`, by contents, absent included, so one appearing
-    /// is a change): `ConfigSeal.homeFiles`' zsh files (`.zlogout` among them) and `startupFiles`, but those whose twin
-    /// `ConfigSeal.homeFiles` watches already on every Mac (main's twins of 2026-11-27, phase 1's J3: today each of
-    /// them), so the list stays disjoint from the Mac's own.
+    /// is a change): `ConfigSeal.homeFiles`' zsh files (`.zlogout` among them) and `startupFiles`. Not the twins
+    /// `homeFiles` lists itself (main's of 2026-11-27, phase 1's J3): those are their files' twins already. Main's rows
+    /// watch the same twins for every seal, recorded as they are at a seal's first look (`ConfigSeal.comesAndGoes`);
+    /// these are the Mac list's, held at their first read on a book that watches it (R9), so both are kept.
     static var twinnedStartupFiles: [String] {
-        let home = ConfigSeal.homeFiles.map(\.0)
-        let watchedTwins = Set(home.filter(isTwin).map { $0.lowercased() })
         var files: [String] = []
-        for file in home.filter({ $0.hasPrefix(".z") && !isTwin($0) }) + startupFiles
-        where !files.contains(file) && !watchedTwins.contains((file + twinSuffix).lowercased()) {
+        for file in ConfigSeal.homeFiles.map(\.0).filter({ $0.hasPrefix(".z") && !isTwin($0) }) + startupFiles where !files.contains(file) {
             files.append(file)
         }
         return files

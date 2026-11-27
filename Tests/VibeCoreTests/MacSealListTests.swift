@@ -92,8 +92,11 @@ struct MacSealListTests {
         #expect(items.allSatisfy { ConfigSeal.isHome(key: ConfigSeal.keyPrefix + $0.name) }, "each is the node-wide seal's, not a team's")
         // No folder row is a `.folder`, which doesn't see a folder's mode.
         #expect(!items.contains { $0.kind == .folder })
-        // Nothing the Mac's own list (`homeFiles`) watches is listed twice: the zsh files and git's config are there.
-        #expect(names.isDisjoint(with: ConfigSeal.homeFiles.map { "~/" + $0.0 }))
+        // Nothing the Mac's own list (`homeFiles`) watches is listed twice: the zsh files and git's config are there. But
+        // the startup files' compiled twins (main's, phase 1's J3): the Mac list's own rows hold them at their first read
+        // (R9), which main's rows, recorded at a seal's first look, don't.
+        #expect(names.isDisjoint(with: ConfigSeal.homeFiles.filter { !MacSealList.isTwin($0.0) }.map { "~/" + $0.0 }))
+        for file in MacSealList.twinnedStartupFiles { #expect(names.contains("~/" + file + ".zwc"), "~/\(file).zwc is the Mac list's") }
         #expect(Set(items.map(\.name)).count == items.count)
         // Outside rows read under the root given, named by their own path.
         #expect(items.first { $0.name == "/opt/homebrew/bin" }?.path == outside + "/opt/homebrew/bin")

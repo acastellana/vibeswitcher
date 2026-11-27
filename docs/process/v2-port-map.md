@@ -412,7 +412,8 @@ Conflicts (15 files), each keeping both sides:
   `TestEnvironmentTests` pin `swift_tests`' line with `VIBESWITCHER_HEAVY_ROOT=$heavy_root`.
 - `scripts/temporary-folder-lint.txt`: both sides' lines.
 - `Sources/VibeCore/ConfigSeal.swift`: `v2`'s `/mnt/` and `/run/user/` homes with main's `#past` keys; `v2`'s git config
-  keys and main's twins; main's read budget with `v2`'s coarse-ctime hash; main's `walk` with its budget.
+  keys and main's twins; main's read budget with `v2`'s coarse-ctime hash, which now reads within main's 32 MB (the
+  limit below); main's `walk` with its budget.
 - `Sources/VibeCore/LeadToolset.swift`: main's `MacLoad.ruleText` with `v2`'s `MacLimits.fileName`; `BoostTests` takes
   main's wording with `v2`'s values for the cores.
 - `Sources/VibeCore/LeadVaultAppProof.swift`: main's `AppProof.vaultKeyUnreadable` beside `v2`'s move of `KeychainStore`.
@@ -454,6 +455,12 @@ What main added that doesn't build on Linux, changed in this merge: `import Cryp
 `HostHandover.swift` and `HostRole.swift`; `Darwin.close` to `Sys.close`; `OSStatus` to `Int32`; main's `identity`'s
 `st_mtimespec` and `st_ctimespec` to `Platform.Files.modified` and `changed`. `HandoverProofTests`, `HostRoleTests` and
 `VaultKeyUnreadableTests` are the Mac's (VibeHostTests' `MacOnlyTests.txt`).
+
+**A stated limit on Linux (the lead's call, 2026-11-28):** main's read bound applies everywhere: a watched file over 32 MB
+(`ConfigSeal.readLimit`), or one past its folder's 64 MB budget (`folderBudget`), is judged by its metadata only, so an
+in-place rewrite of the same size within one ctime tick of the last sealed write isn't seen. `v2`'s coarse-ctime
+contents hash for a script past `scriptLimit` holds up to 32 MB. The unbounded read it had stays removed (a large file
+stalled every gate).
 
 **Owed, for the Linux side:** whether the Linux host takes main's checks of a handover's lock (`HostHandover.Lock`) and
 the account's host's role (`HostRole.vault`'s lock check) in place of `v2`'s `ownsLaunchers` vault; read only, not run
