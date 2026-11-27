@@ -701,7 +701,7 @@ struct ComposerTextView: NSViewRepresentable {
                 }
             }
             // ↩ and ↑ / ↓ in an empty box: the answer card's, while it shows a question.
-            let flags = currentEvent()?.modifierFlags ?? []
+            let flags = Self.keyFlags(of: currentEvent())
             if let key = Self.cardKey(selector, flags: flags), parent.cardKey(key) { return true }
             switch selector {
             case #selector(NSResponder.insertNewline(_:)), #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)):
@@ -720,6 +720,16 @@ struct ComposerTextView: NSViewRepresentable {
             default:
                 return false
             }
+        }
+
+        /// The modifiers held with the key a command came from: the current event's when that's a key going down, none
+        /// otherwise. A command that came with no key (the sandbox's `send`, an accessibility client's) finds whatever
+        /// event the app took last as its current one: a window event, say, whose flags are the keyboard's as it was
+        /// made. With Shift held on the real keyboard then, the sandbox's Return was a ⇧↩: a newline in the box, and
+        /// the message never sent.
+        static func keyFlags(of event: NSEvent?) -> NSEvent.ModifierFlags {
+            guard let event, event.type == .keyDown else { return [] }
+            return event.modifierFlags
         }
 
         /// The answer card's key for a command: plain ↩ (⇧↩ and ⌥↩ stay the box's), ↑, ↓, and Esc (a picker's).
