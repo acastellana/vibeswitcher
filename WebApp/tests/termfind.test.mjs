@@ -14,7 +14,7 @@ import { installDom, find, byClass, FakeNode } from './fakedom.test.mjs';
 installDom();
 globalThis.matchMedia = () => ({ matches: false, addEventListener() {} });
 globalThis.MutationObserver ??= class { observe() {} disconnect() {} };
-const { findKey, findKeys, terminalFind, findDecorations, FIND_COLOURS } = await import('../js/views/terminal.js');
+const { findKey, findKeys, terminalFind, findDecorations, findTheme, FIND_COLOURS } = await import('../js/views/terminal.js');
 const { setLanguage, t } = await import('../js/i18n.js');
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -58,11 +58,15 @@ test('P4: the bar highlights every match as you type, steps next and previous, s
   setLanguage('en');
   const search = fakeSearch({ resultIndex: 2, resultCount: 12 });
   let closed = 0;
-  const bar = terminalFind({ search, dark: () => false, closed: () => { closed += 1; } });
+  let opened = 0;
+  const bar = terminalFind({ search, dark: () => false, opened: () => { opened += 1; }, closed: ({ refocus }) => { if (refocus) closed += 1; } });
   assert.ok(bar.el.hidden, 'closed until asked');
   assert.equal(bar.el.attrs.role, 'search');
   bar.open();
   assert.ok(!bar.el.hidden);
+  assert.equal(opened, 1, 'the terminal takes find’s look');
+  bar.open();
+  assert.equal(opened, 1, 'once, while it stays open');
   const input = find(bar.el, byClass('find-input'));
   assert.equal(input.attrs.placeholder, t('teFindInTerminal'));
   typeInto(input, 'error');
@@ -92,6 +96,18 @@ test('P4: the bar highlights every match as you type, steps next and previous, s
   assert.deepEqual(search.calls.at(-1), ['clear'], 'and takes the highlights away');
   assert.equal(closed, 1, 'the focus goes back to the terminal');
   assert.equal(count.textContent, '');
+  // Closed as the pane goes: its look back, the focus left where it is.
+  bar.open();
+  bar.close({ refocus: false });
+  assert.equal(closed, 1);
+  // While open, the selection (the current match) is the current match's orange, focused or not; the rest of the
+  // theme as it was.
+  const theme = { background: '#1E1E1E', foreground: '#FFFFFF', selectionBackground: '#444444' };
+  const finding = findTheme(theme, true);
+  assert.equal(finding.selectionBackground, FIND_COLOURS.dark.border);
+  assert.equal(finding.selectionInactiveBackground, FIND_COLOURS.dark.border);
+  assert.equal(finding.background, theme.background);
+  assert.equal(theme.selectionBackground, '#444444', 'the theme itself unchanged');
 });
 
 test('P4: no match says so; an empty field finds nothing; a dark terminal gets the dark highlights', () => {
@@ -111,7 +127,11 @@ test('P4: no match says so; an empty field finds nothing; a dark terminal gets t
   search.results = { resultIndex: 0, resultCount: 1000 };
   typeInto(input, 'a');
   assert.equal(find(bar.el, byClass('find-count')).textContent, t('chOf', { a: 1, b: '1000+' }));
-  for (const colour of Object.values(FIND_COLOURS).flatMap(Object.values)) assert.match(colour, /^#[0-9A-F]{8}$/, 'a hex xterm.js takes');
+  for (const { match, active, border } of Object.values(FIND_COLOURS)) {
+    for (const colour of [match, active]) assert.match(colour, /^#[0-9A-F]{8}$/, 'a hex xterm.js takes');
+    assert.match(border, /^#[0-9A-F]{6}$/, 'the current match’s outline, opaque');
+  }
+  assert.equal(findDecorations(false).activeMatchBorder, FIND_COLOURS.light.border);
 });
 
 test('P4: the key opens find only while a terminal shows, the focus in it or in nothing; anywhere else it stays the browser’s', () => {

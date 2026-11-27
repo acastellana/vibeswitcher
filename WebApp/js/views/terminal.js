@@ -95,19 +95,28 @@ export function findKeys({ pane, screen, finder, shown, readOnly, mac = MAC }) {
 }
 
 // The decorations' colours (the page's `--highlight` yellow, the current match orange), as xterm.js takes them: hex.
+// The current match is also xterm.js's selection, which it draws over a highlight: its outline (`border`, drawn above
+// the text) keeps it the one that stands out.
 export const FIND_COLOURS = {
-  light: { match: '#FFD60080', active: '#FF9500CC' },
-  dark: { match: '#FFC80052', active: '#FF9F0AB3' },
+  light: { match: '#FFD60080', active: '#FF9500CC', border: '#FF9500' },
+  dark: { match: '#FFC80052', active: '#FF9F0AB3', border: '#FF9F0A' },
 };
 export function findDecorations(dark) {
-  const { match, active } = FIND_COLOURS[dark ? 'dark' : 'light'];
-  return { matchBackground: match, matchOverviewRuler: match, activeMatchBackground: active, activeMatchColorOverviewRuler: active };
+  const { match, active, border } = FIND_COLOURS[dark ? 'dark' : 'light'];
+  return { matchBackground: match, matchOverviewRuler: match, activeMatchBackground: active, activeMatchBorder: border, activeMatchColorOverviewRuler: active };
+}
+
+// While find is open, the terminal's selection, which is the current match (the add-on selects it), drawn in the
+// current match's orange, focused or not (the focus is in the find field): the one match that stands out.
+export function findTheme(theme, dark) {
+  const { border } = FIND_COLOURS[dark ? 'dark' : 'light'];
+  return { ...theme, selectionBackground: border, selectionInactiveBackground: border, selectionForeground: '#000000' };
 }
 
 // The find bar over a terminal: `search` is xterm.js's SearchAddon (or anything with its findNext, findPrevious,
-// clearDecorations and onDidChangeResults), `dark` whether the terminal is dark now, `closed` what takes the focus
-// back. Returns { el, open, close, step, shown }.
-export function terminalFind({ search, dark = () => false, closed = () => {} }) {
+// clearDecorations and onDidChangeResults), `dark` whether the terminal is dark now, `opened` and `closed` what the
+// terminal does as it opens and closes (its look; the focus back). Returns { el, open, close, step, shown }.
+export function terminalFind({ search, dark = () => false, opened = () => {}, closed = () => {} }) {
   const input = kit.field({ kind: 'search', class: 'find-input', type: 'search', placeholder: t('teFindInTerminal'), 'aria-label': t('teFindInTerminal'),
     autocomplete: 'off', spellcheck: 'false' });
   const count = h('span', { class: 'find-count', role: 'status' });
@@ -138,6 +147,7 @@ export function terminalFind({ search, dark = () => false, closed = () => {} }) 
     say();
   }
   function open() {
+    if (el.hidden) opened();
     el.hidden = false;
     input.focus();
     input.select?.();
@@ -150,7 +160,7 @@ export function terminalFind({ search, dark = () => false, closed = () => {} }) 
     results = null;
     search.clearDecorations();
     setText(count, '');
-    if (refocus) closed();
+    closed({ refocus });
   }
   input.addEventListener('input', find);
   input.addEventListener('keydown', (event) => {
@@ -207,7 +217,14 @@ export function terminalView(app) {
         term.loadAddon(fit);
         const search = new SearchAddon();
         term.loadAddon(search);
-        finder = terminalFind({ search, dark: () => look() === 'dark', closed: () => { if (!control.state.readOnly) term.focus(); } });
+        finder = terminalFind({
+          search, dark: () => look() === 'dark',
+          opened: () => { term.options.theme = findTheme(xtermOptions(terminalLook(), look() === 'dark').theme, look() === 'dark'); },
+          closed: ({ refocus }) => {
+            term.options.theme = xtermOptions(terminalLook(), look() === 'dark').theme;
+            if (refocus && !control.state.readOnly) term.focus();
+          },
+        });
         findSlot.replaceChildren(finder.el);
         term.open(screen);
         term.onData((data) => control.input(data));
@@ -248,7 +265,7 @@ export function terminalView(app) {
     const watched = !!term.options.disableStdin;
     for (const [name, value] of Object.entries(options)) {
       if (watched && (name === 'cursorStyle' || name === 'cursorBlink')) continue;
-      term.options[name] = value;
+      term.options[name] = name === 'theme' && finder?.shown() ? findTheme(value, look() === 'dark') : value;
     }
     refit();
   }
