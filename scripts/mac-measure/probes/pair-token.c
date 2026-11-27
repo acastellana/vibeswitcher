@@ -10,18 +10,26 @@
 // trial, sequenced over pipes; the keeper reads or writes its end only where the trial says so. No dialog, no debugger,
 // no root, nothing read of a process this one didn't start.
 //
-//   pair-token SOCKET_PATH PROGRAM [IMAGE]   (PROGRAM: a hardened image taking --sleep SECONDS, the maker's exec target;
-//                                             IMAGE: pair-image, the hardened image that acts, for the second part)
+//   pair-token SOCKET_PATH PROGRAM [IMAGE [PLAIN BIG WINDOW]]   (PROGRAM: a hardened image taking --sleep SECONDS, the
+//                                             maker's exec target; IMAGE: pair-image, the hardened image that acts, for
+//                                             the second part; PLAIN, BIG, WINDOW: part three's other images)
+//   pair-token --a-routes IMAGE PLAIN BIG WINDOW   part three alone (K-M16's here part and D1's timing)
 //
 // The second part, (g) to (o) (2026-11-27, the proof's redesign after K-M1 refuted the fixed token), is at the end of
 // this file: the whole write-then-exec with every point a keeper could ask the token, a silent holder, a nonce round,
 // a keeper-made end, which acts of a holder move the token, the token once the last to act exited, the end of file a
 // first run saw, a Mach message's audit trailer, and SCM_CREDS.
+//
+// The third part (2026-11-27, the proof review of that day: I1, I2, D1), after the second: K-M16's here part, what a
+// hardened child finds on itself when its parent named exception ports by every way a parent can, its rlimits, the
+// window before its first statement, and Security's check timed against a large image. It receives no exception and
+// takes no other task's port; the active routes are the keyboard trial's (K7).
 #include <Security/Security.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <libproc.h>
 #include <mach/mach.h>
+#include <mach/mach_time.h>
 #include <poll.h>
 #include <signal.h>
 #include <spawn.h>
@@ -31,6 +39,7 @@
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/un.h>
 #include <sys/wait.h>
@@ -1348,12 +1357,406 @@ static void part_two(void) {
     trial_o();
 }
 
+// ======================================================================================================================
+// K-M16's here part (2026-11-27, the proof review's I1, I2 and D1): assumption A measured only as far as a hardened
+// child can see itself, and Security's check timed. The probe sets exception ports for its own child, with a port E it
+// made and never receives on, by every way a parent can: posix_spawn's attributes (posix_spawnattr_setexceptionports_np),
+// its own task's ports and the exec'ing thread's ports set by the forked child just before its exec; each with every
+// behaviour, for each mask group (EXC_MASK_ALL, EXC_MASK_CRASH, EXC_MASK_CORPSE_NOTIFY). The child is IMAGE (hardened)
+// or PLAIN (the same source, not hardened) in its `ports` mode: it reports what it found on itself at its first
+// statement (main's first line), clears every mask on its task and main thread, and reads them again. No exception is
+// raised, none is received, none is answered: E is destroyed unread. Then rlimits a parent sets before the exec, and
+// the time from just before the spawn or exec to the first statement (the window before any statement of the image's
+// own runs: dyld and the libraries' initializers), for IMAGE and for a Swift image linking Foundation (WINDOW).
+// (D1) Security's check timed on a message from IMAGE and from BIG (IMAGE's source with a 256 MiB section of random
+// bytes, so its signature covers 256 MiB), and again once a copy of IMAGE is renamed over BIG's path while BIG runs.
+// What isn't run here (the active routes: a handler receiving a fault, a state reply, a task port the child handed
+// over before its exec, a traced exec) is owed to the keyboard trial (K7): not from an agent's session.
+// ======================================================================================================================
+static const char *image_plain, *image_big, *image_window;
+static CFDataRef big_cdhash;
+static mach_port_t unread = MACH_PORT_NULL;  // E: the handler port the probe names and never receives on
+
+static double micros(uint64_t from, uint64_t to) {
+    static mach_timebase_info_data_t base;
+    if (!base.denom) mach_timebase_info(&base);
+    return (double)(to - from) * base.numer / base.denom / 1000.0;
+}
+
+#if defined(__arm64__)
+#define STATE_FLAVOR ARM_THREAD_STATE64
+#else
+#define STATE_FLAVOR x86_THREAD_STATE64
+#endif
+
+static const struct { const char *name; exception_behavior_t behavior; thread_state_flavor_t flavor; } behaviours[] = {
+    {"EXCEPTION_DEFAULT", EXCEPTION_DEFAULT, THREAD_STATE_NONE},
+    {"EXCEPTION_STATE", EXCEPTION_STATE, STATE_FLAVOR},
+    {"EXCEPTION_STATE_IDENTITY", EXCEPTION_STATE_IDENTITY, STATE_FLAVOR},
+    {"EXCEPTION_IDENTITY_PROTECTED", EXCEPTION_IDENTITY_PROTECTED, THREAD_STATE_NONE},
+    {"EXCEPTION_STATE_IDENTITY_PROTECTED", EXCEPTION_STATE_IDENTITY_PROTECTED, STATE_FLAVOR},
+};
+#define BEHAVIOURS (sizeof behaviours / sizeof behaviours[0])
+static const exception_mask_t set_masks[3] = {EXC_MASK_ALL, EXC_MASK_CRASH, EXC_MASK_CORPSE_NOTIFY};
+static const char *set_names[3] = {"ALL", "CRASH", "CORPSE_NOTIFY"};
+
+enum route { BASELINE, SPAWN_ATTR, OWN_TASK, OWN_THREAD };
+
+// The image's lines until the end of file, printed; the window from `before` to the first statement it reports; how
+// it ended.
+static void image_lines(int from, pid_t pid, uint64_t before) {
+    FILE *in = fdopen(from, "r");
+    char *line = NULL;
+    size_t size = 0;
+    unsigned long long first = 0;
+    int lines = 0;
+    while (getline(&line, &size, in) > 0) {
+        lines++;
+        printf("%s", line);
+        const char *mark = strstr(line, "first statement at ");
+        if (mark) first = strtoull(mark + strlen("first statement at "), NULL, 10);
+    }
+    free(line);
+    fclose(in);
+    int status = 0;
+    waitpid(pid, &status, 0);
+    if (first && before) printf("  the window, from just before the spawn or exec to its first statement: %.0f us\n", micros(before, first));
+    if (WIFEXITED(status)) printf("  it exited %d%s\n", WEXITSTATUS(status), lines ? "" : ", having written nothing");
+    else if (WIFSIGNALED(status)) printf("  it was ended by signal %d (%s)%s\n", WTERMSIG(status), strsignal(WTERMSIG(status)), lines ? "" : " before its first statement wrote anything");
+}
+
+static void ports_case(const char *title, const char *img, enum route route, size_t b) {
+    printf("== %s\n", title);
+    int lines[2], report[2];
+    if (pipe(lines) || pipe(report)) die("pipe");
+    lines[0] = high(lines[0]); lines[1] = high(lines[1]); report[0] = high(report[0]); report[1] = high(report[1]);
+    exception_behavior_t behavior = behaviours[b].behavior | MACH_EXCEPTION_CODES;
+    uint64_t before = 0;
+    pid_t pid;
+    if (route == BASELINE || route == SPAWN_ATTR) {
+        posix_spawn_file_actions_t actions;
+        posix_spawn_file_actions_init(&actions);
+        posix_spawn_file_actions_adddup2(&actions, lines[1], 3);
+        posix_spawnattr_t attributes;
+        posix_spawnattr_init(&attributes);
+        if (route == SPAWN_ATTR) {
+            printf("  posix_spawnattr_setexceptionports_np(E, %s|MACH_EXCEPTION_CODES):", behaviours[b].name);
+            for (int m = 0; m < 3; m++)
+                printf(" %s %d", set_names[m], posix_spawnattr_setexceptionports_np(&attributes, set_masks[m], unread, behavior, behaviours[b].flavor));
+            printf("\n");
+        }
+        char *args[] = {(char *)img, "ports", "3", NULL};
+        extern char **environ;
+        before = mach_absolute_time();
+        int spawned_ok = posix_spawn(&pid, img, &actions, &attributes, args, environ);
+        posix_spawn_file_actions_destroy(&actions);
+        posix_spawnattr_destroy(&attributes);
+        if (spawned_ok != 0) { printf("  posix_spawn refused: %d (%s)\n", spawned_ok, strerror(spawned_ok)); close(lines[0]); close(lines[1]); close(report[0]); close(report[1]); return; }
+    } else {
+        // The forked child gets E as its bootstrap special port (set around the fork and restored at once, as (n)).
+        mach_port_t saved = MACH_PORT_NULL;
+        if (task_get_special_port(mach_task_self(), TASK_BOOTSTRAP_PORT, &saved) != KERN_SUCCESS) die("task_get_special_port");
+        if (task_set_special_port(mach_task_self(), TASK_BOOTSTRAP_PORT, unread) != KERN_SUCCESS) die("task_set_special_port");
+        pid = fork();
+        if (pid != 0 && task_set_special_port(mach_task_self(), TASK_BOOTSTRAP_PORT, saved) != KERN_SUCCESS) die("restore");
+        if (pid == 0) {
+            close(lines[0]); close(report[0]);
+            int results[3] = {0, 0, 0};
+            mach_port_t e = MACH_PORT_NULL;
+            task_get_special_port(mach_task_self(), TASK_BOOTSTRAP_PORT, &e);
+            if (route == OWN_TASK)
+                for (int m = 0; m < 3; m++) results[m] = task_set_exception_ports(mach_task_self(), set_masks[m], e, behavior, behaviours[b].flavor);
+            if (route == OWN_THREAD) {
+                mach_port_t thread = mach_thread_self();
+                for (int m = 0; m < 3; m++) results[m] = thread_set_exception_ports(thread, set_masks[m], e, behavior, behaviours[b].flavor);
+            }
+            put(report[1], results, sizeof results);
+            if (dup2(lines[1], 3) != 3) _exit(126);
+            close(lines[1]);
+            uint64_t t = mach_absolute_time();
+            put(report[1], &t, sizeof t);
+            close(report[1]);
+            execl(img, img, "ports", "3", (char *)NULL);
+            _exit(127);
+        }
+        close(report[1]);
+        int results[3];
+        ssize_t got = read(report[0], results, sizeof results);
+        if (got != (ssize_t)sizeof results) {
+            int status = 0;
+            waitpid(pid, &status, 0);
+            printf("  the forked child ended before its exec (%s %d)\n", WIFSIGNALED(status) ? "signal" : "exit", WIFSIGNALED(status) ? WTERMSIG(status) : WEXITSTATUS(status));
+            close(report[0]); close(lines[0]); close(lines[1]);
+            return;
+        }
+        if (route == OWN_TASK || route == OWN_THREAD)
+            printf("  the forked child's %s(E, %s|MACH_EXCEPTION_CODES) just before its exec: ALL 0x%x, CRASH 0x%x, CORPSE_NOTIFY 0x%x\n",
+                   route == OWN_TASK ? "task_set_exception_ports" : "thread_set_exception_ports (its own thread, the one that execs)",
+                   behaviours[b].name, results[0], results[1], results[2]);
+        get(report[0], &before, sizeof before);
+        close(report[0]);
+    }
+    close(lines[1]);
+    if (route == BASELINE || route == SPAWN_ATTR) { close(report[0]); close(report[1]); }
+    image_lines(lines[0], pid, before);
+}
+
+// A launcher (IMAGE in its `limit` mode, standing for a session's) lowers one of its limits, then execs the target
+// (IMAGE in its `ports` mode, or WINDOW): what the target finds, or how it ended before its first statement.
+static void limit_case(const char *title, const char *name, const char *value, const char *target) {
+    printf("== %s\n", title);
+    int lines[2];
+    if (pipe(lines)) die("pipe");
+    posix_spawn_file_actions_t actions;
+    posix_spawn_file_actions_init(&actions);
+    posix_spawn_file_actions_adddup2(&actions, lines[1], 3);
+    char *with_ports[] = {(char *)image, "limit", (char *)name, (char *)value, (char *)target, "ports", "3", NULL};
+    char *bare[] = {(char *)image, "limit", (char *)name, (char *)value, (char *)target, NULL};
+    extern char **environ;
+    pid_t pid;
+    if (posix_spawn(&pid, image, &actions, NULL, target == image ? with_ports : bare, environ) != 0) die("posix_spawn");
+    posix_spawn_file_actions_destroy(&actions);
+    close(lines[1]);
+    image_lines(lines[0], pid, 0);
+}
+
+// The window alone, for WINDOW (a Swift image linking Foundation): it writes its first statement's time on 3 and ends.
+static void window_case(const char *title, const char *img) {
+    printf("== %s\n", title);
+    int lines[2];
+    if (pipe(lines)) die("pipe");
+    posix_spawn_file_actions_t actions;
+    posix_spawn_file_actions_init(&actions);
+    posix_spawn_file_actions_adddup2(&actions, lines[1], 3);
+    char *args[] = {(char *)img, NULL};
+    extern char **environ;
+    pid_t pid;
+    uint64_t before = mach_absolute_time();
+    if (posix_spawn(&pid, img, &actions, NULL, args, environ) != 0) die("posix_spawn");
+    posix_spawn_file_actions_destroy(&actions);
+    close(lines[1]);
+    image_lines(lines[0], pid, before);
+}
+
+static void a_routes(void) {
+    printf("#### K-M16, here: what a hardened child finds on itself (assumption A's passive half)\n");
+    if (mach_port_allocate(mach_task_self(), MACH_PORT_RIGHT_RECEIVE, &unread) != KERN_SUCCESS) die("mach_port_allocate");
+    if (mach_port_insert_right(mach_task_self(), unread, unread, MACH_MSG_TYPE_MAKE_SEND) != KERN_SUCCESS) die("insert_right");
+    ports_case("(p0) baseline: IMAGE spawned with no exception port named (what a child of this probe inherits)", image, BASELINE, 0);
+    char title[256];
+    for (size_t b = 0; b < BEHAVIOURS; b++) {
+        snprintf(title, sizeof title, "(p1) IMAGE spawned with E named in posix_spawn's attributes, %s", behaviours[b].name);
+        ports_case(title, image, SPAWN_ATTR, b);
+    }
+    for (size_t b = 0; b < BEHAVIOURS; b++) {
+        snprintf(title, sizeof title, "(p2) a forked child sets E as its own task's exception port, %s, then execs IMAGE", behaviours[b].name);
+        ports_case(title, image, OWN_TASK, b);
+    }
+    for (size_t b = 0; b < BEHAVIOURS; b++) {
+        snprintf(title, sizeof title, "(p3) a forked child sets E on its own thread (the one that execs), %s, then execs IMAGE", behaviours[b].name);
+        ports_case(title, image, OWN_THREAD, b);
+    }
+    ports_case("(p4) control, not hardened: PLAIN spawned with E in posix_spawn's attributes, EXCEPTION_STATE", image_plain, SPAWN_ATTR, 1);
+    ports_case("(p4) control, not hardened: a forked child sets E on its own task, EXCEPTION_STATE, then execs PLAIN", image_plain, OWN_TASK, 1);
+    ports_case("(p4) control, not hardened: a forked child sets E on its own thread, EXCEPTION_STATE, then execs PLAIN", image_plain, OWN_THREAD, 1);
+    mach_port_mod_refs(mach_task_self(), unread, MACH_PORT_RIGHT_RECEIVE, -1);
+    mach_port_deallocate(mach_task_self(), unread);
+    unread = MACH_PORT_NULL;
+    printf("#### K-M16, here: rlimits a launcher sets before its exec (no exception port named)\n");
+    limit_case("(q1) the launcher lowers RLIMIT_STACK to 64 KiB, then execs IMAGE", "STACK", "65536", image);
+    limit_case("(q2) the launcher lowers RLIMIT_STACK to 16 KiB, then execs IMAGE", "STACK", "16384", image);
+    limit_case("(q3) the launcher lowers RLIMIT_STACK to 16 KiB, then execs WINDOW (Swift, Foundation)", "STACK", "16384", image_window);
+    limit_case("(q4) the launcher lowers RLIMIT_NOFILE to 4 (descriptors 0 to 3 open), then execs IMAGE", "NOFILE", "4", image);
+    limit_case("(q5) the launcher lowers RLIMIT_NOFILE to 5, then execs IMAGE", "NOFILE", "5", image);
+    limit_case("(q6) the launcher lowers RLIMIT_NOFILE to 4, then execs WINDOW (Swift, Foundation)", "NOFILE", "4", image_window);
+    limit_case("(q7) the launcher lowers RLIMIT_NOFILE to 5, then execs WINDOW (Swift, Foundation)", "NOFILE", "5", image_window);
+    limit_case("(q8) the launcher lowers RLIMIT_DATA to 1 MiB, then execs IMAGE", "DATA", "1048576", image);
+    limit_case("(q9) the launcher lowers RLIMIT_CPU to 0, then execs IMAGE", "CPU", "0", image);
+    printf("#### K-M16, here: the window before the first statement\n");
+    for (int k = 0; k < 3; k++) ports_case("(w1) IMAGE (C) spawned bare: the window", image, BASELINE, 0);
+    for (int k = 0; k < 3; k++) window_case("(w2) WINDOW (Swift, Foundation linked, hardened) spawned bare: the window", image_window);
+}
+
+// --- (D1) Security's check timed ------------------------------------------------------------------------------------
+static int receive_token(mach_port_t port, audit_token_t *token) {
+    struct { mach_msg_header_t header; char body[8]; mach_msg_audit_trailer_t trailer; } message;
+    memset(&message, 0, sizeof message);
+    kern_return_t got = mach_msg(&message.header,
+                                 MACH_RCV_MSG | MACH_RCV_TIMEOUT | MACH_RCV_TRAILER_TYPE(MACH_MSG_TRAILER_FORMAT_0) | MACH_RCV_TRAILER_ELEMENTS(MACH_RCV_TRAILER_AUDIT),
+                                 0, sizeof message, port, 5000, MACH_PORT_NULL);
+    if (got != KERN_SUCCESS) { printf("  no message within 5 s (0x%x)\n", got); return 0; }
+    *token = message.trailer.msgh_audit;
+    return 1;
+}
+
+static SecRequirementRef cdhash_requirement(CFDataRef cdhash) {
+    char text[128] = "cdhash H\"";
+    for (CFIndex i = 0; i < CFDataGetLength(cdhash); i++) snprintf(text + strlen(text), 3, "%02x", CFDataGetBytePtr(cdhash)[i]);
+    strcat(text, "\"");
+    CFStringRef string = CFStringCreateWithCString(NULL, text, kCFStringEncodingUTF8);
+    SecRequirementRef requirement = NULL;
+    SecRequirementCreateWithString(string, kSecCSDefaultFlags, &requirement);
+    CFRelease(string);
+    return requirement;
+}
+
+static double ms_since(uint64_t t0) { return micros(t0, mach_absolute_time()) / 1000.0; }
+
+// The kernel's own record of the process the token names (csops_audittoken: refused once that pid's pidversion isn't
+// the token's): its cdhash (CS_OPS_CDHASH) and its status word (CS_OPS_STATUS). No file is opened.
+extern int csops_audittoken(pid_t pid, unsigned int ops, void *useraddr, size_t usersize, audit_token_t *token);
+
+static void kernel_identity(audit_token_t token, CFDataRef own) {
+    unsigned char cdhash[20];
+    uint32_t status = 0;
+    uint64_t t0 = mach_absolute_time();
+    int got = csops_audittoken((pid_t)token.val[5], 5 /* CS_OPS_CDHASH */, cdhash, sizeof cdhash, &token);
+    int error = got ? errno : 0;
+    int got_status = csops_audittoken((pid_t)token.val[5], 0 /* CS_OPS_STATUS */, &status, sizeof status, &token);
+    int status_error = got_status ? errno : 0;
+    double took = ms_since(t0);
+    printf("    csops_audittoken (the kernel's record, by the token), both calls in %.2f ms: ", took);
+    if (got) printf("cdhash refused errno=%d (%s)", error, strerror(error));
+    else {
+        printf("cdhash ");
+        for (int i = 0; i < 8; i++) printf("%02x", cdhash[i]);
+        int same_bytes = own && CFDataGetLength(own) >= 20 && memcmp(cdhash, CFDataGetBytePtr(own), 20) == 0;
+        printf(" (%s)", same_bytes ? "the image's as started" : "not the image's as started");
+    }
+    if (got_status) printf("; status refused errno=%d (%s)\n", status_error, strerror(status_error));
+    else printf("; status word 0x%08x\n", status);
+}
+
+static void d1_checks(const char *when, audit_token_t token, CFDataRef own, CFDataRef other) {
+    printf("  %s:\n", when);
+    kernel_identity(token, own);
+    CFDataRef data = CFDataCreate(NULL, (const UInt8 *)&token, sizeof token);
+    const void *keys[] = {kSecGuestAttributeAudit};
+    const void *values[] = {data};
+    CFDictionaryRef attributes = CFDictionaryCreate(NULL, keys, values, 1, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+    SecCodeRef code = NULL;
+    uint64_t t0 = mach_absolute_time();
+    OSStatus guest = SecCodeCopyGuestWithAttributes(NULL, attributes, kSecCSDefaultFlags, &code);
+    printf("    SecCodeCopyGuestWithAttributes: %d in %.2f ms\n", (int)guest, ms_since(t0));
+    CFRelease(attributes);
+    CFRelease(data);
+    if (guest != errSecSuccess || !code) return;
+    t0 = mach_absolute_time();
+    CFDictionaryRef info = NULL;
+    OSStatus dynamic = SecCodeCopySigningInformation((SecStaticCodeRef)code, kSecCSDynamicInformation, &info);
+    double dynamic_ms = ms_since(t0);
+    CFDataRef cdhash = info ? CFDictionaryGetValue(info, kSecCodeInfoUnique) : NULL;
+    CFNumberRef word = info ? CFDictionaryGetValue(info, kSecCodeInfoStatus) : NULL;
+    uint32_t flags = 0;
+    if (word) CFNumberGetValue(word, kCFNumberSInt32Type, &flags);
+    printf("    SecCodeCopySigningInformation(kSecCSDynamicInformation): %d in %.2f ms, cdhash ", (int)dynamic, dynamic_ms);
+    print_cdhash(cdhash);
+    printf(" (%s), status word 0x%08x\n", cdhash && CFEqual(cdhash, own) ? "the image's as started" : "not the image's as started", flags);
+    if (info) CFRelease(info);
+    SecRequirementRef mine = cdhash_requirement(own), theirs = cdhash_requirement(other);
+    const struct { const char *name; SecCSFlags flags; SecRequirementRef requirement; } checks[] = {
+        {"SecCodeCheckValidity, default flags, its own cdhash (the keeper's runs)", kSecCSDefaultFlags, mine},
+        {"the same, again", kSecCSDefaultFlags, mine},
+        {"the same, a third time", kSecCSDefaultFlags, mine},
+        {"default flags, another image's cdhash (a pinned row that isn't the sender's)", kSecCSDefaultFlags, theirs},
+        {"kSecCSBasicValidateOnly, its own cdhash", kSecCSBasicValidateOnly, mine},
+        {"kSecCSMatchGuestRequirementInKernel, its own cdhash", kSecCSMatchGuestRequirementInKernel, mine},
+        {"kSecCSMatchGuestRequirementInKernel, another image's cdhash", kSecCSMatchGuestRequirementInKernel, theirs},
+    };
+    for (size_t i = 0; i < sizeof checks / sizeof checks[0]; i++) {
+        t0 = mach_absolute_time();
+        OSStatus valid = SecCodeCheckValidity(code, checks[i].flags, checks[i].requirement);
+        printf("    %s: %d in %.2f ms\n", checks[i].name, (int)valid, ms_since(t0));
+    }
+    CFRelease(mine);
+    CFRelease(theirs);
+    CFRelease(code);
+}
+
+// Spawns `img` in its `mach` mode with `port` as its bootstrap special port; returns its pid once its message came.
+static pid_t spawn_sender(const char *img, mach_port_t port, audit_token_t *token) {
+    posix_spawnattr_t attributes;
+    posix_spawnattr_init(&attributes);
+    posix_spawnattr_setspecialport_np(&attributes, port, TASK_BOOTSTRAP_PORT);
+    char *args[] = {(char *)img, "mach", NULL};
+    extern char **environ;
+    pid_t pid;
+    if (posix_spawn(&pid, img, NULL, &attributes, args, environ) != 0) die("posix_spawn");
+    posix_spawnattr_destroy(&attributes);
+    if (!receive_token(port, token)) { kill(pid, SIGKILL); waitpid(pid, NULL, 0); return 0; }
+    return pid;
+}
+
+static void d1_timing(void) {
+    printf("#### D1: Security's check timed (as the user; the keeper runs it as root)\n");
+    mach_port_t port;
+    if (mach_port_allocate(mach_task_self(), MACH_PORT_RIGHT_RECEIVE, &port) != KERN_SUCCESS) die("mach_port_allocate");
+    if (mach_port_insert_right(mach_task_self(), port, port, MACH_MSG_TYPE_MAKE_SEND) != KERN_SUCCESS) die("insert_right");
+    struct stat small, big;
+    stat(image, &small);
+    stat(image_big, &big);
+    printf("== (d1) IMAGE (%lld bytes) sends one message; its token checked\n", (long long)small.st_size);
+    audit_token_t token;
+    pid_t pid = spawn_sender(image, port, &token);
+    if (pid) { d1_checks("IMAGE, its file as signed", token, image_cdhash, big_cdhash); kill(pid, SIGTERM); waitpid(pid, NULL, 0); }
+    printf("== (d2) BIG (%lld bytes: IMAGE's source and a 256 MiB section) sends one message; its token checked; then a copy of IMAGE renamed over BIG's path while BIG runs, and the same token checked again\n", (long long)big.st_size);
+    pid = spawn_sender(image_big, port, &token);
+    if (pid) {
+        d1_checks("BIG, its file as signed", token, big_cdhash, image_cdhash);
+        char swap[PATH_MAX];
+        snprintf(swap, sizeof swap, "%s.swap", image_big);
+        int in = open(image, O_RDONLY), out = open(swap, O_WRONLY | O_CREAT | O_TRUNC, 0755);
+        char buffer[65536];
+        ssize_t n;
+        while (in >= 0 && out >= 0 && (n = read(in, buffer, sizeof buffer)) > 0) put(out, buffer, (size_t)n);
+        close(in);
+        close(out);
+        if (rename(swap, image_big) != 0) die("rename");
+        printf("  a copy of IMAGE renamed over BIG's path; BIG still runs (pid %d)\n", pid);
+        d1_checks("BIG, its path now IMAGE's copy", token, big_cdhash, image_cdhash);
+        kill(pid, SIGTERM);
+        waitpid(pid, NULL, 0);
+        printf("  BIG ended and reaped; its token asked again:\n");
+        kernel_identity(token, big_cdhash);
+    }
+    mach_port_mod_refs(mach_task_self(), port, MACH_PORT_RIGHT_RECEIVE, -1);
+    mach_port_deallocate(mach_task_self(), port);
+}
+
+static void part_three(void) {
+    a_routes();
+    d1_timing();
+}
+
+// IMAGE's, PLAIN's, BIG's and WINDOW's paths and cdhashes, for part three.
+static void third_part_images(char **paths) {
+    image = paths[0];
+    image_plain = paths[1];
+    image_big = paths[2];
+    image_window = paths[3];
+    image_cdhash = file_cdhash(image);
+    big_cdhash = file_cdhash(image_big);
+    printf("IMAGE's file cdhash=");
+    print_cdhash(image_cdhash);
+    printf("\nBIG's file cdhash=");
+    print_cdhash(big_cdhash);
+    printf("\n");
+}
+
 int main(int argc, char **argv) {
     setvbuf(stdout, NULL, _IOLBF, 0);
-    if (argc != 3 && argc != 4) { fprintf(stderr, "usage: pair-token SOCKET_PATH PROGRAM [IMAGE]\n"); return 64; }
     signal(SIGPIPE, SIG_IGN);
+    if (argc == 6 && strcmp(argv[1], "--a-routes") == 0) {
+        third_part_images(argv + 2);
+        part_three();
+        return 0;
+    }
+    if (argc != 3 && argc != 4 && argc != 7) {
+        fprintf(stderr, "usage: pair-token SOCKET_PATH PROGRAM [IMAGE [PLAIN BIG WINDOW]] | pair-token --a-routes IMAGE PLAIN BIG WINDOW\n");
+        return 64;
+    }
     program = argv[2];
-    image = argc == 4 ? argv[3] : NULL;
+    image = argc >= 4 ? argv[3] : NULL;
     program_real = realpath(program, NULL);
     if (strlen(argv[1]) >= sizeof address.sun_path) { fprintf(stderr, "socket path too long\n"); return 1; }
     strcpy(address.sun_path, argv[1]);
@@ -1395,5 +1798,9 @@ int main(int argc, char **argv) {
     trial_f(1, "(f) a connection: the connector writes, its forked child writes, the connector writes last");
     if (image) part_two();
     unlink(argv[1]);
+    if (argc == 7) {
+        third_part_images(argv + 3);
+        part_three();
+    }
     return 0;
 }
