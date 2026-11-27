@@ -1051,6 +1051,7 @@ export const ES = {
   chCloseFind: "Cerrar la búsqueda",
   chLeftAsADraftOver: "Queda como borrador, sobre el cuadro.",
   chLeftAsADraftOver2: "Queda como borrador, sobre el cuadro: `vibeswitcher send` lo ejecuta en el shell del agente después de que escribas su código.",
+  chRunCant: "No se ejecutó: esta sesión ya no acepta borradores desde esta página. Escribe el comando en la terminal de la sesión.",
   chThisSessionHasEnded: "Esta sesión ha terminado.",
   chRunsInAnotherTerminalIt: "Se ejecuta en otra terminal. Aquí se puede leer, no escribir.",
   chThisPageFollowsTheNode: "Esta página sigue al nodo; para escribir en una sesión, usa su terminal.",

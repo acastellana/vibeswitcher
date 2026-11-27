@@ -487,7 +487,8 @@ export function chatView(app) {
     // A code block's Run: only in an agent's session the page drafts for (a shell takes no `send`).
     canRun: () => view.canDraft() && ['claude', 'codex'].includes(store.state.sessions.get(view.session)?.agent),
     runCode: (prompt) => {
-      if (!view.canRun()) return;
+      // The session moved on since Run was drawn (it ended, or no longer takes a draft here): say so, in words.
+      if (!view.canRun()) { say(t('chRunCant')); return; }
       store.sessionDraft(view.session, prompt, [], false);
       say(t('chLeftAsADraftOver2'));
     },

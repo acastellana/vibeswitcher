@@ -1063,6 +1063,7 @@ const EN = {
   chCloseFind: "Close find",
   chLeftAsADraftOver: "Left as a draft, over the box.",
   chLeftAsADraftOver2: "Left as a draft, over the box: `vibeswitcher send` runs it in the agent’s shell after you type its code.",
+  chRunCant: "Not run: this session no longer takes a draft from this page. Type the command in the session’s own terminal.",
   chThisSessionHasEnded: "This session has ended.",
   chRunsInAnotherTerminalIt: "Runs in another terminal. It can be read here, not typed into.",
   chThisPageFollowsTheNode: "This page follows the node; to type into a session, use its terminal.",
