@@ -151,7 +151,8 @@ public final class HostServer {
 
     /// The lock at `path`, taken: the descriptor that holds it. `Failure.alreadyRunning` when another host holds it.
     public static func takeLock(at path: String) throws -> Int32 {
-        let fd = open(path, O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
+        // Never through a link: the lock is the file at its path.
+        let fd = open(path, O_CREAT | O_RDWR | O_CLOEXEC | O_NOFOLLOW, 0o600)
         guard fd >= 0 else { throw Failure.lock(errno) }
         guard flock(fd, LOCK_EX | LOCK_NB) == 0 else {
             Darwin.close(fd)

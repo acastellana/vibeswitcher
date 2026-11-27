@@ -64,12 +64,29 @@ public struct HostRole {
         return home.hasPrefix("/") ? home : nil
     }
 
-    /// A fresh start's lock (`HostServer.takeLock` on `lockPath`): the descriptor that holds it. `main.swift` takes it
-    /// before the vault's key or file is read.
+    /// A fresh start's lock (`HostServer.takeLock` on `lockPath`, never through a link): the descriptor that holds it.
+    /// `main.swift` takes it before the vault's key or file is read. The account's host takes it only when it's the
+    /// file at its path once held (`Failure.notTheLock` otherwise, the descriptor closed): one that isn't runs as
+    /// nothing, rather than as the account's host with its key read and its vault on a lock another host can take.
     public func takeLock() throws -> Int32 {
         let fd = try HostServer.takeLock(at: lockPath)
         afterTaking?(lockPath)
+        if isAccountHost, let why = HostHandover.Lock.notHeld(fd, path: lockPath) {
+            Darwin.close(fd)
+            throw Failure.notTheLock(why)
+        }
         return fd
+    }
+
+    public enum Failure: Error, CustomStringConvertible {
+        /// The lock taken isn't the lock file at its path: why.
+        case notTheLock(String)
+
+        public var description: String {
+            switch self {
+            case .notTheLock(let why): return "its lock isn't the lock file at its path (\(why))"
+            }
+        }
     }
 
     /// The vault's key, `read` (the Keychain's) for the account's host alone: nil for any other, which never reads it.

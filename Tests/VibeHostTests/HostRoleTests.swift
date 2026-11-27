@@ -139,8 +139,9 @@ struct HostRoleTests {
     }
 
     /// On the account's own home, a second host started beside the running one, its lock file removed first (or
-    /// replaced): the first no longer holds the lock there, and saves nothing more; a host whose descriptor doesn't
-    /// hold the lock at its path never opens the vault for writing, and never reads the key for it.
+    /// replaced): the first no longer holds the lock there, and saves nothing more; a vault on a descriptor that doesn't
+    /// hold the lock at its path is never opened for writing (and `main.swift` starts no account's host on one:
+    /// `aLinkedOrReplacedLockStartsNoAccountsHost`).
     @Test func aSecondHostBesideTheRunningOneLeavesOneWriter() throws {
         let role = role(["HOME": account.path])
         let file = role.root.appendingPathComponent("lead/vault.sealed")
