@@ -391,13 +391,16 @@ genuine server, the child of the job's process. Closing it from the command line
 launchd and then checked, the racy shape this design avoids. The server closes it instead: at its start, before it
 serves or writes anything, a Mac node server finds its own row by its running code and requires its connector's peer
 token to run that row's host, hardened (`NodeCheck.macConnectorRefusal`, in `ServerStart`; off with the rest, since no
-Mac host starts a `--node` server yet). Measured by the reviewer (`pair.c`): a stream pair's `LOCAL_PEERTOKEN` names
-the process that made the pair (its pid and pidversion), fixed at creation: not "the last sender", as this section said
-before. **Rests on a refuted premise: under redesign** (the keeper design's K-M1, measured on this Mac on 2026-11-27,
-[its row in the record](../../process/v2-mac-measurements.md): a received pair end's token is read live and names
-whoever last sent or received on the maker's end; after the maker's exec a fresh read names the exec'd image and
-Security accepts it; only a token kept from before the exec is refused; this sentence and what rests on it, the
-connector check included, are left as written for the keeper's proof redesign). Two things for item 13: after an in-place exec handover that token is stale (Security refuses a token whose
+Mac host starts a `--node` server yet). **Corrected 2026-11-27 (the keeper design's K-M1, measured on this Mac, [its row in the
+record](../../process/v2-mac-measurements.md)):** this section said, after the reviewer's `pair.c`, that a stream
+pair's `LOCAL_PEERTOKEN` names the process that made the pair, fixed at creation. **It doesn't**: it names whoever last
+sent, received or polled on the other end, as that process runs now; after an exec a fresh read names the new image
+and Security accepts it, and a failed write or read moves it without a byte (K-M1 (a) to (c), (j), (g4)). So the
+connector check above is open the same way: a host of a session's own that makes the connector, forks a holder of its
+end and execs the genuine pinned host passes it, and the holder talks to the server as its host. It stays off with
+the rest (no Mac host starts a `--node` server); its redesign is the keeper design's Mach form (the server judging a
+message from its host by the message's own audit trailer: its parent's pid, a host row of the record, hardened, as
+K4a-ii's child proof runs the other way), in step 11. Two things for item 13: after an in-place exec handover that token is stale (Security refuses a token whose
 process exec'd), so a server carried across a handover needs a new connector or a restart; and the test is at the
 function, with a real pair's token (a node server's record path isn't a test's to choose). And from the re-check: a
 server child checks its connector's peer once, at its start, so after a handover it would keep serving a swapped host
@@ -1425,27 +1428,30 @@ Each step is small, keeps the app unchanged, and says what it needs from a real 
     "The host's side"; homed here by the re-check of 2026-11-27, its question 3): every `Platform.Spawn` in the host
     image and in the server names `keep` (`POSIX_SPAWN_CLOEXEC_DEFAULT`), its in-place forms too, with a lint over
     their targets. Behaviour-preserving; safe to build now; its own review. Needs: the hosted Mac for the tests.
-11. **The host image's children prove themselves** (the keeper design's K4a-ii). **Rests on a refuted premise: under
-    redesign** (the keeper design's K-M1, 2026-11-27: a pair's token isn't fixed at the making, so the proof below
-    waits on the keeper's proof redesign before it is built). As designed: the parser and the server child
-    spawned with only a channel, proving their code with a fresh pair before they get a link (hardened exactly when the
-    image is, in the handover keeper's `refusal` and `parentRefusal` too; the proof waited off the host's queue, at
-    most 10 s, its spawn off that queue as well, the child at the limit reaped by an exit source, no thread held per
-    proof, and a proof that only timed out told so, never that something replaced the helper: the narrow re-check's
-    N4 (b)); the launcher written afresh at each host start; a
-    pinned image gives pair ends only to its own code, its row's server, or across the checked node's own switch a
-    target the record pins, with its test flags and by-path handover refused (the re-check's N1). Every session's start
-    on the Mac changes, the app's host included, with or without the keeper. After step 10 and the redesign; its cost
-    measured first (K-M14, extended: the spawn's own time, a quarantined or stalled launcher, a burst of
-    never-proving history reads); a hardened image that isn't pinned starts no server child and takes no test keeper
-    or secret (its KP20f); **whether it refuses the by-path handover is open** (refused, the app's own host, hardened
-    and never pinned, loses its sessions at every app update; dropped, it rests on the refuted premise), for the
-    redesign to settle, keeping the app's handover at every update, with no exemption keyed on `ownsLaunchers`;
-    `MacKeeperHandoverTests`' hardened arm moves to function level and to the keeper's K7; its own review; the app and
-    its update checked in the sandbox. The keeper's K4 waits on steps 10 and 11 and the redesign. Then, once step 11
-    is on v2, the pins record's `format 2` (the keeper design's K4b), whose own install script refuses,
-    unconditionally, any commit that doesn't contain step 11's commit (the floor: a build from before it is never
-    served or installed again). Needs: this Mac's real signed hardened images.
+11. **The host image's children prove themselves** (the keeper design's K4a-ii), **in the Mach form** (the keeper
+    design's proof after K-M1: a pair's token can't prove a child, K-M1 (b), (c), (g4)): the parser and the server
+    child spawned with a port of the host's as their bootstrap special port and no socket, each proving its code by
+    one Mach message whose audit trailer must name the spawned pid running the expected code, hardened exactly when the
+    image is (a message sent before an exec is refused, K-M1 (n2)), and only then given its link or connector as a
+    fileport to a port it made, with its real bootstrap port back; the proof waited off the host's queue, at most 10 s,
+    its spawn off that queue as well, the child at the limit reaped by an exit source, no thread held per proof, and a
+    proof that only timed out told so, never that something replaced the helper (the narrow re-check's N4 (b)); the
+    launcher written afresh at each host start; a pinned image gives ends only to its own code, its row's server, or
+    across the checked node's own switch a target the record pins, with its test flags and by-path handover refused
+    (the re-check's N1). Beside it, **the handover keeper's proofs in the Mach form** (the keeper design's K4c:
+    `MacHandoverKeeper` is open today to K-M1 (b) with the pid matching) and the server's check of its host above.
+    Every session's start on the Mac changes, the app's host included, with or without the keeper. After step 10; its
+    cost measured first (K-M14, extended: the spawn's own time, a quarantined or stalled launcher, a burst of
+    never-proving history reads, the host's own image started with a bootstrap port that isn't launchd's, a fileport's
+    round trip); a hardened image that isn't pinned starts no server child and takes no test keeper or secret (its
+    KP20f, the lead's choice (A)), and **keeps its by-path handover** (KP20f, settled: the keeper takes no socket end,
+    so no end it hands out carries a request), so **the Mac app's own host (hardened, never pinned) keeps its handover
+    at every app update** (`HostChildProofTests.theAppsHostStillHandsOverByPathAtAnAppUpdate`), with no exemption keyed
+    on `ownsLaunchers`; `MacKeeperHandoverTests`' hardened arm moves to function level and to the keeper's K7; its own
+    review; the app and its update checked in the sandbox. The keeper's K4 waits on steps 10 and 11. Then, once step 11
+    is on v2, the pins record's `format 2` (the keeper design's K4b, which lands only after this step's Mach form is on
+    v2), whose own install script refuses, unconditionally, any commit that doesn't contain step 11's commit (the
+    floor, which the keeper's K5 raises to K4b's commit). Needs: this Mac's real signed hardened images.
 12. **The node's removal** (the keeper design's answer to its re-check's question 2): an `install-node-mac.sh` remove
     form that stops the node's agent first, then runs the keeper step's `--remove`, or `--remove --forget-store` when
     you ask it to forget the node's record, said before the password (`KeeperStepTests.theNodesRemovalRemovesTheKeeper`
