@@ -6,6 +6,7 @@ Read-only: it opens the recorder's files for reading and writes nothing. Standar
     python3 -I scripts/load-gate-backtest.py                 # every day in ~/.vibeswitcher/stats
     python3 -I scripts/load-gate-backtest.py --stats DIR     # another folder of load-*.jsonl / merges-*.jsonl
     python3 -I scripts/load-gate-backtest.py --top           # also the top process groups' evidence
+    python3 -I scripts/load-gate-backtest.py --until 2026-11-27T11:27   # the data as the review saw it
     python3 -I scripts/load-gate-backtest.py --selftest      # the hand-checked fixture, Tests/Fixtures/load-gate
 
 Inputs (LoadRecorder.swift): load-YYYY-MM-DD.jsonl, one LoadSample about every minute (`load` [1, 5, 15],
@@ -97,9 +98,11 @@ class Sample:
         return self.known and self.one > 2.0 * self.threshold
 
 
-def load_samples(stats, threshold, boost_threshold):
+def load_samples(stats, threshold, boost_threshold, until=None):
     raws = read_jsonl(sorted(glob.glob(os.path.join(stats, "load-*.jsonl"))))
     samples = [Sample(r, threshold, boost_threshold) for r in raws if r.get("t")]
+    if until is not None:
+        samples = [s for s in samples if s.t <= until]
     samples.sort(key=lambda s: s.t)
     boot = None
     for i, s in enumerate(samples):
@@ -116,12 +119,14 @@ def load_samples(stats, threshold, boost_threshold):
     return samples
 
 
-def load_merges(stats):
+def load_merges(stats, until=None):
     merges = []
     for raw in read_jsonl(sorted(glob.glob(os.path.join(stats, "merges-*.jsonl")))):
         if not raw.get("t"):
             continue
         raw["_t"] = dt.datetime.fromisoformat(raw["t"])
+        if until is not None and raw["_t"] > until:
+            continue
         ran = raw.get("first_run") is not None
         raw["_ran"] = ran
         raw["_bad"] = ran and (raw.get("first_run") == "failed" or raw.get("reran") is not None
@@ -178,6 +183,18 @@ def rule_c(boot_minutes):
             return False
         booted = since_boot(s)
         ignore_five = s.idle or (booted is not None and booted <= boot_minutes)
+        return s.one <= s.threshold if ignore_five else steady(s) <= s.threshold
+    return rule
+
+
+def rule_c_guarded(boot_minutes):
+    """(cG) As (c), but the boot clause only while no heavy slot is held: our own build can't pause into room."""
+    def rule(samples, i):
+        s = samples[i]
+        if not s.known:
+            return False
+        booted = since_boot(s)
+        ignore_five = s.idle or (s.held == 0 and booted is not None and booted <= boot_minutes)
         return s.one <= s.threshold if ignore_five else steady(s) <= s.threshold
     return rule
 
@@ -257,6 +274,7 @@ RULES = [
     ("b", "1-minute only", rule_one),
     ("c15", "(a), 5-min ignored while idle or <=15 min after boot", rule_c(15)),
     ("c30", "(a), 5-min ignored while idle or <=30 min after boot", rule_c(30)),
+    ("cG", "(c30), the boot clause only while no slot is held", rule_c_guarded(30)),
     ("cB", "(a), 5-min ignored <=30 min after boot only", rule_boot_only(30)),
     ("d", "(a) while a heavy slot is held, else 1-minute", rule_committed),
     ("d'", "(d), and no room while every slot is held", rule_committed_full),
@@ -381,9 +399,9 @@ def fmt_min(value):
     return f"{value:.0f}"
 
 
-def report(stats, threshold, boost_threshold, top, out=sys.stdout):
-    samples = load_samples(stats, threshold, boost_threshold)
-    merges = load_merges(stats)
+def report(stats, threshold, boost_threshold, top, out=sys.stdout, until=None):
+    samples = load_samples(stats, threshold, boost_threshold, until)
+    merges = load_merges(stats, until)
     if not samples:
         print(f"load-gate-backtest: no load-*.jsonl in {stats}", file=out)
         return None
@@ -596,7 +614,7 @@ def selftest():
     stats = os.path.join(os.path.dirname(here), "Tests", "Fixtures", "load-gate", "stats")
     with open(os.devnull, "w", encoding="utf-8") as sink:
         got = report(stats, None, 36.0, False, out=sink)
-    a, b, c, d = (got["results"][k] for k in ("a", "b", "c30", "d"))
+    a, b, c, d, g = (got["results"][k] for k in ("a", "b", "c30", "d", "cG"))
     expected = [
         ("samples", len(got["samples"]), 16),
         ("a refused", a["refused"], 10.0),
@@ -618,6 +636,8 @@ def selftest():
         ("c30 refused idle", c["refused_idle"], 1.0),
         # (d) is (c) here: the idle moments are the slot-free ones.
         ("d refused", d["refused"], 6.0),
+        # (cG): no slot is held after the fixture's boot, so it is (c30) here.
+        ("cG refused", g["refused"], 6.0),
         ("boots", len({s.boot_at for s in got["samples"] if s.boot_at}), 1),
     ]
     failed = [(name, value, want) for name, value, want in expected if value != want]
@@ -633,11 +653,13 @@ def main():
     parser.add_argument("--threshold", type=float, default=None, help="the normal load_threshold (default 2 x cores)")
     parser.add_argument("--boost-threshold", type=float, default=36.0)
     parser.add_argument("--top", action="store_true", help="also print the top process groups' evidence")
+    parser.add_argument("--until", help="leave out samples and merges after this local time, 2026-11-27T11:27")
     parser.add_argument("--selftest", action="store_true")
     args = parser.parse_args()
     if args.selftest:
         return selftest()
-    return 0 if report(args.stats, args.threshold, args.boost_threshold, args.top) is not None else 1
+    until = dt.datetime.fromisoformat(args.until).astimezone() if args.until else None
+    return 0 if report(args.stats, args.threshold, args.boost_threshold, args.top, until=until) is not None else 1
 
 
 if __name__ == "__main__":

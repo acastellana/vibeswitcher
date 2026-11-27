@@ -1,17 +1,19 @@
 # The Mac's load gate, 2026-11: a backtest of better rules against the recorded samples
 
-**Recommendation: build rule (c).** Keep today's max(1-minute, 5-minute), but have the gate read the 1-minute alone
-during the first 30 minutes after the Mac starts, and whenever nothing of ours is running (no worker or verifier in any
-project, no heavy slot held). **What changes for you:** a lockout after a restart like this morning's would have
-lasted 5 minutes instead of 15. Those 5 are the minutes when the 1-minute itself was over the limit. On a day without a
-restart about 0 minutes come back. **What risk is taken:** in the replay, none. Rule (c) said room at 10 moments when
-today's rule refused, and no overload followed any of them. **The main finding:** the formula is not what holds work
-back. Over 10 days of samples the gate refused 116 minutes a day. At 96% of those minutes a build or test held a heavy
+**Recommendation: build rule (cG).** Keep today's max(1-minute, 5-minute) whenever a build or test holds a heavy slot.
+While no slot is held, have the gate read the 1-minute alone if no worker or verifier runs in any project, or if the
+Mac started less than 30 minutes ago. **What changes for you:** a lockout after a restart like this morning's would
+have lasted about 10 minutes instead of 15: 5 minutes while the 1-minute itself was over the limit, the rest while a
+heavy slot was held. On a day without a restart about 0 minutes come back. **What risk is taken:** in the replay, none.
+The rule gave back 6 minutes that today's rule refused, and no overload followed any of them. While a slot is held it
+is today's rule, so our own build pausing between phases can't open room. **The main finding:** the formula is not
+what holds work back. Over 10 days of samples the gate refused 116 minutes a day. At 96% of those minutes a build or test held a heavy
 slot, and at 73% the 1-minute itself was over the limit: the Mac really was busy, mostly with our own builds and tests.
 The bigger lever is the third heavy slot (see [What the numbers say](#what-the-numbers-say)). That is not this rule.
 
 Written by a worker (task the-mac-s-load) on 2026-11-27. It is a replay of recorded data: the replay generated no load,
-ran no bench and changed no code in Sources/. Reproduce it with `python3 -I scripts/load-gate-backtest.py --top`
+ran no bench and changed no code in Sources/. Reproduce it with
+`python3 -I scripts/load-gate-backtest.py --top --until 2026-11-27T11:28` (the data as this review saw it)
 ([the script](../../../scripts/load-gate-backtest.py)). Its arithmetic is checked on a hand-made fixture
 ([Tests/Fixtures/load-gate](../../../Tests/Fixtures/load-gate)) by `python3 -I scripts/load-gate-backtest.py --selftest`.
 
@@ -48,18 +50,19 @@ Minutes over the 10.0 days of samples, except "/day", which is per 24 hours of s
 
 | Rule | What it says | Refused | /day | Idle | No team | Free | Longest idle | Back | FR load (runs, new) | FR merge (merges, new) |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | --- | ---: | --- | --- |
-| **a** | max(1, 5) ≤ T: **today, the baseline** | 1158 | 116 | 11 | 42 | 20 | 10 m, 11-27 11:04 | 0 | 301 (94, 0) | 128 (41, 0) |
-| b | the 1-minute only | 847 | 85 | 5 | 22 | 0 | 5 m, 11-27 11:04 | 312 | 382 (121, **81**) | 143 (43, **15**) |
-| **c** | (a), but the 5-minute ignored while idle or ≤ 30 min after boot (≤ 15 min: the same) | 1148 | 115 | 5 | 32 | 14 | 5 m, 11-27 11:04 | 11 | 301 (94, 0) | 128 (41, 0) |
-| cB | (a), but the 5-minute ignored ≤ 30 min after boot only | 1148 | 115 | 5 | 32 | 14 | 5 m | 11 | 301 (94, 0) | 128 (41, 0) |
+| a | max(1, 5) ≤ T: **today, the baseline** | 1158 | 116 | 11 | 42 | 20 | 10 m, 11-27 11:04 | 0 | 301 (94, 0) | 128 (41, 0) |
+| b | the 1-minute only | 846 | 85 | 5 | 22 | 0 | 5 m, 11-27 11:04 | 312 | 382 (121, **81**) | 143 (43, **15**) |
+| c | (a), but the 5-minute ignored while idle or ≤ 30 min after boot (≤ 15 min: the same) | 1147 | 115 | 5 | 32 | 14 | 5 m, 11-27 11:04 | 11 | 301 (94, 0) | 128 (41, 0) |
+| **cG** | **(c), but the boot clause only while no heavy slot is held: recommended** | 1152 | 115 | 5 | 36 | 14 | 5 m, 11-27 11:04 | 6 | 301 (94, 0) | 128 (41, 0) |
+| cB | (a), but the 5-minute ignored ≤ 30 min after boot only | 1147 | 115 | 5 | 32 | 14 | 5 m | 11 | 301 (94, 0) | 128 (41, 0) |
 | cI | (a), but the 5-minute ignored while idle only | 1152 | 115 | 5 | 36 | 14 | 5 m | 6 | 301 (94, 0) | 128 (41, 0) |
 | d | committed: (a) while a heavy slot is held, otherwise the 1-minute (team sessions don't count) | 1138 | 114 | 5 | 36 | 0 | 5 m | 20 | 302 (94, 1) | 129 (41, 1) |
-| d′ | (d), and no room while every heavy slot is held | 1881 | 188 | 5 | 36 | 0 | 5 m | 20 | 190 (72, 1) | 109 (32, 1) |
-| k3 | the 1-minute ≤ T at every sample of the last 3 minutes | 1870 | 187 | 8 | 37 | 276 | 8 m | 52 | 253 (77, 8) | 110 (28, 0) |
-| k5 | the same over 5 minutes | 2302 | 230 | 10 | 45 | 390 | 10 m | 14 | 207 (59, 1) | 106 (26, 0) |
-| g | (a), but the 5-minute ignored once the 1-minute has stayed ≤ T/2 for 3 minutes | 1145 | 115 | 10 | 33 | 19 | 9 m | 14 | 301 (94, 0) | 128 (41, 0) |
-| h | (g), and only while no heavy slot is held | 1158 | 116 | 10 | 41 | 19 | 9 m | 1 | 301 (94, 0) | 128 (41, 0) |
-| f24 | max(1, 5) ≤ 24 always: 2 × cores | 1773 | 177 | 12 | 47 | 60 | 10 m | 0 | 196 (58, 0) | 106 (30, 0) |
+| d′ | (d), and no room while every heavy slot is held | 1880 | 188 | 5 | 36 | 0 | 5 m | 20 | 190 (72, 1) | 109 (32, 1) |
+| k3 | the 1-minute ≤ T at every sample of the last 3 minutes | 1869 | 187 | 8 | 37 | 276 | 8 m | 52 | 253 (77, 8) | 110 (28, 0) |
+| k5 | the same over 5 minutes | 2301 | 230 | 10 | 45 | 390 | 10 m | 14 | 207 (59, 1) | 106 (26, 0) |
+| g | (a), but the 5-minute ignored once the 1-minute has stayed ≤ T/2 for 3 minutes | 1144 | 114 | 10 | 33 | 19 | 9 m | 14 | 301 (94, 0) | 128 (41, 0) |
+| h | (g), and only while no heavy slot is held | 1156 | 116 | 10 | 41 | 19 | 9 m | 1 | 301 (94, 0) | 128 (41, 0) |
+| f24 | max(1, 5) ≤ 24 always: 2 × cores | 1772 | 177 | 12 | 47 | 60 | 10 m | 0 | 196 (58, 0) | 106 (30, 0) |
 | f36 | max(1, 5) ≤ 36 always: 3 × cores | 1086 | 109 | 11 | 42 | 15 | 10 m | 72 | 312 (96, 11) | 132 (41, 4) |
 | e | real CPU use (idle share from host_processor_info ticks) | not judgeable: no CPU field is recorded (see [the CPU signal](#e-the-cpu-signal)) | | | | | | | | |
 
@@ -93,13 +96,17 @@ Also printed by the script:
    whose tests failed. Among the moments when today's rule says room, 301 of 12,888 were (**2.3%**). A moment when the
    1-minute is under T but the 5-minute isn't is about 12 times likelier to precede an overload. That is the
    2026-10-28 failure, and it is common, not a one-off: max(1, 5) stays.
-3. **Rule (c) takes back the restart and nothing else.** It gives back 11 minutes, all on 11-27: 11:09–11:13, then
-   11:14–11:17 (inside the boot window, with a slot held), then 11:18. No new false room. The ≤ 15 and ≤ 30 minute
-   boot windows give the same result because there is one boot. (cI), the idle clause alone, gives back only 6,
-   because a heavy slot was held from 11:14 to 11:17. (cB), the boot clause alone, matches (c): the idle clause adds
-   nothing measurable, since the Mac was idle only right after the restart. (c) keeps the idle clause anyway. It is the
-   safe form of "nothing of ours can be pausing between build phases", and it covers an app restart or a quiet night
-   that a boot clock wouldn't.
+3. **Rules (c) and (cG) take back the restart and nothing else.** (c) gives back 11 minutes, all on 11-27:
+   11:09–11:13, then 11:14–11:17, then 11:18. No new false room. But 11:14–11:17 is inside the boot window *with a
+   heavy slot held*, which is exactly the shape the gate must not trust. A build that pauses between phases within 30
+   minutes of a boot would open room under (c), just as 2026-10-28 did. **(cG)** applies the boot clause only while no
+   heavy slot is held. It gives back 6 minutes (11:09–11:13 and 11:18), again with no new false room, and while a
+   slot is held it is today's rule. The ≤ 15 and ≤ 30 minute boot windows give the same result because there is one
+   boot. (cI), the idle clause alone, matches (cG) in these files. The boot clause adds something only when team
+   sessions come back within 30 minutes of a restart, before any slot is held (here they came back at 11:20, when the
+   5-minute was already under 36). (cB), the boot clause alone, matches (c). The idle clause adds nothing measurable,
+   since the Mac was idle only right after the restart. (cG) keeps it anyway: it covers an app restart or a quiet
+   night that a boot clock wouldn't, and no build of ours can be pausing when no slot is held and no team runs.
 4. **(d), the committed-work rule, buys 9 more minutes for one new false-room moment.** It gives back 20 minutes. The
    extra ones are moments with team sessions open, no slot held, the 1-minute low and the 5-minute high (11-15 22:35,
    11-19 15:08–15:10, 11-26 08:57, and others). One of them, 11-14 01:13 (the 1-minute 3.9, the 5-minute 26.7, 2 team
@@ -161,7 +168,7 @@ groups at most, with short-lived processes missed. A short passive measurement o
 beside `sysctl vm.loadavg`, 60 seconds; no load generated) read the CPU **0–7% idle** while the 1-minute load went from
 18 to 40 and the 5-minute from 18 to 22. All of that was under the threshold of 36, while builds were running. So,
 during our work, a CPU-idle rule would say "no room" *more* often than the load rule. It could only help in moments
-like the restart, where the load is high and the CPU possibly isn't, and rule (c) already covers that. **The one extra
+like the restart, where the load is high and the CPU possibly isn't, and rule (cG) already covers that. **The one extra
 field that would make (e) judgeable:** `cpuIdle` in each LoadSample, the host's idle share over the minute since the
 last sample, from `host_statistics(HOST_CPU_LOAD_INFO)` tick deltas (a host call, not a look at any process).
 Recorded for a week, it would let this script add the row.
@@ -172,8 +179,9 @@ Recorded for a week, it would let this script add the row.
 census of team sessions across every project (workers and verifiers; leads don't count). The heavy slots' holders
 (`TestLock`).
 
-**Rule.** `steady` = the 1-minute alone if (a) no worker or verifier runs in any project and no heavy slot is held, or
-(b) the Mac started less than 30 minutes ago. Otherwise it is max(1-minute, 5-minute), as today. Room means `steady` ≤
+**Rule (cG).** `steady` = the 1-minute alone if no heavy slot is held and either (a) no worker or verifier runs in
+any project, or (b) the Mac started less than 30 minutes ago. Otherwise, and always while any heavy slot is held, it
+is max(1-minute, 5-minute), as today. Room means `steady` ≤
 load_threshold (unchanged: 2 × cores, 36 while boosted). Every input that can't be read counts toward waiting: an
 unreadable load means no room, an unreadable uptime means "not just started", and an unreadable census or set of
 holders means "not idle". (Today `MacLoad.isBusy` and the `steadyLoad().map { … } ?? false` call sites treat an
@@ -181,7 +189,7 @@ unreadable load as room. The load was readable in every one of the 14,364 sample
 nothing.)
 
 **Said to a person in one sentence:** "The Mac has room when its load is under the threshold, counting the last 5
-minutes too unless nothing of ours is running or the Mac has just started."
+minutes too unless no build or test holds a slot and either nothing of ours runs or the Mac has just started."
 
 **What each gate uses.** They all use the same `steady` through the one seam they already share
 (`LeadToolset.steadyLoad`, `MacLoad.steady`): start_worker's and audit's refusals, auto_advance's starts, the room
@@ -190,21 +198,23 @@ clause can apply only when the caller knows the census and the holders. Where on
 app's Team line), it uses max(1, 5) as today.
 
 **What the lead is told.**
-- In a refusal on the 5-minute: "the Mac's load is 40 (its 5-minute average; the last minute's is 6), over
-  load_threshold 36: room again in about 4 minutes". The estimate is N = 5 ln((five − one) / (T − one)), said only
+- In a refusal on the 5-minute: "the Mac's load is 70 (its 5-minute average; the last minute's is 6), over
+  load_threshold 36: room again in about 4 minutes" (5 ln(64 / 30) = 3.8, rounded up). The estimate is N = 5 ln((five − one) / (T − one)), said only
   when the 1-minute is under T and rounded up to whole minutes. In the replay it was within 2 minutes of the actual
   wait 63% of the time, with a median error of +0.3 min.
 - When the clause applies, the load is shown with its reason: "load 6 (the last minute's: the Mac started 8 minutes
-  ago)" or "load 6 (the last minute's: no team session runs and no build or test holds a slot)".
+  ago and no build or test holds a slot)" or "load 6 (the last minute's: no team session runs and no build or test
+  holds a slot)".
 - The Team view's spoken line ("the greater of the last minute's and the last 5 minutes'") says the same.
 
 **Tests for that task.**
 - The 11-27 restart as a fixture: room from the first minute the 1-minute is ≤ 36.
-- The 10-28 shape stays refused: a slot held, the 1-minute 20, the 5-minute 45.
-- Team sessions open, no slot held, the 5-minute high: refused.
+- The 10-28 shape stays refused: a slot held, the 1-minute 20, the 5-minute 45. This holds within 30 minutes of a boot
+  too.
+- Team sessions open, no slot held, the 5-minute high, more than 30 minutes after a boot: refused.
 - An unreadable load, uptime or census: refused, or not idle.
 - The estimate's arithmetic.
-- `python3 -I scripts/load-gate-backtest.py` again afterwards: rule (c)'s row is the new baseline.
+- `python3 -I scripts/load-gate-backtest.py` again afterwards: rule (cG)'s row is the new baseline.
 
 ## What was not measurable
 
