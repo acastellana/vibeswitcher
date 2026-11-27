@@ -374,6 +374,30 @@ def analyse(data):
             outside["cpu"] += out_cpu
             outside["build_cpu"] += out_build
         ratios.append((s.one, total / 100.0, s.held))
+    # Above load 48: where the named CPU runs, by slots held (mean cores a sample): our build and test work inside a
+    # slot, ours outside any, sessions, the rest of ours (other of ours), not ours; and the 1-minute beside it.
+    where = {}
+    for i, s in enumerate(data.samples):
+        if not s.top:
+            continue
+        holder_projects = {h.get("project") for _, h in data.holders[i]}
+        merge_held = any(k == "merge" for k, _ in data.holders[i])
+        lead_held = any(k == "lead-other" for k, _ in data.holders[i])
+        row = where.setdefault(min(len(data.holders[i]), 3), {"n": 0, "load": 0.0, "in slot": 0.0, "ours outside": 0.0,
+                                                               "sessions": 0.0, "other of ours": 0.0, "not ours": 0.0})
+        row["n"] += 1
+        row["load"] += s.one
+        for g in s.top:
+            cpu = float(g.get("cpu") or 0) / 100
+            ph = phase_of(g)
+            ft = folder_type(g.get("project"))
+            if ph in ("build", "test"):
+                inside = (ft in ("merge-*", "merge-batch") and merge_held) or (ft == "audit-*" and (lead_held or merge_held)) \
+                    or (g.get("project") in holder_projects)
+                row["in slot" if inside else "ours outside"] += cpu
+            else:
+                row[ph] += cpu
+    out["where"] = where
     out["with_top"] = with_top
     out["phase_cpu"] = phase_cpu
     out["folder_phase"] = folder_phase
@@ -504,6 +528,12 @@ def report(data, out=sys.stdout):
             p(f"  1-minute {lo}-{hi if hi < 10 ** 5 else '…'}: {len(sel)} samples, the top groups use "
               f"median {pct([r[1] for r in sel], 0.5):.1f} cores (p90 {pct([r[1] for r in sel], 0.9):.1f}) of 12; "
               f"load per core used, median {pct([r[0] / max(r[1], 0.1) for r in sel], 0.5):.0f}")
+    p("  where the named CPU runs, by slots held (mean cores a sample; the 1-minute beside it; the rest of the load is")
+    p("  in processes the recorder can't name: short-lived ones, root daemons, groups past the top 5)")
+    for held, row in sorted(a["where"].items()):
+        n = row["n"] or 1
+        p(f"    {held}{'+' if held == 3 else ''} held ({row['n']:3d} samples): 1-minute {row['load'] / n:5.1f}; " + ", ".join(
+            f"{k} {row[k] / n:.1f}" for k in ("in slot", "ours outside", "sessions", "other of ours", "not ours")))
     o = a["outside"]
     p(f"  ours outside any slot (build or test groups whose folder's project holds no slot): {o['samples']} samples, "
       f"{o['minutes']:.0f} min, {o['cpu'] / 100:.0f} core-samples ({o['build_cpu'] / 100:.0f} of them building); by command, "
@@ -579,6 +609,11 @@ def selftest():
         ("refused held", a["refused"]["held"], 4.0),
         ("refused with ours outside", a["refused"]["held_top_outside"], 1.0),
         ("outside samples", a["outside"]["samples"], 1),
+        # 10:06 (1 held): the load run's bundles 3 cores in its slot, its bash loops 9 (other of ours); 10:10 (3 held):
+        # 4 in a slot, 3 outside, 1 not ours.
+        ("where 1 held in slot", a["where"][1]["in slot"], 3.0),
+        ("where 1 held other of ours", a["where"][1]["other of ours"], 9.0),
+        ("where 3 held", [a["where"][3][k] for k in ("in slot", "ours outside", "not ours")], [4.0, 3.0, 1.0]),
         ("outside build cores", a["outside"]["build_cpu"] / 100, 3.0),
         ("anchor 1 held", a["anchor"][1][2], 8),
         ("merge widths", a["merge_cores"], {4: (1, 120)}),
