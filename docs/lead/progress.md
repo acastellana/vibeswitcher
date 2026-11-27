@@ -5210,3 +5210,8 @@ That freeze looks like starvation (the Mac loaded or paging), not the app's work
 - 2026-11-27 16:32 Planned review-v2-s-keeper-2: Review v2's keeper proof as redesigned on Mach messages (branch v2-mac-keeper-proof) as an independent security reviewer: report only
 - 2026-11-27 16:48 Pipeline held: why-a-heavy-slot ready to merge with none landing; cause: every test slot held
 - 2026-11-27 16:53 Merged why-a-heavy-slot: Why a heavy slot loads the Mac beyond its share of cores: measure where the load of a build or test run comes from, and name the fixes (report only) (build c08b3a3f8520)
+- 2026-11-27 16:53 Automatically (auto_advance): Merged why-a-heavy-slot (Why a heavy slot loads the Mac beyond its share of cores: measure where the load of a build or test run comes from, and name the fixes (report only)) into main at 1bb2c3cd, on its passing audit and the full test run.
+- 2026-11-27 16:53 Automatically (auto_advance): Cleaned up why-a-heavy-slot (freed 1.8 GB of build output and temporary folders). It stays done.
+- 2026-11-27 16:59 Started a worker on a-heavy-slot-gets
+- 2026-11-27 16:59 Automatically (auto_advance): Started a worker on a-heavy-slot-gets (A heavy slot gets its real share: scripts/test.sh hands vs-heavy the real VibeSwitcher folder, so a worker's run counts 3 slots, not 2), its after tasks done (why-a-heavy-slot).
+- 2026-11-27 16:59 Automatically (auto_advance): Overlap for a-heavy-slot-gets's start (a warning only: nothing was refused or reordered). Sources/VibeCore/TestLock.swift: the-load-gate-reads (running: its branch changes it); scripts/test.sh: scripts-test-sh-fails (planned: its boundaries name it).
