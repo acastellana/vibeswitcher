@@ -100,9 +100,12 @@ enum SessionReplyTicks {
     }
 
     /// Whether `now` (the screen read again) shows `check` on the question `menu` was: the same question, its cursor on
-    /// the row and every tick as asked.
+    /// the row and every tick as asked. The same question holds its options' words too (the review's N-C5-1: options
+    /// replaced by others of the same count are not ticked and submitted), but for the free-text row's, which change
+    /// as it is typed into.
     static func shows(_ now: ScreenMenu?, _ check: Check, of menu: ScreenMenu) -> Bool {
         guard let now, now.sameQuestion(as: menu), now.checked != nil else { return false }
+        guard menu.options.indices.allSatisfy({ SessionPrompt.takesText(menu, $0) || now.options[$0] == menu.options[$0] }) else { return false }
         return now.selected == check.cursor && now.checked == check.ticks
     }
 }
