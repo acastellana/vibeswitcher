@@ -187,10 +187,10 @@ struct ApprovalLinesReviewProcessTests {
     /// (`PeerFacts.read`), and dropped when that check fails, as the ancestry is. A token whose pidversion isn't the
     /// running process's (what a pid given again, or an exec since the connect, leaves: M7; the link's own binding is
     /// `ProcessesTests.aTokenFromBeforeAnExecOrAnEndNamesNoLink`) gives no coalition and no ancestry, so the voice
-    /// refuses. The environment's marker is NOT dropped with them (read before the check too, but not gated on it): it
-    /// is the process's that has the pid now, harmless only because the ancestry line runs before the environment line
-    /// in `callerRefusal`; pinned here, so a reorder of the lines shows.
-    @Test func theCoalitionIsBoundToTheTokensProcessAndTheMarkerOnlyByTheLinesOrder() throws {
+    /// refuses. The environment's marker is dropped with them (D2): read before the check too, it would otherwise be
+    /// the environment of whatever process has the pid now, kept harmless only by the ancestry line running first in
+    /// `callerRefusal`; so a reorder of the lines can't make it count.
+    @Test func theCoalitionAndTheMarkerAreBoundToTheTokensProcess() throws {
         #if canImport(Darwin)
         let token = try Self.ownToken()
         let own = try #require(Platform.Processes.coalition(getpid()))
@@ -201,8 +201,8 @@ struct ApprovalLinesReviewProcessTests {
         let unbound = PeerFacts.read(pid: getpid(), token: stale)
         #expect(unbound.coalition == nil, "\(unbound)")
         #expect(unbound.ancestry == nil && unbound.terminal == .unreadable && unbound.underRunner == nil, "\(unbound)")
-        // Not gated: the process with the pid now (this one) read as it is.
-        #expect(unbound.sessionMarker == bound.sessionMarker && unbound.sessionMarker != nil, "\(unbound)")
+        // Gated as the coalition is (D2): a process the token's check hasn't bound gives no marker.
+        #expect(bound.sessionMarker != nil && unbound.sessionMarker == nil, "\(unbound)")
         let launchd = try #require(Platform.Processes.coalition(1))
         #expect(Self.voice(own: launchd).callerRefusal(peer: stale, facts: unbound, live: LiveSessions(), uid: getuid())
                 == "its ancestry can't be read")
