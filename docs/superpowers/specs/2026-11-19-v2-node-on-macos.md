@@ -36,8 +36,8 @@ node host beside the app's, no voice rule, no Mac seal list, no install script f
 as the user's: the LaunchAgent (step 5, "The LaunchAgent: start, stop and status"; `start` refused by
 `NodeSystem.macUnbuilt`), the checked node host beside the app's ("The checked node start"; off behind
 `HostImages.isCheckedMacNode` and `macServerRefusal`), the voice rule's `approval` mode (off behind
-`NodeSystem.approvalMeasured`; row 3's two new lines settled, not built: "The rule's lines, settled from the
-measurements"), the Mac seal list (step 8, "Built: `MacSealList`"; watched only by a checked node host's book) and the
+`NodeSystem.approvalMeasured`; row 3's two new lines built, off, reviewed ready with fixes: "The rule's lines, settled
+from the measurements"), the Mac seal list (step 8, "Built: `MacSealList`"; watched only by a checked node host's book) and the
 install script (step 7, `install-node-mac.sh`, unproven by a real install). Still not built: the unified log (step 6)
 and living beside the app (step 9). The node runs as the user's on a Mac only when the switch-on review and the user
 turn those flags on.
@@ -171,10 +171,9 @@ design the page's requests are judged by the device's key, outside them.
 The measurement record's row 3: whether to add the coalition line (M4) and the peer's environment line (M2), and the
 `approval` mode's guard rails, from [the measurements](../../process/v2-mac-measurements.md): M1 to M14 (2026-11-25, an
 agent's session) and the user's keyboard session of 2026-11-26 (K-LA-1 to K-LA-7, K-ESC-1 to K-ESC-3, K-AG-1; run from a
-VibeSwitcher shell card, not Terminal.app). **Settled, not built**: `ApprovalVoice` has neither new line yet;
-`NodeSystem.approvalMeasured` stays false until the two lines are built, the independent review that precedes any
-switch-on has read them, and the user says go.
-**Built, off (2026-11-27, branch `v2-mac-approval-lines`):** both lines are in `ApprovalVoice.callerRefusal` (`ApprovalLinesTests`), each as this table words it, still off behind `NodeSystem.approvalMeasured`; the review owed reads them.
+VibeSwitcher shell card, not Terminal.app). Settled 2026-11-26; `NodeSystem.approvalMeasured` stays false until the
+review's items before the flip are closed and the user says go.
+**Built, off (2026-11-27, branch `v2-mac-approval-lines`):** both lines are in `ApprovalVoice.callerRefusal` (`ApprovalLinesTests`), each as this table words it, still off behind `NodeSystem.approvalMeasured`. The independent review read them (REVIEW-row3, `ApprovalLinesReviewTests`): ready with fixes, no Important; its two fixes owed before the branch is offered are in (D1 and N2: which kinds the lines refuse, in this table and `ApprovalVoice`'s doc; D2: `PeerFacts.read` drops the session marker when the token's check fails, as it drops the coalition).
 
 **What carries the guarantee for a state change: the dialog alone.** (A read asks no dialog: for reads these lines
 are the whole gate, which K-ESC-1 to 3 now show an escape passes; "Open for the user: the Mac's reads" below.) Every
@@ -193,7 +192,7 @@ boundary.
 | The controlling terminal isn't a live session's | a peer on a session's terminal | `setsid`; an escape, which gets a fresh terminal of Terminal's (K-ESC-1/2: `ttys014`) | none | refused | **kept** |
 | No branch code runner above | a peer under one | (not measured on the Mac) | none | refused | **kept** |
 | **The coalition: the peer isn't in the server's own resource coalition** (the node job's: the host, the server and every session descend from it; the server reads its own once at its start, M4's `self`) | every descendant of a node session that didn't go through launchd, however detached: a process keeps its coalition through fork, exec, `setsid` and reparenting to launchd (M4); a `setsid` child of a LaunchAgent job is in the job's coalition while the job runs (K-AG-1, two runs) | the escapes through launchd: a job of its own gets a new coalition (K-ESC-3), `open -a Terminal` and AppleScript land in Terminal's (K-ESC-1/2) | none expected: the user's Terminal is Terminal's coalition (by inference from K-ESC-1, Terminal's process in it; **open**, closed by ANC-1), the app's shell cards the app's (1841, every caller block); a command line typed in a node session is ancestry's already | refused (for reads too, as every line: `callerRefusal` runs first): the installed command line is the user's hardened build, which M4 read detached and hardened; a private read (flavour 20, not in the SDK's headers) a later macOS may change makes every state change refused, loudly, never open | **added** (settled here on the records, for the review) |
-| **The peer's environment: `VIBESWITCHER_SESSION` set on the peer itself** (never an ancestor: Apple's binaries read empty, M2 and K-ESC-1/2's chains) | any process carrying the variable: the Mac app's shell cards and agent sessions (`VIBESWITCHER_SESSION=set` in every caller block, K-ESC-1 to 3), which no other line refuses (not a node session, not the node's coalition: an app agent's Bash tool running the command line would otherwise reach the dialog); a node session's descendant that kept it | anything that dropped it: `env -u`, a re-exec with an environment of its own, a job a session loads itself (K-ESC-3: unset, `ppid=1`), an escape into Terminal (K-ESC-1/2: unset) | **the user's own shell cards in the Mac app, for reads as well as state changes**: `ApprovalVoice.judge` runs every line (`callerRefusal`) before it looks at the kind, so `status`, `board` and the other reads are refused there too; on a node the user runs the command line from Terminal, or uses the page; the refusal says so | refused (readable for the user's builds with SIP on, M2) | **added as an early refusal, not a boundary** (the lead's call, 2026-11-26, reversible): the approval's guarantee rests on the dialog alone (its words, open below; one Escape posted by an untrusted process didn't end it, K-LA-7), never on this line or any other, and the review is not to count it |
+| **The peer's environment: `VIBESWITCHER_SESSION` set on the peer itself** (never an ancestor: Apple's binaries read empty, M2 and K-ESC-1/2's chains) | any process carrying the variable: the Mac app's shell cards and agent sessions (`VIBESWITCHER_SESSION=set` in every caller block, K-ESC-1 to 3), which no other line refuses (not a node session, not the node's coalition: an app agent's Bash tool running the command line would otherwise reach the dialog); a node session's descendant that kept it | anything that dropped it: `env -u`, a re-exec with an environment of its own, a job a session loads itself (K-ESC-3: unset, `ppid=1`), an escape into Terminal (K-ESC-1/2: unset) | **the user's own shell cards in the Mac app, for their own reads as well as state changes**: `ApprovalVoice.judge` runs every line (`callerRefusal`) before it looks at the kind, so every state change and every one of the user's own reads (the socket's `.user` and `.webRead` reads: `mail`, `recent`, `brief`, `shells`, `config.held`, `base.show`, `approve.list`, `plugin.inspect`, `update.check`, `start`, `web.passkey`, `web.pairing`) is refused there with the line's words and no dialog, and the hello's voice word says `other`; anyone's kinds (`status`, `board`, `questions`, `plugin.list` and the other `.anyone` reads) never reach `ApprovalVoice` (the socket routes them `.read`), so a shell card keeps them (the review's `onTheWireTheLinesRefuseTheUsersReadsButNotAnyonesReads`); on a node the user runs the command line from Terminal, or uses the page; the refusal says so | refused (readable for the user's builds with SIP on, M2) | **added as an early refusal, not a boundary** (the lead's call, 2026-11-26, reversible): the approval's guarantee rests on the dialog alone (its words, open below; one Escape posted by an untrusted process didn't end it, K-LA-7), never on this line or any other, and the review is not to count it |
 | The responsible process | — | — | — | — | **no line**: after `open -a Terminal` the escaped shell, `bash` and `zsh` name Terminal (K-ESC-1), after AppleScript each names itself (K-ESC-2), a self-loaded job itself (K-ESC-3), and under the app's session host every process names itself (M5, every caller block): no fact to judge by, and private |
 
 **The `approval` mode's guard rails, with the dialog:**
@@ -1483,7 +1482,7 @@ user's server takes it only once `NodeSystem.approvalMeasured` is turned on, aft
 property list, its check, the `launchctl` lines and `print`'s pid), not wired: `start` on the Mac is still refused.
 Step 4 on this Mac (2026-11-25 and 26): the agent's measurements M1 to M14, then the user's keyboard session (part A of
 the runbook, from a shell card: LA-1, 2, 3, 6, 7, ESC-1, 2, 3, AG-1; ANC-1, ANC-2, LA-4, LA-5 and the `sudo` trial not
-run); row 3 settled from them ("The rule's lines, settled from the measurements"), its two lines not built; the page's
+run); row 3 settled from them ("The rule's lines, settled from the measurements"), its two lines since built, off; the page's
 12-hour unlock and the Mac's browser passkey recorded in "The user's voice on the Mac".
 
 **Progress since (corrected 2026-11-26, the join of `v2-mac-seal-list` and `v2-mac-runbook`).** "Step 5's agent is
@@ -1522,7 +1521,7 @@ the premise holds: a detached session reads these five with no dialog unless the
   opens and confirms the page, then up to 12 hours with no prompt; the unlock is the device's, and on the Mac desktop a
   browser passkey (one Touch ID); the server's own dialog stays for the command line's state changes, the first
   enrolment and guarded changes (each its own Touch ID, never by the unlock alone).
-- **(settled 2026-11-26 on the measurements, for the review; not built)** The rule's lines: the coalition line added;
+- **(settled 2026-11-26 on the measurements; built 2026-11-27, off, reviewed ready with fixes)** The rule's lines: the coalition line added;
   the peer's environment line added as an early refusal, not a boundary (the lead's call, reversible); no
   responsible-process line; the guard rails kept; what stays open named with its keyboard step.
 - **(call)** The service is a LaunchAgent in `gui/<uid>`, not started by the app.

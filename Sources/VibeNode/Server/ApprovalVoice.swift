@@ -18,8 +18,13 @@ import VibeCore
 ///    is no live session's; no branch code runner is above it; it isn't in the server's own launchd coalition (the
 ///    coalition line); its own environment doesn't carry `VIBESWITCHER_SESSION` (the environment line, an early
 ///    refusal, not a boundary). The last two are the spec's row 3, settled from the user's measurements of 2026-11-26
-///    ("The rule's lines, settled from the measurements"); both refuse reads too, since every line runs before the kind
-///    is looked at.
+///    ("The rule's lines, settled from the measurements"). Every line runs before the kind is looked at, so what they
+///    refuse is everything that reaches `judge`: every state change, and the user's own reads, the socket's kinds of
+///    sender `.user` or `.webRead` with `effect: .read` (`mail`, `recent`, `brief`, `shells`, `config.held`,
+///    `base.show`, `approve.list`, `plugin.inspect`, `update.check`, `start`, `web.passkey`, `web.pairing`). Anyone's
+///    kinds (`status`, `board`, `questions`, `plugin.list` and the other `.anyone` reads) never reach it: the socket
+///    routes them `.read` (`Principal.route`), so a shell card keeps them. The hello's voice word, judged here, says
+///    `other` with the line's words.
 /// 4. a request that changes nothing (`NodeWire.changesState` false) is the user's voice then, as on Linux;
 /// 5. a state change is put to the person at the Mac (`authenticator`, LocalAuthentication's dialog), its reason the
 ///    card's text the engine built (`reason(kind:card:)`, never the board's): approved, it is the user's voice; declined,
