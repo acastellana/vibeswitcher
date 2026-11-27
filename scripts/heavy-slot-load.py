@@ -242,6 +242,7 @@ class Data:
 
 
 ALL_KINDS = ("merge", "lead-other", "worker", "worker-v2", "load-run", "other-project", "no-project")
+OUR_KINDS = ("merge", "lead-other", "worker", "worker-v2", "load-run")
 
 
 def analyse(data):
@@ -292,6 +293,9 @@ def analyse(data):
         conc["by_day"][day] = conc["by_day"].get(day, 0.0) + o
     out["concentration"] = conc
     out["slot_minutes"] = slot_min
+    # Slot-minutes add once per holder, so with two slots held a minute counts twice: their sum is not held_minutes.
+    out["slot_minutes_total"] = sum(slot_min.values())
+    out["slot_minutes_ours"] = sum(slot_min[k] for k in OUR_KINDS)
     out["over_share"] = over
     out["over_share_total"] = over_total
     out["held_minutes"] = held_minutes
@@ -544,6 +548,8 @@ def report(data, out=sys.stdout):
         ow = a["over_share_weighted"][k]
         p(f"  {k:14} {sm:8.0f} {sm / days:6.0f} {o:10.0f} {100 * o / (a['over_share_total'] or 1):5.0f}% "
           f"{ow:8.0f} {100 * ow / (a['over_share_total'] or 1):5.0f}% {a['over_limit_with'][k]:10.0f}")
+    p(f"  slot-minutes, one per holder a minute: {a['slot_minutes_total']:.0f} in all, {a['slot_minutes_ours']:.0f} this"
+      f" project's (merge, lead-other, worker, worker-v2, load-run)")
     p("  (over-share: max(0, 1-min - B - n x share) x minutes, split equally among the n holders, then split by what")
     p("   each kind adds over B when it holds the only slot (by alone); over-T min: minutes")
     p("   with the 1-minute over the threshold in force while that kind held a slot, each kind present counted)")
@@ -636,7 +642,8 @@ def selftest():
             top: swift-frontend 400 % in ours (a slot of ours is held: inside), swift-frontend 300 % in a folder whose
             project holds no slot (outside, building: 3 cores), a 100 % group in no folder (not ours)
       10:13 70 (the 5-minute 70): lead-other                                               -> 61
-    Slot-minutes: merge 3, worker 2, load-run 3, lead-other 3, other-project 1, worker-v2 1. Over-share: merge
+    Slot-minutes: merge 3, worker 2, load-run 3, lead-other 3, other-project 1, worker-v2 1: 13 in all, 12 ours, over
+      10 minutes with a slot held (10:04 and 10:10 count each holder). Over-share: merge
       4 + 12 + 8 = 24, worker 8, load-run 103, lead-other 11 + 11 + 61 = 83, other-project 11, worker-v2 11: 240.
     Over T with a slot held: 10:06, 10:08, 10:10, 10:13: 4, with a load run 2. The gate (max(1, 5) > 36) refuses the
       same 4, all with a slot held; of the two with top groups, 10:10 shows ours outside the slots: 1.
@@ -657,6 +664,10 @@ def selftest():
         ("lead-other slot-min", sm["lead-other"], 3.0),
         ("other-project slot-min", sm["other-project"], 1.0),
         ("worker-v2 slot-min", sm["worker-v2"], 1.0),
+        # 3 + 2 + 3 + 3 + 1 + 1; other-project's 1 isn't ours. Minutes with a slot held: 10 (10:02-10:10, 10:13).
+        ("slot-min total", a["slot_minutes_total"], 13.0),
+        ("slot-min ours", a["slot_minutes_ours"], 12.0),
+        ("held minutes", a["held_minutes"], 10.0),
         ("merge over-share", round(ov["merge"], 6), 24.0),
         ("worker over-share", round(ov["worker"], 6), 8.0),
         ("load-run over-share", round(ov["load-run"], 6), 103.0),
