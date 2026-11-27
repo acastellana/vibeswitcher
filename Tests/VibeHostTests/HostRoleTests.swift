@@ -127,6 +127,9 @@ struct HostRoleTests {
             let scratch = role(environment, lock: other)
             #expect(!scratch.holdsRootLock && !scratch.isAccountHost, "\(environment)")
             #expect(scratch.socketPath(argument: nil) == nil, "\(environment): it would take the account's host.sock")
+            // Handed over to (a build before listening there, its sessions in this process): it carries on there.
+            #expect(scratch.socketPath(argument: nil, handingOver: true) == scratch.root.appendingPathComponent("host.sock").path,
+                    "\(environment): a handover would hang up its sessions")
             // A socket of its own given: that one.
             #expect(scratch.socketPath(argument: base.appendingPathComponent("own.sock").path)
                     == base.appendingPathComponent("own.sock").path, "\(environment)")

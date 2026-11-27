@@ -72,9 +72,11 @@ public struct HostRole {
     /// another lock on the account's own folder with no `--socket`: that one isn't the folder's host, and listening
     /// unlinks what's at the path first, so it would take the account's host's socket. Nil then: `main.swift` doesn't
     /// start. A host on a lock of its own elsewhere (the sandbox's, on its own home) keeps its folder's `host.sock`.
-    public func socketPath(argument socketArgument: String?) -> String? {
+    /// `handingOver`: a build before executed this one in its place (`--handover`), already listening there with the
+    /// sessions in this process: it carries on there, as before, rather than exit and hang up their terminals.
+    public func socketPath(argument socketArgument: String?, handingOver: Bool = false) -> String? {
         if let socketArgument { return socketArgument }
-        if !holdsRootLock, onAccountFolder { return nil }
+        if !holdsRootLock, onAccountFolder, !handingOver { return nil }
         return root.appendingPathComponent("host.sock").path
     }
 

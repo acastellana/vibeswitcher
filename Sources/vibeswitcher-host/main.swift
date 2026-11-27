@@ -55,8 +55,9 @@ func ensureLauncher() -> String {
     return launcher
 }
 // Its socket: a host on a lock of its own on the account's folder, with none given, doesn't start (see
-// `HostRole.socketPath`), before it touches that folder's files or the socket there.
-guard let socketPath = role.socketPath(argument: value(after: "--socket")) else {
+// `HostRole.socketPath`), before it touches that folder's files or the socket there. Not a handover's: the sessions are
+// in this process already.
+guard let socketPath = role.socketPath(argument: value(after: "--socket"), handingOver: value(after: "--handover") != nil) else {
     FileHandle.standardError.write(Data(("vibeswitcher-host: on \(lockPath), not \(role.root.path)'s own lock, and no "
         + "--socket: not started (its host.sock is that folder's host's)\n").utf8))
     exit(1)
