@@ -152,7 +152,8 @@ done
 # A named folder that's there and can't be read (or no folder named: ""), or a mac-limits.json or boost.json there that
 # can't be read or isn't a JSON object, is unread: then the count is at least the highest slot the lock folder has a
 # file for (a reader that could read its count made it), so the share is narrower, never wider. A folder or file that
-# isn't there is Settings unset, or no boost, as the app takes it (a merge's scratch home has none). Prints "SLOTS LIMIT", then on a line of its own what it couldn't read, if anything.
+# isn't there is Settings unset, or no boost, as the app takes it (a merge's scratch home has none). Prints "SLOTS
+# LIMIT", then on a line of its own what it couldn't read, if anything.
 slots=$(/usr/bin/perl -MJSON::PP -e '
     my ($root, $ncpu, $own, $named, $locks) = @ARGV;
     my @unread;
