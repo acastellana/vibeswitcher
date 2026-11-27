@@ -87,14 +87,19 @@ public enum WebAssets {
     public static let compressible: Set<String> = [contentTypes["html"]!, contentTypes["js"]!, contentTypes["css"]!, contentTypes["json"]!,
                                                    contentTypes["webmanifest"]!]
 
-    /// Whether an `Accept-Encoding` value takes gzip: `gzip` or `x-gzip` (or `*`) with no `q=0`.
+    /// Whether an `Accept-Encoding` value takes gzip: `gzip` or `x-gzip` named with no `q=0`; named neither, `*` with
+    /// no `q=0` (RFC 9110 12.5.3: a coding named outweighs `*`).
     public static func takesGzip(_ acceptEncoding: String?) -> Bool {
-        (acceptEncoding ?? "").split(separator: ",").contains { item in
+        var named: [Double] = []
+        var any: Double?
+        for item in (acceptEncoding ?? "").split(separator: ",") {
             let parts = item.split(separator: ";").map { $0.trimmingCharacters(in: .whitespaces).lowercased() }
-            guard let name = parts.first, ["gzip", "x-gzip", "*"].contains(name) else { return false }
+            guard let name = parts.first else { continue }
             let q = parts.dropFirst().first { $0.hasPrefix("q=") }.flatMap { Double($0.dropFirst(2)) } ?? 1
-            return q > 0
+            if name == "gzip" || name == "x-gzip" { named.append(q) } else if name == "*" { any = q }
         }
+        if !named.isEmpty { return named.contains { $0 > 0 } }
+        return (any ?? 0) > 0
     }
 
     /// The asset as the browser asked for it: gzipped (`Content-Encoding: gzip`, its own `ETag`, the gzip's bytes'

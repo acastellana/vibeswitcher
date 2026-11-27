@@ -229,7 +229,7 @@ struct WebAssetsTests {
         // Every other header is the file's, in its order.
         let others = { (headers: [(String, String)]) in headers.filter { !["Content-Encoding", "Vary", "ETag"].contains($0.0) }.map { "\($0.0): \($0.1)" } }
         #expect(others(packed.headers) == others(script.headers))
-        for plain in [nil, "", "identity", "br, zstd", "gzip;q=0", "deflate, gzip; q=0.0"] as [String?] {
+        for plain in [nil, "", "identity", "br, zstd", "gzip;q=0", "deflate, gzip; q=0.0", "gzip;q=0, *", "*;q=0"] as [String?] {
             let response = WebAssets.response(to: script, ifNoneMatch: nil, acceptEncoding: plain)
             #expect(response.body == script.body, "\(plain ?? "nil")")
             #expect(named("Content-Encoding", response.headers).isEmpty, "\(plain ?? "nil")")
