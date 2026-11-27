@@ -35,7 +35,8 @@ this counts: sized jobs alone would keep it at 0.
 Phases: the 1-minute load by minutes into the hold (single-holder samples), and above load 48 the top groups' CPU by
 command: build (swift-frontend, swift-build, swift-package, swiftc, swift-driver, clang, ld), test (swiftpm-testing,
 the host, parsers and MCP server the tests start, git, node, xctest), other of ours (any other group in a project
-folder) and not ours (no project folder: the browser, the VM, system daemons).
+folder), sessions (Claude Code and the MCP server it runs, whose command or group leader is a version such as
+"2.1.327") and not ours (no project folder: the browser, the VM, system daemons).
 """
 import argparse
 import datetime as dt
@@ -93,8 +94,17 @@ def folder_type(project):
     return "other folder"
 
 
+def is_session(name):
+    """A Claude Code process: its command name is its version ("2.1.327")."""
+    parts = (name or "").split(".")
+    return len(parts) == 3 and all(x.isdigit() for x in parts)
+
+
 def phase_of(group):
     command = group.get("command") or ""
+    # A session's own processes (Claude Code, and the MCP server it runs) aren't a build or a test.
+    if is_session(command) or is_session(group.get("leader")):
+        return "sessions"
     if command in BUILD:
         return "build"
     if command in TEST or command.startswith("vibeswitcher-") or command.startswith("launcher"):
@@ -284,6 +294,21 @@ def analyse(data):
         share = wmean([(share_of(r[2], r[3]), r[1]) for r in rows])
         out["single"][k] = {"minutes": sum(r[1] for r in rows), "mean": mean, "p90": pct(ones, 0.9),
                             "added": mean - data.baseline, "share": share}
+    # The same over-share split by each kind's load alone (what it adds over B with no other slot held; a kind never
+    # alone takes the mean of all single-holder samples): a kind that loads the Mac alone takes more of a shared excess.
+    alone_all = [r for rows in single.values() for r in rows]
+    fallback = max(0.1, wmean([(r[0], r[1]) for r in alone_all]) - data.baseline) if alone_all else 1.0
+    weight = {k: max(0.1, out["single"][k]["added"]) if k in out["single"] else fallback for k in ALL_KINDS}
+    over_w = {k: 0.0 for k in ALL_KINDS}
+    for i, s in enumerate(data.samples):
+        kinds = data.kinds_at(i)
+        if not kinds:
+            continue
+        o = data.over_share(i) * s.weight
+        total_w = sum(weight[k] for k in kinds)
+        for k in kinds:
+            over_w[k] += o * weight[k] / total_w
+    out["over_share_weighted"] = over_w
     # Compositions for 2 and 3 held.
     comp = {}
     for i, s in enumerate(data.samples):
@@ -312,6 +337,7 @@ def analyse(data):
     folder_phase = {}
     ratios = []
     outside = {"samples": 0, "minutes": 0.0, "cpu": 0.0, "build_cpu": 0.0}
+    outside_by = {}
     with_top = 0
     for i, s in enumerate(data.samples):
         if not s.top:
@@ -340,6 +366,8 @@ def analyse(data):
                     out_cpu += cpu
                     if ph == "build":
                         out_build += cpu
+                    key = (g.get("command"), g.get("leader") or "-", ft)
+                    outside_by[key] = outside_by.get(key, 0.0) + cpu
         if out_cpu:
             outside["samples"] += 1
             outside["minutes"] += s.weight
@@ -350,12 +378,26 @@ def analyse(data):
     out["phase_cpu"] = phase_cpu
     out["folder_phase"] = folder_phase
     out["outside"] = outside
+    out["outside_by"] = outside_by
     out["ratios"] = ratios
     # Load runs: episodes, minutes, load while one is held, and the over-limit minutes with one held.
     lr_min = sum(data.samples[i].weight for ep in data.load_run_episodes for i in ep["samples"])
     lr_over = sum(data.samples[i].weight for ep in data.load_run_episodes for i in ep["samples"]
                   if data.samples[i].known and data.samples[i].one > data.samples[i].threshold)
-    out["load_runs"] = {"episodes": len(data.load_run_episodes), "minutes": lr_min, "over_limit": lr_over}
+    # Alone: the load run the only holder and the 1-minute over T. Decided by its busy loops: over T, but under it
+    # once its target's worth above B (--load 2 x cores, less what the Mac had anyway) is taken out.
+    lr_alone = lr_loops = 0.0
+    for ep in data.load_run_episodes:
+        for i in ep["samples"]:
+            s = data.samples[i]
+            if not s.known or s.one <= s.threshold:
+                continue
+            if len(data.holders[i]) == 1:
+                lr_alone += s.weight
+            if s.one - max(0.0, 2 * s.cores - data.baseline) <= s.threshold:
+                lr_loops += s.weight
+    out["load_runs"] = {"episodes": len(data.load_run_episodes), "minutes": lr_min, "over_limit": lr_over,
+                        "alone_over": lr_alone, "loops_decide": lr_loops}
     # Episodes by kind: count and median length in minutes, the time a hold takes.
     eps = {}
     for ep in data.episodes():
@@ -410,16 +452,18 @@ def report(data, out=sys.stdout):
     p()
     p(f"slot-minutes by kind ({a['held_minutes']:.0f} min with a slot held; over-share load-minutes "
       f"{a['over_share_total']:.0f}; minutes with a slot held and the 1-minute over T: {a['over_limit_held']:.0f})")
-    p(f"  {'kind':14} {'slot-min':>8} {'/day':>6} {'over-share':>10} {'share%':>6} {'over-T min':>10}")
+    p(f"  {'kind':14} {'slot-min':>8} {'/day':>6} {'over-share':>10} {'share%':>6} {'by alone':>8} {'share%':>6} {'over-T min':>10}")
     days = hours / 24 or 1
     for k in ALL_KINDS:
         sm = a["slot_minutes"][k]
         if not sm:
             continue
         o = a["over_share"][k]
+        ow = a["over_share_weighted"][k]
         p(f"  {k:14} {sm:8.0f} {sm / days:6.0f} {o:10.0f} {100 * o / (a['over_share_total'] or 1):5.0f}% "
-          f"{a['over_limit_with'][k]:10.0f}")
-    p("  (over-share: max(0, 1-min - B - n x share) x minutes, split equally among the n holders; over-T min: minutes")
+          f"{ow:8.0f} {100 * ow / (a['over_share_total'] or 1):5.0f}% {a['over_limit_with'][k]:10.0f}")
+    p("  (over-share: max(0, 1-min - B - n x share) x minutes, split equally among the n holders, then split by what")
+    p("   each kind adds over B when it holds the only slot (by alone); over-T min: minutes")
     p("   with the 1-minute over the threshold in force while that kind held a slot, each kind present counted)")
     p()
     p("one slot held, by kind: the 1-minute (weighted mean, p90), what it adds over B, and the slot's share")
@@ -443,7 +487,8 @@ def report(data, out=sys.stdout):
         p(f"  {k:14} {n:5d}  median {med:5.1f}  total {tot:6.0f}")
     lr = a["load_runs"]
     p(f"load runs by signature (lower bound: top groups exist only above load 48): {lr['episodes']} holds, "
-      f"{lr['minutes']:.0f} min, {lr['over_limit']:.0f} of them with the 1-minute over T")
+      f"{lr['minutes']:.0f} min, {lr['over_limit']:.0f} of them with the 1-minute over T, {lr['alone_over']:.0f} of those "
+      f"with no other slot held, {lr['loops_decide']:.0f} under T once its busy loops' target above B is taken out")
     p()
     p(f"top groups (samples over load 48: {a['with_top']}): CPU by phase, in cores (summed % / 100, x the samples)")
     tot = sum(a["phase_cpu"].values()) or 1
@@ -461,7 +506,10 @@ def report(data, out=sys.stdout):
               f"load per core used, median {pct([r[0] / max(r[1], 0.1) for r in sel], 0.5):.0f}")
     o = a["outside"]
     p(f"  ours outside any slot (build or test groups whose folder's project holds no slot): {o['samples']} samples, "
-      f"{o['minutes']:.0f} min, {o['cpu'] / 100:.0f} core-samples ({o['build_cpu'] / 100:.0f} of them building)")
+      f"{o['minutes']:.0f} min, {o['cpu'] / 100:.0f} core-samples ({o['build_cpu'] / 100:.0f} of them building); by command, "
+      f"group leader and folder type:")
+    for (command, leader, ft), cpu in sorted(a["outside_by"].items(), key=lambda kv: -kv[1])[:8]:
+        p(f"    {command:16} led by {leader:10} {ft:34} {cpu / 100:5.1f} core-samples")
     p()
     r = a["refused"]
     p(f"the gate's refusals (max(1, 5) > T): {r['all']:.0f} min; no slot held {r['no_slot']:.0f}; a slot held "
@@ -517,9 +565,15 @@ def selftest():
         ("other-project over-share", round(ov["other-project"], 6), 11.0),
         ("worker-v2 over-share", round(ov["worker-v2"], 6), 11.0),
         ("over-share total", round(a["over_share_total"], 6), 240.0),
+        ("by-alone split keeps the total", round(sum(a["over_share_weighted"].values()), 6), 240.0),
+        # 10:04: merge alone adds 12, the worker 4: 16 splits 12 / 4.
+        ("by-alone merge", round(a["over_share_weighted"]["merge"], 6), 4.0 + 12.0 + 12.0),
         ("over-T held", a["over_limit_held"], 4.0),
         ("over-T with load run", a["over_limit_with"]["load-run"], 2.0),
         ("load-run episodes", a["load_runs"]["episodes"], 1),
+        # 10:06 (60) and 10:08 (40), alone both; 40 - (24 - 5) = 21 <= 36 is the loops' doing, 60 - 19 = 41 isn't.
+        ("load-run alone over T", a["load_runs"]["alone_over"], 2.0),
+        ("load-run loops decide", a["load_runs"]["loops_decide"], 1.0),
         ("single merge mean", round(a["single"]["merge"]["mean"], 6), 17.0),
         ("refused", a["refused"]["all"], 4.0),
         ("refused held", a["refused"]["held"], 4.0),
