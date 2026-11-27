@@ -31,6 +31,8 @@ struct KeychainCallLintTests {
 
     /// A use in `file`, on a line containing `text`, allowed for `reason`. An entry nothing matches fails the lint.
     static let allowed: [(file: String, text: String, reason: String)] = [
+        ("Tests/VibeCoreTests/KeychainLintTests.swift", "CopyMatching(query, &item)",
+         "a planted SecItem call the keeper's coverage test writes into a scratch tree's Keeper/Sources for KeychainLint's scan to find: text in a file, never compiled or run"),
         ("Tests/VibeSwitcherTests/BriefingKeyTests.swift", "$(security find-generic-password -w)",
          "a line BriefingKey.parse is given, and refuses: nothing runs it"),
         ("Tests/VibeCoreTests/AppUpdateTests.swift", "== \"security unlock-keychain '\\(keychain.path)' && scripts/build-app.sh --install\"",
