@@ -18,11 +18,14 @@ public enum NodeLogs {
     public static func masked(_ text: String) -> String { ConfigSeal.inert(Redaction.secrets(in: text), limit: 1000) }
 
     /// The file's last `count` lines (of its last `tailBytes`), each `masked`, never through a link; why not when it
-    /// can't be read ("not there yet", "couldn't be read …").
+    /// can't be read ("not there yet", "couldn't be read …"). Only a regular file is read: opened without waiting (a
+    /// FIFO in its place would hold the read until a writer came: the review's N-C8-1), anything else refused.
     public static func tail(_ path: String, lines count: Int) -> Result<[String], NodeFacts.Failure> {
-        let fd = open(path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
+        let fd = open(path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK)
         guard fd >= 0 else { return .failure(.init(errno == ENOENT ? "not there yet" : "couldn't be read: errno \(errno)")) }
         let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
+        var facts = stat()
+        guard fstat(fd, &facts) == 0, (facts.st_mode & S_IFMT) == S_IFREG else { return .failure(.init("couldn't be read: it isn't a file")) }
         guard let size = try? handle.seekToEnd() else { return .failure(.init("couldn't be read")) }
         let start = size > UInt64(tailBytes) ? size - UInt64(tailBytes) : 0
         try? handle.seek(toOffset: start)
