@@ -383,43 +383,44 @@ $ bash scripts/mac-measure/pair-token.sh
 ## K-M1  27.2 (26B123), System Integrity Protection status: enabled.
 pair-token: CodeDirectory v=20500 size=372 flags=0x10002(adhoc,runtime) hashes=5+2 location=embedded
 PROGRAM (facts-hardened): CodeDirectory v=20500 size=312 flags=0x10002(adhoc,runtime) hashes=3+2 location=embedded
-this probe's file cdhash=ea089d7f08afefa3
+this probe's file cdhash=0ab8a83174341971
 PROGRAM's file cdhash=bd5977d7fff8c336
 == control: a live maker that hasn't exec'd (the positive control)
-  keeper pid=79615 pidversion=3266607; maker pid=79619 pidversion=3266617
-  the maker alive, not exec'd, nothing written: LOCAL_PEERTOKEN pid=79619 pidversion=3266617 = the maker, as it was before any exec | LOCAL_PEERPID=79619 | Security: guest=0 valid=0 cdhash=ea089d7f08afefa3 (this probe's file) hardened=yes
+  keeper pid=64169 pidversion=3701278; maker pid=64231 pidversion=3701453
+  the maker alive, not exec'd, nothing written: LOCAL_PEERTOKEN pid=64231 pidversion=3701453 = the maker, as it was before any exec | LOCAL_PEERPID=64231 | Security: guest=0 valid=0 cdhash=0ab8a83174341971 (this probe's file) hardened=yes
 == control: the token asked at the receipt too, then the maker writes a request and execs
-  keeper pid=79615 pidversion=3266607; maker pid=79620 pidversion=3266619
-  asked at the receipt, before the exec (this control only): LOCAL_PEERTOKEN pid=79620 pidversion=3266619 = the maker, as it was before any exec | LOCAL_PEERPID=79620 | Security: guest=0 valid=0 cdhash=ea089d7f08afefa3 (this probe's file) hardened=yes
+  keeper pid=64169 pidversion=3701278; maker pid=64235 pidversion=3701460
+  asked at the receipt, before the exec (this control only): LOCAL_PEERTOKEN pid=64235 pidversion=3701460 = the maker, as it was before any exec | LOCAL_PEERPID=64235 | Security: guest=0 valid=0 cdhash=0ab8a83174341971 (this probe's file) hardened=yes
   the maker exec'd: it now runs PROGRAM
-  after the exec: LOCAL_PEERTOKEN pid=79620 pidversion=3266620 = the maker's pid, another pidversion (its image after the exec) | LOCAL_PEERPID=79620 | Security: guest=0 valid=0 cdhash=bd5977d7fff8c336 (PROGRAM's file) hardened=yes
+  after the exec: LOCAL_PEERTOKEN pid=64235 pidversion=3701462 = the maker's pid, another pidversion (its image after the exec) | LOCAL_PEERPID=64235 | Security: guest=0 valid=0 cdhash=bd5977d7fff8c336 (PROGRAM's file) hardened=yes
+  the token kept from the receipt, asked of Security again after the exec: pid=64235 pidversion=3701460 = the maker, as it was before any exec | Security: guest=-67065
   the keeper read the 3-byte request and wrote a 3-byte answer on its end
-  after the keeper's read and write: LOCAL_PEERTOKEN pid=79620 pidversion=3266620 = the maker's pid, another pidversion (its image after the exec) | LOCAL_PEERPID=79620 | Security: guest=0 valid=0 cdhash=bd5977d7fff8c336 (PROGRAM's file) hardened=yes
+  after the keeper's read and write: LOCAL_PEERTOKEN pid=64235 pidversion=3701462 = the maker's pid, another pidversion (its image after the exec) | LOCAL_PEERPID=64235 | Security: guest=0 valid=0 cdhash=bd5977d7fff8c336 (PROGRAM's file) hardened=yes
 == (a) a forked child of the maker writes on the maker's end; the maker execs; then the token
-  keeper pid=79615 pidversion=3266607; maker pid=79621 pidversion=3266621; forked child pid=79622 pidversion=3266622
+  keeper pid=64169 pidversion=3701278; maker pid=64238 pidversion=3701466; forked child pid=64239 pidversion=3701468
   the forked child wrote 1 byte on the maker's end
   the maker exec'd: it now runs PROGRAM
-  after the exec: LOCAL_PEERTOKEN pid=79622 pidversion=3266622 = the maker's forked child | LOCAL_PEERPID=79622 | Security: guest=0 valid=0 cdhash=ea089d7f08afefa3 (this probe's file) hardened=yes
+  after the exec: LOCAL_PEERTOKEN pid=64239 pidversion=3701468 = the maker's forked child | LOCAL_PEERPID=64239 | Security: guest=0 valid=0 cdhash=0ab8a83174341971 (this probe's file) hardened=yes
 == (a) a forked child of the maker writes and reads on the maker's end; the maker execs; then the token
-  keeper pid=79615 pidversion=3266607; maker pid=79623 pidversion=3266624; forked child pid=79624 pidversion=3266625
+  keeper pid=64169 pidversion=3701278; maker pid=64240 pidversion=3701472; forked child pid=64241 pidversion=3701473
   the keeper wrote 1 byte on its end (for the child to read), before the child acted
   the forked child wrote 1 byte on the maker's end and read 1
   the maker exec'd: it now runs PROGRAM
-  after the exec: LOCAL_PEERTOKEN pid=79624 pidversion=3266625 = the maker's forked child | LOCAL_PEERPID=79624 | Security: guest=0 valid=0 cdhash=ea089d7f08afefa3 (this probe's file) hardened=yes
+  after the exec: LOCAL_PEERTOKEN pid=64241 pidversion=3701473 = the maker's forked child | LOCAL_PEERPID=64241 | Security: guest=0 valid=0 cdhash=0ab8a83174341971 (this probe's file) hardened=yes
 == (b) the maker writes a request and execs; the keeper reads and writes on its end; the token after each
-  keeper pid=79615 pidversion=3266607; maker pid=79625 pidversion=3266627
+  keeper pid=64169 pidversion=3701278; maker pid=64242 pidversion=3701476
   the maker exec'd: it now runs PROGRAM
-  after the exec: LOCAL_PEERTOKEN pid=79625 pidversion=3266628 = the maker's pid, another pidversion (its image after the exec) | LOCAL_PEERPID=79625 | Security: guest=0 valid=0 cdhash=bd5977d7fff8c336 (PROGRAM's file) hardened=yes
+  after the exec: LOCAL_PEERTOKEN pid=64242 pidversion=3701481 = the maker's pid, another pidversion (its image after the exec) | LOCAL_PEERPID=64242 | Security: guest=0 valid=0 cdhash=bd5977d7fff8c336 (PROGRAM's file) hardened=yes
   the keeper read the 3-byte request and wrote a 3-byte answer on its end
-  after the keeper's read and write: LOCAL_PEERTOKEN pid=79625 pidversion=3266628 = the maker's pid, another pidversion (its image after the exec) | LOCAL_PEERPID=79625 | Security: guest=0 valid=0 cdhash=bd5977d7fff8c336 (PROGRAM's file) hardened=yes
+  after the keeper's read and write: LOCAL_PEERTOKEN pid=64242 pidversion=3701481 = the maker's pid, another pidversion (its image after the exec) | LOCAL_PEERPID=64242 | Security: guest=0 valid=0 cdhash=bd5977d7fff8c336 (PROGRAM's file) hardened=yes
 == (c) KP10: the maker writes a request, gives a copy of its end to a third process, execs; the keeper answers; the third reads it
-  keeper pid=79615 pidversion=3266607; maker pid=79626 pidversion=3266629; third pid=79627 pidversion=3266630
+  keeper pid=64169 pidversion=3701278; maker pid=64246 pidversion=3701484; third pid=64249 pidversion=3701488
   the maker exec'd: it now runs PROGRAM
-  after the exec: LOCAL_PEERTOKEN pid=79626 pidversion=3266631 = the maker's pid, another pidversion (its image after the exec) | LOCAL_PEERPID=79626 | Security: guest=0 valid=0 cdhash=bd5977d7fff8c336 (PROGRAM's file) hardened=yes
+  after the exec: LOCAL_PEERTOKEN pid=64246 pidversion=3701490 = the maker's pid, another pidversion (its image after the exec) | LOCAL_PEERPID=64246 | Security: guest=0 valid=0 cdhash=bd5977d7fff8c336 (PROGRAM's file) hardened=yes
   the keeper read the 3-byte request and wrote a 3-byte answer on its end
-  after the keeper's read and write: LOCAL_PEERTOKEN pid=79626 pidversion=3266631 = the maker's pid, another pidversion (its image after the exec) | LOCAL_PEERPID=79626 | Security: guest=0 valid=0 cdhash=bd5977d7fff8c336 (PROGRAM's file) hardened=yes
+  after the keeper's read and write: LOCAL_PEERTOKEN pid=64246 pidversion=3701490 = the maker's pid, another pidversion (its image after the exec) | LOCAL_PEERPID=64246 | Security: guest=0 valid=0 cdhash=bd5977d7fff8c336 (PROGRAM's file) hardened=yes
   the third process read the answer on its copy of the maker's end
-  after the third's read: LOCAL_PEERTOKEN pid=79627 pidversion=3266630 = the third process | LOCAL_PEERPID=79627 | Security: guest=0 valid=0 cdhash=ea089d7f08afefa3 (this probe's file) hardened=yes
+  after the third's read: LOCAL_PEERTOKEN pid=64249 pidversion=3701488 = the third process | LOCAL_PEERPID=64249 | Security: guest=0 valid=0 cdhash=0ab8a83174341971 (this probe's file) hardened=yes
 == (d) the names of a pair's ends and of a connection's
   socketpair, end 0: getsockname len=16 family=1 path="" getpeername len=16 family=1 path=""
   socketpair, end 1: getsockname len=16 family=1 path="" getpeername len=16 family=1 path=""
@@ -443,8 +444,8 @@ PROGRAM's file cdhash=bd5977d7fff8c336
   connect with no path (the length of the family alone): refused errno=22 (Invalid argument)
   connect to a path where nothing is bound: refused errno=2 (No such file or directory)
 == (e) baseline: the other end open
-  keeper pid=79615 pidversion=3266607; maker pid=79628 pidversion=3266632
-  the maker's end open, untouched (the baseline): LOCAL_PEERTOKEN pid=79628 pidversion=3266632 = the maker, as it was before any exec | LOCAL_PEERPID=79628 | Security: guest=0 valid=0 cdhash=ea089d7f08afefa3 (this probe's file) hardened=yes
+  keeper pid=64169 pidversion=3701278; maker pid=64250 pidversion=3701492
+  the maker's end open, untouched (the baseline): LOCAL_PEERTOKEN pid=64250 pidversion=3701492 = the maker, as it was before any exec | LOCAL_PEERPID=64250 | Security: guest=0 valid=0 cdhash=0ab8a83174341971 (this probe's file) hardened=yes
   poll (POLLIN|POLLOUT|POLLPRI asked, no wait): 1 revents=0x4 POLLOUT
   recv(MSG_PEEK|MSG_DONTWAIT): -1 errno=35 (Resource temporarily unavailable)
   (the maker ended)
@@ -452,8 +453,8 @@ PROGRAM's file cdhash=bd5977d7fff8c336
   poll (POLLIN|POLLOUT|POLLPRI asked, no wait): 1 revents=0x13 POLLIN POLLPRI POLLHUP
   recv(MSG_PEEK|MSG_DONTWAIT): 0
 == (e) the other end half-closed: shutdown(SHUT_WR)
-  keeper pid=79615 pidversion=3266607; maker pid=79629 pidversion=3266633
-  after the maker's shutdown(SHUT_WR), its end kept open: LOCAL_PEERTOKEN pid=79629 pidversion=3266633 = the maker, as it was before any exec | LOCAL_PEERPID=79629 | Security: guest=0 valid=0 cdhash=ea089d7f08afefa3 (this probe's file) hardened=yes
+  keeper pid=64169 pidversion=3701278; maker pid=64251 pidversion=3701497
+  after the maker's shutdown(SHUT_WR), its end kept open: LOCAL_PEERTOKEN pid=64251 pidversion=3701497 = the maker, as it was before any exec | LOCAL_PEERPID=64251 | Security: guest=0 valid=0 cdhash=0ab8a83174341971 (this probe's file) hardened=yes
   poll (POLLIN|POLLOUT|POLLPRI asked, no wait): 1 revents=0x13 POLLIN POLLPRI POLLHUP
   recv(MSG_PEEK|MSG_DONTWAIT): 0
   (the maker ended)
@@ -461,7 +462,7 @@ PROGRAM's file cdhash=bd5977d7fff8c336
   poll (POLLIN|POLLOUT|POLLPRI asked, no wait): 1 revents=0x13 POLLIN POLLPRI POLLHUP
   recv(MSG_PEEK|MSG_DONTWAIT): 0
 == (e) the other end closed
-  keeper pid=79615 pidversion=3266607; maker pid=79630 pidversion=3266634
+  keeper pid=64169 pidversion=3701278; maker pid=64252 pidversion=3701498
   after the maker's close of its end (its only holder; the maker alive): LOCAL_PEERTOKEN refused errno=57 (Socket is not connected)
   poll (POLLIN|POLLOUT|POLLPRI asked, no wait): 1 revents=0x13 POLLIN POLLPRI POLLHUP
   recv(MSG_PEEK|MSG_DONTWAIT): 0
@@ -470,8 +471,8 @@ PROGRAM's file cdhash=bd5977d7fff8c336
   poll (POLLIN|POLLOUT|POLLPRI asked, no wait): 1 revents=0x13 POLLIN POLLPRI POLLHUP
   recv(MSG_PEEK|MSG_DONTWAIT): 0
 == (e) a former holder's shutdown(SHUT_RD)
-  keeper pid=79615 pidversion=3266607; maker pid=79631 pidversion=3266635; forked child pid=79632 pidversion=3266636
-  after a former holder's shutdown(SHUT_RD) and close (the maker's forked child, ended; the maker's end open): LOCAL_PEERTOKEN pid=79631 pidversion=3266635 = the maker, as it was before any exec | LOCAL_PEERPID=79631 | Security: guest=0 valid=0 cdhash=ea089d7f08afefa3 (this probe's file) hardened=yes
+  keeper pid=64169 pidversion=3701278; maker pid=64254 pidversion=3701501; forked child pid=64256 pidversion=3701504
+  after a former holder's shutdown(SHUT_RD) and close (the maker's forked child, ended; the maker's end open): LOCAL_PEERTOKEN pid=64254 pidversion=3701501 = the maker, as it was before any exec | LOCAL_PEERPID=64254 | Security: guest=0 valid=0 cdhash=0ab8a83174341971 (this probe's file) hardened=yes
   poll (POLLIN|POLLOUT|POLLPRI asked, no wait): 0 revents=0x0
   recv(MSG_PEEK|MSG_DONTWAIT): -1 errno=35 (Resource temporarily unavailable)
   (the maker ended)
@@ -480,20 +481,21 @@ PROGRAM's file cdhash=bd5977d7fff8c336
   recv(MSG_PEEK|MSG_DONTWAIT): 0
 == (f) a connection: the connector writes, then its forked child holding a copy writes last
   the connector wrote 1 byte, then its forked child (holding a copy of the connecting socket) wrote 1
-  keeper pid=79615 pidversion=3266607; maker pid=79633 pidversion=3266637; forked child pid=79634 pidversion=3266638
-  at the accept, nothing read: LOCAL_PEERTOKEN pid=79634 pidversion=3266638 = the maker's forked child | LOCAL_PEERPID=79634 | Security: guest=0 valid=0 cdhash=ea089d7f08afefa3 (this probe's file) hardened=yes
+  keeper pid=64169 pidversion=3701278; maker pid=64260 pidversion=3701511; forked child pid=64261 pidversion=3701512
+  at the accept, nothing read: LOCAL_PEERTOKEN pid=64261 pidversion=3701512 = the maker's forked child | LOCAL_PEERPID=64261 | Security: guest=0 valid=0 cdhash=0ab8a83174341971 (this probe's file) hardened=yes
   the keeper read 2 bytes: mf
-  after the keeper's read: LOCAL_PEERTOKEN pid=79634 pidversion=3266638 = the maker's forked child | LOCAL_PEERPID=79634 | Security: guest=0 valid=0 cdhash=ea089d7f08afefa3 (this probe's file) hardened=yes
+  after the keeper's read: LOCAL_PEERTOKEN pid=64261 pidversion=3701512 = the maker's forked child | LOCAL_PEERPID=64261 | Security: guest=0 valid=0 cdhash=0ab8a83174341971 (this probe's file) hardened=yes
 == (f) a connection: the connector writes, its forked child writes, the connector writes last
   the connector wrote 1 byte, then its forked child (holding a copy of the connecting socket) wrote 1, then the connector wrote 1 more
-  keeper pid=79615 pidversion=3266607; maker pid=79635 pidversion=3266639; forked child pid=79636 pidversion=3266640
-  at the accept, nothing read: LOCAL_PEERTOKEN pid=79635 pidversion=3266639 = the maker, as it was before any exec | LOCAL_PEERPID=79635 | Security: guest=0 valid=0 cdhash=ea089d7f08afefa3 (this probe's file) hardened=yes
+  keeper pid=64169 pidversion=3701278; maker pid=64262 pidversion=3701514; forked child pid=64263 pidversion=3701515
+  at the accept, nothing read: LOCAL_PEERTOKEN pid=64262 pidversion=3701514 = the maker, as it was before any exec | LOCAL_PEERPID=64262 | Security: guest=0 valid=0 cdhash=0ab8a83174341971 (this probe's file) hardened=yes
   the keeper read 3 bytes: mfM
-  after the keeper's read: LOCAL_PEERTOKEN pid=79635 pidversion=3266639 = the maker, as it was before any exec | LOCAL_PEERPID=79635 | Security: guest=0 valid=0 cdhash=ea089d7f08afefa3 (this probe's file) hardened=yes
+  after the keeper's read: LOCAL_PEERTOKEN pid=64262 pidversion=3701514 = the maker, as it was before any exec | LOCAL_PEERPID=64262 | Security: guest=0 valid=0 cdhash=0ab8a83174341971 (this probe's file) hardened=yes
 ```
 
-Run five times (the script once more before this one, the probe three times by hand from the same source): the same
-lines but for the pids, the pidversions and the probe's own cdhash. A first version of the probe, whose maker closed the
+Run six times (the script twice before this one, the probe three times by hand from the same source; this last run
+added the kept token's line after the blind check asked for it): the same lines but for the pids, the pidversions and
+the probe's own cdhash. A first version of the probe, whose maker closed the
 sent end and its connection right after the `sendmsg`, before the keeper's `recvmsg`, twice read end of file on the
 received end where the maker had written a request (once in (b), once in (c), in two runs); with the maker waiting until
 the keeper had the end, no run lost it. Not measured further (XNU's collection of in-flight Unix sockets is a
@@ -507,8 +509,10 @@ pair end names whichever process last sent or received on the other end, as that
 
 - **The controls.** A live maker that hasn't exec'd is named and accepted (valid, its cdhash, hardened): the check
   works when nothing moved. Asked at the receipt the token names the maker as it was; asked again after its exec, the
-  same pid with a **new pidversion**, and Security **accepts** it as PROGRAM's code, hardened. So asking at the receipt
-  and comparing later (step 5's "must equal the first") is what tells an exec, not Security.
+  same pid with a **new pidversion**, and Security **accepts** it as PROGRAM's code, hardened; the token *kept* from the
+  receipt, asked of Security again after the exec, is **refused** (`-67065`, no such guest, as M7's connection token).
+  So Security refuses a pair's token taken before an exec, but a token read after it names the new image: only a token
+  taken before the exec, kept and asked again (or compared with step 5's second read), tells an exec.
 - **(a)** A forked child of the maker that writes (or writes and reads) on the maker's end, the maker then exec'd: the
   token names **the forked child**, accepted by Security as the child's code. For K2: the token moves to a forked
   holder, so a pinned host's forked child (or any holder of its end) that writes last is who the keeper would judge.

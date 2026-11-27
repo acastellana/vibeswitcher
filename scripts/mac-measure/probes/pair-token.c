@@ -324,7 +324,14 @@ static void trial(enum kind kind, const char *title) {
         close(end);
         return;
     }
-    if (kind == ASKED_BEFORE) token("asked at the receipt, before the exec (this control only)", end);
+    audit_token_t kept;
+    socklen_t kept_size = sizeof kept;
+    int have_kept = 0;
+    if (kind == ASKED_BEFORE) {
+        token("asked at the receipt, before the exec (this control only)", end);
+        // The token taken at the receipt, kept to ask Security again after the exec (as M7 asks for a connection's).
+        have_kept = getsockopt(end, SOL_LOCAL, LOCAL_PEERTOKEN, &kept, &kept_size) == 0;
+    }
     if (kind == A_WRITES_READS) {
         if (write(end, "k", 1) != 1) die("the keeper's write");
         printf("  the keeper wrote 1 byte on its end (for the child to read), before the child acted\n");
@@ -337,6 +344,12 @@ static void trial(enum kind kind, const char *title) {
     say(to_maker[1]);
     await_exec(exec_pipe[0]);
     token("after the exec", end);
+    if (have_kept) {
+        who_t w = of(kept);
+        printf("  the token kept from the receipt, asked of Security again after the exec: pid=%d pidversion=%d = %s", w.pid, w.version, label(w));
+        security(kept);
+        printf("\n");
+    }
     if (kind == B_KEEPER || kind == C_THIRD || kind == ASKED_BEFORE) {
         char bytes[3];
         ssize_t got = read(end, bytes, 3);
