@@ -81,6 +81,42 @@ public enum NodeJournal {
         }
     }
 
+    /// The same reads, narrowed to the unit's entries anything here reads (2026-11-27: `status` took 22-30 s on the
+    /// user's node, nearly all of it reading and decoding the unit's whole journal, 220,000 entries and 375 MB, all but
+    /// some thirty of them every Swift process's "Failed to set thread priority" that libdispatch logs under WSL): the
+    /// manager's job lines (`SYSLOG_IDENTIFIER=systemd`: `events`' starts and stops), the host's start and server-restart
+    /// lines (`SYSLOG_IDENTIFIER=vibeswitcher-host` and `--grep` on their beginnings: `events`' details and restarts),
+    /// then the command line's own, as before. Every check on an entry is the same (`events`, `passes`): the narrowing
+    /// only leaves out entries none of them takes. Only with a journalctl that matches patterns (`+PCRE2` in its
+    /// `--version`): else `readArguments`.
+    public static func narrowArguments(uid: uid_t) -> [[String]] {
+        [["-u", VoiceRule.nodeUnit, "SYSLOG_IDENTIFIER=systemd"],
+         ["-u", VoiceRule.nodeUnit, "SYSLOG_IDENTIFIER=vibeswitcher-host", "--grep", hostLinesPattern],
+         ["SYSLOG_IDENTIFIER=\(identifier)"]].map {
+            ["--user", "-o", "json", "--no-pager"] + $0 + ["_UID=\(uid)"]
+        }
+    }
+
+    /// The host's lines `events` reads (`startLine`, a server child that ended), as journalctl's `--grep` takes them.
+    static let hostLinesPattern = "^vibeswitcher-host: (started pid |server child pid .* ended after )"
+
+    /// The node's journal as the command line reads it: `narrowArguments` when journalctl matches patterns, else
+    /// `readArguments`; each entry once. `run` runs journalctl with its arguments (status and output; nil: it didn't
+    /// run). A `--grep` read that found nothing ends 1 with nothing written: no entries, not a failure.
+    public static func read(uid: uid_t, run: ([String]) -> (status: Int32, output: String)?) -> Result<[JournalEntry], NodeFacts.Failure> {
+        let narrow = run(["--version"]).map { $0.status == 0 && $0.output.contains("+PCRE2") } ?? false
+        var entries: [JournalEntry] = []
+        for arguments in narrow ? narrowArguments(uid: uid) : readArguments(uid: uid) {
+            guard let ran = run(arguments) else { return .failure(.init("journalctl --user didn't answer")) }
+            if ran.status == 1, arguments.contains("--grep"), ran.output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { continue }
+            guard ran.status == 0 else { return .failure(.init("journalctl --user didn't answer")) }
+            entries += Self.entries(json: ran.output)
+        }
+        // The stand-in gives every entry for each match; a real journal gives each once. Once each either way.
+        var seen = Set<[String: String]>()
+        return .success(entries.filter { seen.insert($0.fields).inserted })
+    }
+
     /// The entries of a `journalctl -o json` text, one JSON object a line; a line that isn't one is passed over.
     public static func entries(json text: String) -> [JournalEntry] {
         text.split(whereSeparator: \.isNewline).compactMap { line in
