@@ -1459,8 +1459,10 @@ Each step is small, keeps the app unchanged, and says what it needs from a real 
     v2), whose own install script refuses, unconditionally, any commit that doesn't contain step 11's commit (the
     floor, which the keeper's K5 raises to K4b's commit). **The keeper design's proof review of 2026-11-27 adds** (its
     rows K4a-ii and K4c, and KA1 to KA12): each child and handover process runs the image's first statement (every
-    exception mask cleared, task and main thread, then the environment rule) before its proof, every host (the app's
-    included) spawning its parser and handover keeper with exactly the fixed list; a hardened image's parser refuses
+    exception mask cleared, task and main thread, then the environment rule) before its proof: every host (the app's
+    included) spawns its parser with exactly the fixed list, and a checked node its handover keeper (the app's host
+    uses none: it hands over by path), and each of them, finding another variable, execs itself again once with the
+    list, so a parent of an older build still gets a working child; a hardened image's parser refuses
     `--parser-test-hooks`; each proof names its role and each receiver takes only its own; the server judges its host
     by the handout's own message (the Mach form of the server's check above); and this step is offered only after the
     keeper design's K-M16 trial part as well. Needs: this Mac's real signed hardened images.
