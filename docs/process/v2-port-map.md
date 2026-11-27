@@ -384,6 +384,77 @@ again on that host, the action record and `.user` seals (`LeadVaultV2`) included
 brief renders 11385 bytes (main's own brief fits under 11_255). Both texts are as their authors wrote them; the `v2` side
 may prefer to trim its worker brief back under 11_255 instead.
 
+### The merge of 2026-11-28 (phase 1's J1)
+
+main at `1e7a1d4d` (328 commits past `e02ece00`, 188 not merges, the rest the lead's records) merged into `v2` at
+`73483812` after `v2-main-merged` `e5ba8f8e` (the merge above, local until now), which merged in with no conflict. Main's
+code since `e02ece00`: the host vault's fixes (`0044b1b2`, `2b929ab6`: a vault whose Keychain key can't be read isn't
+started over, `VaultStorage.KeyRead`), which role a host is (`HostRole`: only the account's own host, by its folder and
+lock, reads the vault's key), a handover taken only from the running host it replaces (`HostHandover.receive`, and for the
+account's host a proof under its vault key, `HostHandover.Proof`), the load gate's one rule (cI, `MacLoad.room`), the
+config seal's bounds and zsh twins, the guard's sudo and program-name reads, the heavy slot's caller's folder
+(`VIBESWITCHER_HEAVY_ROOT`), the load recorder's runnable threads and CPU ticks.
+
+Of the files the engine replaces or copies from, main changed these:
+
+| Commit | File | Status |
+| --- | --- | --- |
+| `2c1c0405` (the room watch judged by `MacLoad.room`; `MacLoad.steady` removed) | `LeadController.swift`: refresh, the witness and the room watch; `Sources/VibeSwitcher/HostClient.swift` `hasListed` | ported in this merge: `VibeNode/Engine/RoomWatch.swift` judges by `MacLoad.room` (its `averages` and `heavyLock`, the host listed once `HostLink` is connected: the node's link proves nothing, so no refused proof empties its list); `RoomWatchTests` fake the averages |
+| `2c1c0405` | `Sources/VibeSwitcher/MacLimitsSettings.swift` (a comment) | not needed: the node's settings say the rule through `LeadToolset`'s shared text |
+| `0044b1b2`, `8b4b723c`, `1eff2a13`, `ef89ac41` (the unreadable-key and started-over alerts) | `Sources/VibeSwitcher/HostClient.swift` `keyResetAlert` | not needed: the app's alerts about its own key (as at the merge above) |
+| `8ac260e8` (composer drafts in the harness's defaults) | `Tests/VibeSwitcherTests/ChatSyncTests.swift` | not needed: the app's composer; the node's page keeps no drafts in defaults |
+
+Conflicts (15 files), each keeping both sides:
+
+- `Resources/bin/vs-heavy`: main's unread folder (`@unread`) before `v2`'s Linux `node-limits.json`.
+- `scripts/test.sh`: `v2`'s `swift_tests` and `swift_tests_retrying_failed` with main's `heavy_root`, given to both of
+  their vs-heavy calls (the retry's in its subshell); `PreferencesCheckTests`, `TestScriptWebTests` and
+  `TestEnvironmentTests` pin `swift_tests`' line with `VIBESWITCHER_HEAVY_ROOT=$heavy_root`.
+- `scripts/temporary-folder-lint.txt`: both sides' lines.
+- `Sources/VibeCore/ConfigSeal.swift`: `v2`'s `/mnt/` and `/run/user/` homes with main's `#past` keys; `v2`'s git config
+  keys and main's twins; main's read budget with `v2`'s coarse-ctime hash; main's `walk` with its budget.
+- `Sources/VibeCore/LeadToolset.swift`: main's `MacLoad.ruleText` with `v2`'s `MacLimits.fileName`; `BoostTests` takes
+  main's wording with `v2`'s values for the cores.
+- `Sources/VibeCore/LeadVaultAppProof.swift`: main's `AppProof.vaultKeyUnreadable` beside `v2`'s move of `KeychainStore`.
+- `Sources/VibeCore/LoadRecorder.swift`: `v2`'s `Platform.Processes.brief` with main's `runnable`, read through
+  `Platform.Processes.runnableThreads`; main's `cpuTicks` through `Platform.Host.cpuTicks` (both nil on Linux, not read
+  there yet: owed).
+- `Sources/VibeHost/VaultStorage.swift`: main's `Key`, `KeyRead` and statuses on `v2`'s `Platform.Keychain` (its `read`,
+  main's `SecItem` body moved into `Keychain+Darwin.swift`; Linux nil). A status is an `Int32` (`OSStatus` on the Mac).
+- `Sources/VibeHost/HostServer.swift`: main's `takeLock` and `start(holdingLock:)`, with `v2`'s `heldLockIsAllowed` in
+  the latter; main's key guard after `v2`'s Linux and keeper dispatch (each proves its own way); main's `proofArguments`
+  beside `v2`'s `handoverState` (the proof binds the state's lock descriptor, `pathWatch`'s on Linux).
+- `Sources/VibeHost/HostHandover.swift`: `v2`'s spawn and formats with main's `keyID`; `probeCheck` returns the state, so
+  the probe says its format; `receive` takes `v2`'s checked-node rule (`admit`, `HostImages.mayTakeHandover`) before the
+  lock, proof or secrets; `Proof`'s start time from `Platform.Processes.record`.
+- `Sources/vibeswitcher-host/main.swift`: `v2`'s order (probe, keeper, proxy, hardening, the node's start) with main's
+  `HostRole` after it; the probe's key through a `HostRole` of its own command line. The lock taken first (not for a
+  handover or a keeper's switch). On the Mac, main's `receive` and `role.vault`; on Linux (`!Platform.CodeIdentity.isAvailable`),
+  `v2`'s read through sealed memory and its `ownsLaunchers` vault, unchanged: Linux has no Keychain key, so main's proof
+  (no handover without the key) would refuse every Linux handover. `ownsLaunchers` on the Mac is `role.holdsRootLock`.
+  `v2`'s keeper intake from the command line (`MacHandoverKeeper.takeIfAsked`, a scratch host's test of the Mac's
+  switch) is for a host that isn't the account's: the account's host takes a state file's handover with main's proof
+  only, so a keeper a process of the account started can't stand in for it. The checked node's own keeper (its parsed
+  command line) is as `v2` has it.
+- `Tests/VibeCoreTests/LeadHandoverTests.swift`: both new tests.
+
+Where main's change met `v2` code it didn't know, changed in this merge:
+
+- `ConfigSeal.walk` takes main's read budget and stays internal (`v2`'s `SwitchSeal.folderHashes` hashes a folder as
+  the look does, now within the look's `folderBudget`); `LinuxSealList`'s entries take main's `Contents.big` (a file past
+  `readLimit` told by its metadata).
+- `VibeNode/Engine/RoomWatch.swift`: `MacLoad.steady` is gone, so the node's room watch judges by `MacLoad.room` (the
+  table above).
+
+What main added that doesn't build on Linux, changed in this merge: `import CryptoKit` and `import Darwin` out of
+`HostHandover.swift` and `HostRole.swift`; `Darwin.close` to `Sys.close`; `OSStatus` to `Int32`; main's `identity`'s
+`st_mtimespec` and `st_ctimespec` to `Platform.Files.modified` and `changed`. `HandoverProofTests`, `HostRoleTests` and
+`VaultKeyUnreadableTests` are the Mac's (VibeHostTests' `MacOnlyTests.txt`).
+
+**Owed, for the Linux side:** whether the Linux host takes main's checks of a handover's lock (`HostHandover.Lock`) and
+the account's host's role (`HostRole.vault`'s lock check) in place of `v2`'s `ownsLaunchers` vault; read only, not run
+on Linux. The load recorder's runnable threads and CPU ticks on Linux.
+
 ## Non-seam edits
 
 Rows marked *planned* are the ones the plans expect, listed before they are made so an executor doesn't stop to ask;

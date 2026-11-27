@@ -63,6 +63,17 @@ proposal. Nothing is stopped; the lead extends the budget, re-plans or abandons 
 Workers can't push, move refs, rebase other branches, or check out the lead's branch: Claude Code's permission rules
 deny it. A worker brings its branch up to date by merging the base in.
 
+Behind those rules, every session the lead starts (lead, worker, verifier) has a hook that reads each Bash line before
+it runs: it finds each git and `security` the line runs and refuses the forms its rules can't see (git's `-C`, `-c` and
+`--git-dir`, `git -P push`, `GIT_DIR=…`, `security` in any form). What it can't read, it refuses rather than guesses:
+text naming git handed to `sh -c` or `eval`, a git option the shell makes from a variable, a program whose name the
+shell makes (`/usr/bin/gi? push`, `"$tool" x`, `$EDITOR f`, a loop running `$t`; a path with its variable in double
+quotes and its last name written out, `"$ROOT/scripts/x.sh"`, is fine), and launchers it doesn't read (`script`,
+`setsid`, `su`, …). A `[[ … ]]` test written plainly is read as a test; an odd-looking one (a quoted `[[`, `)]]`, a test
+across lines) is read word by word, and the refusal says to write it plainly. Its limit: it reads the Bash lines a
+session types. Script files, other interpreters (`python3 -c`, `osascript`) and remote shells (`ssh`) are outside it,
+and so is text handed to a shell or `eval` that doesn't name git or security.
+
 ### Codex workers
 
 A task can name its worker's agent: `add_task` or `update_task` with `agent: codex` (`claude` is the default; `auto`
@@ -377,8 +388,10 @@ These are set once for the Mac, not per project, in Settings › Performance, an
 `~/.vibeswitcher/mac-limits.json`:
 
 - **Team sessions** (`mac_max_sessions`): the most workers and verifiers of all projects together, 10 by default.
-- **Load** (`load_threshold`): the load above which leads start nothing, the greater of the 1- and 5-minute averages
-  (so a dip of the 1-minute after a spike isn't room); empty means twice the cores.
+- **Load** (`load_threshold`): the load above which leads start nothing; empty means twice the cores. The Mac has room
+  when its load is under the threshold, counting the last 5 minutes too unless nothing of ours runs: no worker, no
+  verifier, no build or test holding a slot. So after a restart the first start goes once the last minute's load is
+  under it, while a dip of the 1-minute after a spike, with anything of ours running, still isn't room.
 - **Test and build slots** (`heavySlots` in the file): the builds and full test runs at once, below. The cores ÷ 6,
   rounded down, by default (2 on a 12-core Mac, the user's choice on 2026-11-01).
 
@@ -535,9 +548,12 @@ named once an hour as stranded.
 ## The records
 
 The lead's reasoning lives in the repository, in `records_dir` (`docs/lead` by default): `decisions.md`,
-`progress.md`, `incidents.md` and `decisions-archive.md`. The lead can't commit, so its tool server commits these files
-to the lead's branch, after each merge and at most every 5 minutes, as "Lead: decisions and progress". Your staged and
-unstaged changes are left alone. `archive_decisions` moves old entries to `decisions-archive.md` unchanged. Workers may
+`progress.md`, `incidents.md` and `decisions-archive.md`. The lead can't commit, so its tool server writes them to disk
+at once and commits them to the lead's branch only when something needs them in git: before a merge's rebase and tests,
+before a push request records the head, at a lead handover, for a `redact_record`, and when merge_remote brings the other
+Mac's records. One commit carries everything written since the last, named by what it adds ("Lead: 3 decisions, 41
+progress lines"); a merge that changes the product inventory commits it with them. Your staged and unstaged changes are
+left alone. `archive_decisions` moves old entries to `decisions-archive.md` unchanged. Workers may
 not edit that folder. The lead's recording tools refuse text the repository's lints would fail on there (another
 project's name, a credential's shape), and `redact_record` replaces one existing line that fails them; the records
 commit carries that before the next merge, naming it in its message.
@@ -599,7 +615,7 @@ Each value as the code sets it today. Paths are under `Sources/VibeCore/` unless
 | Usage back-off | 80 % of a limit on the model | `AccountUsage.swift` |
 | Stall: silent, idle, compacted | 15, 10, 5 min | `LeadStall.swift` |
 | Verifier ends after its verdict | 20 s | `Sources/VibeHost/HostServer.swift` |
-| Records commit | after each merge, at most every 5 min | `LeadRecords.swift` |
+| Records commit | before a merge, a push request, a handover; a redaction | `LeadRecords.swift` |
 
 The rules the lead itself follows (when to audit, when to ask) are in its prompt (`LeadWorkflow.swift`) and in
 [docs/process/lead-rules.md](../process/lead-rules.md).

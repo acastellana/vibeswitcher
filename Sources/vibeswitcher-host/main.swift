@@ -10,8 +10,16 @@ PTYSpawn.execIfLaunched(CommandLine.arguments)
 // As a session's parser (see `SessionParser`): its headless terminal, fed by the host. Hardened first (see
 // `HostHardening`).
 SessionParser.runIfAsked(CommandLine.arguments)
-// As the probe of a handover (see `HostHandover`): only whether this build can take over.
-HostHandover.probeIfAsked(CommandLine.arguments)
+// As the probe of a handover (see `HostHandover`): only whether this build can take over, and for the account's host
+// whether it gets the same vault key (asked only by the account's host on the Mac: `--handover-probe-key`). Which host
+// the probe is, as the host below asks it (see `HostRole`), from its own command line and environment.
+HostHandover.probeIfAsked(CommandLine.arguments) {
+    let line = CommandLine.arguments
+    let lock = line.firstIndex(of: "--lock").flatMap { line.indices.contains($0 + 1) ? line[$0 + 1] : nil }
+    let role = HostRole(environment: ProcessInfo.processInfo.environment, fallbackHome: NSHomeDirectory(), lockArgument: lock,
+                        accountHome: HostRole.accountHome)
+    return role.vaultKey { VaultStorage.keychainKey() }?.key
+}
 // As the keeper of a Mac switch (V2/MacHandoverKeeper.swift): it proves its code, holds the state, gives it back only
 // to a new image that proves its own, and exits.
 MacHandoverKeeper.keepIfAsked(CommandLine.arguments)
@@ -60,7 +68,14 @@ case .success(let home)?: testShapeHome = home
 case nil: break
 }
 
+// Made first: which host this is is asked of the folder as it is on disk.
 VibePaths.ensurePrivateDirectories()
+// Which host this is (see `HostRole`): its folder, its lock, and whether it's the account's own host (its folder the
+// account's real home, from the user database, and that folder's lock): only that one uses the vault's Keychain key.
+// Asked after the node's start above, which on Linux has set HOME and VIBESWITCHER_HOME as the node's.
+let role = HostRole(environment: ProcessInfo.processInfo.environment, fallbackHome: NSHomeDirectory(),
+                    lockArgument: value(after: "--lock"), accountHome: HostRole.accountHome)
+let lockPath = role.lockPath
 let environment = ProcessInfo.processInfo.environment
 // What a fresh Terminal session would inherit from launchd, the login shell adding the rest (the Mac); on Linux no
 // agent socket, interop, bus, display or runtime folder. Then what every session gets (see `Platform.Tools`).
@@ -70,11 +85,12 @@ let executable = Bundle.main.executablePath ?? arguments[0]
 // This build's folders: on Linux from --node-root, else --image-path, else the executable (see V2/HostImages.swift).
 let folders = HostImages.folders(arguments: nodeArguments, executable: executable)
 let build = HostBuild.id(ofExecutableAt: folders.image)
-let lockPath = value(after: "--lock") ?? VibePaths.hostLock.path
-// The user's host, not a scratch host on its own lock (which runs beside it, and leaves its files alone). On Linux by
-// the lock file's identity, a link refused (see `HostHardening.lock`); on the Mac by its path, as always. On Linux a
-// new image after a handover is the user's host too when the state the image before wrote says so (V2/HandoverMemory.swift).
-let ownsLaunchers = HandoverMemory.ownsLaunchers(probed: HostHardening.ownsLaunchers(lockPath: lockPath, usersLock: VibePaths.hostLock.path),
+// The user's host, not a scratch host on its own lock (which runs beside it, and leaves its files alone). On the Mac on
+// its folder's own lock (`HostRole.holdsRootLock`); on Linux by the lock file's identity, a link refused (see
+// `HostHardening.lock`). On Linux a new image after a handover is the user's host too when the state the image before
+// wrote says so (V2/HandoverMemory.swift).
+let ownsLaunchers = HandoverMemory.ownsLaunchers(probed: Platform.CodeIdentity.isAvailable ? role.holdsRootLock
+                                                     : HostHardening.ownsLaunchers(lockPath: lockPath, usersLock: VibePaths.hostLock.path),
                                                  arguments: arguments, hardening: hardening, refused: startRefusal != nil)
 // A scratch host's test of a traced new image (Linux): refused as if traced, so it goes back (V2/HandoverMemory.swift).
 if let traced = HandoverMemory.testTracer(arguments: arguments, ownsLaunchers: ownsLaunchers) { hardening = traced }
@@ -94,7 +110,7 @@ if startRefusal == nil {
 if let startRefusal, HostHardening.handover(in: arguments) == nil { notStarted(startRefusal) }
 // Sessions are started through a launcher (see `PTYSpawn`). Not the app's copy: an update replaces that file while
 // this host keeps running, and this host must keep starting its own build. A private copy, named by build.
-let launchers = VibePaths.root.appendingPathComponent("host", isDirectory: true)
+let launchers = role.root.appendingPathComponent("host", isDirectory: true)
 let launcher = launchers.appendingPathComponent("launcher-\(build)").path
 func ensureLauncher() -> String {
     try? FileManager.default.createDirectory(at: launchers, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
@@ -106,8 +122,16 @@ func ensureLauncher() -> String {
     }
     return launcher
 }
+// Its socket: a host on a lock of its own on the account's folder, with none given, doesn't start (see
+// `HostRole.socketPath`), before it touches that folder's files or the socket there. Not a handover's: the sessions are
+// in this process already.
+guard let socketPath = role.socketPath(argument: value(after: "--socket"), handingOver: value(after: "--handover") != nil) else {
+    FileHandle.standardError.write(Data(("vibeswitcher-host: on \(lockPath), not \(role.root.path)'s own lock, and no "
+        + "--socket: not started (its host.sock is that folder's host's)\n").utf8))
+    exit(1)
+}
 var config = HostServer.Config(
-    socketPath: value(after: "--socket") ?? VibePaths.hostSocket.path,
+    socketPath: socketPath,
     lockPath: lockPath,
     shell: shell,
     // On Linux its own sealed copy (no launcher copy made); on the Mac a private copy, as always.
@@ -174,10 +198,10 @@ config.installRoot = HandoverTarget.installRoot(arguments: arguments, ownsLaunch
 config.projectAllowList = ProjectAllowList.place(arguments: arguments, accountHome: HostImages.accountHome)
 if let limit = value(after: "--parser-stall-limit").flatMap(TimeInterval.init), limit > 0 { config.parser.stallLimit = limit }
 // The user's host logs its sessions (see `HostLog`); a scratch host only where it's told to.
-config.logPath = value(after: "--log") ?? (ownsLaunchers ? VibePaths.root.appendingPathComponent("debug/host.log").path : nil)
+config.logPath = value(after: "--log") ?? (ownsLaunchers ? role.root.appendingPathComponent("debug/host.log").path : nil)
 // What a build this one hands over to is started with: the same, without this start's handover.
 let handoverFlags: [String: Bool] = ["--handover": true, "--handover-fallback": true, "--handover-fail-restore": false,
-                                     "--handover-fallback-app": true, "--app-executable": true,
+                                     "--handover-fallback-app": true, "--app-executable": true, HostHandover.proofFlag: true,
                                      HostStart.appKeyFlag: false, HostImages.imagePathFlag: true, HandoverMemory.fallbackImageFlag: true,
                                      MacHandoverKeeper.channelFlag: true, MacHandoverKeeper.pidFlag: true].merging(TestAppPrincipal.handoverFlags) { $1 }
     // On Linux --node-root and --server too: a handover appends the target's, and its fallback's (V2/HandoverMemory.swift).
@@ -209,6 +233,8 @@ func goBack(_ statePath: String, _ error: Error) -> Never {
         log("going back to \(fallback)")
         var arguments = config.arguments + ["--handover", statePath]
         if let app = value(after: "--handover-fallback-app") { arguments += ["--app-executable", app] }
+        // The proof holds for the build before too: the same process, state and lock (the Mac's; Linux carries none).
+        if let proof = value(after: HostHandover.proofFlag) { arguments += [HostHandover.proofFlag, proof] }
         // On Linux the old image's sealed copy, carried across the exec, by its path's name (V2/HandoverMemory.swift).
         log("\(HandoverMemory.goBack(to: fallback, image: value(after: HandoverMemory.fallbackImageFlag), arguments: arguments) ?? HostHandover.exec(fallback, arguments: arguments, inherit: nil))")
     }
@@ -220,6 +246,34 @@ func goBack(_ statePath: String, _ error: Error) -> Never {
 // The build before handed its sessions over, by executing this one in its place (same process). Read before the
 // server is made: what it kept in memory (`HostServer.secretsForHandover`) can go into this one's config.
 let handoverPath = HostHardening.handover(in: arguments)
+// A fresh start takes its lock first, before the vault's key or file is read: another host holding it, this one
+// exits having read neither. A handover inherits the lock of the build before (checked by `HostHandover.receive` on the
+// Mac, by `HandoverMemory` on Linux), and so does a checked node's switch through its keeper (`HostImages.mayTakeHandover`).
+var heldLock: Int32 = -1
+if handoverPath == nil, checkedStart?.commandLine.keeper == nil {
+    do {
+        heldLock = try role.takeLock()
+    } catch HostServer.Failure.alreadyRunning {
+        HostServer.note("host: another host holds the lock; this one (build \(build)) exits", logPath: config.logPath)
+        exit(0)
+    } catch {
+        log("\(error)")
+        exit(1)
+    }
+}
+// The vault's Keychain key, for the account's host only, read once and only when first asked: whether it was made
+// on this read is known from that one read alone (a second finds the one the first made).
+// Nil for any host but the account's, which reads none, and on Linux, which has no Keychain.
+var vaultKeyRead: VaultStorage.KeyRead??
+func vaultKeyResult() -> VaultStorage.KeyRead? {
+    if let read = vaultKeyRead { return read }
+    let read = role.vaultKey { VaultStorage.keychainKey() }
+    vaultKeyRead = .some(read)
+    // Which status kept the key (never the key): a host without it can't open the vault, seal it, or take a handover.
+    if let status = read?.failure { HostServer.note("vault key: Keychain status \(status)", logPath: config.logPath) }
+    return read
+}
+func vaultKey() -> VaultStorage.Key? { vaultKeyResult()?.read }
 var restoring: HostHandover.State?
 var restoredSecrets: Data?
 // The state as handed over, its secrets' descriptor still named: what `HandoverMemory.finish` closes once restored.
@@ -243,15 +297,38 @@ if let checkedStart, let keeper = checkedStart.commandLine.keeper {
         // A test of the fallback: as if this build couldn't read the state (on Linux, once it has read it and its
         // secrets, below: V2/HandoverMemory.swift).
         if arguments.contains("--handover-fail-restore"), !HandoverMemory.failsRestoreLate { throw HostHandover.Failure.unreadable("--handover-fail-restore") }
-        // A Mac switch through a keeper: the state it held, given only once this image proved its code to it.
-        let kept = MacHandoverKeeper.takeIfAsked(arguments)
-        var state = try kept?.get() ?? HostHandover.read(from: handoverPath)
         // A checked node's state only to a checked start, and a checked start's only from a proven keeper: otherwise
         // nothing is taken, and the exit closes every descriptor this image was given (the review's F1, N2).
-        if let why = HostImages.mayTakeHandover(state, viaKeeper: kept != nil, checkedNode: config.checkedNode) { notStarted(why) }
-        handedOver = state
-        restoredSecrets = HostHandover.takeSecrets(from: &state)
-        restoring = state
+        func admit(_ state: HostHandover.State, viaKeeper: Bool) {
+            if let why = HostImages.mayTakeHandover(state, viaKeeper: viaKeeper, checkedNode: config.checkedNode) { notStarted(why) }
+        }
+        // A Mac switch through a keeper: the state it held, given only once this image proved its code to it. A scratch
+        // host's alone (`HostServer.Config.testKeeperHost`): the account's host takes a handover only with its proof
+        // (`HostHandover.receive`), which a keeper a process of the account started itself wouldn't carry.
+        if !role.isAccountHost, let kept = MacHandoverKeeper.takeIfAsked(arguments) {
+            var state = try kept.get()
+            admit(state, viaKeeper: true)
+            handedOver = state
+            restoredSecrets = HostHandover.takeSecrets(from: &state)
+            restoring = state
+        } else if Platform.CodeIdentity.isAvailable {
+            // The Mac, from a state file: taken only from the running host this one replaces (see `HostHandover.receive`:
+            // the lock it holds, and for the account's host the proof under its vault key).
+            let received = try HostHandover.receive(from: handoverPath, lockPath: lockPath, userHost: role.isAccountHost,
+                                                    proof: value(after: HostHandover.proofFlag), logPath: config.logPath,
+                                                    key: { vaultKey()?.key }, admit: { admit($0, viaKeeper: false) })
+            handedOver = received.state
+            restoredSecrets = received.secrets
+            restoring = received.state
+        } else {
+            // Linux: through sealed memory the image before wrote, non-dumpable (V2/HandoverMemory.swift); no Keychain,
+            // so no key to prove it with.
+            var state = try HostHandover.read(from: handoverPath)
+            admit(state, viaKeeper: false)
+            handedOver = state
+            restoredSecrets = HostHandover.takeSecrets(from: &state)
+            restoring = state
+        }
     } catch {
         goBack(handoverPath, error)
     }
@@ -261,21 +338,38 @@ if let checkedStart, let keeper = checkedStart.commandLine.keeper {
 // A fresh launch must not let a script designate itself as the app and replace a keyless host's key.
 config.appExecutable = (restoring != nil ? value(after: "--app-executable") : nil)
     ?? folders.appExecutable
-// The lead's vault: the user's host keeps it sealed under ~/.vibeswitcher/lead with its Keychain key; a scratch host
-// (on its own lock) keeps one in memory only, never touching the user's.
+// The lead's vault: the account's host keeps it sealed under ~/.vibeswitcher/lead with its Keychain key; any other host
+// keeps one in memory only, never touching the account's (see `HostRole.vault`).
 // After a handover, the vault is the one the build before held in memory (its secrets), not what's on disk.
-let vaultFile = VibePaths.root.appendingPathComponent("lead/vault.sealed")
-config.vault = ownsLaunchers ? VaultStorage(file: vaultFile, key: VaultStorage.keychainKey(), logPath: config.logPath).book(handedOver: restoredSecrets)
-    : LeadVault.Book(restoring: restoredSecrets)
+if Platform.CodeIdentity.isAvailable {
+    do {
+        config.vault = try role.vault(lockFD: restoring?.lockFD ?? heldLock, key: vaultKey(), keyUnreadable: vaultKeyResult()?.failure,
+                                      handedOver: restoredSecrets, logPath: config.logPath)
+    } catch {
+        // The account's host no longer on the lock file at its path: it doesn't run (see `HostRole.vault`).
+        HostServer.note("host: \(error); this one (build \(build)) exits", logPath: config.logPath)
+        if let handoverPath { goBack(handoverPath, error) }
+        log("\(error)")
+        exit(1)
+    }
+} else {
+    // Linux has no Keychain: the user's host (`ownsLaunchers`, by its lock's identity or the state carried) keeps its
+    // vault in memory only, as `VaultStorage` with no key; a scratch host one of its own.
+    let vaultFile = VibePaths.root.appendingPathComponent("lead/vault.sealed")
+    config.vault = ownsLaunchers ? VaultStorage(file: vaultFile, key: nil, keyIsNew: false, logPath: config.logPath).book(handedOver: restoredSecrets)
+        : LeadVault.Book(restoring: restoredSecrets)
+}
 // On Linux a fresh vault holds its first look for the user's accept; a restored one keeps its own (V2/VaultFirstLook.swift).
 if VaultFirstLook.holds(arguments: arguments, ownsLaunchers: ownsLaunchers, restored: restoredSecrets.map(LeadVault.Book.reads) ?? false) { config.vault?.holdsFirstLook = true }
 // A scratch host's test sets how long a `.user` seal verifies (V2/LeadVaultV2.swift); the user's host refuses the flag.
 if HostHardening.takesTestFlags(ownsLaunchers: ownsLaunchers), let life = value(after: "--test-user-seal-life").flatMap(Double.init) { LeadVaultV2.sealLife = life }
 // The app that started this host gives it its key on stdin (see `AppProof`), and says so: taken while the vault
-// holds none, but not by a vault that started over (its file no longer opens under the Keychain key): that one waits
+// holds none, but not by a vault that started over (its file no longer opens under the Keychain key, or is gone though
+// the key was there already, `VaultStorage.Key.made`): that one waits
 // for your confirmation through the app (`LeadVault.Book.awaitsAppKey`).
 if arguments.contains(HostStart.appKeyFlag), let key = HostStart.appKeyFromStdin(), let vault = config.vault, !vault.adoptAppKey(key) {
-    log(vault.awaitsAppKey ? "the vault started over: the app key on stdin waits for your confirmation"
+    log(vault.keyUnread ? "the vault's key couldn't be read from the Keychain: the app key on stdin waits for your confirmation"
+        : vault.awaitsAppKey ? "the vault started over: the app key on stdin waits for your confirmation"
         : "the app key on stdin isn't the one the vault holds: kept the vault's")
 }
 
@@ -297,6 +391,9 @@ HostImages.raiseDescriptorLimit(handedOver: handoverPath != nil || checkedStart?
 if let vault = config.vault { server.secretsForHandover = { vault.serialized } }
 // What a held first look kept from being recorded, in the host's log.
 config.vault?.onHeld = { server.note($0) }
+// The user's host proves to the build it hands over to that the handover is its own (see `HostHandover.receive`).
+server.handoverKey = vaultKey()?.key
+server.handoverNeedsKey = role.isAccountHost
 // A test of the secret channel: these bytes are handed over, and the next build says whether it got them.
 let testSecret = HostHardening.takesTestFlags(ownsLaunchers: ownsLaunchers) ? value(after: "--handover-test-secret").map { Data($0.utf8) }
     ?? HandoverMemory.testSecret(arguments: arguments, ownsLaunchers: ownsLaunchers) : nil
@@ -344,11 +441,8 @@ if let state = restoring {
     }
 } else {
     do {
-        try server.start()
+        try server.start(holdingLock: heldLock)
         HandoverMemory.removeStaleStateFiles(lockPath: lockPath, server: server)
-    } catch HostServer.Failure.alreadyRunning {
-        server.note("host: another host holds the lock; this one (build \(build)) exits")
-        exit(0)
     } catch {
         log("\(error)")
         exit(1)
@@ -370,8 +464,8 @@ for name in (try? FileManager.default.contentsOfDirectory(atPath: launchers.path
 }
 // Earlier versions kept the user's sealing key and the teams in files any of the team could read: gone.
 if ownsLaunchers {
-    try? FileManager.default.removeItem(at: VibePaths.root.appendingPathComponent("steer/sender.key"))
-    try? FileManager.default.removeItem(at: VibePaths.root.appendingPathComponent("lead/teams"))
+    try? FileManager.default.removeItem(at: role.root.appendingPathComponent("steer/sender.key"))
+    try? FileManager.default.removeItem(at: role.root.appendingPathComponent("lead/teams"))
 }
 // On Linux: its pid, its build and SWIFT_BACKTRACE, the journal's start line (see V2/HostStartLine.swift).
 HostStartLine.say()

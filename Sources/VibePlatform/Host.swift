@@ -11,6 +11,8 @@ extension Platform {
     /// - `volumeFree(at:) -> Int64?`: the bytes free to this user on the volume holding a path that exists.
     /// - `descriptorLimit() -> Int`: how many files this process may have open at once.
     /// - `bootTime() -> Date?`: when the machine last started, by the wall clock; nil when not known.
+    /// - `cpuTicks() -> (user: UInt32, system: UInt32, idle: UInt32, nice: UInt32)?`: the CPU's tick counts since boot,
+    ///   all cores together (they wrap at 2³²); nil when not known (Linux: not read there yet).
     ///
     /// Everything is read in process: no tool is run, nothing prompts.
     public enum Host {}

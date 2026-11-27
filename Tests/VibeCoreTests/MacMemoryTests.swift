@@ -79,7 +79,7 @@ extension LeadToolsetTests {
         let lead = try lead(root, runtime)
         runtime.memory = MacMemory(pressure: .normal, swapUsed: 7_761 * 1_048_576, swapTotal: 9_216 * 1_048_576, swapOutRate: nil)
         let calm = call(lead, "status").text
-        let line = try #require(calm.components(separatedBy: "\n").first { $0.hasPrefix("Mac (every project's team):") })
+        let line = try #require(calm.components(separatedBy: "\n").first { $0.hasPrefix("Mac (all projects):") })
         #expect(line.contains("load 0.5"), "\(line)")
         #expect(line.contains("(mac_max_sessions 6), memory pressure normal, swap 7.6/9 GB, swap-out not known yet."), "\(line)")
         #expect(!line.contains("refuse until it eases"), "\(line)")

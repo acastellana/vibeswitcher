@@ -135,7 +135,7 @@ struct PreferencesCheckTests {
     @Test func theFullRunChecksTheBuildsDefaults() throws {
         let lines = try String(contentsOf: Self.repo.appendingPathComponent("scripts/test.sh"), encoding: .utf8)
             .components(separatedBy: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
-        let build = #"Resources/bin/vs-heavy --as scripts/test.sh bash -c 'clean_test_environment; slot_width; heavy_swift build || { : > "$VS_BUILD_FAILED_MARK"; exit 1; }; heavy_swift test "$@"' scripts/test.sh "$@""#
+        let build = #"VIBESWITCHER_HEAVY_ROOT=$heavy_root Resources/bin/vs-heavy --as scripts/test.sh bash -c 'clean_test_environment; slot_width; heavy_swift build || { : > "$VS_BUILD_FAILED_MARK"; exit 1; }; heavy_swift test "$@"' scripts/test.sh "$@""#
         // swift test runs in `swift_tests` (and `swift_tests_retrying_failed`, which calls it), called between the two.
         let defined = lines.firstIndex(of: "swift_tests() {")
         #expect(defined.map { lines[$0 + 1] } == build, "scripts/test.sh has no `swift_tests() {` running `\(build)`")

@@ -22,7 +22,7 @@ struct ChatWindowGrowthTests {
         let path = projects.appendingPathComponent("lead.jsonl").path
         IdleBench.writeTranscript(to: path, turns: turns)
         let chat = ChatModel(outbox: ComposerOutbox(url: home.appendingPathComponent("outbox.json")), home: home.path,
-                             steerRoot: home.appendingPathComponent("vibeswitcher"))
+                             steerRoot: home.appendingPathComponent("vibeswitcher"), defaults: temp.defaults("chat-window-growth-defaults"))
         chat.show(path: path)
         #expect(await until { chat.state == .ready && !chat.reading })
         return (chat, path)

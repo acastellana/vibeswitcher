@@ -99,7 +99,7 @@ struct MainWindowAccessibilityTests {
         ]
         try Data(lines.map { String(decoding: try JSONSerialization.data(withJSONObject: $0), as: UTF8.self) }.joined(separator: "\n").utf8 + [0x0A])
             .write(to: transcript)
-        let chat = ChatModel()
+        let chat = ChatModel(defaults: scratch.defaults("main-window-ax-chat"))
         chat.show(path: transcript.path)
         #expect(await until { chat.state == .ready && chat.log.usage != nil }, "the chat didn't load")
         chat.mode = .plan

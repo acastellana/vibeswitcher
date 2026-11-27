@@ -6,7 +6,10 @@ import Foundation
 extension Platform.Keychain {
     enum System {
         /// nil: no Keychain to keep it in.
-        static func key(service: String, account: String, label: String, size: Int, make: () -> Data) -> Data? { nil }
+        static func read(service: String, account: String, label: String, size: Int, make: () -> Data) -> Read? { nil }
+
+        /// The Mac's `errSecDecode`, which no read here gives.
+        static let notAKey: Int32 = -26275
 
         /// Nothing: there is nothing kept.
         static func remove(service: String, account: String) {}

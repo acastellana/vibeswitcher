@@ -5,29 +5,49 @@ import VibeCore
 /// with a key from your login Keychain. The Keychain gives that key, without asking you, only to the binary that
 /// created it (the host); anything else that asks (`security find-generic-password`, a worker's script) makes macOS
 /// ask you first. A file that was changed, or sealed with another key, doesn't open: the vault starts empty, and the
-/// file is kept as it was (see `book`).
+/// file is kept as it was (see `book`). A file that's gone while its key was there already starts over the same way.
 public struct VaultStorage {
     public let file: URL
     /// Nil: no key (the Keychain didn't give it without asking): the vault lives in memory only.
     public let key: SymmetricKey?
+    /// `key` was made on this start, the Keychain holding none before (`Key.made`): only then is a missing vault file a
+    /// first start. False for a key that was there already.
+    public let keyIsNew: Bool
+    /// Why there's no `key`: the Keychain's status when reading it failed (`KeyRead.failure`); nil when there's a key,
+    /// or none was read (a test's keyless vault).
+    public let keyUnreadable: Int32?
     /// The host's log, for a save that failed (the file's name and why, never what's in it); nil logs nothing.
     private let logPath: String?
     private let sync: (Int32) -> Bool
     /// How a failed save's next try is timed; a test's own instead.
     private let retryLater: (TimeInterval, @escaping () -> Void) -> Void
+    /// Whether the host still holds its lock (see `HostRole.vault`), asked before each save: false saves nothing more.
+    private let holdsLock: () -> Bool
 
-    public init(file: URL, key: SymmetricKey?, logPath: String? = nil) {
-        self.init(file: file, key: key, logPath: logPath, sync: VibePaths.syncToDisk) {
+    /// `keyIsNew`: said by whoever read the key (`Key.made`), never assumed.
+    public init(file: URL, key: SymmetricKey?, keyIsNew: Bool, keyUnreadable: Int32? = nil, logPath: String? = nil,
+                holdsLock: @escaping () -> Bool = { true }) {
+        self.init(file: file, key: key, keyIsNew: keyIsNew, keyUnreadable: keyUnreadable, logPath: logPath, sync: VibePaths.syncToDisk,
+                  holdsLock: holdsLock) {
             DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + $0, execute: $1)
         }
     }
 
-    init(file: URL, key: SymmetricKey?, logPath: String? = nil, sync: @escaping (Int32) -> Bool = VibePaths.syncToDisk,
+    /// A test's: its key one it just made (`keyIsNew`), unless it says otherwise.
+    init(file: URL, key: SymmetricKey?, logPath: String? = nil) {
+        self.init(file: file, key: key, keyIsNew: true, logPath: logPath)
+    }
+
+    init(file: URL, key: SymmetricKey?, keyIsNew: Bool = true, keyUnreadable: Int32? = nil, logPath: String? = nil,
+         sync: @escaping (Int32) -> Bool = VibePaths.syncToDisk, holdsLock: @escaping () -> Bool = { true },
          retryLater: @escaping (TimeInterval, @escaping () -> Void) -> Void) {
         self.file = file
         self.key = key
+        self.keyIsNew = keyIsNew
+        self.keyUnreadable = keyUnreadable
         self.logPath = logPath
         self.sync = sync
+        self.holdsLock = holdsLock
         self.retryLater = retryLater
     }
 
@@ -35,24 +55,49 @@ public struct VaultStorage {
     /// that it starts over when there was one it can't read); it saves itself after each change when there's a key.
     /// A vault that started over saves nothing while it waits for your answer (`Book.awaitsAppKey`): the file that
     /// didn't open stays as it was until you teach the host the app's key, and is then set aside beside it
-    /// (`setAsideSuffix`), never sealed over.
+    /// (`setAsideSuffix`), never sealed over. A missing file under a key the Keychain had already (`keyIsNew` false)
+    /// starts over too, not as a first start: whatever file is there by the time you answer is set aside the same way.
     public func book(handedOver: Data? = nil) -> LeadVault.Book {
         let handedOver = handedOver.flatMap { LeadVault.Book.reads($0) ? $0 : nil }
         let opened = load()
         let saved = handedOver ?? opened
         let there = FileManager.default.fileExists(atPath: file.path)
-        // Started over whenever a vault file was there and what came of it doesn't read (it didn't open, or opened as
-        // something that isn't a vault): only a first start, with no file, takes the app's key unasked.
+        // No file though the Keychain's key was there already (`keyIsNew` false): a vault had been sealed under it, and
+        // its file was moved or deleted since (or its folder replaced). Not a first start.
+        let missing = !there && key != nil && !keyIsNew
+        // Started over whenever a vault file was there, or should have been, and what came of it doesn't read (it
+        // didn't open, opened as something that isn't a vault, or isn't there): only a true first start, with no file
+        // and a key made on this start (or none at all), takes the app's key unasked.
         let reads = saved.map(LeadVault.Book.reads) ?? false
-        let book = LeadVault.Book(restoring: saved, startingOver: !reads && there)
+        // A key the Keychain didn't give (`keyUnreadable`) is no vault that doesn't open: the file was never tried, and
+        // may open once the key reads (2026-11-27: a cold start after a power cut found the vault's key unreadable, and
+        // the vault started over in its place). Not started over, nothing written or set aside (there's no key to save
+        // with): the vault waits for your confirmation, in memory only, and the log says which status kept the key.
+        let unread = key == nil && keyUnreadable != nil && !reads
+        let book = LeadVault.Book(restoring: saved, startingOver: !unread && !reads && (there || missing), keyUnread: unread)
+        if key == nil {
+            let log = HostLog(path: logPath)
+            if let status = keyUnreadable, unread {
+                log.note("vault: \(file.lastPathComponent) \(there ? "kept as it is" : "isn't there"): its key couldn't be read from the "
+                    + "Keychain (Keychain status \(status)); in memory only, nothing it holds survives a restart, and it waits for your confirmation")
+            } else {
+                log.note("vault: in memory only (no key from the Keychain\(keyUnreadable.map { ", Keychain status \($0)" } ?? "")): "
+                    + "nothing it holds survives a restart")
+            }
+        }
         if key != nil {
             // A file there that isn't a vault under this key (a handed-over vault doesn't read it) is never saved over,
-            // nor one that opens when the vault waiting for your answer came from memory (a build before without a key).
-            let unopened = there && (!(opened.map(LeadVault.Book.reads) ?? false) || book.awaitsAppKey)
-            let saver = Saver(storage: self, log: HostLog(path: logPath), later: retryLater, setAside: unopened)
+            // nor one that opens when the vault waiting for your answer came from memory (a build before without a key),
+            // nor one that appears while a vault waits for your answer (a file put back): each is set aside first.
+            let unopened = there && !(opened.map(LeadVault.Book.reads) ?? false) || book.awaitsAppKey
+            let saver = Saver(storage: self, log: HostLog(path: logPath), later: retryLater, setAside: unopened,
+                              missing: missing)
             book.onChange = { saver.save($0) }
-            // What came from memory goes to disk too (the build before may have had no key to save it with).
-            if handedOver != nil { saver.save(book.serialized) }
+            // What came from memory goes to disk at once only where no vault opens (none there yet, or one that didn't
+            // open, set aside first): a vault that opens is never saved over by the handover itself, only by a change
+            // the vault makes afterwards (the build before saved each of its own).
+            let opens = opened.map(LeadVault.Book.reads) ?? false
+            if handedOver != nil, !opens { saver.save(book.serialized) }
         }
         return book
     }
@@ -113,12 +158,19 @@ public struct VaultStorage {
         /// A vault was seen that doesn't wait for your answer: none waits after it (the app's key is never taken out).
         private var answered = false
         private var toldHeld = false
+        /// The lock was seen lost: nothing is saved from then on.
+        private var lockLost = false
 
-        init(storage: VaultStorage, log: HostLog, later: @escaping (TimeInterval, @escaping () -> Void) -> Void, setAside: Bool) {
+        /// The vault started over because its file wasn't there (its key was): said so in the log.
+        private let missing: Bool
+
+        init(storage: VaultStorage, log: HostLog, later: @escaping (TimeInterval, @escaping () -> Void) -> Void, setAside: Bool,
+             missing: Bool) {
             self.storage = storage
             self.log = log
             self.later = later
             self.setAside = setAside
+            self.missing = missing
         }
 
         func save(_ data: Data) {
@@ -136,10 +188,21 @@ public struct VaultStorage {
         }
 
         private func attempt() {
-            guard let data = unsaved else { return }
+            guard let data = unsaved, !lockLost else { return }
+            // A host that no longer holds its lock (its lock file removed or replaced, and maybe a second host started
+            // on this folder, which keeps the vault from then on) seals nothing more.
+            guard storage.holdsLock() else {
+                lockLost = true
+                unsaved = nil
+                log.note("vault: \(name) not saved: this host no longer holds its lock (its lock file was removed or replaced); it saves nothing more")
+                return
+            }
             if !answered {
                 guard !LeadVault.Book.awaitsAppKey(data) else {
-                    if !toldHeld { log.note("vault: \(name) didn't open; kept as it is, nothing saved until you answer") }
+                    if !toldHeld {
+                        log.note(missing ? "vault: \(name) isn't there though its key is; nothing saved until you answer"
+                            : "vault: \(name) didn't open; kept as it is, nothing saved until you answer")
+                    }
                     toldHeld = true
                     return
                 }
@@ -147,7 +210,7 @@ public struct VaultStorage {
             }
             do {
                 if setAside {
-                    if let aside = try storage.setAside() { log.note("vault: \(name) didn't open; set aside as \(aside)") }
+                    if let aside = try storage.setAside() { log.note("vault: \(name) not opened; set aside as \(aside)") }
                     setAside = false
                 }
                 try storage.save(data)
@@ -171,14 +234,56 @@ public struct VaultStorage {
 
     public static let keychainService = "dev.vibeswitcher.lead-vault"
 
-    /// The vault's key from the login Keychain, made the first time. Never asks you (the host has no window to ask
-    /// from): nil when the Keychain won't give it without asking (a rebuilt host without the stable signing
-    /// identity, see scripts/setup-signing.sh), and then nothing is saved. The Keychain is the platform's
-    /// (`Platform.Keychain`); Linux has none, and the vault there lives in memory only.
-    public static func keychainKey(service: String = keychainService, account: String = "vault") -> SymmetricKey? {
-        Platform.Keychain.key(service: service, account: account, label: "VibeSwitcher lead vault", size: 32) {
+    /// The vault's key as the Keychain gave it: `made` on this read (the Keychain had no such item, and the one made
+    /// was added), or there already.
+    public struct Key {
+        public let key: SymmetricKey
+        public let made: Bool
+
+        public init(_ key: SymmetricKey, made: Bool) {
+            self.key = key
+            self.made = made
+        }
+    }
+
+    /// What reading the vault's key from the Keychain came to: its key (`found`), or the status that kept it from the
+    /// host (`failure`): any answer but the item with its 32 bytes, or no item and a new one added. Which status is said
+    /// in host.log (never the key): a read that fails is not a vault that doesn't open (2026-11-27, see `book`). A
+    /// status is the Keychain's `OSStatus` (an `Int32`; Linux has no Keychain and no status).
+    public enum KeyRead {
+        case found(Key)
+        case unreadable(Int32)
+
+        public var read: Key? {
+            if case .found(let key) = self { return key }
+            return nil
+        }
+
+        public var key: SymmetricKey? { read?.key }
+
+        public var failure: Int32? {
+            if case .unreadable(let status) = self { return status }
+            return nil
+        }
+    }
+
+    /// The status a read gives for an item whose data isn't a 32-byte key (the Keychain itself said success).
+    public static let notAKey = Platform.Keychain.notAKey
+
+    /// The vault's key from the login Keychain, made the first time (`Key.made`: only when the Keychain said it had
+    /// none and took the new one; every other key is one that was there). Never asks you (the host has no window to
+    /// ask from): `unreadable`, with the Keychain's status, when it won't give it without asking (a rebuilt host the
+    /// item doesn't trust, a locked keychain, see scripts/setup-signing.sh), and then nothing is saved. The Keychain is
+    /// the platform's (`Platform.Keychain`); Linux has none: nil, and the vault there lives in memory only.
+    public static func keychainKey(service: String = keychainService, account: String = "vault") -> KeyRead? {
+        let read = Platform.Keychain.read(service: service, account: account, label: "VibeSwitcher lead vault", size: 32) {
             SymmetricKey(size: .bits256).withUnsafeBytes { Data($0) }
-        }.map { SymmetricKey(data: $0) }
+        }
+        switch read {
+        case .found(let data, let made)?: return .found(Key(SymmetricKey(data: data), made: made))
+        case .unreadable(let status)?: return .unreadable(status)
+        case nil: return nil
+        }
     }
 
     public static func removeKeychainKey(service: String, account: String = "vault") {

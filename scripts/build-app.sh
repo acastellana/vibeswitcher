@@ -13,6 +13,7 @@ cd "$(dirname "$0")/.."
 source scripts/lib/scratch.sh
 source scripts/lib/swift-jobs.sh
 source scripts/lib/resource-bundles.sh
+source scripts/lib/watched-sizes.sh
 
 # --- The keychain search list (this block is the same in setup-signing.sh and build-app.sh; test-signing.sh checks) ---
 LOGIN_KEYCHAIN="$HOME/Library/Keychains/login.keychain-db"
@@ -259,6 +260,10 @@ if [[ -n "${KEYCHAIN:-}" ]] && security show-keychain-info "$KEYCHAIN" 2>&1 | gr
     security set-keychain-settings -l "$KEYCHAIN"
     echo "The signing keychain now stays unlocked until the Mac sleeps or you log out (it locked after 5 minutes)."
 fi
+# What the app installs into a folder the config seal watches (the hooks' binary, copied as it is into
+# ~/.vibeswitcher/bin), signed as it ships: within 80% of ConfigSeal.readLimit, or the build fails before any install.
+SEAL_READ_LIMIT="$(seal_read_limit)"
+check_watched_sizes "$SEAL_READ_LIMIT" "$APP/Contents/MacOS/vibeswitcher-hook"
 echo "Built $APP"
 
 if [[ "${1:-}" == "--install" ]]; then

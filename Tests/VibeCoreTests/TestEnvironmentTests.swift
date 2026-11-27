@@ -158,7 +158,7 @@ struct TestEnvironmentTests {
         let drops = test.filter { $0.contains("clean_test_environment") }.map { $0.trimmingCharacters(in: .whitespaces) }
         // The build and the tests (`swift_tests`), and --retry-failed's retry of the tests that failed.
         #expect(drops.count == 3 && drops.first == #"if (clean_test_environment; node "$file"); then"#, "\(drops)")
-        #expect(drops.dropFirst().first?.hasPrefix("Resources/bin/vs-heavy --as scripts/test.sh bash -c 'clean_test_environment; slot_width; heavy_swift build ") == true, "\(drops)")
+        #expect(drops.dropFirst().first?.hasPrefix("VIBESWITCHER_HEAVY_ROOT=$heavy_root Resources/bin/vs-heavy --as scripts/test.sh bash -c 'clean_test_environment; slot_width; heavy_swift build ") == true, "\(drops)")
         #expect(drops.last?.hasPrefix(#"with_tmpdir "$retry/tmp/" Resources/bin/vs-heavy --as scripts/test.sh bash -c 'clean_test_environment; slot_width; heavy_swift test --skip-build "$@"'"#) == true, "\(drops)")
         #expect(load.filter { $0.contains("clean_test_environment") || $0.contains("team_session_unsets") } == [
             #"    env $(team_session_unsets) "${command[@]}" 8>&- &"#,

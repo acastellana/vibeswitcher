@@ -154,7 +154,7 @@ struct AccessibilityTreeBenchTests {
         try FileManager.default.createDirectory(at: projects, withIntermediateDirectories: true)
         let path = projects.appendingPathComponent("lead.jsonl")
         try ChatKeyViewLoopTests.transcript(turns: 75).write(to: path)
-        let chat = ChatModel()
+        let chat = ChatModel(defaults: scratch.defaults("ax-bench-chat"))
         chat.show(path: path.path)
         #expect(await until { chat.state == .ready && chat.staging == nil }, "the chat didn't load")
         let ticker = ChatAccessibilityTests.Ticker()

@@ -104,7 +104,7 @@ struct AllDoneSnapshots {
         for scheme in [NSAppearance.Name.aqua, .darkAqua] {
             for increased in [false, true] {
                 Contrast.override = increased
-                let chat = ChatModel()
+                let chat = ChatModel(defaults: scratch.defaults("all-done-chat"))
                 chat.show(path: path.path)
                 let deadline = Date().addingTimeInterval(hangGuard)
                 // The read lands through the main queue: let it run.

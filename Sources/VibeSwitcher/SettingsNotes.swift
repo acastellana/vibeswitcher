@@ -46,7 +46,7 @@ enum SettingsNote: String, CaseIterable {
                         + "limit reaches \(MacLoad.number(Boost.vetoPercent)) %, unless Ignore usage limits is on.")
         case .macLimits:
             return ("Mac-wide limits", "Every project shares these limits: at one, leads start nothing new until there's room. Merges wait while the load is high.",
-                    "Load is the greater of the Mac's 1- and 5-minute averages. A lead that was refused is told once there's room.\n\n"
+                    MacLoad.ruleText + " A lead that was refused is told once there's room.\n\n"
                         + "Each build or full test run takes one slot. A project can set its own slots with heavy_slots in its workflow.md; "
                         + "load_threshold and mac_max_sessions there are ignored.\n\n"
                         + "A job using more than 3 cores for at least 5 minutes outside the shared slots is reported once to its project's lead, "

@@ -10,11 +10,7 @@ struct HomePathLintTests {
     /// Kept once per process, and correct so: each is the top-level code of an executable of its own (the host, the
     /// hook), which runs once at its start, on the home that process was started with.
     static let allowed: Set<String> = [
-        "Sources/vibeswitcher-host/main.swift: lockPath",
-        "Sources/vibeswitcher-host/main.swift: ownsLaunchers",
-        "Sources/vibeswitcher-host/main.swift: launchers",
-        "Sources/vibeswitcher-host/main.swift: vaultFile",
-        "Sources/vibeswitcher-host/main.swift: config",
+        "Sources/vibeswitcher-host/main.swift: role",
         "Sources/vibeswitcher-hook/main.swift: stateURL",
     ]
 

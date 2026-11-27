@@ -239,7 +239,7 @@ struct LeadVaultNoAnswerTests: LeadTeamFixture {
         #expect(task.status == .done, "\(task.status): \(merged.text)")
         let onto = try #require(task.merged?.onto)
         #expect(onto != before && head("\(onto)~1", root) == before)
-        #expect(Git.run(["log", "-1", "--format=%s", onto], in: root).output == LeadRecords.subject)
+        #expect(LeadRecords.isSubject(Git.run(["log", "-1", "--format=%s", onto], in: root).output))
         #expect(Git.run(["show", "\(onto):docs/lead/progress.md"], in: root).output.contains("Not committed yet"))
     }
 

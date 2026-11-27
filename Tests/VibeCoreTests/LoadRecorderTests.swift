@@ -225,6 +225,132 @@ struct LoadRecorderTests {
         ], "\(groups)")
     }
 
+    /// The CPU's idle share is the idle ticks' share of all ticks between this sample's reading and the previous one's:
+    /// none on the first sample, after a failed reading on either side, or after a gap longer than `ticksSpan`; a
+    /// counter that wrapped since still gives it.
+    @Test func theCPUsIdleShareIsFromTwoTickReadings() throws {
+        let folder = temp.url("stats")
+        var readings: [CPUTicks?] = [
+            CPUTicks(user: 1000, system: 500, idle: 4000, nice: 0),
+            CPUTicks(user: 1300, system: 600, idle: 4500, nice: 100), // 300 + 100 + 500 + 100: 50 % idle
+            nil, // failed
+            CPUTicks(user: 2000, system: 900, idle: 6000, nice: 100), // no reading before it
+            CPUTicks(user: 2100, system: 900, idle: 6300, nice: 100), // 100 + 300: 75 % idle
+            CPUTicks(user: 2200, system: 1000, idle: 6400, nice: 100), // after a 10-minute gap
+            CPUTicks(user: 2210, system: 1000, idle: 6400, nice: 100), // 0 % idle: recorded, not absent
+        ]
+        var sources = sources(load: 3)
+        sources.cpuTicks = { readings.removeFirst() }
+        let recorder = LoadRecorder(folder: folder, sources: sources)
+        let now = Date(timeIntervalSince1970: 1_793_000_000)
+        let times = [0.0, 60, 120, 180, 240, 240 + 600, 900].map { now.addingTimeInterval($0) }
+        let idle = try times.map { try recorder.write(census: [], at: $0).cpuIdle }
+        #expect(idle == [nil, 50, nil, nil, 75, nil, 0], "\(idle)")
+        let lines = try String(contentsOf: folder.appendingPathComponent(LoadStats.fileName("load", for: now)), encoding: .utf8)
+            .split(separator: "\n")
+        #expect(lines[1].contains("\"cpu_idle\":50") && lines[6].contains("\"cpu_idle\":0"), "\(lines)")
+        #expect(!lines[0].contains("cpu_idle") && !lines[2].contains("cpu_idle") && !lines[5].contains("cpu_idle"), "\(lines)")
+        // Counters that wrapped past 2³² since: 200 + 100 + 100 ticks between, 100 of them idle.
+        let wrapped = CPUTicks(user: 50, system: 10, idle: 40, nice: 0)
+            .idle(since: CPUTicks(user: UInt32.max - 149, system: UInt32.max - 89, idle: UInt32.max - 59, nice: 0))
+        #expect(wrapped == 25)
+        // No ticks between: no share.
+        #expect(CPUTicks(user: 1, system: 1, idle: 1, nice: 1).idle(since: CPUTicks(user: 1, system: 1, idle: 1, nice: 1)) == nil)
+    }
+
+    /// A table shaped as vs-heavy runs: the holder (vs-heavy, in the session shell's job), its command leading its own
+    /// group, children and grandchildren, one whose parent ended (reparented to launchd, still in the command's
+    /// group), a test's child in a group of its own and that one's orphan; and around it the shell's job and an
+    /// unrelated process.
+    static let table = [
+        LoadProcess(pid: 50, ppid: 1, pgid: 50, comm: "zsh", cpuSeconds: 0, runnable: 1),
+        LoadProcess(pid: 51, ppid: 50, pgid: 50, comm: "claude", cpuSeconds: 0, runnable: 4),
+        LoadProcess(pid: 100, ppid: 50, pgid: 50, comm: "vs-heavy", cpuSeconds: 0, runnable: 0),
+        LoadProcess(pid: 101, ppid: 100, pgid: 101, comm: "bash", cpuSeconds: 0, runnable: 1),
+        LoadProcess(pid: 102, ppid: 101, pgid: 101, comm: "swift-build", cpuSeconds: 0, runnable: 3),
+        LoadProcess(pid: 103, ppid: 102, pgid: 101, comm: "swift-frontend", cpuSeconds: 0, runnable: 2),
+        LoadProcess(pid: 104, ppid: 1, pgid: 101, comm: "swift-frontend", cpuSeconds: 0, runnable: 2),
+        LoadProcess(pid: 105, ppid: 103, pgid: 105, comm: "vibe-host", cpuSeconds: 0, runnable: 1),
+        LoadProcess(pid: 106, ppid: 1, pgid: 105, comm: "zsh", cpuSeconds: 0, runnable: 1),
+        // What a holder that has ended (pid 300) left in its group, and the unrelated.
+        LoadProcess(pid: 301, ppid: 1, pgid: 300, comm: "pytest", cpuSeconds: 0, runnable: 2),
+        LoadProcess(pid: 900, ppid: 1, pgid: 900, comm: "beam.smp", cpuSeconds: 0, runnable: 7),
+    ]
+
+    @Test func runnableThreadsAreCountedInEachHoldersTree() {
+        // 100's tree: itself, 101–104 (104 reparented), 105 and its orphan 106; not the shell's job (50, 51).
+        #expect(LoadRecorder.runnable(in: Self.table, holder: 100) == 0 + 1 + 3 + 2 + 2 + 1 + 1)
+        // A holder down the tree (a script run by the command): its own part.
+        #expect(LoadRecorder.runnable(in: Self.table, holder: 102) == 3 + 2 + 1 + 1)
+        // A holder that ended: what's left in its group; one that left nothing: unknown, not 0.
+        #expect(LoadRecorder.runnable(in: Self.table, holder: 300) == 2)
+        #expect(LoadRecorder.runnable(in: Self.table, holder: 400) == nil)
+        // A holder alive with nothing runnable: 0.
+        #expect(LoadRecorder.runnable(in: [LoadProcess(pid: 7, ppid: 1, pgid: 7, comm: "sleep", cpuSeconds: 0)], holder: 7) == 0)
+    }
+
+    /// Through the recorder: each holder's tree and the total, in the line; a holder whose note names no process (it
+    /// ended) has none; when the table can't be read, the fields are absent, never 0. The table is read once a sample,
+    /// over load 48 too (the groups' second look serves).
+    @Test func aSampleRecordsEachHoldersRunnableThreadsAndTheTotalOrNoneWhenUnread() throws {
+        let folder = temp.url("stats")
+        let since = Date(timeIntervalSince1970: 1_793_000_000)
+        let holders = [TestLock.Holder(slot: 1, note: "pid 100, scripts/test.sh in /r/proj, since 10:00", since: since, project: "proj"),
+                       TestLock.Holder(slot: 2, note: "pid 300, scripts/test.sh in /r/other, since 10:00", since: since, project: "other"),
+                       TestLock.Holder(slot: 3, note: nil, since: nil)]
+        let reads = Locked(0)
+        var table: [LoadProcess]? = Self.table
+        var sources = sources(load: 20, processes: { reads.set(reads.get() + 1); return table }, holders: holders)
+        let recorder = LoadRecorder(folder: folder, sources: sources)
+        let sample = try recorder.write(census: [], at: since.addingTimeInterval(60))
+        #expect(reads.get() == 1)
+        #expect(sample.heavy.held.map(\.runnable) == [10, 2, nil], "\(sample.heavy.held)")
+        #expect(sample.runnable == Self.table.reduce(0) { $0 + $1.runnable })
+        let line = try LoadStats.line(sample)
+        #expect(line.contains("\"runnable\":10,\"slot\":1") && line.contains("\"runnable\":24"), "\(line)")
+
+        table = nil
+        let unread = try recorder.write(census: [], at: since.addingTimeInterval(120))
+        #expect(unread.runnable == nil && unread.heavy.held.allSatisfy { $0.runnable == nil }, "\(unread)")
+        #expect(!(try LoadStats.line(unread)).contains("runnable"))
+
+        // Over load 48 with no earlier look: two reads (the groups' window), the second's runnable threads recorded.
+        reads.set(0)
+        table = Self.table
+        sources.averages = { [60, 50, 40] }
+        let busy = try LoadRecorder(folder: folder, sources: sources).write(census: [], at: since.addingTimeInterval(180))
+        #expect(reads.get() == 2 && busy.runnable == 24 && busy.heavy.held.first?.runnable == 10, "\(reads.get()) \(busy)")
+        #expect(busy.top != nil)
+    }
+
+    /// A process holding two slots (a lead's tool server running a merge and an audit, each note naming its pid): its
+    /// tree is counted once, on the first slot, and the second says whose count includes it; another holder's is its own.
+    @Test func aTreeHoldingTwoSlotsIsCountedOnce() throws {
+        let since = Date(timeIntervalSince1970: 1_793_000_000)
+        let holders = [TestLock.Holder(slot: 1, note: "pid 101, VibeSwitcher's merge test of abc in /r/proj, since 10:00", since: since),
+                       TestLock.Holder(slot: 2, note: "pid 100, scripts/test.sh in /r/proj, since 10:00", since: since),
+                       TestLock.Holder(slot: 3, note: "pid 101, VibeSwitcher's audit of t in /r/proj, since 10:00", since: since)]
+        let recorder = LoadRecorder(folder: temp.url("stats"), sources: sources(load: 20, processes: { Self.table }, holders: holders))
+        let sample = try recorder.write(census: [], at: since.addingTimeInterval(60))
+        #expect(sample.heavy.held.map(\.runnable) == [1 + 3 + 2 + 2 + 1 + 1, 10, nil], "\(sample.heavy.held)")
+        #expect(sample.heavy.held.map(\.sameTreeAs) == [nil, nil, 1], "\(sample.heavy.held)")
+        let line = try LoadStats.line(sample)
+        #expect(line.contains("\"same_tree_as\":1,\"slot\":3") && !line.contains("\"runnable\":8,\"same_tree_as\""), "\(line)")
+    }
+
+    /// Lines from before the CPU's idle share and the runnable threads were recorded (a holder without them too) decode
+    /// unchanged; a new line decodes with them.
+    @Test func linesWithoutTheNewFieldsStillDecode() throws {
+        let old = #"{"cores":12,"cost_ms":2.5,"heavy":{"held":[{"minutes":4,"project":"proj","slot":1,"task":"t"}],"slots":3},"load":[30,25,20],"sessions":[],"t":"2026-11-20T14:02:00+01:00"}"#
+        let sample = try decode(Substring(old))
+        #expect(sample.cpuIdle == nil && sample.runnable == nil && sample.heavy.held.first?.runnable == nil)
+        #expect(try LoadStats.line(sample) == old)
+        let new = #"{"cores":12,"cost_ms":4.1,"cpu_idle":12.5,"heavy":{"held":[{"minutes":4,"project":"proj","runnable":6,"slot":1,"task":"t"}],"slots":3},"load":[30,25,20],"runnable":31,"sessions":[],"t":"2026-11-27T14:02:00+01:00"}"#
+        let read = try decode(Substring(new))
+        #expect(read.cpuIdle == 12.5 && read.runnable == 31 && read.heavy.held.first?.runnable == 6)
+        #expect(try LoadStats.line(read) == new)
+    }
+
     @Test func aProjectIsTheRepositoryFoldersNameAndNoDeeper() {
         let home = "/Users/me"
         let repo = { (folder: String) in folder == "/Users/me/dev/proj" || folder == "/Users/me/dev/proj/vendor/lib" }
@@ -271,6 +397,9 @@ struct LoadRecorderTests {
         #expect(LoadRecorder.memory()?.pressure != nil)
         #endif
         #expect((LoadRecorder.processes()?.count ?? 0) > 1)
+        #expect(LoadRecorder.cpuTicks() != nil)
+        // This test's own thread is running: the account's runnable threads are at least 1.
+        #expect((LoadRecorder.processes()?.reduce(0) { $0 + $1.runnable } ?? 0) >= 1)
         #expect(LoadRecorder.cwd(getpid()) != nil)
     }
 }

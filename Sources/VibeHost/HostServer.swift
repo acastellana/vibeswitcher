@@ -127,6 +127,12 @@ public final class HostServer {
     /// on). Called on `queue` just before the exec. The new build gets exactly these bytes from
     /// `HostHandover.takeSecrets(from:)` (before it makes its server) or from `start(restoring:)`.
     public var secretsForHandover: (() -> Data)?
+    /// The vault's Keychain key, held by the user's host: each handover carries a proof under it that this host made it
+    /// (`HostHandover.Proof`), without which the user's host refuses it. Nil: none (a scratch or keyless host).
+    public var handoverKey: SymmetricKey?
+    /// The user's host: without `handoverKey` it hands over to no build, which would refuse it and go back to this
+    /// build's copy, which would refuse it too (and quit, its sessions with it). Refused here, it carries on.
+    public var handoverNeedsKey = false
 
     let config: Config
     private let log: HostLog
@@ -212,16 +218,27 @@ public final class HostServer {
     }
 
     public func start() throws {
-        queue.setSpecific(key: Self.queueKey, value: true)
+        try start(holdingLock: Self.takeLock(at: config.lockPath))
+    }
+
+    /// The lock at `path`, taken: the descriptor that holds it. `Failure.alreadyRunning` when another host holds it.
+    public static func takeLock(at path: String) throws -> Int32 {
         // No link followed (the re-check's note 5): a link at the lock's path, dangling or not, refuses the start (ELOOP)
         // rather than making and holding the file it names.
-        lockFD = open(config.lockPath, O_CREAT | O_RDWR | O_CLOEXEC | O_NOFOLLOW, 0o600)
-        guard lockFD >= 0 else { throw Failure.lock(errno) }
-        guard flock(lockFD, LOCK_EX | LOCK_NB) == 0 else {
-            Sys.close(lockFD)
-            lockFD = -1
+        let fd = open(path, O_CREAT | O_RDWR | O_CLOEXEC | O_NOFOLLOW, 0o600)
+        guard fd >= 0 else { throw Failure.lock(errno) }
+        guard flock(fd, LOCK_EX | LOCK_NB) == 0 else {
+            Sys.close(fd)
             throw Failure.alreadyRunning
         }
+        return fd
+    }
+
+    /// Starts serving, holding its lock through `lock` (`takeLock`, on `Config.lockPath`): this host's from now on. A
+    /// lock `Config.heldLockIsAllowed` refuses is let go (`Failure.lock(EPERM)`).
+    public func start(holdingLock lock: Int32) throws {
+        queue.setSpecific(key: Self.queueKey, value: true)
+        lockFD = lock
         guard config.heldLockIsAllowed?(lockFD) != false else { Sys.close(lockFD); lockFD = -1; throw Failure.lock(EPERM) }
         // Holding the lock: any socket file left behind is stale.
         listenFD = try UnixSocket.listen(path: config.socketPath)
@@ -314,6 +331,9 @@ public final class HostServer {
 
     /// A line in the session log (see `HostLog`).
     public func note(_ text: String) { log.note(text) }
+
+    /// `text` in the host's log at `logPath` (none: nowhere), before there's a server to note it.
+    public static func note(_ text: String, logPath: String?) { HostLog(path: logPath).note(text) }
 
     /// Closes everything. `terminateSessions`: also end the programs (tests); otherwise they lose their terminal anyway.
     public func stop(terminateSessions: Bool) {
@@ -421,6 +441,8 @@ public final class HostServer {
                 return .ok
             }
             refusal = "That isn't the key this session host knows for VibeSwitcher."
+        } else if config.vault?.keyUnread == true {
+            refusal = AppProof.vaultKeyUnreadable
         } else if config.vault?.awaitsAppKey == true {
             refusal = AppProof.vaultStartedOver
         } else {
@@ -437,7 +459,8 @@ public final class HostServer {
         guard client.runsAppCode, !isCheckedNodeHost, appKey == nil, key.count == AppProof.keySize else { return }
         if let vault = config.vault {
             guard vault.adoptAppKey(key) else {
-                return log.note("host: the vault started over: the app's key waits for your confirmation, \(HostLog.peer(client.peerPID))")
+                let why = vault.keyUnread ? "the vault's key couldn't be read from the Keychain" : "the vault started over"
+                return log.note("host: \(why): the app's key waits for your confirmation, \(HostLog.peer(client.peerPID))")
             }
         } else {
             looseAppKey = SymmetricKey(data: key)
@@ -906,6 +929,12 @@ public final class HostServer {
         case .success(let expected): return handOverThroughKeeper(to: executable, expected: expected, reply: reply)
         case nil: break
         }
+        // The user's host on the Mac proves each handover under its vault key (`HostHandover.Proof`); Linux and the
+        // checked node's keeper, above, prove theirs their own way.
+        guard !handoverNeedsKey || handoverKey != nil else {
+            log.note("handover refused: this host has no vault key to prove it with")
+            return reply(.error("Couldn't hand over: this host has no vault key from the Keychain to prove the handover with."))
+        }
         handingOver = true
         let path = config.handoverPath
         let fail: (Error) -> Void = { [weak self] error in
@@ -920,9 +949,10 @@ public final class HostServer {
             return fail(error)
         }
         log("handing over to \(executable)")
+        let key = handoverKey
         DispatchQueue.global().async { [weak self] in
             do {
-                try HostHandover.probe(executable, statePath: path)
+                try HostHandover.probe(executable, statePath: path, keyID: key.map(HostHandover.Proof.keyID))
             } catch {
                 self?.queue.async { fail(error) }
                 return
@@ -932,12 +962,14 @@ public final class HostServer {
                 var secretFD: Int32?
                 var parsersStopped = false
                 do {
-                    if let secrets = self.secretsForHandover?() { secretFD = try HostHandover.SecretChannel.make(secrets) }
+                    let secrets = self.secretsForHandover?()
+                    if let secrets { secretFD = try HostHandover.SecretChannel.make(secrets) }
                     // A session that just ended is saved as ended, with the screen its parser showed last.
                     self.sessions.values.forEach { $0.finishNow() }
                     let state = self.handoverState(secretFD: secretFD)
                     if let bad = state.descriptors.first(where: { !HostHandover.isOpen($0) }) { throw HostHandover.Failure.badDescriptor(bad) }
-                    try HostHandover.write(state, to: path)
+                    let proof = try Self.proofArguments(key: self.handoverKey, state: try HostHandover.write(state, to: path), secrets: secrets,
+                                                        lockFD: state.lockFD, lockPath: self.config.lockPath)
                     reply(.ok)
                     // The new build starts its own parsers, from the replays; none of these is left running.
                     self.sessions.values.forEach { $0.suspendParser() }
@@ -947,6 +979,7 @@ public final class HostServer {
                     // The fallback is a private launcher copy, not next to the app. Carry the original app
                     // location through argv so restoring it never infers identity from the mutable state file.
                     if let app = self.config.appExecutable { arguments += ["--handover-fallback-app", app] }
+                    arguments += proof
                     throw HostHandover.exec(executable, arguments: arguments, inherit: state.descriptors)
                 } catch {
                     if parsersStopped { self.sessions.values.forEach { $0.resumeParser() } }
@@ -958,6 +991,17 @@ public final class HostServer {
                 }
             }
         }
+    }
+
+    /// What the build this host hands over to is told to prove the handover is this host's (`HostHandover.Proof`):
+    /// nothing without `key`. Throws when there's a key and the proof can't be made (the handover fails, this host
+    /// carrying on): the user's host would refuse a handover without one.
+    static func proofArguments(key: SymmetricKey?, state: Data, secrets: Data?, lockFD: Int32, lockPath: String) throws -> [String] {
+        guard let key else { return [] }
+        guard let proof = HostHandover.Proof.make(vaultKey: key, state: state, secrets: secrets, lockFD: lockFD, lockPath: lockPath) else {
+            throw HostHandover.Failure.refused("this host can't make its proof")
+        }
+        return [HostHandover.proofFlag, proof.description]
     }
 
     func handoverState(secretFD: Int32?) -> HostHandover.State {

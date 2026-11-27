@@ -6,7 +6,7 @@ import VibeCore
 final class MacLimitsEditor: ObservableObject {
     /// Team sessions (workers and verifiers) of all projects at once, at least 1.
     @Published var maxSessions: Int { didSet { changed() } }
-    /// The load (the greater of the 1- and 5-minute averages) above which leads start nothing; nil (empty) or 0: twice the cores.
+    /// The load (as `MacLoad.room` judges it) above which leads start nothing; nil (empty) or 0: twice the cores.
     @Published var loadThreshold: Double? { didSet { changed() } }
     /// Builds and full test runs at once, Mac-wide (vs-heavy's, merges', audits'), 1 to the cores.
     @Published var heavySlots: Int { didSet { changed() } }

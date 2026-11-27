@@ -671,7 +671,7 @@ extension LeadToolset {
             }
         }
         if !landed.isEmpty { archiveFinished(force: false) }
-        let patience = waited.map { " (The tests waited \(Worktrees.duration($0.after)) for the Mac's load to drop from \(MacLoad.number($0.from)) below load_threshold.)" } ?? ""
+        let patience = waited.map { " (The tests waited \(Worktrees.duration($0.after)) for the Mac's load to drop\($0.from.map { " from \(MacLoad.number($0))" } ?? "") below load_threshold.)" } ?? ""
         let head = "Batch of \(gates.count) (\(names)) onto \(base): \(runs) test run\(runs == 1 ? "" : "s")"
             + (landed.isEmpty ? ", nothing merged." : ", \(landed.count) merged.")
         var text = head + patience + "\n" + lines.filter { !$0.isEmpty }.map { "- " + $0 }.joined(separator: "\n")
@@ -705,10 +705,10 @@ extension LeadToolset {
         return MCPToolResult(text: result.text, isError: !merged)
     }
 
-    /// auto_advance's batch step: `mergeBatch`, with the records flushed after.
+    /// auto_advance's batch step: `mergeBatch`, with the product inventory committed after when it changed.
     func advanceMergeBatch(_ slugs: [String], locked: (() -> Void)? = nil) throws -> BatchResult {
         let result = try mergeBatch(slugs, locked: locked)
-        records.flush(base: base)
+        records.commitInventory(base: base)
         return result
     }
 }

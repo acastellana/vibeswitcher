@@ -256,7 +256,8 @@ public enum ConfigSeal {
     /// (`LeadVault.Book`); the rest is the main checkout's, sealed per team.
     public static func isHome(key: String) -> Bool {
         let rest = key.hasPrefix(keysPrefix) ? key.dropFirst(keysPrefix.count) : key.hasPrefix(gonePrefix) ? key.dropFirst(gonePrefix.count)
-            : key.hasPrefix(bookkeepingPrefix) ? key.dropFirst(bookkeepingPrefix.count) : key.hasPrefix(keyPrefix) ? key.dropFirst(keyPrefix.count) : ""
+            : key.hasPrefix(bookkeepingPrefix) ? key.dropFirst(bookkeepingPrefix.count) : key.hasPrefix(pastPrefix) ? key.dropFirst(pastPrefix.count)
+            : key.hasPrefix(keyPrefix) ? key.dropFirst(keyPrefix.count) : ""
         return rest.hasPrefix("~/") || rest.hasPrefix("/mnt/") || rest.hasPrefix("/run/user/")
     }
 
@@ -271,10 +272,12 @@ public enum ConfigSeal {
     static func goneKey(of key: String) -> String { gonePrefix + name(ofKey: key) }
 
     /// Whether the thing `key` names comes and goes with what settings say (a plugin they enable, the scripts of a
-    /// settings file that reads), unlike a file, which hashes as absent when it's not there.
+    /// settings file that reads), unlike a file, which hashes as absent when it's not there. And a zsh startup file's
+    /// compiled twin (`isTwin`), watched since after most seals began: one a seal first sees present, past its first
+    /// look, waits for your Accept once (an existing user's own twin: one card); one first seen absent is recorded.
     static func comesAndGoes(key: String) -> Bool {
         let name = name(ofKey: key)
-        return isPlugin(name: name) || isScripts(name: name)
+        return isPlugin(name: name) || isScripts(name: name) || isTwin(name: name)
     }
 
     /// Where a seal notes that it has watched plugins and scripts since (its first look that did): after it, one seen
@@ -285,7 +288,7 @@ public enum ConfigSeal {
     /// Whether `key` is one of the vault's own notes beside a watched thing's hash (`keysPrefix`, `gonePrefix`,
     /// `comesAndGoesSince`): never in its `guarded` answer.
     static func isVaultNote(_ key: String) -> Bool {
-        key.hasPrefix(keysPrefix) || key.hasPrefix(gonePrefix) || key.hasPrefix(bookkeepingPrefix) || key == comesAndGoesSince
+        key.hasPrefix(keysPrefix) || key.hasPrefix(gonePrefix) || key.hasPrefix(bookkeepingPrefix) || key.hasPrefix(pastPrefix) || key == comesAndGoesSince
     }
 
     /// Where a look's hashes say what a folder hashes to with the sync bookkeeping counted (`isSyncBookkeeping`), as
@@ -315,6 +318,34 @@ public enum ConfigSeal {
     static let bookkeepingPrefix = keyPrefix + "#bookkeeping "
 
     static func bookkeepingKey(of key: String) -> String { bookkeepingPrefix + name(ofKey: key) }
+
+    // MARK: Past a bound (2026-11-27)
+
+    /// Where a look's hashes (and the seal, beside a thing's hash) name what in a watched thing is past a bound
+    /// (`readLimit`, `folderBudget`, `maxEntries`, `maxNamed`): told by its mode, size, times and inode, or cut, never
+    /// read whole. One newline-separated list of its paths or parts.
+    static let pastPrefix = keyPrefix + "#past "
+
+    static func pastKey(of key: String) -> String { pastPrefix + name(ofKey: key) }
+
+    /// What a `pastKey` value names.
+    static func past(_ value: String?) -> Set<String> { Set((value ?? "").split(separator: "\n").map(String.init)) }
+
+    /// Whether `key` (a watched key) has something past a bound in `now` that `recorded` didn't name so: the first time
+    /// it's seen that way, a change that waits for your Accept, whoever made it, quiet or not (as an oversized
+    /// compiled twin does). Seen so and accepted, a rewrite of it is judged as any change of that thing.
+    static func newlyPast(key: String, recorded: [String: String], now: [String: String]) -> Bool {
+        !past(now[pastKey(of: key)]).subtracting(past(recorded[pastKey(of: key)])).isEmpty
+    }
+
+    /// The `pastKey` value naming `items`: nil when there's none.
+    static func pastValue(_ items: [String]) -> String? { items.isEmpty ? nil : Set(items).sorted().joined(separator: "\n") }
+
+    /// Whether a plugin's or a settings' scripts' part (`parts`) is past a bound: cut (under an install's label too,
+    /// "user: cut", for a plugin with several), or told by metadata ("big").
+    static func isPast(part label: String, _ digest: String) -> Bool {
+        label == "cut" || label.hasSuffix(": cut") || digest.split(separator: " ").contains("big")
+    }
 
     /// The bookkeeping read for its shape at most (Claude Code reads its manifest up to 4 MB); past it, it's hashed as
     /// any file and isn't shaped.
@@ -436,8 +467,23 @@ public enum ConfigSeal {
     /// The vault's answer to a lead that seals a change made while the team's sessions ran.
     public static let heldRefusal = "The agents' config changed while the team's sessions ran: only you accept that, in VibeSwitcher."
 
-    /// The files in your home every session or shell loads.
-    static let homeFiles: [(String, Watched.Kind)] = [
+    /// The files in your home every session or shell loads, and the compiled twin of each zsh startup file among them
+    /// (`twinSuffix`).
+    static let homeFiles: [(String, Watched.Kind)] = sourceHomeFiles + sourceHomeFiles.filter { zshStartupFiles.contains($0.0) }.map { ($0.0 + ".zwc", .file) }
+
+    /// zsh's startup files. zsh runs a `<file>.zwc` (what `zcompile` makes) in place of the file when it's newer, and
+    /// alone when the file is absent, so each one's twin is watched beside it, present or absent: one appearing is a
+    /// change. Like the files themselves, only your home's: not under `$ZDOTDIR`.
+    static let zshStartupFiles: Set<String> = [".zshenv", ".zprofile", ".zshrc", ".zlogin", ".zlogout"]
+
+    /// How a compiled twin is named to the lead and on your card: "~/.zshrc.zwc (a compiled copy of your shell startup file)".
+    static let twinSuffix = " (a compiled copy of your shell startup file)"
+
+    /// Whether the watched thing `name` is a zsh startup file's compiled twin.
+    static func isTwin(name: String) -> Bool { name.hasPrefix("~/") && name.hasSuffix(".zwc" + twinSuffix) }
+
+    /// The files in your home every session or shell loads, as they're written.
+    private static let sourceHomeFiles: [(String, Watched.Kind)] = [
         (".claude/settings.json", .file), (".claude/settings.local.json", .file), (".claude/CLAUDE.md", .file),
         (".claude/skills", .folder), (".claude/agents", .folder), (".claude/commands", .folder), (".claude/hooks", .folder),
         (".claude/output-styles", .folder), (".claude.json", .mcpServers),
@@ -462,7 +508,7 @@ public enum ConfigSeal {
     /// plugins they enable.
     public static func homeWatched(home: String) -> [Watched] {
         let files = homeFiles.map { file in
-            let name = "~/" + file.0
+            let name = "~/" + file.0 + (file.0.hasSuffix(".zwc") ? twinSuffix : "")
             return Watched(name: name, path: (home as NSString).appendingPathComponent(file.0), kind: file.1, executes: !instructions.contains(name))
         }
         let skip = files.filter { $0.kind == .file || $0.kind == .folder }.map(\.path)
@@ -575,6 +621,13 @@ public enum ConfigSeal {
             if let parts = parts(item) {
                 all[keyPrefix + item.name] = partsHash(parts)
                 all[keysPrefix + item.name] = encode(Dictionary(parts, uniquingKeysWith: { first, _ in first }))
+                all[pastPrefix + item.name] = pastValue(parts.filter { isPast(part: $0.0, $0.1) }.map(\.0))
+                continue
+            }
+            // A compiled twin: read once too, so its hash and its per-key hashes (whether it's there) never disagree.
+            if let twin = twinHashes(item) {
+                all[keyPrefix + item.name] = twin.hash
+                all[keysPrefix + item.name] = encode(twin.keys)
                 continue
             }
             if item.kind == .folder || item.kind == .entries {
@@ -582,11 +635,14 @@ public enum ConfigSeal {
                 all[keyPrefix + item.name] = folder.hash
                 all[keysPrefix + item.name] = encode(folder.entries)
                 all[countingPrefix + item.name] = folder.countingHash
+                all[pastPrefix + item.name] = pastValue(folder.past)
                 if item.name == copiedFolder { all[bookkeepingKey(of: keyPrefix + item.name)] = encode(folder.bookkeeping) }
                 continue
             }
-            guard let hash = fingerprint(item) else { continue }
+            var past = false
+            guard let hash = fingerprint(item, past: &past) else { continue }
             all[keyPrefix + item.name] = hash
+            if past { all[pastPrefix + item.name] = pastValue(["contents"]) }
             if let keys = keyHashes(item) { all[keysPrefix + item.name] = encode(keys) }
         }
         return all
@@ -604,6 +660,8 @@ public enum ConfigSeal {
             guard stat(watched.path, &info) == 0 else { return [:] }
             return regularContents(watched.path, limit: jsonLimit).flatMap { String(data: $0, encoding: .utf8) }.flatMap(gitKeys)
         }
+        // A compiled twin: none while absent, so one first watched holds only when it's there (`comesAndGoes`).
+        if let twin = twinHashes(watched) { return twin.keys }
         guard watched.kind == .mcpServers || (watched.kind == .file && watched.path.hasSuffix(".json")) else { return nil }
         var info = stat()
         guard stat(watched.path, &info) == 0 else { return [:] }
@@ -797,11 +855,32 @@ public enum ConfigSeal {
     /// A JSON file read whole (`~/.claude.json`, settings) at most: past it, it's taken as unreadable.
     static let jsonLimit = 64 << 20
 
+    /// A watched file's contents read at most (a file, an entry of a watched folder, a plugin's module): past it, it's
+    /// told by its mode, size, times (ctime too: a shell can set mtime back, not ctime) and inode (`bigDigest`), never
+    /// read, so a session's big (or sparse) file can't stall a look; rewriting it is still a change. On this Mac
+    /// (2026-11-27) the biggest watched file is the hooks' binary, 21 MB, in `~/.vibeswitcher/bin`.
+    static let readLimit = 32 << 20
+
+    /// A watched folder's files (and a plugin's modules, a settings file's scripts) read at most this many bytes in
+    /// all, in name order: past it, the rest are told as `readLimit` tells a big one. On this Mac (2026-11-27) the
+    /// biggest is `~/.claude/skills`, 23 MB in 1242 files. Each watched thing reads at most this (a plugin: each
+    /// install, its JSON files, scripts and modules together), each file at most `readLimit`, so a look reads at most
+    /// that times what's watched (a plugin enabled is one more), and the vault hashes one look at a time
+    /// (`LeadVault.Book.lookGate`).
+    static let folderBudget = 64 << 20
+
     /// What `watched` holds now, hashed (SHA-256, hex). Something absent hashes as such, never as an empty file. nil
     /// when it can't be told now (`~/.claude.json` that doesn't parse, three reads in a row).
     public static func fingerprint(_ watched: Watched) -> String? {
+        var past = false
+        return fingerprint(watched, past: &past)
+    }
+
+    /// `fingerprint`, `past` set when its contents were past `readLimit` (`pastKey`).
+    static func fingerprint(_ watched: Watched, past: inout Bool) -> String? {
         switch watched.kind {
         case .plugin, .scripts: return parts(watched).map(partsHash)
+        case .file where isTwin(name: watched.name): return twinHashes(watched)?.hash
         default: break
         }
         var hasher = SHA256()
@@ -820,6 +899,9 @@ public enum ConfigSeal {
             case .digest(let digest): add("file\0" + digest)
             case .other: add("other")
             case .unreadable: add("unreadable")
+            case .big(let said):
+                add("file\0" + said)
+                past = true
             }
         case .folder, .entries:
             return readFolder(watched).hash
@@ -837,6 +919,45 @@ public enum ConfigSeal {
             break
         }
         return hex(hasher.finalize())
+    }
+
+    /// A compiled twin's per-key hash (`keyHashes`), as the card names it.
+    static let twinKey = "compiled code"
+
+    /// A compiled twin's hash and per-key hashes (none while absent), from one read: nil for anything else.
+    static func twinHashes(_ watched: Watched) -> (hash: String, keys: [String: String])? {
+        guard watched.kind == .file, isTwin(name: watched.name) else { return nil }
+        let digest = twinDigest(watched.path)
+        let hash = hex(SHA256.hash(data: Data(digest.utf8)))
+        return (hash, digest == "absent" ? [:] : [twinKey: hash])
+    }
+
+    /// A zsh startup file's compiled twin as watched: "absent", or its link's target and its contents' hash. What
+    /// can't be read whole (unreadable, not a regular file, past `scriptLimit`) is told by its size, times (ctime too:
+    /// a shell can set mtime back, not ctime) and inode, so rewriting it is still a change.
+    static func twinDigest(_ path: String) -> String {
+        var info = stat()
+        guard lstat(path, &info) == 0 else { return "absent" }
+        var said = ""
+        if (info.st_mode & S_IFMT) == S_IFLNK {
+            said = "link " + ((try? FileManager.default.destinationOfSymbolicLink(atPath: path)) ?? "") + " "
+            var target = stat()
+            guard stat(path, &target) == 0 else { return said + "dangling " + identity(info) }
+            info = target
+        }
+        guard (info.st_mode & S_IFMT) == S_IFREG else { return said + "other " + identity(info) }
+        guard info.st_size <= Int64(scriptLimit) else { return said + "big " + identity(info) }
+        switch contentsDigest(path, followLink: true) {
+        case .digest(let digest): return said + "file " + digest
+        case .other: return said + "other " + identity(info)
+        case .unreadable: return said + "unreadable " + identity(info)
+        case .big(let big): return said + big
+        }
+    }
+
+    /// A file's mode, size, times and inode: what tells it when its contents can't be read.
+    static func identity(_ info: stat) -> String {
+        "\(info.st_mode) \(info.st_size) \(Platform.Files.modified(info).tv_sec).\(Platform.Files.modified(info).tv_nsec) \(Platform.Files.changed(info).tv_sec).\(Platform.Files.changed(info).tv_nsec) \(info.st_ino)"
     }
 
     /// The hash of a plugin's or a settings' scripts' parts, in order.
@@ -885,6 +1006,8 @@ public enum ConfigSeal {
         guard !root.isEmpty, lstat(root, &info) == 0 else { return [("absent", "")] }
         var parts: [(String, String)] = []
         var listed = Set<String>()
+        // One budget for all this install reads: its JSON files, the scripts they name, its modules.
+        var budget = folderBudget
         var configs: [Any] = []
         var files: [(path: String, object: Any)] = []
         let label = { (path: String) -> String in
@@ -893,7 +1016,7 @@ public enum ConfigSeal {
         func json(_ path: String) {
             let path = URL(fileURLWithPath: path).standardized.path
             guard listed.insert(path).inserted else { return }
-            let read = jsonPart(path)
+            let read = jsonPart(path, budget: &budget)
             parts.append((label(path), read.digest))
             if let object = read.object {
                 configs.append(object)
@@ -913,7 +1036,7 @@ public enum ConfigSeal {
         let vars = ["CLAUDE_PLUGIN_ROOT": root, "HOME": home]
         var named: [String] = []
         for config in configs { for command in commands(in: config) { named += namedPaths(command, vars: vars, home: home, base: root) } }
-        parts += scriptParts(named, skip: [], listed: &listed, label: label)
+        parts += scriptParts(named, skip: [], listed: &listed, budget: &budget, label: label)
         // The manifest's own paths are the plugin folder's; a hooks file's modules are relative to that file.
         let manifestPath = URL(fileURLWithPath: manifest).standardized.path
         let modules = files.flatMap { file -> [String] in
@@ -921,7 +1044,7 @@ public enum ConfigSeal {
             return (ConfigSeal.modules(in: file.object) ?? []).map { modulePath($0, in: folder, root: root) }
         }
         if files.contains(where: { ConfigSeal.modules(in: $0.object) != nil }) {
-            parts += moduleParts(root, modules: modules, have: Set(parts.map(\.0)), label: label)
+            parts += moduleParts(root, modules: modules, have: Set(parts.map(\.0)), budget: &budget, label: label)
         }
         return parts
     }
@@ -960,12 +1083,12 @@ public enum ConfigSeal {
     /// descriptor with no link followed, so a folder swapped for a link mid-look reads as unreadable, not as the
     /// link's target. What's a part already (`have`: a script a command names too, read as that) isn't listed again,
     /// but for a listed module that isn't a file to read, which is one more part saying so (`moduleSuffix`).
-    static func moduleParts(_ root: String, modules: [String], have: Set<String>, label: (String) -> String) -> [(String, String)] {
+    static func moduleParts(_ root: String, modules: [String], have: Set<String>, budget: inout Int, label: (String) -> String) -> [(String, String)] {
         var parts: [(String, String)] = []
         var have = have
         for path in modules {
             let name = label(path)
-            let digest = path.hasPrefix(root + "/") ? moduleDigest(root, relative: String(path.dropFirst(root.count + 1))) : moduleOutside
+            let digest = path.hasPrefix(root + "/") ? moduleDigest(root, relative: String(path.dropFirst(root.count + 1)), budget: &budget) : moduleOutside
             if have.insert(name).inserted {
                 parts.append((name, digest))
             } else if isUnreadModule(digest), have.insert(name + moduleSuffix).inserted {
@@ -976,15 +1099,21 @@ public enum ConfigSeal {
         let folder = open(root, O_RDONLY | O_DIRECTORY | O_CLOEXEC)
         guard folder >= 0 else { return parts + [("modules", "unreadable")] }
         var count = 0
-        _ = walkCode(folder, relative: "", depth: 0, count: &count) { name, digest in
+        _ = walkCode(folder, relative: "", depth: 0, count: &count, budget: &budget) { name, digest in
             if name == "cut" || have.insert(name).inserted { parts.append((name, digest)) }
         }
         return parts
     }
 
     /// What's at `relative` in the folder `root`, as a listed module's part: its contents' hash, or why it wasn't read
-    /// (`unreadModule`). Each folder on the way is opened from the one before, no link followed.
+    /// (`unreadModule`). Each folder on the way is opened from the one before, no link followed. Read within `budget`
+    /// (what's left of it after), else told by metadata (`fileDigest`).
     static func moduleDigest(_ root: String, relative: String) -> String {
+        var budget = folderBudget
+        return moduleDigest(root, relative: relative, budget: &budget)
+    }
+
+    static func moduleDigest(_ root: String, relative: String, budget: inout Int) -> String {
         var folder = open(root, O_RDONLY | O_DIRECTORY | O_CLOEXEC)
         guard folder >= 0 else { return moduleAbsent }
         defer { close(folder) }
@@ -1001,7 +1130,7 @@ public enum ConfigSeal {
                 close(folder)
                 folder = next
             case (S_IFREG, true):
-                let digest = fileDigest(folder, name)
+                let digest = fileDigest(folder, name, budget: &budget)
                 return digest == "other" || digest == "unreadable" ? unreadModule + digest : digest
             default:
                 return unreadModule + "other"
@@ -1012,8 +1141,9 @@ public enum ConfigSeal {
 
     /// Every file under the open folder `folder` (closed here) that a module can import (`moduleExtensions`), by
     /// contents, and every link, by its target; names in order, links never followed, at most `maxEntries` entries
-    /// looked at (then "cut", and false).
-    private static func walkCode(_ folder: Int32, relative: String, depth: Int, count: inout Int, part: (String, String) -> Void) -> Bool {
+    /// looked at (then "cut", and false), the files read within `budget` (`fileDigest`).
+    private static func walkCode(_ folder: Int32, relative: String, depth: Int, count: inout Int, budget: inout Int,
+                                 part: (String, String) -> Void) -> Bool {
         guard let stream = fdopendir(folder) else {
             close(folder)
             part(relative.isEmpty ? "modules" : relative, "unreadable")
@@ -1042,11 +1172,11 @@ public enum ConfigSeal {
                     part(shown, "unreadable")
                     continue
                 }
-                guard walkCode(next, relative: shown, depth: depth + 1, count: &count, part: part) else { return false }
+                guard walkCode(next, relative: shown, depth: depth + 1, count: &count, budget: &budget, part: part) else { return false }
             case S_IFLNK:
                 part(shown, "link " + linkDigest(here, name))
             case S_IFREG where moduleExtensions.contains((name as NSString).pathExtension.lowercased()):
-                part(shown, fileDigest(here, name))
+                part(shown, fileDigest(here, name, budget: &budget))
             default:
                 break
             }
@@ -1062,16 +1192,21 @@ public enum ConfigSeal {
     }
 
     /// The contents' hash of the regular file `name` in the open folder `folder`, a link there refused: "other" for
-    /// what isn't a regular file, "unreadable".
-    private static func fileDigest(_ folder: Int32, _ name: String) -> String {
+    /// what isn't a regular file, "unreadable". Read within `readLimit` and what's left of `budget` (taken from it),
+    /// else told by its mode, size, times and inode (`bigDigest`).
+    private static func fileDigest(_ folder: Int32, _ name: String, budget: inout Int) -> String {
         let fd = openat(folder, name, O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC)
         guard fd >= 0 else { return errno == ELOOP ? "other" : "unreadable" }
         defer { close(fd) }
         var hasher = SHA256()
-        switch readRegular(fd, limit: nil, chunk: { hasher.update(data: $0) }) {
+        var read = 0
+        let contents = readRegular(fd, limit: min(readLimit, max(0, budget)), chunk: { read += $0.count; hasher.update(data: $0) })
+        budget -= read
+        switch contents {
         case .digest: return hex(hasher.finalize())
         case .other: return "other"
         case .unreadable: return "unreadable"
+        case .big(let said): return said
         }
     }
 
@@ -1091,11 +1226,15 @@ public enum ConfigSeal {
             if let command = object[key] as? String { found.append(.shell(command)) }
         }
         var listed = Set<String>()
-        return scriptParts(found.flatMap { namedPaths($0, vars: vars, home: home, base: project) }, skip: skip, listed: &listed) { shown($0, home: home) }
+        var budget = folderBudget
+        return scriptParts(found.flatMap { namedPaths($0, vars: vars, home: home, base: project) }, skip: skip, listed: &listed, budget: &budget) {
+            shown($0, home: home)
+        }
     }
 
     /// Each of `paths` not yet `listed` nor at or under `skip`, hashed (`scriptDigest`), at most `maxNamed`.
-    private static func scriptParts(_ paths: [String], skip: [String], listed: inout Set<String>, label: (String) -> String) -> [(String, String)] {
+    private static func scriptParts(_ paths: [String], skip: [String], listed: inout Set<String>, budget: inout Int,
+                                    label: (String) -> String) -> [(String, String)] {
         var parts: [(String, String)] = []
         for path in paths where !skip.contains(where: { path == $0 || path.hasPrefix($0 + "/") }) {
             guard listed.insert(path).inserted else { continue }
@@ -1105,28 +1244,41 @@ public enum ConfigSeal {
             }
             // What isn't there is no part, so command text a word carried, not a file, is never a label. Created
             // later it's a part then, and that's a change.
-            guard let digest = scriptDigest(path), digest != "absent" else { continue }
+            guard let digest = scriptDigest(path, budget: &budget), digest != "absent" else { continue }
             parts.append((label(path), digest))
         }
         return parts
     }
 
     /// A JSON file's digest (as `file` hashes it: "absent", a link's target, its contents) and what it holds, when it
-    /// reads as JSON.
-    private static func jsonPart(_ path: String) -> (digest: String, object: Any?) {
+    /// reads as JSON. Read within what's left of `budget` (taken from it): past it, told by metadata, its commands not read (and
+    /// it's past a bound: `isPast`).
+    private static func jsonPart(_ path: String, budget: inout Int) -> (digest: String, object: Any?) {
         var info = stat()
         guard lstat(path, &info) == 0 else { return ("absent", nil) }
         let link = (info.st_mode & S_IFMT) == S_IFLNK ? "link " + ((try? FileManager.default.destinationOfSymbolicLink(atPath: path)) ?? "") + " " : ""
-        guard let data = regularContents(path, limit: jsonLimit) else {
-            return (link + (contentsDigest(path, followLink: true) == .other ? "other" : "unreadable"), nil)
+        let limit = min(jsonLimit, max(0, budget))
+        if let data = regularContents(path, limit: limit) {
+            budget -= data.count
+            return (link + hex(SHA256.hash(data: data)), try? JSONSerialization.jsonObject(with: data))
         }
-        return (link + hex(SHA256.hash(data: data)), try? JSONSerialization.jsonObject(with: data))
+        switch contentsDigest(path, followLink: true, limit: limit) {
+        case .other: return (link + "other", nil)
+        case .big(let said): return (link + said, nil)
+        default: return (link + "unreadable", nil)
+        }
     }
 
     /// A file a command names, as watched: "absent", or its link's target and its contents' hash (past
     /// `scriptLimit`, its size, times and inode). nil when it isn't watched: a folder, or something you can't change:
     /// neither it nor its folder is writable by you or yours (made read-only, you can make it writable again).
     static func scriptDigest(_ path: String) -> String? {
+        var budget = folderBudget
+        return scriptDigest(path, budget: &budget)
+    }
+
+    /// `scriptDigest`, read within what's left of `budget` (taken from it): past it, told as one past `scriptLimit`.
+    static func scriptDigest(_ path: String, budget: inout Int) -> String? {
         let parent = (path as NSString).deletingLastPathComponent
         var info = stat(), folder = stat()
         let yours = (lstat(path, &info) == 0 && info.st_uid == geteuid()) || (stat(parent, &folder) == 0 && folder.st_uid == geteuid())
@@ -1140,16 +1292,20 @@ public enum ConfigSeal {
         }
         switch info.st_mode & S_IFMT {
         case S_IFDIR: return nil
-        case S_IFREG where info.st_size > Int64(scriptLimit):
+        case S_IFREG where info.st_size > Int64(min(scriptLimit, max(0, budget))):
             // Where ctime is as coarse as the kernel's tick (Linux), a patch in the tick of the last change keeps it:
             // the contents are hashed there too.
             if Platform.Files.changeTimeIsCoarse, case .digest(let digest) = contentsDigest(path, followLink: true) { said += digest + " " }
             return said + "big \(info.st_size) \(Platform.Files.modified(info).tv_sec).\(Platform.Files.modified(info).tv_nsec) \(Platform.Files.changed(info).tv_sec).\(Platform.Files.changed(info).tv_nsec) \(info.st_ino)"
         default:
-            switch contentsDigest(path, followLink: true) {
+            var read = 0
+            let contents = contentsDigest(path, followLink: true, limit: min(scriptLimit, max(0, budget)), read: &read)
+            budget -= read
+            switch contents {
             case .digest(let digest): return said + digest
             case .other: return said + "other"
             case .unreadable: return said + "unreadable"
+            case .big(let big): return said + big
             }
         }
     }
@@ -1172,6 +1328,9 @@ public enum ConfigSeal {
         /// The sync's bookkeeping files, by relative path: "<its line's hash> <f when it's shaped as Claude Code writes
         /// it (`syncShaped`), else x> <mtime, seconds>", for the vault's look at a round (`finishedSyncRound`).
         var bookkeeping: [String: String] = [:]
+        /// The paths of the files past a bound (`readLimit`, `folderBudget`: told by metadata), and "cut" when
+        /// `maxEntries` cut it (`pastKey`).
+        var past: [String] = []
     }
 
     /// Reads the folder `watched` (`Kind.folder`). The lines are the hash's since before the bookkeeping was left out,
@@ -1185,8 +1344,11 @@ public enum ConfigSeal {
             return FolderRead(hash: absent, countingHash: absent, entries: [:])
         }
         var entries: [String: String] = [:], bookkeeping: [String: String] = [:]
+        var past: [String] = []
         var count = 0
-        walk(watched.path, relative: "", name: watched.name, count: &count) { line in
+        var budget = folderBudget
+        walk(watched.path, relative: "", name: watched.name, count: &count, budget: &budget) { line in
+            if line.past { past.append(line.path ?? "cut") }
             let text = Data((line.text + "\n").utf8)
             counting.update(data: text)
             guard !line.bookkeeping else {
@@ -1196,7 +1358,7 @@ public enum ConfigSeal {
             hasher.update(data: text)
             if let path = line.path { entries[path] = hex(SHA256.hash(data: text).prefix(8)) + " \(line.text.prefix(1)) \(line.mtime)" }
         }
-        return FolderRead(hash: hex(hasher.finalize()), countingHash: hex(counting.finalize()), entries: entries, bookkeeping: bookkeeping)
+        return FolderRead(hash: hex(hasher.finalize()), countingHash: hex(counting.finalize()), entries: entries, bookkeeping: bookkeeping, past: past)
     }
 
     /// One of `walk`'s lines: what's hashed, and for an entry its path and mtime (`FolderRead.entries`).
@@ -1207,10 +1369,16 @@ public enum ConfigSeal {
         var bookkeeping = false
         /// Bookkeeping shaped as Claude Code writes it (`syncShaped`), from the same read that hashed it.
         var shaped = false
+        /// Past a bound: a file told by metadata, or the cut.
+        var past = false
     }
 
     /// Each entry under `folder` (of the watched thing `name`) in name order, one line each: links read, never followed.
-    static func walk(_ folder: String, relative: String, name watchedName: String, count: inout Int, line: (FolderLine) -> Void) {
+    /// Each file is read within `readLimit` and what's left of `budget` (taken from it); past either, it's told by its
+    /// mode, size, times and inode (`bigDigest`), its line otherwise as ever. Not private: `SwitchSeal.folderHashes`
+    /// hashes a folder as the look does.
+    static func walk(_ folder: String, relative: String, name watchedName: String, count: inout Int, budget: inout Int,
+                             line: (FolderLine) -> Void) {
         guard let names = try? FileManager.default.contentsOfDirectory(atPath: folder) else {
             line(FolderLine(text: "unreadable \(relative)"))
             return
@@ -1220,7 +1388,7 @@ public enum ConfigSeal {
             if SkillSyncStaging.leftOut(name, in: folder, relative: relative, watched: watchedName) { continue }
             count += 1
             guard count <= maxEntries else {
-                line(FolderLine(text: "cut"))
+                line(FolderLine(text: "cut", past: true))
                 return
             }
             let path = (folder as NSString).appendingPathComponent(name)
@@ -1231,25 +1399,33 @@ public enum ConfigSeal {
             switch info.st_mode & S_IFMT {
             case S_IFDIR:
                 line(FolderLine(text: "d \(shown)", path: shown, mtime: mtime))
-                walk(path, relative: shown, name: watchedName, count: &count, line: line)
+                walk(path, relative: shown, name: watchedName, count: &count, budget: &budget, line: line)
             case S_IFLNK:
                 line(FolderLine(text: "l \(shown) -> " + ((try? FileManager.default.destinationOfSymbolicLink(atPath: path)) ?? ""), path: shown, mtime: mtime))
             case S_IFREG:
                 let bookkeeping = isSyncBookkeeping(shown, in: watchedName)
                 var digest: String
-                var shaped = false
+                var shaped = false, past = false
                 // The bookkeeping is read whole, once (it's small), for its hash and its shape alike.
-                if bookkeeping, let data = regularContents(path, limit: syncBookkeepingLimit, followLink: false) {
+                if bookkeeping, let data = regularContents(path, limit: min(syncBookkeepingLimit, max(0, budget)), followLink: false) {
+                    budget -= data.count
                     digest = hex(SHA256.hash(data: data))
                     shaped = syncShaped(data, name: (shown as NSString).lastPathComponent)
                 } else {
-                    switch contentsDigest(path, followLink: false) {
+                    var read = 0
+                    let contents = contentsDigest(path, followLink: false, limit: min(readLimit, max(0, budget)), read: &read)
+                    budget -= read
+                    switch contents {
                     case .digest(let hex): digest = hex
                     case .other: digest = "other"
                     case .unreadable: digest = "unreadable"
+                    case .big(let said):
+                        digest = said
+                        past = true
                     }
                 }
-                line(FolderLine(text: "f \(shown) \(info.st_mode & 0o777) \(digest)", path: shown, mtime: mtime, bookkeeping: bookkeeping, shaped: shaped))
+                line(FolderLine(text: "f \(shown) \(info.st_mode & 0o777) \(digest)", path: shown, mtime: mtime, bookkeeping: bookkeeping, shaped: shaped,
+                                past: past))
             default:
                 line(FolderLine(text: "o \(shown)", path: shown, mtime: mtime))
             }
@@ -1264,14 +1440,29 @@ public enum ConfigSeal {
         /// memory.
         case other
         case unreadable
+        /// A regular file past the read's limit, never read past it: "big <mode> <size> <mtime> <ctime> <inode>"
+        /// (`bigDigest`), so rewriting it is still a change.
+        case big(String)
     }
+
+    /// What tells a regular file past a read's limit (`Contents.big`): its mode, size, times and inode.
+    static func bigDigest(_ info: stat) -> String { "big " + identity(info) }
 
     /// Opens `path` without waiting (a FIFO's open would wait for a writer), checks what it opened is a regular file,
     /// and hashes it as it reads, a chunk at a time. `followLink`: a link at `path` is followed (the file behind it is
-    /// what loads); otherwise a link is refused (a folder's entries were told apart already).
-    static func contentsDigest(_ path: String, followLink: Bool) -> Contents {
+    /// what loads); otherwise a link is refused (a folder's entries were told apart already). Past `limit` it isn't
+    /// read on (`Contents.big`); `read`, the bytes it read.
+    static func contentsDigest(_ path: String, followLink: Bool, limit: Int = readLimit) -> Contents {
+        var read = 0
+        return contentsDigest(path, followLink: followLink, limit: limit, read: &read)
+    }
+
+    static func contentsDigest(_ path: String, followLink: Bool, limit: Int, read: inout Int) -> Contents {
         var hasher = SHA256()
-        switch readRegular(path, followLink: followLink, limit: nil, chunk: { hasher.update(data: $0) }) {
+        var count = 0
+        let contents = readRegular(path, followLink: followLink, limit: limit, chunk: { count += $0.count; hasher.update(data: $0) })
+        read = count
+        switch contents {
         case .digest: return .digest(hex(hasher.finalize()))
         case let other: return other
         }
@@ -1286,19 +1477,30 @@ public enum ConfigSeal {
     }
 
     /// `contentsDigest`'s and `regularContents`' read: `.digest("")` when it read it whole, each chunk handed on.
-    private static func readRegular(_ path: String, followLink: Bool, limit: Int?, chunk: (Data) -> Void) -> Contents {
+    private static func readRegular(_ path: String, followLink: Bool, limit: Int, chunk: (Data) -> Void) -> Contents {
         let fd = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC | (followLink ? 0 : O_NOFOLLOW))
         guard fd >= 0 else { return errno == ELOOP ? .other : .unreadable }
         defer { close(fd) }
         return readRegular(fd, limit: limit, chunk: chunk)
     }
 
-    /// `readRegular` of a file already open at `fd` (left open).
-    private static func readRegular(_ fd: Int32, limit: Int?, chunk: (Data) -> Void) -> Contents {
+    /// The bytes the seal's reads take from files, counted while a test sets one (none otherwise): what a look costs.
+    final class ReadCount: @unchecked Sendable {
+        private let lock = NSLock()
+        private var total = 0
+        var bytes: Int { lock.lock(); defer { lock.unlock() }; return total }
+        func add(_ count: Int) { lock.lock(); total += count; lock.unlock() }
+    }
+
+    @TaskLocal static var readCount: ReadCount?
+
+    /// `readRegular` of a file already open at `fd` (left open). Past `limit` (at its open, or grown past it while
+    /// read), `.big`, told by what `fstat` says then.
+    private static func readRegular(_ fd: Int32, limit: Int, chunk: (Data) -> Void) -> Contents {
         var info = stat()
         guard fstat(fd, &info) == 0 else { return .unreadable }
         guard (info.st_mode & S_IFMT) == S_IFREG else { return .other }
-        if let limit, info.st_size > Int64(limit) { return .unreadable }
+        if info.st_size > Int64(limit) { return .big(bigDigest(info)) }
         var buffer = [UInt8](repeating: 0, count: 64 * 1024)
         var total = 0
         while true {
@@ -1306,8 +1508,13 @@ public enum ConfigSeal {
             if count < 0, errno == EINTR { continue }
             guard count >= 0 else { return .unreadable }
             if count == 0 { return .digest("") }
+            readCount?.add(count)
             total += count
-            if let limit, total > limit { return .unreadable }
+            if total > limit {
+                var now = stat()
+                guard fstat(fd, &now) == 0 else { return .unreadable }
+                return .big(bigDigest(now))
+            }
             chunk(Data(buffer[0..<count]))
         }
     }

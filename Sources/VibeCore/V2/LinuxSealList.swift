@@ -371,6 +371,8 @@ public enum LinuxSealList {
                 case .digest(let hex): digest = hex
                 case .other: digest = "other"
                 case .unreadable: digest = "unreadable"
+                // Past the look's bound for a file (main's `ConfigSeal.readLimit`): told by its metadata.
+                case .big(let big): digest = big
                 }
                 line("f \(shown) \(info.st_mode & 0o777) \(digest)", shown, mtime)
             default:

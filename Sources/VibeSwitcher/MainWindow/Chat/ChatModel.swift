@@ -6,15 +6,21 @@ import VibeCore
 /// Unsent text per session (row id), so switching sessions never sends a draft to the wrong one, and images
 /// attached to each draft. Kept on disk (shortly after typing stops), so a restart or an update doesn't lose them.
 final class ComposerDrafts: ObservableObject {
-    @Published var drafts: [String: String] = UserDefaults.standard.dictionary(forKey: "chatDrafts") as? [String: String] ?? [:] {
+    @Published var drafts: [String: String] {
         didSet { saveSoon() }
     }
-    @Published var attachments: [String: [String]] = UserDefaults.standard.dictionary(forKey: "chatAttachments") as? [String: [String]] ?? [:] {
+    @Published var attachments: [String: [String]] {
         didSet { saveSoon() }
     }
+    /// Where they're kept (the app's own defaults; a test's own suite: an unbundled test binary's standard defaults
+    /// are shared by every test process on the Mac, so one test's draft was the next one's message).
+    private let defaults: UserDefaults
     private var pendingSave: DispatchWorkItem?
 
-    init() {
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        drafts = defaults.dictionary(forKey: "chatDrafts") as? [String: String] ?? [:]
+        attachments = defaults.dictionary(forKey: "chatAttachments") as? [String: [String]] ?? [:]
         NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
             self?.save()
         }
@@ -37,8 +43,8 @@ final class ComposerDrafts: ObservableObject {
     func save() {
         pendingSave?.cancel()
         pendingSave = nil
-        UserDefaults.standard.set(drafts.filter { !$0.value.isEmpty }, forKey: "chatDrafts")
-        UserDefaults.standard.set(attachments.filter { !$0.value.isEmpty }, forKey: "chatAttachments")
+        defaults.set(drafts.filter { !$0.value.isEmpty }, forKey: "chatDrafts")
+        defaults.set(attachments.filter { !$0.value.isEmpty }, forKey: "chatAttachments")
     }
 }
 
@@ -94,7 +100,7 @@ final class ChatModel: ObservableObject {
     @Published private(set) var focusComposerRequests = 0
     /// Unsent text and attachments per session. Its own object: typing changes it on every key, and that mustn't
     /// redraw the conversation.
-    let composer = ComposerDrafts()
+    let composer: ComposerDrafts
     /// What the composer sent that the conversation doesn't show yet, on disk (survives a crash or relaunch).
     let outbox: ComposerOutbox
     /// Where transcripts are looked for (the user's home; a scratch one in tests).
@@ -105,7 +111,10 @@ final class ChatModel: ObservableObject {
     /// The clock a sent message is late by (moved on in tests).
     var now: () -> Date = Date.init
 
-    init(outbox: ComposerOutbox = ComposerOutbox(), home: String = VibePaths.home, steerRoot: URL = VibePaths.root) {
+    /// `defaults`: where the composer's drafts are kept (a test's own suite in tests).
+    init(outbox: ComposerOutbox = ComposerOutbox(), home: String = VibePaths.home, steerRoot: URL = VibePaths.root,
+         defaults: UserDefaults = .standard) {
+        composer = ComposerDrafts(defaults: defaults)
         self.outbox = outbox
         self.home = home
         self.steerRoot = steerRoot

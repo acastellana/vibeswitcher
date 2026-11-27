@@ -51,6 +51,9 @@ extension Platform.Host {
         text(of: "/proc/stat").flatMap(bootTime(stat:))
     }
 
+    /// Not read on Linux yet (/proc/stat's `cpu` line has them, in USER_HZ): nil.
+    public static func cpuTicks() -> (user: UInt32, system: UInt32, idle: UInt32, nice: UInt32)? { nil }
+
     // MARK: /proc's text
 
     /// The whole of a /proc file (which says it is 0 bytes long, so it is read to its end); nil when it can't be

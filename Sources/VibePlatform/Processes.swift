@@ -200,6 +200,10 @@ extension Platform {
         /// the Mac another user's or a zombie). Exact to a clock tick (10 ms) on Linux.
         public static func cpuSeconds(_ pid: pid_t) -> Double? { System.cpuSeconds(pid) }
 
+        /// The threads of a process running or waiting for a core now; nil when it can't be read (gone; on the Mac
+        /// another user's or a zombie). Linux: nil, not read there yet (the load recorder then counts none).
+        public static func runnableThreads(_ pid: pid_t) -> Int? { System.runnableThreads(pid) }
+
         /// The memory a process holds in RAM now, in bytes; nil when it can't be read (gone, a zombie; on the Mac
         /// another user's; on Linux a kernel thread, which has none of its own).
         public static func residentBytes(_ pid: pid_t) -> Int64? { System.residentBytes(pid) }

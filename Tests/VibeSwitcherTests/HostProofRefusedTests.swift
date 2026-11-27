@@ -66,6 +66,7 @@ struct HostProofRefusedTests {
         #expect(started.messageText == "The team's vault could not be opened and was started again.")
         for words in ["Keychain reset", "another program on this Mac replaced the vault's key", "Check first", "VibeSwitcher lead vault",
                       "don't teach the host until", "kept as it was, at ~/.vibeswitcher/lead/vault.sealed",
+                      "or is no longer there", "if you didn't move or delete the vault's file",
                       "nothing is saved over it until you answer", "vault.sealed.didnt-open-<date>"] {
             #expect(started.informativeText.contains(words), "\(words)")
         }
@@ -113,11 +114,14 @@ struct HostProofRefusedTests {
         #expect(asked.count == 1 && asked.first == stranger.proofRefusal)
         // Connected, and shown nothing: the refusal is what the window shows.
         #expect(stranger.sessions.isEmpty)
+        // Its empty list is no census for the load gate (`MacLoad.room`): the app it took has listed, the stranger hasn't.
+        #expect(app.hasListed && !stranger.hasListed)
 
         // No key at all (the Keychain wouldn't give it): nothing to prove with, said as plainly.
         let keyless = await scene.client(nil)
         #expect(keyless.proofRefusal == HostConnection.noKey)
         #expect(keyless.sessions.isEmpty)
+        #expect(!keyless.hasListed)
 
         // The app's own key: proved, its sessions shown.
         #expect(app.sessions.contains { $0.id == session.id })

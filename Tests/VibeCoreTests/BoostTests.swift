@@ -289,7 +289,8 @@ extension LeadToolsetTests {
         #expect(!audit.isError, "\(audit.text)")
         boosting = false
         let busy = call(lead, "audit", ["task": "one"])
-        #expect(busy.isError && busy.text.contains("load \(String(format: "%.1f", between)) (load_threshold \(MacLoad.number(load)) in Settings)"), "\(busy.text)")
+        let reading = String(format: "%.1f", between)
+        #expect(busy.isError && busy.text.contains("load \(reading) (the last minute's; the 5-minute average is \(reading); load_threshold \(MacLoad.number(load)) in Settings)"), "\(busy.text)")
         let busyStart = call(lead, "start_worker", ["task": "two"])
         #expect(busyStart.isError && busyStart.text.contains("above load_threshold"), "\(busyStart.text)")
         boosting = true

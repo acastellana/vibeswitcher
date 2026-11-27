@@ -10,6 +10,7 @@ import Testing
 @MainActor
 @Suite(.serialized)
 struct ChatToolLineAccessibilityTests {
+    let temp = Scratch()
     static let start = Date(timeIntervalSince1970: 1_800_000_000)
 
     static func tool(_ id: String, _ title: String, seconds: TimeInterval, failed: Bool = false) -> ChatTool {
@@ -34,7 +35,7 @@ struct ChatToolLineAccessibilityTests {
     }
 
     @Test func eachToolLineIsOneElementThatSaysWhatTheLineSays() async throws {
-        let chat = ChatModel()
+        let chat = ChatModel(defaults: temp.defaults("tool-line-chat"))
         let (window, settle) = show(ToolGroupView(id: "g", tools: Self.tools, chat: chat, expanded: ["g"], openImage: { _ in }))
         defer { window.close() }
         settle()
@@ -54,7 +55,7 @@ struct ChatToolLineAccessibilityTests {
     }
 
     @Test func aToolLinesElementOpensAndClosesIt() async throws {
-        let chat = ChatModel()
+        let chat = ChatModel(defaults: temp.defaults("tool-line-chat"))
         #expect(!chat.expanded.contains("t1"))
         let line = ToolRowView(tool: Self.tools[0], chat: chat, open: false)
         let (window, settle) = show(line)

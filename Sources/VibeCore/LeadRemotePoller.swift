@@ -47,7 +47,7 @@ final class LeadRemotePoller: @unchecked Sendable {
         guard (try? lead.authenticate()) != nil,
                (try? lead.checkSettings(workflow, not: "Not fetched")) != nil,
               (try? lead.checkBattery(not: "Not fetched")) != nil,
-              !(lead.runtime.steadyLoad().map { $0 > lead.macLimits().loadLimit } ?? false),
+              !lead.loadOver(lead.macLimits()),
               let pin = try? lead.vault.guardedSettings(root: lead.root)?[LeadRemote.urlKey(workflow.remoteName)] else { return }
         let folder = lead.vault.scratch(root: lead.root, "remote-poll")
         guard (try? lead.vault.ensurePrivate(folder)) != nil,

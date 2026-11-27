@@ -189,7 +189,9 @@ struct LinuxSealListTests {
         try write(". ~/x.sh\n", home + "/.bashrc")
         #expect(LinuxSealList.watched(home: home, uid: getuid()).isEmpty)
         let names = ConfigSeal.homeWatched(home: home).map(\.name)
-        #expect(names == ConfigSeal.homeFiles.map { "~/" + $0.0 } + ["~/.claude/settings.json's scripts", "~/.claude/settings.local.json's scripts"])
+        // main's compiled twins (`.zwc`) named as `homeWatched` names them.
+        #expect(names == ConfigSeal.homeFiles.map { "~/" + $0.0 + ($0.0.hasSuffix(".zwc") ? ConfigSeal.twinSuffix : "") }
+                + ["~/.claude/settings.json's scripts", "~/.claude/settings.local.json's scripts"])
     }
 
     /// A listing reads metadata only: a file it can't read still fingerprints, and its mode is part of it.

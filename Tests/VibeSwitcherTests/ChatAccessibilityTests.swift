@@ -68,7 +68,7 @@ struct ChatAccessibilityTests {
         // 75 turns of 4 entries: the project-b lead's 290-odd.
         try ChatKeyViewLoopTests.transcript(turns: 75).write(to: path)
 
-        let chat = ChatModel()
+        let chat = ChatModel(defaults: scratch.defaults("chat-ax"))
         chat.show(path: path.path)
         // Each wait ends on what it waits for, under its own hang guard: other main-actor suites in the same run can
         // hold the main actor for minutes, so one deadline for all of them ran out before the chat had a turn.

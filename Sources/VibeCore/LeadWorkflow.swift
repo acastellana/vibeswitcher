@@ -1294,9 +1294,10 @@ public enum LeadPrompts {
         let limit = MacLoad.number(limits.loadLimit) + (limits.loadThreshold == nil ? ", twice the cores" : "")
         return """
         The Mac is shared: other projects' leads run their teams on it too, and a loaded Mac slows every build and \
-        fails timing-sensitive tests. start_worker and audit refuse while its load (the greater of its 1- and 5-minute averages, so a dip after a spike \
-        doesn't count as room) is above load_threshold (\(limit)) or the workers and verifiers of all projects together are at mac_max_sessions \
+        fails timing-sensitive tests. start_worker and audit refuse while its load is above load_threshold (\(limit)) \
+        or the workers and verifiers of all projects together are at mac_max_sessions \
         (\(limits.maxSessions)); both are set once for the Mac by the user in VibeSwitcher's Settings, not in workflow.md. \
+        \(MacLoad.ruleText) \
         They refuse too while the Mac is short of memory (its memory pressure at warning or above, or swapping out fast: status's Mac line says). \
         The user's Boost mode may raise them, and max_workers, for a while (when they're away on AC power, or on demand) and drop them \
         back at once: status says which limits hold now ("boost: on (…)"). \

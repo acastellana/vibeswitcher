@@ -97,8 +97,9 @@ struct TestScriptWebTests {
     @Test func theFullRunRunsTheWebTestsAfterSwiftTest() throws {
         let lines = try String(contentsOf: Self.repo.appendingPathComponent("scripts/test.sh"), encoding: .utf8)
             .components(separatedBy: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
-        // Under vs-heavy (the Mac-wide lock for heavy work), as one command, on its slot's share of the cores (slot_width, heavy_swift).
-        let build = #"Resources/bin/vs-heavy --as scripts/test.sh bash -c 'clean_test_environment; slot_width; heavy_swift build || { : > "$VS_BUILD_FAILED_MARK"; exit 1; }; heavy_swift test "$@"' scripts/test.sh "$@""#
+        // Under vs-heavy (the Mac-wide lock for heavy work), as one command, on its slot's share of the cores (slot_width, heavy_swift),
+        // the slots counted from the caller's VibeSwitcher folder (VIBESWITCHER_HEAVY_ROOT).
+        let build = #"VIBESWITCHER_HEAVY_ROOT=$heavy_root Resources/bin/vs-heavy --as scripts/test.sh bash -c 'clean_test_environment; slot_width; heavy_swift build || { : > "$VS_BUILD_FAILED_MARK"; exit 1; }; heavy_swift test "$@"' scripts/test.sh "$@""#
         // In `swift_tests`, which the run calls (or `swift_tests_retrying_failed`, which calls it: TestScriptRetryTests),
         // keeping its status before the web tests run.
         let defined = lines.firstIndex(of: "swift_tests() {"), web = lines.firstIndex(of: "run_web_tests Tests/Web || status=1")

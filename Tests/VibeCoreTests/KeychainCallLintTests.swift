@@ -24,6 +24,9 @@ struct KeychainCallLintTests {
         ("scripts/build-app.sh", "the user's interactive install path: it reads the user's search list and signing keychain and asks to unlock it, as the user runs it"),
         ("scripts/setup-signing.sh", "the user's interactive install path: it makes the user's signing keychain at the user's own password prompt"),
         ("Tests/VibeCoreTests/RefusedSecurityTests.swift", "every `security` line in it is a string the PreToolUse hook's parser (RefusedGit) reads and refuses, or a command it must let through: nothing runs one"),
+        ("Tests/VibeCoreTests/RefusedGitProgramNameTests.swift", "its `security` lines are strings the PreToolUse hook's parser (RefusedGit) reads and refuses: nothing runs one"),
+        ("Tests/VibeCoreTests/RefusedGitMonotonicTests.swift", "its `security` lines are strings both guards (RefusedGit, main's copy) read: nothing runs one"),
+        ("Tests/VibeCoreTests/RefusedGitMainCopy.swift", "main's guard, copied: its `security` is the name it refuses, read in lines it's given; nothing runs one"),
     ]
 
     /// A use in `file`, on a line containing `text`, allowed for `reason`. An entry nothing matches fails the lint.
