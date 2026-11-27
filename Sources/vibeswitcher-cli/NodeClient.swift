@@ -95,16 +95,8 @@ struct NodeContext {
     /// (`NodeJournal.readArguments`). nil, and why, when there is no journal to read.
     func journalEntries() -> Result<[JournalEntry], NodeFacts.Failure> {
         guard let journalctl else { return .failure(.init(Self.noStandIn)) }
-        var entries: [JournalEntry] = []
-        for arguments in NodeJournal.readArguments(uid: getuid()) {
-            guard let ran = runTool(journalctl, arguments), ran.status == 0 else {
-                return .failure(.init("journalctl --user didn't answer"))
-            }
-            entries += NodeJournal.entries(json: ran.output)
-        }
-        // The stand-in gives every entry for each match; a real journal gives each once. Once each either way.
-        var seen = Set<[String: String]>()
-        return .success(entries.filter { seen.insert($0.fields).inserted })
+        // Only the entries anything here reads (`NodeJournal.read`): the unit's whole journal took `status` 20 s.
+        return NodeJournal.read(uid: getuid()) { runTool(journalctl, $0) }
     }
 
     /// The unit's state (`systemctl --user show`); nil without a manager.

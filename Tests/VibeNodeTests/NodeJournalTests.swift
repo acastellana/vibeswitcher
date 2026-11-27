@@ -200,6 +200,44 @@ struct NodeJournalTests {
         #expect(NodeJournal.readArguments(uid: 1234).allSatisfy { $0.last == "_UID=1234" && $0.first == "--user" })
     }
 
+    /// The read `status` does (2026-11-27: 22-30 s on the user's node, the unit's whole journal of libdispatch's
+    /// "Failed to set thread priority" lines read and decoded): with a journalctl that matches patterns, the unit is read
+    /// only for the manager's job lines and the host's start and restart lines, never whole; what `events` makes of it
+    /// is the same. Counted by the reads asked, not by the clock: however much else the unit logged, none of it is read.
+    @Test func theUnitsJournalIsReadOnlyForWhatCounts() {
+        let boot = "b00t"
+        let job = Self.job("start", boot: boot, at: Self.start)
+        let host = Self.startLine(pid: 4242, boot: boot, at: Self.start.addingTimeInterval(1))
+        let spam = (0..<5000).map { _ in Self.startLine(pid: 9, at: Self.start).replacingOccurrences(of: "vibeswitcher-host: started pid 9", with: "Failed to set thread priority") }
+        var asked: [[String]] = []
+        let journal = { (pcre: Bool) in { (arguments: [String]) -> (status: Int32, output: String)? in
+            asked.append(arguments)
+            if arguments == ["--version"] { return (0, "systemd 255 (255.4)\n+PAM +AUDIT " + (pcre ? "+PCRE2" : "-PCRE2") + " +XZ\n") }
+            if arguments.contains("SYSLOG_IDENTIFIER=systemd") { return (0, job) }
+            if arguments.contains("--grep") { return (0, host) }
+            if arguments.contains("-u") { return (0, ([job, host] + spam).joined(separator: "\n")) }
+            return (0, "")
+        } }
+        let narrow = NodeJournal.read(uid: Self.uid, run: journal(true))
+        let reads = asked
+        #expect(!reads.contains { $0.contains("-u") && !$0.contains("SYSLOG_IDENTIFIER=systemd") && !$0.contains("--grep") }, "the unit read whole: \(reads)")
+        #expect(reads.count == 4 && reads.dropFirst().allSatisfy { $0.last == "_UID=1000" }, "\(reads)")
+        guard case .success(let entries) = narrow else { Issue.record("\(narrow)"); return }
+        #expect(entries.count == 2, "only what counts is decoded: \(entries.count)")
+        let events = NodeJournal.events(entries, mainPID: 4242, uid: Self.uid)
+        #expect(events.count == 1 && events.first?.detail?.hasPrefix("pid 4242 build ") == true, "\(events)")
+        // The same events from the whole read a journalctl without pattern matching gets.
+        asked = []
+        guard case .success(let whole) = NodeJournal.read(uid: Self.uid, run: journal(false)) else { Issue.record("no whole read"); return }
+        #expect(asked.dropFirst().map { $0 } == NodeJournal.readArguments(uid: Self.uid), "\(asked)")
+        #expect(NodeJournal.events(whole, mainPID: 4242, uid: Self.uid) == events)
+        // A pattern read that found nothing ends 1 with nothing written: no entries, not a failure.
+        let empty = NodeJournal.read(uid: Self.uid) { arguments in
+            arguments == ["--version"] ? (0, "+PCRE2") : arguments.contains("--grep") ? (1, "") : (0, "")
+        }
+        #expect((try? empty.get())?.isEmpty == true, "\(empty)")
+    }
+
     /// journald reads a writer's cgroup as it takes the datagram, so an entry whose writer had ended has no
     /// `_SYSTEMD_CGROUP` (the bootstrap path's M4, 2026-11-17: `logger`'s entry). It never counts, whoever wrote it
     /// (any process of the user's can write one and end); `status` says it for what it is on a line of its own, never
