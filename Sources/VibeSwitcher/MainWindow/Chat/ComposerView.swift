@@ -603,6 +603,9 @@ struct ComposerTextView: NSViewRepresentable {
         /// Transcripts for this box, put in at the cursor.
         let inbox = DictationInbox()
 
+        /// The event a command (↩, ↑, Esc) came with: the app's current one. Replaceable for tests.
+        var currentEvent: () -> NSEvent? = { NSApp.currentEvent }
+
         init(_ parent: ComposerTextView) { self.parent = parent }
 
         func undoManager(for view: NSTextView) -> UndoManager? { undo }
@@ -698,10 +701,10 @@ struct ComposerTextView: NSViewRepresentable {
                 }
             }
             // ↩ and ↑ / ↓ in an empty box: the answer card's, while it shows a question.
-            if let key = Self.cardKey(selector, flags: NSApp.currentEvent?.modifierFlags ?? []), parent.cardKey(key) { return true }
+            let flags = currentEvent()?.modifierFlags ?? []
+            if let key = Self.cardKey(selector, flags: flags), parent.cardKey(key) { return true }
             switch selector {
             case #selector(NSResponder.insertNewline(_:)), #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)):
-                let flags = NSApp.currentEvent?.modifierFlags ?? []
                 if flags.contains(.shift) {
                     textView.insertNewlineIgnoringFieldEditor(nil)
                 } else if flags.contains(.option) {
