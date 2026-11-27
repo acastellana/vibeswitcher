@@ -332,6 +332,22 @@ def analyse(data):
             if lo <= minutes <= hi:
                 prof.setdefault(kind, {}).setdefault((lo, hi), []).append((s.one, s.weight))
     out["profile"] = {k: {b: (wmean(v), sum(w for _, w in v)) for b, v in d.items()} for k, d in prof.items()}
+    # The profile mixes holds: the ones still running at minute 11 are the slow ones, often on a busy Mac. So the same
+    # holds compared with themselves: holds of 15 minutes or more held alone at 80 % of their samples, each one's mean
+    # 1-minute at minutes 0-5 against 11-20 (the median of each), and the samples just before and after the hold.
+    long_holds = {}
+    for ep in data.episodes():
+        idx = ep["samples"]
+        if len(idx) < 15 or sum(1 for i in idx if len(data.holders[i]) == 1) < 0.8 * len(idx):
+            continue
+        def at(lo, hi):
+            v = [data.samples[i].one for i in idx if len(data.holders[i]) == 1 and data.samples[i].known
+                 and lo <= (data.holders[i][0][1].get("minutes") or 0) <= hi]
+            return sum(v) / len(v) if v else None
+        early, late = at(0, 5), at(11, 20)
+        if early is not None and late is not None:
+            long_holds.setdefault(ep["kind"], []).append((early, late))
+    out["long_holds"] = {k: (len(v), pct([e for e, _ in v], 0.5), pct([l for _, l in v], 0.5)) for k, v in long_holds.items()}
     # Top groups at high load: CPU by phase and by folder type; cores used against the load.
     phase_cpu = {}
     folder_phase = {}
@@ -501,10 +517,13 @@ def report(data, out=sys.stdout):
     for key, (mean, p90, minutes) in sorted(a["compositions"].items(), key=lambda kv: -kv[1][2])[:14]:
         p(f"  {key:44} mean {mean:5.1f}  p90 {p90:5.1f}  {minutes:5.0f} min")
     p()
-    p("one slot held: the 1-minute by minutes into the hold (mean, minutes) — the build comes first")
+    p("one slot held: the 1-minute by minutes into the hold (mean, minutes; mixes holds, see the line after)")
     for kind, d in sorted(a["profile"].items()):
         cells = "  ".join(f"{lo}-{hi if hi < 10 ** 5 else '…'}: {mean:4.1f} ({m:.0f})" for (lo, hi), (mean, m) in sorted(d.items()))
         p(f"  {kind:14} {cells}")
+    p("  the same hold against itself (held alone 15 min or more): holds, median of its minutes 0-5, of its 11-20")
+    for kind, (n, early, late) in sorted(a["long_holds"].items()):
+        p(f"    {kind:14} {n:3d} holds  0-5: {early:5.1f}  11-20: {late:5.1f}")
     p()
     p("episodes (one hold each): count, median minutes, total minutes")
     for k, (n, med, tot) in sorted(a["episodes"].items(), key=lambda kv: -kv[1][2]):
