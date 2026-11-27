@@ -25,6 +25,11 @@ public enum AppProof {
 
     public static let keychainService = "dev.vibeswitcher.app-proof"
 
+    /// The session host's refusal of the app's proof while its vault started over and holds no key
+    /// (`LeadVault.Book.awaitsAppKey`): the app's alert says it in its own words (`HostClient.keyResetAlert`).
+    public static let vaultStartedOver = "The team's vault could not be opened and was started again, so the session host "
+        + "takes VibeSwitcher's key only once you confirm it."
+
     /// The app's key in memory, made the first time as the Keychain makes it (or the one given): the store every
     /// test uses in place of `KeychainStore`.
     public final class MemoryStore: AppKeyStore, @unchecked Sendable {

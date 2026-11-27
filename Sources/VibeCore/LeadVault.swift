@@ -790,6 +790,21 @@ extension LeadVault {
 
         // MARK: The app's key
 
+        /// The vault started over (`startedOver`) and holds no app key: it takes the app's only once you confirm it
+        /// (`adoptAppKey`'s `replacing`), and the host says so when the app's proof is refused (`AppProof.vaultStartedOver`).
+        public var awaitsAppKey: Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            return state.startedOver != nil && state.appKey == nil
+        }
+
+        /// `awaitsAppKey` of the vault `data` encodes (`onChange`'s, `serialized`): what its saver asks, since
+        /// `onChange` is called with the book's lock held.
+        public static func awaitsAppKey(_ data: Data) -> Bool {
+            guard let state = state(data) else { return false }
+            return state.startedOver != nil && state.appKey == nil
+        }
+
         /// The key the app proves itself with (see `AppProof`), once the app gave it.
         public var appKey: SymmetricKey? {
             lock.lock()
@@ -799,11 +814,15 @@ extension LeadVault {
 
         /// Takes `key` as the app's, only while the vault holds none (or `replacing` the one it holds: the host decides
         /// when): once it has one, only that one proves the app. True when `key` is the app's key now.
+        /// A vault that started over and holds no key (`awaitsAppKey`) takes one only `replacing`: the app's
+        /// `replaceAppKey`, which you confirm. Its sealed file stopped opening under the Keychain key, which another
+        /// program of your account can replace (2026-11-26): the key the app passes at the host's start, or enrolls,
+        /// would otherwise go in unseen, and the vault be sealed under the replaced key from then on.
         @discardableResult
         public func adoptAppKey(_ key: Data, replacing: Bool = false) -> Bool {
             lock.lock()
             var changed = false
-            if state.appKey == nil || replacing, state.appKey != key, key.count == AppProof.keySize {
+            if state.appKey == nil && state.startedOver == nil || replacing, state.appKey != key, key.count == AppProof.keySize {
                 state.appKey = key
                 changed = true
             }

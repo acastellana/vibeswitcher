@@ -10,7 +10,7 @@ struct PromptSizeTests {
     /// commit, and trim before raising where a rule can go.
     static let ceilings: [Role: Int] = [
         .lead: 18_572,  // 16_884 on 2026-11-12, plus 10%
-        .worker: 11_255,  // 10_232 on 2026-11-12, plus 10%
+        .worker: 11_400,  // 10_232 on 2026-11-12, plus 10%; raised at the merge of 2026-11-27: main's Keychain rule (LeadPrompts.keychain) on v2's longer brief
         .verifier: 11_602,  // 10_548 on 2026-11-12, plus 10%
     ]
 

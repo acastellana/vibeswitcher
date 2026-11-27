@@ -334,6 +334,56 @@ What main added that didn't build or pass on Linux, changed in this merge (kinds
 on mythos (`LeadWorkflow.defaultSecurityAuditModel`); main runs it on Fable and has no such setting. Main's tests
 that assume Fable set it to fable here.
 
+### The merge of 2026-11-27
+
+main at `e02ece00` (140 commits past the merge base `1051d510`, 123 of them the lead's records) merged into `v2` at
+`8df1ee37`: the Keychain fixes of 2026-11-26 (a process of the user's own account could plant a paired phone, replace
+the app's Keychain key, or get a started-over vault to save over its old sealed file). Of the files the engine replaces
+or copies from, main changed these; each line says what became of it:
+
+| Commit | File | Status |
+| --- | --- | --- |
+| `fea91901`, `5e98c1fc`, `72682762` (the key-mismatch and started-over alerts: another program may have replaced the key; the old file set aside only when the Keychain gives the host a key) | `Sources/VibeSwitcher/HostClient.swift` `confirmKeyReset`, `keyResetAlert` | not needed: the app's alerts about its own key; `HostLink` proves nothing to the host (the node's server reaches it through its connector, and `HostServer.enroll` takes no key from a checked node host) |
+| `f1cc885f`, `5b3b3454` (the app's key read once; Phone Access's paired phones sealed under a key made from it) | `Sources/VibeSwitcher/AppDelegate.swift` outside `HookSetup` and `HookBinary` | not needed: the node keeps no paired phones' list (its page admits by its own pairing codes and web tokens) |
+
+Main's shared changes landed where they were: `VaultStorage.book`'s saver that holds a started-over vault's saves and
+sets the file aside (`Sources/VibeHost/VaultStorage.swift`, the one place a vault is made, `vibeswitcher-host`'s main),
+`LeadVault.Book.awaitsAppKey` and `adoptAppKey`'s rule, `SealedData`, `RefusedGit.keychainTool`, `LeadLaunch.keychainTool`
+and `LeadPrompts.keychain`; `VaultStartedOverTests`, `RefusedSecurityTests` and `KeychainCallLintTests` are in targets
+Linux builds (a key the test makes, no Keychain), checked against `v2`'s lints on the Mac, read only for Linux, not run
+there yet. On Linux the host has no Keychain key, so its vault has no saver: a started-over vault there only refuses the
+app's key unasked, as on the Mac.
+
+Four conflicts, each keeping both sides:
+
+- `Sources/VibeCore/LeadLaunch.swift`: main's `keychainTool` in each role's deny rules, before `v2`'s
+  `LinuxLaunch.denyRules`; `LeadLaunchTests.theMacsDenyRulesAreTodays`' hashes recorded again (the Mac's lists are main's).
+- `Sources/VibeCore/LeadVaultAppProof.swift`: main's `AppProof.vaultStartedOver` beside `v2`'s move of `KeychainStore`
+  to `Sources/VibeCore/MacOnly/AppProof+Keychain.swift` (main didn't change it).
+- `Sources/VibeHost/HostServer.swift` `enroll`: `v2`'s `!isCheckedNodeHost` with main's started-over vault that logs
+  and takes nothing.
+- `docs/guide/development.md`: `KeychainCallLint` in `v2`'s lint command (its table row merged on its own).
+
+What main added that didn't build or pass on Linux, changed in this merge (kinds 1 to 3, so listed here):
+
+- `Sources/VibeCore/SealedData.swift`, `Tests/VibeHostTests/VaultStartedOverTests.swift`: `import CryptoKit` removed
+  (VibeCore exports the crypto, swift-crypto's on Linux; PlatformLint).
+- `Tests/VibeCoreTests/KeychainCallLintTests.swift`: its stand-in `security` (run by bash from the PATH it makes)
+  written by `installScript` (ShebangWriteLint); the two scripts its scratch tree only gives the lint to read,
+  `scripts/probe.sh` and `scripts/build-app.sh`, in `ShebangWriteLintTests.exemptions`. Its allowed list takes `v2`'s
+  `scripts/install-node-mac.sh` read of gh's token (the user's own install, at the keyboard; the CI dry run passes
+  `--test-origin` and `--test-ci-answer`, which skip it): for the installer's review, `gh auth token` asks no dialog.
+
+**Owed, for the device keys join:** a checked Mac node host owns the launchers, so its vault is `VaultStorage`'s, under
+a Keychain key, and it takes no app key (`HostServer.enroll` and `replaceAppKey` refuse one with `isCheckedNodeHost`).
+A started-over vault there awaits the app's key for good (`LeadVault.Book.awaitsAppKey`), so main's saver saves nothing
+again on that host, the action record and `.user` seals (`LeadVaultV2`) included, until a restart drops them: closed
+(the old file kept), but in memory only. That host's way to answer is still to decide.
+
+`PromptSizeTests`' worker ceiling went from 11_255 to 11_400: main's `LeadPrompts.keychain` in `v2`'s longer worker
+brief renders 11385 bytes (main's own brief fits under 11_255). Both texts are as their authors wrote them; the `v2` side
+may prefer to trim its worker brief back under 11_255 instead.
+
 ## Non-seam edits
 
 Rows marked *planned* are the ones the plans expect, listed before they are made so an executor doesn't stop to ask;

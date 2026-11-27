@@ -21,7 +21,8 @@ struct KeychainLiveTests {
         let store = AppProof.KeychainStore(service: service)
         defer {
             SecItemDelete([kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
-                           kSecAttrAccount as String: store.account] as CFDictionary)
+                           kSecAttrAccount as String: store.account,
+                           kSecUseAuthenticationUI as String: kSecUseAuthenticationUIFail] as CFDictionary)
         }
         let key = try #require(store.key())
         #expect(key.data.count == AppProof.keySize)
@@ -29,7 +30,8 @@ struct KeychainLiveTests {
 
         var found: CFTypeRef?
         let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
-                                    kSecReturnRef as String: true]
+                                    kSecReturnRef as String: true,
+                                    kSecUseAuthenticationUI as String: kSecUseAuthenticationUIFail]
         #expect(SecItemCopyMatching(query as CFDictionary, &found) == errSecSuccess)
         // swiftlint:disable:next force_cast
         let item = found as! SecKeychainItem

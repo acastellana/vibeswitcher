@@ -128,6 +128,7 @@ checks it instead:
 | No reads of Claude Code's prompt history and other sessions' stores (`~/.claude/history.jsonl`, `paste-cache`, `file-history`, other projects' transcripts) | Its brief only: the sandbox limits writes, not reads; the Claude audit reads its branch and report |
 | (none: Codex's own) | Your Codex rules (`~/.codex/rules`) stay in force: a command prefix you approved there runs outside the sandbox. The TUI loads them whatever a session says (only `codex exec --ignore-rules` skips them), so keep them narrow; the audit reads what the branch did |
 | pkill, killall and debuggers refused by rule | Its brief; a sandboxed command signals only its own processes |
+| The `security` command refused by rule and by the hook (your Keychains, where VibeSwitcher's keys are) | Its brief only: Keychain checks are done in a keyboard session with you |
 
 Review a Codex worker's output critically: it's the audit's job, and the start_worker reply says so.
 

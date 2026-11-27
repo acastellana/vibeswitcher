@@ -70,7 +70,9 @@ check "lint catches the partition list's -k and import's -P" '[[ $(password_argu
 printf 'security %s "$KEYCHAIN"\nsecurity find-identity -p codesigning "$KEYCHAIN"\n' create-keychain > "$fixture"
 check "lint passes a keychain made at a prompt, and find-identity's -p" '! password_arguments "$fixture" >/dev/null'
 
-found=$(password_arguments $(find scripts -type f) || true)
+# scripts/lib/scratch-keychain.sh aside: its scratch keychain's password is a throwaway, for a file that holds
+# nothing of yours and is deleted on exit (made with -p, it never asks: KeychainCallLintTests).
+found=$(password_arguments $(find scripts -type f ! -path scripts/lib/scratch-keychain.sh) || true)
 check "no keychain password in argv anywhere in scripts/" '[[ -z $found ]]'
 [[ -n $found ]] && echo "$found"
 check "nothing in scripts/ reads a saved signing password" \

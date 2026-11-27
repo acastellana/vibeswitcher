@@ -69,7 +69,8 @@ public enum RemoteAuth {
     }
 
     /// The device a request belongs to: a known token, from the Tailscale account that paired it.
-    /// `login` is the `Tailscale-User-Login` header, which only `tailscale serve` sets.
+    /// `login` is the `Tailscale-User-Login` header, which `tailscale serve` sets: from any other loopback client it's just
+    /// text, so the token (from the list the app sealed) is what admits a request.
     public static func authenticate(authorization: String?, login: String?, devices: [PairedDevice]) -> PairedDevice? {
         guard let login, !login.isEmpty, let authorization, authorization.hasPrefix("Bearer ") else { return nil }
         let presented = hash(String(authorization.dropFirst("Bearer ".count)).trimmingCharacters(in: .whitespaces))
