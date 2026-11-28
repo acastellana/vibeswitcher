@@ -188,7 +188,7 @@ public enum WireSchema {
             shape("draft.args", from: "the contract's §8", [field("card", .string), field("text", .string), field("version", .int)]),
             shape("draft.result", from: "Requests.draft", [field("applied", .map(.int)), field("card", .string)]),
             shape("draft.clear.args", from: "the contract's §8", [field("card", .string)]),
-            shape("seen.args", from: "Requests.seen (the parity gaps of 2026-11-19)", [optional("session", .string), optional("project", .string)]),
+            shape("seen.args", from: "Requests.seen (the parity gaps of 2026-11-19)", [optional("session", .string), optional("project", .string), optional("mark", .string)]),
             shape("session.draft.args", from: "Requests.sessionDraft (driving sessions, 2026-11-20)", [field("session", .string), field("text", .string),
                                                                                                     optional("images", strings), optional("now", .bool)]),
             shape("session.draft.result", from: "Requests.sessionDraft", [field("applied", .map(.int)), field("session", .string)]),

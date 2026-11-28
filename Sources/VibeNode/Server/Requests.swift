@@ -1053,7 +1053,15 @@ public final class Requests: @unchecked Sendable {
             guard let engine, let root = engine.leads.leads[project]?.root else {
                 return reply(.init(re: request.id, error: .init(.gone, "no lead's project \(ConfigSeal.inert(project, limit: 80)) on this node")))
             }
-            return engine.seeAllDone(root: root) { reply(.init(re: request.id, result: .object(["changed": .bool($0)]))) }
+            guard let mark = request.args?["mark"]?.string, !mark.isEmpty else {
+                return reply(.init(re: request.id, error: .init(.badArgs, "seen for a project needs the displayed mark ID")))
+            }
+            return engine.allDone.see(root: root, id: mark) { outcome in
+                switch outcome {
+                case .success(let changed): reply(.init(re: request.id, result: .object(["changed": .bool(changed)])))
+                case .failure: reply(.init(re: request.id, error: .init(.refused, "The board could not be updated.")))
+                }
+            }
         }
         guard let id = request.args?["session"]?.string, !id.isEmpty else {
             return reply(.init(re: request.id, error: .init(.badArgs, "seen needs a session or a project")))

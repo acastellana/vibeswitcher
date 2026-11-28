@@ -1,6 +1,6 @@
 // The all-done mark dismissed (P-s1, the app's `AllDoneWatch.see`): the card at the end of a project's lead
 // conversation has Dismiss, which takes the card and the left column's "all done" away at once and asks the node to
-// keep it seen (`seen {project}`); the node's seen mark keeps it gone after a reload; the next batch's mark shows again;
+// keep it seen (`seen {project, mark}`); the node's seen mark keeps it gone after a reload; the next batch's mark shows again;
 // a refusal gives it back and says why. Drawn on tests/fakedom.test.mjs's stand-in DOM.
 // Run: node --test WebApp/tests/
 import test from 'node:test';
@@ -72,7 +72,7 @@ test('P-s1: Dismiss takes the mark away at once, asks the node to keep it seen, 
   assert.equal(cardOf(view), null, 'the card went at once');
   assert.notEqual(lineOf(app.store), t('allDone'));
   assert.ok(redraws.some((one) => one.name === 'boards' && one.changes[0].id === P), 'the left column is told');
-  assert.deepEqual(requests, [{ kind: 'seen', args: { project: P } }]);
+  assert.deepEqual(requests, [{ kind: 'seen', args: { project: P, mark: 'm2' } }]);
   const said = find(view.el, byClass('all-done-said'));
   assert.ok(said?.textContent.includes(t('adDismissed')), 'it says what it did');
   reply({ ok: true, result: { changed: true } });
@@ -101,9 +101,12 @@ test('P-s1: after a reload the node’s seen keeps it gone; the next batch’s m
   assert.equal(unseenAllDone(again.app.store.state.boards.get(P))?.id, 'm5');
 });
 
-test('P-s1: a refused dismissal gives the mark back and says why, in words', async () => {
+for (const error of [
+  { code: 'gone', message: 'no lead’s project local:project:site on this node' },
+  { code: 'refused', message: 'The board could not be updated.' },
+]) test(`P-s1: a ${error.code} dismissal gives the mark back and says why`, async () => {
   setLanguage('en');
-  const { app } = fakeApp({ allDone: mark('m6'), answer: () => ({ ok: false, error: { code: 'gone', message: 'no lead’s project local:project:site on this node' } }) });
+  const { app } = fakeApp({ allDone: mark('m6'), answer: () => ({ ok: false, error }) });
   const view = projectView(app, { sheet });
   view.render();
   find(cardOf(view), byClass('all-done-dismiss')).dispatch('click');
@@ -112,7 +115,7 @@ test('P-s1: a refused dismissal gives the mark back and says why, in words', asy
   assert.ok(card, 'the mark is back');
   assert.equal(lineOf(app.store), t('allDone'));
   const note = find(card, byClass('refused'));
-  assert.equal(note.textContent, t('adDismissFailed', { why: 'no lead’s project local:project:site on this node' }));
+  assert.equal(note.textContent, t('adDismissFailed', { why: error.message }));
   assert.equal(findAll(view.el, byClass('all-done-said')).length, 0);
 });
 
