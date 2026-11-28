@@ -2,10 +2,12 @@ import Foundation
 import VibeCore
 
 /// What the server reads of the process that sent a request, for the user's voice (the security architecture
-/// document's S3; `Voice.judge`): its cgroup, its ancestry, its controlling terminal, whether its environment carries a
-/// session's marker, and whether a `BranchCode` runner is among its ancestors. Each read from `/proc` for each request,
-/// and each `nil` (or `.unreadable`) when it can't be read: an unreadable field counts as "not the user's voice". A
-/// non-dumpable peer's environment is root's to read, so such a peer is never the user.
+/// document's S3; `Voice.judge`, and the Mac's `ApprovalVoice`): its cgroup (Linux) or its launchd coalition (the
+/// Mac), its ancestry, its controlling terminal, whether its environment carries a session's marker, and whether a
+/// `BranchCode` runner is among its ancestors. Each read from the kernel for each request (`/proc`; the Mac's
+/// `proc_pidinfo` and `KERN_PROCARGS2`), and each `nil` (or `.unreadable`) when it can't be read: an unreadable field
+/// counts as "not the user's voice". A non-dumpable peer's environment is root's to read, so such a peer is never the
+/// user.
 public struct PeerFacts: Equatable, Sendable {
     /// One process of the peer's ancestry: the peer first, then its parent, up to the first process whose parent is 0
     /// or 1 (init is never listed).
@@ -33,15 +35,20 @@ public struct PeerFacts: Equatable, Sendable {
     /// Its ancestry, itself first; nil when a link can't be read.
     public var ancestry: [Ancestor]?
     public var terminal: Terminal
-    /// Whether its environment holds `VIBESWITCHER_SESSION`; nil when it can't be read.
+    /// Whether its environment holds `VIBESWITCHER_SESSION`; nil when it can't be read. The environment it was started
+    /// with, its own (never an ancestor's): on the Mac `KERN_PROCARGS2`, readable for the user's own builds with SIP on
+    /// and empty for Apple's platform binaries (the measurement record's M2).
     public var sessionMarker: Bool?
+    /// The id of its launchd resource coalition (`Platform.Processes.coalition`, the Mac's; M4), read by the kernel of
+    /// the process itself, never from anything it sent; nil when it can't be read, and always on Linux.
+    public var coalition: UInt64?
     /// Whether it, or one of its ancestors, is a `BranchCode` runner; nil when one's arguments can't be read.
     public var underRunner: Bool?
     /// Its command line, for the accepted list (shown only through `ConfigSeal.inert`); empty when unreadable.
     public var commandLine: [String]
 
     public init(pid: pid_t, uid: uid_t?, cgroup: [String]?, ancestry: [Ancestor]?, terminal: Terminal, sessionMarker: Bool?,
-                underRunner: Bool?, commandLine: [String] = []) {
+                underRunner: Bool?, commandLine: [String] = [], coalition: UInt64? = nil) {
         self.pid = pid
         self.uid = uid
         self.cgroup = cgroup
@@ -50,6 +57,7 @@ public struct PeerFacts: Equatable, Sendable {
         self.sessionMarker = sessionMarker
         self.underRunner = underRunner
         self.commandLine = commandLine
+        self.coalition = coalition
     }
 
     /// The variable every session's program carries (`HostedSession.environment`).
@@ -65,16 +73,21 @@ public struct PeerFacts: Equatable, Sendable {
     static let environmentLimit = 1 << 20
 
     /// The process `pid` as it reads now (Linux: `/proc`; the Mac: `proc_pidinfo`'s links, each bound to the peer's
-    /// audit token by Security's check after the read, `Platform.Processes.Link.isProcess(of:)`; its environment and
-    /// cgroup unread there). `token`: the sender as the socket named it; when its
-    /// pid now names another process (it ended and its number was given again), nothing is readable. `cgroupRoot`: a
-    /// scratch server's test's (`ServerArguments.testCgroupRoot`), from which its cgroup lines are read (`rerooted`);
-    /// nil, as the user's node's server always has it: the lines as `/proc` gives them. `runnersAbove`: the runners a
-    /// scratch server's test runs under (`ServerArguments.testRunnerAbove`: the server's own, `runners(above:)`),
-    /// which aren't counted as this process's; none, as the user's node's server always has it: every runner counts.
+    /// audit token by Security's check after the read, `Platform.Processes.Link.isProcess(of:)`; its cgroup none there,
+    /// its coalition `proc_pidinfo`'s, its environment `KERN_PROCARGS2`'s). `token`: the sender as the socket named it;
+    /// when its pid now names another process (it ended and its number was given again), nothing is readable. The
+    /// environment and the coalition are read before the token's check of the first link, so that check binds them to
+    /// the token's process too: once it holds, the process lived with that pid through both reads; when it fails (or
+    /// any link of the walk can't be read), neither is given (nil), as the ancestry isn't. `cgroupRoot`: a scratch
+    /// server's test's (`ServerArguments.testCgroupRoot`), from which its cgroup lines are read (`rerooted`); nil, as
+    /// the user's node's server always has it: the lines as `/proc` gives them. `runnersAbove`: the runners a scratch
+    /// server's test runs under (`ServerArguments.testRunnerAbove`: the server's own, `runners(above:)`), which aren't
+    /// counted as this process's; none, as the user's node's server always has it: every runner counts.
     public static func read(pid: pid_t, token: Platform.PeerToken? = nil, cgroupRoot: String? = nil, runnersAbove: [Ancestor] = []) -> PeerFacts {
         var uid: uid_t?
         if case .record(let record) = Platform.Processes.record(pid) { uid = record.uid }
+        let environment = Platform.Processes.environment(pid, limit: environmentLimit)
+        let coalition = Platform.Processes.coalition(pid)
         var ancestry: [Ancestor] = []
         var terminal = Terminal.unreadable
         var readable = true
@@ -106,12 +119,12 @@ public struct PeerFacts: Equatable, Sendable {
         } else {
             underRunner = nil
         }
-        let environment = Platform.Processes.environment(pid, limit: environmentLimit)
         let cgroup = Platform.Processes.cgroup(pid).map { lines in cgroupRoot.map { rerooted(lines, at: $0) } ?? lines }
         return PeerFacts(pid: pid, uid: uid, cgroup: cgroup, ancestry: readable ? ancestry : nil,
                          terminal: readable ? terminal : .unreadable,
-                         sessionMarker: environment.map { $0.contains { $0.hasPrefix(sessionMarkerName + "=") } },
-                         underRunner: underRunner, commandLine: Platform.Processes.arguments(pid))
+                         sessionMarker: readable ? environment.map { $0.contains { $0.hasPrefix(sessionMarkerName + "=") } } : nil,
+                         underRunner: underRunner, commandLine: Platform.Processes.arguments(pid),
+                         coalition: readable ? coalition : nil)
     }
 
     /// Whether `ancestor` is a branch code runner (`BranchCode.isRunner`) a sender runs under: true, false, or nil when

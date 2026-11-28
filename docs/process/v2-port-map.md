@@ -334,6 +334,138 @@ What main added that didn't build or pass on Linux, changed in this merge (kinds
 on mythos (`LeadWorkflow.defaultSecurityAuditModel`); main runs it on Fable and has no such setting. Main's tests
 that assume Fable set it to fable here.
 
+### The merge of 2026-11-27
+
+main at `e02ece00` (140 commits past the merge base `1051d510`, 123 of them the lead's records) merged into `v2` at
+`8df1ee37`: the Keychain fixes of 2026-11-26 (a process of the user's own account could plant a paired phone, replace
+the app's Keychain key, or get a started-over vault to save over its old sealed file). Of the files the engine replaces
+or copies from, main changed these; each line says what became of it:
+
+| Commit | File | Status |
+| --- | --- | --- |
+| `fea91901`, `5e98c1fc`, `72682762` (the key-mismatch and started-over alerts: another program may have replaced the key; the old file set aside only when the Keychain gives the host a key) | `Sources/VibeSwitcher/HostClient.swift` `confirmKeyReset`, `keyResetAlert` | not needed: the app's alerts about its own key; `HostLink` proves nothing to the host (the node's server reaches it through its connector, and `HostServer.enroll` takes no key from a checked node host) |
+| `f1cc885f`, `5b3b3454` (the app's key read once; Phone Access's paired phones sealed under a key made from it) | `Sources/VibeSwitcher/AppDelegate.swift` outside `HookSetup` and `HookBinary` | not needed: the node keeps no paired phones' list (its page admits by its own pairing codes and web tokens) |
+
+Main's shared changes landed where they were: `VaultStorage.book`'s saver that holds a started-over vault's saves and
+sets the file aside (`Sources/VibeHost/VaultStorage.swift`, the one place a vault is made, `vibeswitcher-host`'s main),
+`LeadVault.Book.awaitsAppKey` and `adoptAppKey`'s rule, `SealedData`, `RefusedGit.keychainTool`, `LeadLaunch.keychainTool`
+and `LeadPrompts.keychain`; `VaultStartedOverTests`, `RefusedSecurityTests` and `KeychainCallLintTests` are in targets
+Linux builds (a key the test makes, no Keychain), checked against `v2`'s lints on the Mac, read only for Linux, not run
+there yet. On Linux the host has no Keychain key, so its vault has no saver: a started-over vault there only refuses the
+app's key unasked, as on the Mac.
+
+Four conflicts, each keeping both sides:
+
+- `Sources/VibeCore/LeadLaunch.swift`: main's `keychainTool` in each role's deny rules, before `v2`'s
+  `LinuxLaunch.denyRules`; `LeadLaunchTests.theMacsDenyRulesAreTodays`' hashes recorded again (the Mac's lists are main's).
+- `Sources/VibeCore/LeadVaultAppProof.swift`: main's `AppProof.vaultStartedOver` beside `v2`'s move of `KeychainStore`
+  to `Sources/VibeCore/MacOnly/AppProof+Keychain.swift` (main didn't change it).
+- `Sources/VibeHost/HostServer.swift` `enroll`: `v2`'s `!isCheckedNodeHost` with main's started-over vault that logs
+  and takes nothing.
+- `docs/guide/development.md`: `KeychainCallLint` in `v2`'s lint command (its table row merged on its own).
+
+What main added that didn't build or pass on Linux, changed in this merge (kinds 1 to 3, so listed here):
+
+- `Sources/VibeCore/SealedData.swift`, `Tests/VibeHostTests/VaultStartedOverTests.swift`: `import CryptoKit` removed
+  (VibeCore exports the crypto, swift-crypto's on Linux; PlatformLint).
+- `Tests/VibeCoreTests/KeychainCallLintTests.swift`: its stand-in `security` (run by bash from the PATH it makes)
+  written by `installScript` (ShebangWriteLint); the two scripts its scratch tree only gives the lint to read,
+  `scripts/probe.sh` and `scripts/build-app.sh`, in `ShebangWriteLintTests.exemptions`. Its allowed list takes `v2`'s
+  `scripts/install-node-mac.sh` read of gh's token (the user's own install, at the keyboard; the CI dry run passes
+  `--test-origin` and `--test-ci-answer`, which skip it): for the installer's review, `gh auth token` asks no dialog.
+
+**Owed, for the device keys join:** a checked Mac node host owns the launchers, so its vault is `VaultStorage`'s, under
+a Keychain key, and it takes no app key (`HostServer.enroll` and `replaceAppKey` refuse one with `isCheckedNodeHost`).
+A started-over vault there awaits the app's key for good (`LeadVault.Book.awaitsAppKey`), so main's saver saves nothing
+again on that host, the action record and `.user` seals (`LeadVaultV2`) included, until a restart drops them: closed
+(the old file kept), but in memory only. That host's way to answer is still to decide.
+
+`PromptSizeTests`' worker ceiling went from 11_255 to 11_400: main's `LeadPrompts.keychain` in `v2`'s longer worker
+brief renders 11385 bytes (main's own brief fits under 11_255). Both texts are as their authors wrote them; the `v2` side
+may prefer to trim its worker brief back under 11_255 instead.
+
+### The merge of 2026-11-28 (phase 1's J1)
+
+main at `1e7a1d4d` (328 commits past `e02ece00`, 188 not merges, the rest the lead's records) merged into `v2` at
+`73483812` after `v2-main-merged` `e5ba8f8e` (the merge above, local until now), which merged in with no conflict. Main's
+code since `e02ece00`: the host vault's fixes (`0044b1b2`, `2b929ab6`: a vault whose Keychain key can't be read isn't
+started over, `VaultStorage.KeyRead`), which role a host is (`HostRole`: only the account's own host, by its folder and
+lock, reads the vault's key), a handover taken only from the running host it replaces (`HostHandover.receive`, and for the
+account's host a proof under its vault key, `HostHandover.Proof`), the load gate's one rule (cI, `MacLoad.room`), the
+config seal's bounds and zsh twins, the guard's sudo and program-name reads, the heavy slot's caller's folder
+(`VIBESWITCHER_HEAVY_ROOT`), the load recorder's runnable threads and CPU ticks.
+
+Of the files the engine replaces or copies from, main changed these:
+
+| Commit | File | Status |
+| --- | --- | --- |
+| `2c1c0405` (the room watch judged by `MacLoad.room`; `MacLoad.steady` removed) | `LeadController.swift`: refresh, the witness and the room watch; `Sources/VibeSwitcher/HostClient.swift` `hasListed` | ported in this merge: `VibeNode/Engine/RoomWatch.swift` judges by `MacLoad.room` (its `averages` and `heavyLock`, the host listed once `HostLink` is connected: the node's link proves nothing, so no refused proof empties its list); `RoomWatchTests` fake the averages |
+| `2c1c0405` | `Sources/VibeSwitcher/MacLimitsSettings.swift` (a comment) | not needed: the node's settings say the rule through `LeadToolset`'s shared text |
+| `0044b1b2`, `8b4b723c`, `1eff2a13`, `ef89ac41` (the unreadable-key and started-over alerts) | `Sources/VibeSwitcher/HostClient.swift` `keyResetAlert` | not needed: the app's alerts about its own key (as at the merge above) |
+| `8ac260e8` (composer drafts in the harness's defaults) | `Tests/VibeSwitcherTests/ChatSyncTests.swift` | not needed: the app's composer; the node's page keeps no drafts in defaults |
+
+Conflicts (15 files), each keeping both sides:
+
+- `Resources/bin/vs-heavy`: main's unread folder (`@unread`) before `v2`'s Linux `node-limits.json`.
+- `scripts/test.sh`: `v2`'s `swift_tests` and `swift_tests_retrying_failed` with main's `heavy_root`, given to both of
+  their vs-heavy calls (the retry's in its subshell); `PreferencesCheckTests`, `TestScriptWebTests` and
+  `TestEnvironmentTests` pin `swift_tests`' line with `VIBESWITCHER_HEAVY_ROOT=$heavy_root`.
+- `scripts/temporary-folder-lint.txt`: both sides' lines.
+- `Sources/VibeCore/ConfigSeal.swift`: `v2`'s `/mnt/` and `/run/user/` homes with main's `#past` keys; `v2`'s git config
+  keys and main's twins; main's read budget with `v2`'s coarse-ctime hash, which now reads within main's 32 MB (the
+  limit below); main's `walk` with its budget.
+- `Sources/VibeCore/LeadToolset.swift`: main's `MacLoad.ruleText` with `v2`'s `MacLimits.fileName`; `BoostTests` takes
+  main's wording with `v2`'s values for the cores.
+- `Sources/VibeCore/LeadVaultAppProof.swift`: main's `AppProof.vaultKeyUnreadable` beside `v2`'s move of `KeychainStore`.
+- `Sources/VibeCore/LoadRecorder.swift`: `v2`'s `Platform.Processes.brief` with main's `runnable`, read through
+  `Platform.Processes.runnableThreads`; main's `cpuTicks` through `Platform.Host.cpuTicks` (both nil on Linux, not read
+  there yet: owed).
+- `Sources/VibeHost/VaultStorage.swift`: main's `Key`, `KeyRead` and statuses on `v2`'s `Platform.Keychain` (its `read`,
+  main's `SecItem` body moved into `Keychain+Darwin.swift`; Linux nil). A status is an `Int32` (`OSStatus` on the Mac).
+- `Sources/VibeHost/HostServer.swift`: main's `takeLock` and `start(holdingLock:)`, with `v2`'s `heldLockIsAllowed` in
+  the latter; main's key guard after `v2`'s Linux and keeper dispatch (each proves its own way); main's `proofArguments`
+  beside `v2`'s `handoverState` (the proof binds the state's lock descriptor, `pathWatch`'s on Linux).
+- `Sources/VibeHost/HostHandover.swift`: `v2`'s spawn and formats with main's `keyID`; `probeCheck` returns the state, so
+  the probe says its format; `receive` takes `v2`'s checked-node rule (`admit`, `HostImages.mayTakeHandover`) before the
+  lock, proof or secrets; `Proof`'s start time from `Platform.Processes.record`.
+- `Sources/vibeswitcher-host/main.swift`: `v2`'s order (probe, keeper, proxy, hardening, the node's start) with main's
+  `HostRole` after it; the probe's key through a `HostRole` of its own command line. The lock taken first (not for a
+  handover or a keeper's switch). On the Mac, main's `receive` and `role.vault`; on Linux (`!Platform.CodeIdentity.isAvailable`),
+  `v2`'s read through sealed memory and its `ownsLaunchers` vault, unchanged: Linux has no Keychain key, so main's proof
+  (no handover without the key) would refuse every Linux handover. `ownsLaunchers` on the Mac is `role.holdsRootLock`.
+  `v2`'s keeper intake from the command line (`MacHandoverKeeper.takeIfAsked`, a scratch host's test of the Mac's
+  switch) is for a host that isn't the account's: the account's host takes a state file's handover with main's proof
+  only, so a keeper a process of the account started can't stand in for it. The checked node's own keeper (its parsed
+  command line) is as `v2` has it.
+- `Tests/VibeCoreTests/LeadHandoverTests.swift`: both new tests.
+
+Where main's change met `v2` code it didn't know, changed in this merge:
+
+- `ConfigSeal.walk` takes main's read budget and stays internal (`v2`'s `SwitchSeal.folderHashes` hashes a folder as
+  the look does, now within the look's `folderBudget`); `LinuxSealList`'s entries take main's `Contents.big` (a file past
+  `readLimit` told by its metadata).
+- `VibeNode/Engine/RoomWatch.swift`: `MacLoad.steady` is gone, so the node's room watch judges by `MacLoad.room` (the
+  table above).
+- `v2`'s lints and checks on main's code, each red in the merge's first full suite: the host's socket refusal through
+  `Platform.Stdio.error` (StdioWriteLint); `--handover-proof` and `--handover-probe-key` refused for a checked node
+  (`MacCheckedReCheckTests`); `HomePathLintTests.allowed` keeps `v2`'s `ownsLaunchers` and `config` beside main's
+  `role`; `HandoverProofTests`' stand-in build by `installScript` (ShebangWriteLint).
+
+What main added that doesn't build on Linux, changed in this merge: `import CryptoKit` and `import Darwin` out of
+`HostHandover.swift` and `HostRole.swift`; `Darwin.close` to `Sys.close`; `OSStatus` to `Int32`; main's `identity`'s
+`st_mtimespec` and `st_ctimespec` to `Platform.Files.modified` and `changed`. `HandoverProofTests`, `HostRoleTests` and
+`VaultKeyUnreadableTests` are the Mac's (VibeHostTests' `MacOnlyTests.txt`).
+
+**A stated limit on Linux (the lead's call, 2026-11-28):** main's read bound applies everywhere: a watched file over 32 MB
+(`ConfigSeal.readLimit`), or one past its folder's 64 MB budget (`folderBudget`), is judged by its metadata only, so an
+in-place rewrite of the same size within one ctime tick of the last sealed write isn't seen. `v2`'s coarse-ctime
+contents hash for a script past `scriptLimit` holds up to 32 MB. The unbounded read it had stays removed (a large file
+stalled every gate).
+
+**Owed, for the Linux side:** whether the Linux host takes main's checks of a handover's lock (`HostHandover.Lock`) and
+the account's host's role (`HostRole.vault`'s lock check) in place of `v2`'s `ownsLaunchers` vault; read only, not run
+on Linux. The load recorder's runnable threads and CPU ticks on Linux.
+
 ## Non-seam edits
 
 Rows marked *planned* are the ones the plans expect, listed before they are made so an executor doesn't stop to ask;
@@ -519,3 +651,7 @@ numbering (its Global Constraints); calls switched to `VibePlatform` (kind 1), t
 | `Sources/VibeCore/LeadVault.swift` `.bind`'s verifier check (`verifierBindRefusal`), `AuditAllowance.usedBy`, `Team.unreadSettings`, `Request.unreadSettings`, a Codex worker recorded as `codex` (made, the reviewer's F1 on 1396ac6e; kind 4) | under a floor that keeps audits off the workers' model, a verifier's or finder's bind is refused when the model its command passes (as the host saw it) is none, an alias, or a family the vault's own record excludes for the task (worker_model or Claude Code's default read at the bind, and the launched families), unless the user's allowance for that commit and family is there, which the bind takes (a finders' panel shares it); a Codex verifier is refused on a task a Codex worker worked on. The agent is the program the session's command runs (`WorkerLaunch.commandAgent`: one simple command of literal words (no expansion, glob, brace or leading `~`), `env` the only wrapper, no assignment at all, the bare name, or a path resolving to the node's links (`Book.programLinks`) or Claude Code's versioned binary in the account's home, resolved inside the bind's bounded reads), never only the grant's declared one: a mismatch isn't bound, and under the floor neither is a session whose program isn't told apart. A panel takes an allowance for one panel's worth (its size then, each index once). With no worker_model and Claude Code's default unreadable at the bind, a verifier isn't bound and a worker's launch records every family. `Request.auditExclusions` gives the lead's tools the same set (their own view added), and the post-merge Claude re-audit chooses its model at its start from it. The lead's own consume call is gone | the rule was enforced only in the lead's tool server: a process in its session could issue, spawn and bind a verifier on any model. The vault's default is read from its home, so a project whose command names another model (the Mac's presets) has both kept off | medium: a check in `.bind` |
 | `Sources/VibeCore/V2/RoleLaunchCheck.swift` (new), `Sources/VibeCore/LeadVault.swift` `.bind` calling it, `Sources/VibeHost/HostServer.swift` the spawn keeping its request's environment names and the bind passing them, `Sources/VibeHost/HostedSession.swift` `requestEnvironmentNames` (made, the review of 368390d7's X1; kind 4) | under the floor that keeps audits off the workers' model, a worker's, verifier's or finder's bind is refused when its command has a flag VibeSwitcher's launch builders don't emit (beside a preset's `--dangerously-skip-permissions`), `--settings` twice or one that isn't the builder's keys and env names (pins only as set), a Codex `-c` key the builder doesn't write, or a spawn environment name outside the builders' ; names only, never values; without the floor nothing changes | each of those can change the model without `--model` | low: one check at the bind, one stored property |
 | `Sources/VibeCore/V2/WorkerLaunches.swift` `options(of:)` and its arities, `routingKeys`, `Seen.full`; `Sources/VibeCore/LeadVault.swift` `Member.settingsDigest` (given at the issue), `runPrefix`; `RoleLaunchCheck.branchRefusal`, `WorkerLaunch.duplicateKey`; `Sources/VibeCore/LeadLaunch.swift` `Prepared.settingsDigest` (made, the review of badb4fdd; kind 4) | one reading of a launch's options as Claude Code's and Codex's parsers read them (a value-taking flag takes `--` too; `[value]` flags only a word not starting with `-`), used by the launch check, `launchModel` and the settings path; under the floor a value starting with `-` is refused, `--resume` is the lead's only, a verifier carries `--setting-sources user` and `--strict-mcp-config` and a worker neither, a `--settings` file is refused where settings are inline (Linux) and elsewhere must be the builder's (written with O_EXCL) by the digest kept with the grant, in the launch's folder, a worker whose branch's settings name a routing key (parsed, or anywhere in the text), a model key (`modelKeys`: `modelOverrides`, `fallbackModel`, `agent`, …) or couldn't be read whole is refused, a settings file with a key twice is refused, and a bind without the full command says to start it again | each was a way past the check (`--name -- --model …`, `--resume --fallback-model …`, a verifier loading the branch's settings, a swapped file, a gateway) | low: one walker, a few checks at the bind |
+| `Sources/VibeCore/ConfigSeal.swift` `Watched.Kind`, `fingerprint`, `keyHashes` (made, the node on macOS's step 8, 2026-11-26, `v2-mac-seal-list`; **approved by the lead**, 2026-11-26) | `case preferences` (an app's preferences read as a property list: every top-level key but the measured churn, by parsed value in a canonical form, with its `ByHost/<domain>.*.plist` files; `MacSealList.preferencesHash`, `preferenceKeys`); one branch in `fingerprint` and one line in `keyHashes` into `MacSealList`; only the Mac list uses it | Terminal's preferences are rewritten at each Terminal start and window move (measured), so a `.file` row would hold every team each time | low: one enum case and two branches |
+| `Sources/VibeCore/ConfigSeal.swift` `homeWatched(home:macList:)`, `watched(home:root:macList:)`, `hashes(home:root:macList:)`, `isHome(key:)` (made, step 8, 2026-11-26; kind 4) | a `macList` parameter, false by default, passed down; one hook line `+ (macList ? MacSealList.watched(…) : [])` beside Linux's; `isHome` also takes the Mac list's rows outside the home (`MacSealList.isOutsideName`: `/opt/homebrew/bin`, `/opt/homebrew/sbin`, `/var/db/xcode_select_link`) | the Mac node's seal list (`Sources/VibeCore/V2/MacSealList.swift`), off for the app's seal and every book but a checked Mac node host's; its rows outside the home sealed once for every team | low: default parameters and one line each |
+| `Sources/VibeCore/LeadVault.swift` `Book.watchesMacList` and `answer`'s two hashing lines (made, step 8, 2026-11-26; kind 4) | a lock-guarded flag, false by default, beside `recordsActions`; `answer` hashes with `macList: watchesMacList` | only a checked Mac node host's book watches the Mac list (never the app's, never another book in the process) | low: additions |
+| `Sources/VibeHost/HostServer.swift` `serverChild`'s `didSet` (made, step 8, 2026-11-26; kind 4) | `config.vault?.watchesMacList = true` beside `recordsActions` under `isMacNodeHost` | the same | low: one line |

@@ -284,7 +284,7 @@ export VIBESWITCHER_PREFERENCE_LEDGER=$tool_scratch/preference-suites
 # (scripts/lib/swift-jobs.sh), and so are the tests (`slot_width` above). The bash it runs drops the team session's
 # variables first; vs-heavy and its supervisor keep them.
 swift_tests() {
-    Resources/bin/vs-heavy --as scripts/test.sh bash -c 'clean_test_environment; slot_width; heavy_swift build || { : > "$VS_BUILD_FAILED_MARK"; exit 1; }; heavy_swift test "$@"' scripts/test.sh "$@"
+    VIBESWITCHER_HEAVY_ROOT=$heavy_root Resources/bin/vs-heavy --as scripts/test.sh bash -c 'clean_test_environment; slot_width; heavy_swift build || { : > "$VS_BUILD_FAILED_MARK"; exit 1; }; heavy_swift test "$@"' scripts/test.sh "$@"
 }
 
 # --tsan's: `swift_tests` with the thread sanitizer, built in .build/tsan (`heavy_swift` adds VS_SWIFT_EXTRA_OPTIONS to
@@ -374,6 +374,8 @@ swift_tests_retrying_failed() {
     mkdir -p "$retry/home" && mkdir -m 700 "$retry/tmp" || return 1
     (
         export HOME=$retry/home CFFIXED_USER_HOME=$retry/home VIBESWITCHER_HOME=$retry/home/.vibeswitcher
+        # Its slots counted from the caller's VibeSwitcher folder too, as `swift_tests`' (VIBESWITCHER_HEAVY_ROOT, below).
+        export VIBESWITCHER_HEAVY_ROOT=$heavy_root
         with_tmpdir "$retry/tmp/" Resources/bin/vs-heavy --as scripts/test.sh bash -c 'clean_test_environment; slot_width; heavy_swift test --skip-build "$@"' scripts/test.sh \
             ${retry_args[@]+"${retry_args[@]}"} "--filter=$pattern" --event-stream-output-path "$retry/events.jsonl" --experimental-event-stream-version 0
     ) 2>&1 | tee "$retry/console.log"
@@ -462,6 +464,19 @@ fi
 # (only there) for the bash vs-heavy runs, the retry's too, whose heavy_swift keeps it from SwiftPM and the tests.
 swiftpm_run_cache
 [[ -n ${swiftpm_cache:-} ]] && export swiftpm_cache
+# The caller's VibeSwitcher folder, before the homes move, as vs-heavy and VibePaths.root find it (VIBESWITCHER_HOME,
+# else .vibeswitcher in CFFIXED_USER_HOME or HOME; in a session VIBESWITCHER_HOME is usually unset): its Settings and
+# Boost give the slot count. Given to vs-heavy alone (VIBESWITCHER_HEAVY_ROOT, which it doesn't pass on), so the tests
+# keep the scratch home. Under the scratch VIBESWITCHER_HOME vs-heavy counted the cores ÷ 6, not Settings' 3: 2 slots
+# of 6 cores on 12, slot 3 never taken (2026-11 heavy slot review, fix 2a). With no home to go by, "": vs-heavy then
+# counts it unread, the narrower share.
+heavy_root=${VIBESWITCHER_HOME:-}
+if [[ $heavy_root != /* ]]; then
+    heavy_root=${CFFIXED_USER_HOME:-}
+    [[ $heavy_root == /* ]] || heavy_root=${HOME:-}
+    [[ $heavy_root == /* ]] && heavy_root=$heavy_root/.vibeswitcher || heavy_root=""
+fi
+unset VIBESWITCHER_HEAVY_ROOT
 export HOME=$tool_scratch/home CFFIXED_USER_HOME=$tool_scratch/home VIBESWITCHER_HOME=$tool_scratch/home/.vibeswitcher
 # The suites run in UTC, as on CI: a time a test checks (the wire vectors' usage resets) reads the same everywhere.
 export TZ=UTC

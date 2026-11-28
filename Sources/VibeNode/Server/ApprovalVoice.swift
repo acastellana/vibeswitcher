@@ -15,8 +15,16 @@ import VibeCore
 ///    audit token checked by Security, `Platform.CodeIdentity.runs`) with the Hardened Runtime (`hardened`: no injected
 ///    library, no task port for another process): the request came through the command line;
 /// 3. the guard rails: its ancestry holds no live session's program, the host or the server; its controlling terminal
-///    is no live session's; no branch code runner is above it. (Linux's environment line is left out: with SIP on, the
-///    Mac doesn't show another process's environment, and it would fail every peer.)
+///    is no live session's; no branch code runner is above it; it isn't in the server's own launchd coalition (the
+///    coalition line); its own environment doesn't carry `VIBESWITCHER_SESSION` (the environment line, an early
+///    refusal, not a boundary). The last two are the spec's row 3, settled from the user's measurements of 2026-11-26
+///    ("The rule's lines, settled from the measurements"). Every line runs before the kind is looked at, so what they
+///    refuse is everything that reaches `judge`: every state change, and the user's own reads, the socket's kinds of
+///    sender `.user` or `.webRead` with `effect: .read` (`mail`, `recent`, `brief`, `shells`, `config.held`,
+///    `base.show`, `approve.list`, `plugin.inspect`, `update.check`, `start`, `web.passkey`, `web.pairing`). Anyone's
+///    kinds (`status`, `board`, `questions`, `plugin.list` and the other `.anyone` reads) never reach it: the socket
+///    routes them `.read` (`Principal.route`), so a shell card keeps them. The hello's voice word, judged here, says
+///    `other` with the line's words.
 /// 4. a request that changes nothing (`NodeWire.changesState` false) is the user's voice then, as on Linux;
 /// 5. a state change is put to the person at the Mac (`authenticator`, LocalAuthentication's dialog), its reason the
 ///    card's text the engine built (`reason(kind:card:)`, never the board's): approved, it is the user's voice; declined,
@@ -45,6 +53,10 @@ public struct ApprovalVoice: Sendable {
     /// the row whose server is this server's own running code, never a file under the node's root); nil when it
     /// couldn't be taken, and then no peer is the user's.
     public var commandLine: Data?
+    /// The server's own launchd resource coalition (`Platform.Processes.coalition(getpid())`), read once at its start
+    /// (the measurement record's M4, `self`): the node job's, which the host, the server and every session descend from.
+    /// nil when it couldn't be read, and then no peer is the user's (the coalition line).
+    public var coalition: UInt64?
     /// Whether a peer's token runs code of a cdhash (`Platform.CodeIdentity.runs(_:cdhash:)`; a test's table).
     public var runs: @Sendable (Platform.PeerToken, Data) -> Bool
     /// Whether a peer runs with the Hardened Runtime (`Platform.CodeIdentity.isHardened`; unreadable is no; a test's own).
@@ -61,11 +73,12 @@ public struct ApprovalVoice: Sendable {
         return record.build(server: own)?.cli
     }
 
-    public init(authenticator: any Authenticator, commandLine: Data?,
+    public init(authenticator: any Authenticator, commandLine: Data?, coalition: UInt64?,
                 runs: @escaping @Sendable (Platform.PeerToken, Data) -> Bool = { Platform.CodeIdentity.runs($0, cdhash: $1) },
                 hardened: @escaping @Sendable (Platform.PeerToken) -> Bool = { Platform.CodeIdentity.isHardened($0) == true }) {
         self.authenticator = authenticator
         self.commandLine = commandLine
+        self.coalition = coalition
         self.runs = runs
         self.hardened = hardened
     }
@@ -87,7 +100,7 @@ public struct ApprovalVoice: Sendable {
     }
 
     /// Why the caller fails steps 1 to 3 (its uid, the installed command line's code, a hardened process, the guard
-    /// rails), or nil when it passes: silent, never asks. The server runs it before it takes the one dialog's place.
+    /// rails, the coalition and environment lines last), or nil when it passes: silent, never asks. The server runs it before it takes the one dialog's place.
     public func callerRefusal(peer: Platform.PeerToken?, facts: PeerFacts, live: LiveSessions, uid: uid_t) -> String? {
         guard let peerUID = facts.uid else { return "its user can't be read" }
         guard peerUID == uid else { return "it is another user's (uid \(peerUID))" }
@@ -110,8 +123,41 @@ public struct ApprovalVoice: Sendable {
         }
         guard let runner = facts.underRunner else { return "whether it runs under branch code can't be read" }
         guard !runner else { return "it runs under a branch code runner" }
+        // The coalition line: the peer isn't in the server's own resource coalition, the node job's, which the host, the
+        // server and every session descend from. A process keeps its coalition through fork, exec, setsid and being
+        // reparented to launchd (M4; a LaunchAgent job's setsid child, K-AG-1), so a node session's descendant that
+        // didn't go through launchd is refused here however it detached. The peer's is read by the kernel of the
+        // process itself (`PeerFacts.coalition`), never from anything it sent; unread on either side, refused. A guard
+        // rail: launchd's escapes (`open -a Terminal`, AppleScript, a job of its own) land in another (K-ESC-1 to 3).
+        guard let coalition else { return Self.ownCoalitionUnread }
+        guard let peerCoalition = facts.coalition else { return Self.coalitionUnread }
+        guard peerCoalition != coalition else { return Self.inNodeCoalition(coalition) }
+        // The peer's environment line, an EARLY REFUSAL, NOT A SECURITY BOUNDARY (the lead's call, 2026-11-26): a
+        // session drops the variable at will (`env -u`, a re-exec, a job of its own, an escape into Terminal, K-ESC-1 to
+        // 3) and then passes it. It keeps the Mac app's shell cards and agent sessions (which carry it, and which no
+        // other line refuses) and a node session's descendant that kept it away from the dialog. The guarantee for a
+        // state change rests on the dialog alone. Read of the peer itself (`KERN_PROCARGS2`, readable for the user's
+        // builds with SIP on, M2), never of an ancestor (Apple's binaries read empty); unreadable, refused.
+        guard let marker = facts.sessionMarker else { return Self.environmentUnread }
+        guard !marker else { return Self.carriesSession }
         return nil
     }
+
+    /// The coalition line's refusals: the server's own coalition unread at its start, the peer's unread, the peer in it.
+    public static let ownCoalitionUnread = "this server's own launchd coalition couldn't be read at its start, so no caller can be told apart from the node's sessions: restart the node"
+    public static let coalitionUnread = "its launchd coalition can't be read"
+    public static func inNodeCoalition(_ coalition: UInt64) -> String {
+        "it runs in the node's own launchd coalition (\(coalition)), as a node session's process does however it detached"
+    }
+
+    /// The environment line's refusals, each saying what the user does instead: the command line from Terminal, or
+    /// the page. The Mac app's shell cards carry the variable, so the user's own command line typed in one is refused
+    /// here, the user's own reads included (the `.user` and `.webRead` ones; anyone's kinds never reach this: the
+    /// spec's row 3).
+    public static let carriesSession = "it carries \(PeerFacts.sessionMarkerName), as a VibeSwitcher session's process does (the Mac app's shell cards "
+        + "and agent sessions included): run the command line from Terminal, or use the page"
+    public static let environmentUnread = "its environment can't be read, so whether it carries \(PeerFacts.sessionMarkerName) can't be told: "
+        + "run the command line from Terminal, or use the page"
 
     /// The longest card text a reason carries: the dialog is small, and the rest is on the command line's screen.
     public static let cardLimit = 200

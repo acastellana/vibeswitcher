@@ -1,5 +1,6 @@
 #if os(Linux)
 import Foundation
+import VibeKeep
 
 // Linux: the user's systemd and journald, by their fixed paths (the node's tools have always been run so).
 extension Platform.Service {
@@ -13,8 +14,9 @@ extension Platform.Service {
         static func runtimeFolder(uid: uid_t) -> String? { "/run/user/\(uid)" }
         // No app here: the node's root is the account's `~/.vibeswitcher`, as it has always been.
         static let nodeRootFolder = ".vibeswitcher"
-        // No such record on Linux: its checks are the unit's cgroup and the sealed copies (unchanged).
-        static func nodePinsRecord(uid: uid_t) -> [String]? { nil }
+        // No such record on Linux: its checks are the unit's cgroup and the sealed copies (unchanged). The keeper's
+        // package's (Keeper/Sources/VibeKeep/Service+Linux.swift).
+        static func nodePinsRecord(uid: uid_t) -> [String]? { Keep.Service.nodePinsRecord(uid: uid) }
     }
 }
 #endif

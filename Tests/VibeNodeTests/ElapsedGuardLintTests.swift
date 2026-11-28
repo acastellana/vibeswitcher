@@ -11,9 +11,11 @@ import Testing
 /// A guard on a feature's injected clock (`now`, `handoverNow`, `dialogNow`, … a test drives) isn't caught: the engine's
 /// injected clocks are read by their tests to move time, and also stamp what is shown.
 struct ElapsedGuardLintTests {
-    /// The node's processes: the host, the server, the engine, the command line, and the platform layer under them.
+    /// The node's processes: the host, the server, the engine, the command line, the platform layer under them, and the
+    /// keeper's package (`Keeper/Sources`: what slice K0 moved there from VibePlatform, and the keeper itself).
     static let covered = ["Sources/VibeNode", "Sources/VibeHost", "Sources/vibeswitcher-server", "Sources/vibeswitcher-cli",
-                          "Sources/vibeswitcher-host", "Sources/VibePlatform"]
+                          "Sources/vibeswitcher-host", "Sources/VibePlatform", "Keeper/Sources"]
+    private let scratch = Scratch()
 
     static let refused: [(pattern: String, what: String)] = [
         (#"(?<![\w.])Date\(\)\s*\.\s*timeIntervalSince\("#, "Date().timeIntervalSince("),
@@ -44,17 +46,19 @@ struct ElapsedGuardLintTests {
         return found
     }
 
-    @Test func noElapsedGuardReadsTheWallClock() throws {
+    /// Each refused use in the covered folders of `tree` (the repository, or a test's tree) that `allowed` doesn't list,
+    /// as "PATH:LINE: WHAT", and the indices of the allowed uses met.
+    static func scan(_ tree: URL = ServerLintTests.repo) throws -> (found: [String], used: Set<Int>) {
         var found: [String] = []
         var used = Set<Int>()
-        for folder in Self.covered {
-            let root = ServerLintTests.repo.appendingPathComponent(folder)
-            #expect(FileManager.default.fileExists(atPath: root.path), "\(folder)")
-            guard let walker = FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil) else { continue }
-            for case let file as URL in walker where file.pathExtension == "swift" {
-                let path = "\(folder)/\(file.path.dropFirst(root.path.count + 1))"
-                for finding in Self.findings(in: try String(contentsOf: file, encoding: .utf8)) {
-                    if let index = Self.allowed.firstIndex(where: { $0.path == path && finding.text.contains($0.text) }) {
+        for folder in covered {
+            let root = tree.appendingPathComponent(folder)
+            // Relative to the folder as the walk gives them (a test's tree under a linked TMPDIR is walked resolved).
+            guard let walker = FileManager.default.enumerator(atPath: root.path) else { continue }
+            for case let relative as String in walker where relative.hasSuffix(".swift") {
+                let path = "\(folder)/\(relative)"
+                for finding in findings(in: try String(contentsOf: root.appendingPathComponent(relative), encoding: .utf8)) {
+                    if let index = allowed.firstIndex(where: { $0.path == path && finding.text.contains($0.text) }) {
                         used.insert(index)
                     } else {
                         found.append("\(path):\(finding.line): \(finding.what)")
@@ -62,9 +66,27 @@ struct ElapsedGuardLintTests {
                 }
             }
         }
+        return (found, used)
+    }
+
+    @Test func noElapsedGuardReadsTheWallClock() throws {
+        for folder in Self.covered {
+            #expect(FileManager.default.fileExists(atPath: ServerLintTests.repo.appendingPathComponent(folder).path), "\(folder)")
+        }
+        let (found, used) = try Self.scan()
         #expect(found.isEmpty, "an elapsed-time guard on the wall clock: use Platform.Clock.steadyDate() (or MacTime.real.awake()), or allow a stamp's comparison with its reason:\n\(found.joined(separator: "\n"))")
         let stale = Self.allowed.indices.filter { !used.contains($0) }.map { "\(Self.allowed[$0].path): \(Self.allowed[$0].text)" }
         #expect(stale.isEmpty, "allowed, and no such line any more: \(stale)")
+    }
+
+    /// The keeper's package is read: a wall-clock guard planted in a sample tree's `Keeper/Sources` is found by the same
+    /// scan.
+    @Test func theKeepersSourcesAreCovered() throws {
+        let tree = scratch.url("elapsed-guard-keeper")
+        let planted = tree.appendingPathComponent("Keeper/Sources/VibeKeep/Planted.swift")
+        try FileManager.default.createDirectory(at: planted.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try "import Foundation\nguard Date().timeIntervalSince(asked) < 5 else { return }\n".write(to: planted, atomically: true, encoding: .utf8)
+        #expect(try Self.scan(tree).found == ["Keeper/Sources/VibeKeep/Planted.swift:2: Date().timeIntervalSince("])
     }
 
     /// The rule on a fixture: each form found on its line; the steady clock, a stamp's own arithmetic, a comment and a

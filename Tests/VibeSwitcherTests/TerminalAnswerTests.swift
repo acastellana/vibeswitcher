@@ -64,7 +64,8 @@ struct TerminalAnswerTests {
 
     func terminalSync(_ fake: Fake) -> ChatSync {
         let home = temp.url("terminal-answer")
-        let chat = ChatModel(outbox: ComposerOutbox(url: home.appendingPathComponent("outbox.json")), home: home.path, steerRoot: home)
+        let chat = ChatModel(outbox: ComposerOutbox(url: home.appendingPathComponent("outbox.json")), home: home.path, steerRoot: home,
+                             defaults: temp.defaults("terminal-answer-defaults"))
         let sync = ChatSync(chat: chat, host: HostClient(socketPath: "/tmp/vsh-ta-\(UUID().uuidString.prefix(8)).sock"))
         sync.terminalTarget = { ChatSync.TerminalTarget(tty: "ttys990", pid: 1, startedAt: Date(timeIntervalSince1970: 0), needsInput: fake.needsInput) }
         sync.terminalScreen = { tty in
@@ -90,7 +91,8 @@ struct TerminalAnswerTests {
     /// The card a window session gets for the same screen.
     func windowCard(_ screen: String) -> AnswerCardContent? {
         let home = temp.url("terminal-answer-window")
-        let chat = ChatModel(outbox: ComposerOutbox(url: home.appendingPathComponent("outbox.json")), home: home.path, steerRoot: home)
+        let chat = ChatModel(outbox: ComposerOutbox(url: home.appendingPathComponent("outbox.json")), home: home.path, steerRoot: home,
+                             defaults: temp.defaults("terminal-answer-defaults"))
         let sync = ChatSync(chat: chat, host: HostClient(socketPath: "/tmp/vsh-ta-\(UUID().uuidString.prefix(8)).sock"))
         let id = UUID()
         sync.target = { ChatSync.Target(id: id, key: "window", agent: .claude, needsInput: true) }

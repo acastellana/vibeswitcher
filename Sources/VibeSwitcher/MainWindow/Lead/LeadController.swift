@@ -530,8 +530,14 @@ final class LeadController: ObservableObject {
     /// project's sessions ended (see `LeadWitness.RoomWaits`); none until the app starts it (`watchRoom`).
     private var roomWaits: LeadWitness.RoomWaits?
     private var roomTimer: Heartbeat.Subscription?
-    /// The Mac's load as the room watch reads it, as the leads' tools judge it (see `MacLoad.steady`); faked in tests.
-    var macLoad: () -> Double? = MacLoad.steady
+    /// The Mac's load averages as the room watch reads them, judged as the leads' tools judge them (`MacLoad.room`,
+    /// with every project's team sessions and the heavy slots held); faked in tests.
+    var macAverages: () -> MacLoad.Averages? = MacLoad.averages
+    /// The Mac-wide heavy slots the room watch reads the holders of (`TestLock.readHolders`; nil, or a slot that can't
+    /// be read: counted as held, so the 5-minute counts too); faked in tests.
+    var heavyLock: () -> TestLock? = { TestLock.standard() }
+    /// The host has listed its sessions (`HostClient.hasListed`); faked in tests.
+    lazy var hostListed: () -> Bool = { [weak self] in self?.host.hasListed ?? false }
     /// Ended team sessions the host has been asked to drop.
     private var forgetting: Set<UUID> = []
     /// Ends the sessions of finished tasks from the vault's roster, in every project (see `RoleSweep`); nil in tests
@@ -1943,10 +1949,15 @@ final class LeadController: ObservableObject {
     /// project's team sessions the host lists and the Mac-wide limits in Settings.
     func lookAtRoom(limits: MacLimits = MacLimits.current()) {
         guard let roomWaits else { return }
-        let mac = MacLoad.count(host.sessions.map { ($0.label, $0.cwd, $0.isLive) }, load: macLoad())
-        // Wait files and the sleep ledger (including its lock) belong on the boards' queue.
+        let mac = MacLoad.count(host.sessions.map { ($0.label, $0.cwd, $0.isLive) }, load: nil)
+        // Before the host's first list, its empty one says nothing of the team sessions: not idle.
+        let listed = hostListed()
+        let averages = macAverages, lock = heavyLock
+        // Wait files and the sleep ledger (including its lock) belong on the boards' queue, the slots' files too.
         reads.async({ _ in
             var mac = mac
+            // The load start_worker judges: the 1-minute alone while no team session runs and no slot is held.
+            mac.judge(MacLoad.room(averages(), teamSessions: listed ? mac.sessions : nil, slotsHeld: lock()?.readHolders()?.count))
             mac.memory = MacMemory.read()
             return roomWaits.look(mac: mac, limits: limits)
         }, then: { [weak self] due in

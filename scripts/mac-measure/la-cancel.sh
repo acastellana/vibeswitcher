@@ -18,6 +18,11 @@ mm_go "Ready?"
 mm_bootstrap_and_start
 mm_wait_for "$mm_out/$mm_label.out" '^outcome=' 90
 mm_say "First ask ended. Now the second: leave it alone."
+# kickstart starts nothing while the first process is still on its way out: wait for it to end (it prints its outcome
+# last, so at most a moment).
+for _ in $(/usr/bin/seq 1 20); do mm_job_running || break; /bin/sleep 0.5; done
+mm_job_running && mm_stop "the first ask's process hasn't ended 10 s after its outcome"
 /bin/launchctl kickstart "gui/$mm_uid/$mm_label" || mm_stop "kickstart failed"
 mm_wait_for "$mm_out/$mm_label.out" '^outcome=' 100 2
+mm_seen="did Cancel close the first dialog, and did the second go away by itself (after about 60 s)?"
 mm_record "$mm_out/$mm_label.out" "$mm_out/$mm_label.err"

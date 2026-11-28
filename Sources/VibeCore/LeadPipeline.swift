@@ -94,7 +94,8 @@ public enum LeadPipeline {
         /// by no name, since the report may reach the records), when every one is held.
         public var slotsHeld: (slots: Int, said: String)?
         /// The Mac's load and load_threshold, while the load holds merges.
-        public var loadHold: (load: Double, threshold: Double)?
+        /// The load merges wait on (nil: it can't be read) and load_threshold.
+        public var loadHold: (load: Double?, threshold: Double)?
         /// The gate code on the base the running build lacks (`LeadToolset.gateLag`), in words.
         public var gateLag: String?
         /// A merge under way: its tasks and when it started.
@@ -105,7 +106,7 @@ public enum LeadPipeline {
         public var lastMerge: Date?
 
         public init(head: String? = nil, records: [String] = [], slotsHeld: (slots: Int, said: String)? = nil,
-                    loadHold: (load: Double, threshold: Double)? = nil, gateLag: String? = nil, merging: (tasks: [String], since: Date)? = nil,
+                    loadHold: (load: Double?, threshold: Double)? = nil, gateLag: String? = nil, merging: (tasks: [String], since: Date)? = nil,
                     recentDurations: [Double] = [], lastMerge: Date? = nil) {
             self.head = head
             self.records = records
@@ -246,6 +247,10 @@ public enum LeadPipeline {
                     + "The merge waits for one; run fewer sessions at once (or stop a long run) to free one.")
         }
         if let (load, threshold) = signals.loadHold {
+            guard let load else {
+                return (.load, "The Mac's load can't be read, so merges wait until it reads under load_threshold (\(MacLoad.number(threshold))), for at most test_timeout_min. "
+                        + "Tell the user if it stays unreadable.")
+            }
             return (.load, "The Mac's load (\(MacLoad.number(load))) is over load_threshold (\(MacLoad.number(threshold))), so merges wait for it to drop. "
                     + "Run fewer sessions at once, or raise load_threshold with configure if the Mac copes.")
         }

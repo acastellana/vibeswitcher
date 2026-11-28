@@ -257,3 +257,25 @@ extension Tag {
 /// `.tags(.perf), .enabled(if: perfRun, perfOnly)`.
 let perfRun = ProcessInfo.processInfo.environment["VIBESWITCHER_PERF"] == "1"
 let perfOnly: Comment = "a bench, judged by time or memory: scripts/test.sh --perf"
+
+/// A loopback port nothing holds right now, below the range the system hands out for port 0 (other suites ask for one
+/// of those and bind it a moment later, and taking it in between fails them), and never one of the app's own
+/// (`DevPages.reservedPorts`: Phone Access and its previews), which the user's running app may be about to take.
+func freeLoopbackPort() throws -> UInt16 {
+    for _ in 0..<100 {
+        let port = UInt16.random(in: 40_000..<49_000)
+        guard !DevPages.reservedPorts.contains(Int(port)) else { continue }
+        let fd = socket(AF_INET, SOCK_STREAM, 0)
+        defer { close(fd) }
+        var address = sockaddr_in()
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_addr.s_addr = inet_addr("127.0.0.1")
+        address.sin_port = port.bigEndian
+        let length = socklen_t(MemoryLayout<sockaddr_in>.size)
+        let bound = withUnsafeMutablePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(fd, $0, length) }
+        }
+        if bound == 0 { return port }
+    }
+    throw CancellationError()
+}

@@ -462,6 +462,30 @@ struct ComposerDeliveryTests {
         #expect(composer.drafts[key] ?? "" == "" && (composer.attachments[key] ?? []).isEmpty)
     }
 
+    /// A draft one harness left and saved isn't in the next one's box: every harness has the same row key, and the drafts
+    /// were kept in the test binary's standard defaults, which every harness in the process, and every test process on
+    /// this Mac, shares. The put-back test ends with "and another thing" in the box, and saves it then and there: the put-
+    /// back message reaching the agent after all takes it out of the box with `composer.save()` (`takeOutArrived`), not
+    /// the half-second save. A harness made after that run read it back as its box's draft, and the image-alone case
+    /// above, which types nothing, sent it with its image: "[Image #1] and another thing" (2026-11-27).
+    @Test func aDraftSavedInOneHarnessIsNotInTheNextOnesBox() async throws {
+        let first = try await Harness.start(temp)
+        first.chat.composer.drafts[first.key] = "left over"
+        first.chat.composer.attachments[first.key] = ["/left/over.png"]
+        first.chat.composer.save()
+        // Taken out again wherever it was saved, so a run without the fix leaves nothing for other runs.
+        defer {
+            first.chat.composer.drafts[first.key] = nil
+            first.chat.composer.attachments[first.key] = nil
+            first.chat.composer.save()
+        }
+        first.stop()
+        let second = try await Harness.start(temp)
+        defer { second.stop() }
+        #expect(second.chat.composer.drafts[second.key] == nil)
+        #expect(second.chat.composer.attachments[second.key] == nil)
+    }
+
     /// Each image path on a line of its own: Claude Code reads two quoted paths on one line as one path, not a file.
     @Test func aMessagesImagesAreEachOnALineAfterItsText() {
         let one = "/Users/x/.vibeswitcher/attachments/a.png", two = "/Users/x/My Shots/b.png"
@@ -476,6 +500,60 @@ struct ComposerDeliveryTests {
                                    isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
         rep.setColor(NSColor(deviceRed: CGFloat(shade % 4) / 3, green: 0.5, blue: 0.2, alpha: 1), atX: 0, y: 0)
         return rep.representation(using: .png, properties: [:])!
+    }
+
+    // MARK: A Return that came from no key
+
+    private func applicationEvent(_ flags: NSEvent.ModifierFlags) throws -> NSEvent {
+        try #require(NSEvent.otherEvent(with: .applicationDefined, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: 0,
+                                        context: nil, subtype: 0, data1: 0, data2: 0))
+    }
+
+    /// The sandbox's `send` (and an accessibility client) hands the box its Return as a command, with no key: the app's
+    /// current event is then whatever it took last (a window event, say), whose flags are the keyboard's as it was made.
+    /// With Shift held on the real keyboard at that moment, the composer read the Return as ⇧↩: a newline in the box and
+    /// nothing sent, so aSandboxRunLeavesTheRealAppsStateHostAndKeychainAlone waited for a reply that never came. Only a
+    /// key going down says what was held with it.
+    @Test func aReturnWithNoKeySendsWhateverTheLastEventsModifiers() throws {
+        var submitted = 0, queued = 0
+        var text = ""
+        let view = ComposerTextView(text: Binding(get: { text }, set: { text = $0 }), height: .constant(22),
+                                    suggestions: .constant(Suggestions()), history: { [] }, focusRequests: 0, complete: { _ in [] },
+                                    submit: { submitted += 1 }, queue: { queued += 1 }, attachImage: { _ in })
+        let coordinator = view.makeCoordinator()
+        let box = ComposerNSTextView(frame: NSRect(x: 0, y: 0, width: 400, height: 40))
+        box.isEditable = true
+        box.isRichText = false
+        box.delegate = coordinator
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 40), styleMask: [.titled], backing: .buffered, defer: true)
+        window.contentView = box
+        #expect(window.makeFirstResponder(box))
+        box.insertText("a message", replacementRange: box.selectedRange())
+
+        // The last event taken wasn't a key, and Shift (or Option) was held as it was made: the Return is a plain one.
+        for held: NSEvent.ModifierFlags in [.shift, .option, [.shift, .option]] {
+            let last = try applicationEvent(held)
+            coordinator.currentEvent = { last }
+            let before = submitted
+            box.doCommand(by: #selector(NSResponder.insertNewline(_:)))
+            #expect(submitted == before + 1, "held \(held.rawValue): not sent")
+            #expect(box.string == "a message" && queued == 0, "held \(held.rawValue): \(box.string.debugDescription), queued \(queued)")
+        }
+
+        // A key going down with Shift held is still ⇧↩ (a newline, nothing sent), and with Option ⌥↩ (queued).
+        func returnKey(_ flags: NSEvent.ModifierFlags) throws -> NSEvent {
+            try #require(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: window.windowNumber,
+                                          context: nil, characters: "\r", charactersIgnoringModifiers: "\r", isARepeat: false,
+                                          keyCode: UInt16(kVK_Return)))
+        }
+        let sent = submitted
+        let optionReturn = try returnKey(.option), shiftReturn = try returnKey(.shift)
+        coordinator.currentEvent = { optionReturn }
+        box.doCommand(by: #selector(NSResponder.insertNewline(_:)))
+        #expect(queued == 1 && submitted == sent && box.string == "a message")
+        coordinator.currentEvent = { shiftReturn }
+        box.doCommand(by: #selector(NSResponder.insertNewline(_:)))
+        #expect(box.string == "a message\n" && submitted == sent && queued == 1, "\(box.string.debugDescription)")
     }
 
     // MARK: Keys

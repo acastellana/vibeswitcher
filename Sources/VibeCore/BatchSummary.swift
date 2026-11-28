@@ -77,6 +77,22 @@ extension LeadBoard {
     }
 }
 
+extension BoardStore {
+    /// Acknowledge the displayed batch under the writer lock. A retry of a persisted dismissal needs no write.
+    public func seeAllDone(id: String, at: Double) throws -> Bool {
+        try locked {
+            var board = try read()
+            guard let index = board.allDone?.firstIndex(where: { $0.id == id }) else {
+                throw BoardError(text: "The all-done mark is no longer on the board.")
+            }
+            guard board.allDone?[index].seenAt == nil else { return false }
+            board.allDone?[index].seenAt = at
+            try write(board)
+            return true
+        }
+    }
+}
+
 /// When a lead's board clears, and what the batch did in plain words: detection is pure (two board snapshots and the
 /// last mark); the summary is written by headless Claude from a bounded, redacted input, or by `fallback`.
 public enum BatchSummary {

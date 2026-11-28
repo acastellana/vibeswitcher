@@ -170,7 +170,8 @@ public enum NodeFolders {
     /// The installed build this command line runs from (`executable`: `/proc/self/exe`), or why `start` and the
     /// `stop` fallback refuse in node mode (ST-D3): resolved with `realpath`, it must be
     /// `<prefix>/<40 hex>/bin/vibeswitcher` of a build `verifyBuild` takes, its own hash among those checked.
-    public static func installedBuild(executable: String, prefix: String) -> Result<(commit: String, folder: String), StartRefusal> {
+    /// `program`: the image's name (the command line's by default; the server's `vibeswitcher-server` for `update`).
+    public static func installedBuild(executable: String, prefix: String, program name: String = installedCLI) -> Result<(commit: String, folder: String), StartRefusal> {
         func refused(_ why: String) -> Result<(commit: String, folder: String), StartRefusal> {
             .failure(StartRefusal("start runs only from an installed build: \(why)"))
         }
@@ -178,9 +179,9 @@ public enum NodeFolders {
         guard let program = resolved(executable) else { return refused("\(ConfigSeal.inert(executable, limit: .max)) can't be resolved") }
         let bin = (program as NSString).deletingLastPathComponent
         let folder = (bin as NSString).deletingLastPathComponent
-        guard (program as NSString).lastPathComponent == installedCLI, (bin as NSString).lastPathComponent == "bin",
+        guard (program as NSString).lastPathComponent == name, (bin as NSString).lastPathComponent == "bin",
               (folder as NSString).deletingLastPathComponent == resolvedPrefix, NodeUnit.isCommit((folder as NSString).lastPathComponent) else {
-            return refused("this command line is \(ConfigSeal.inert(program, limit: .max)), not <prefix>/<commit>/bin/\(installedCLI) in \(ConfigSeal.inert(resolvedPrefix, limit: .max))")
+            return refused("this command line is \(ConfigSeal.inert(program, limit: .max)), not <prefix>/<commit>/bin/\(name) in \(ConfigSeal.inert(resolvedPrefix, limit: .max))")
         }
         switch verifyBuild(folder: folder, prefix: resolvedPrefix) {
         case .failure(let refusal): return refused(refusal.text)

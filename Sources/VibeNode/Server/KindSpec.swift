@@ -173,6 +173,10 @@ public struct KindSpec: Sendable {
                  voiced: .recorded(.init(arguments: .ofType, keepsResult: true, rerun: false, carded: false, batch: false, phrase: "stop your VibeSwitcher node", dialog: .asArguments))),
         KindSpec("lead", sender: .user, effect: .change, servedBy: .requests, page: .acts, wire: .typed(WireKinds.Lead.self),
                  voiced: .recorded(.init(arguments: .ofType, keepsResult: true, rerun: false, carded: false, batch: false, phrase: "start a project's lead for you", dialog: .asArguments))),
+        // A new project (the no-terminal inventory's C1): its folder, repository and first commit, then its lead; `lead`'s
+        // rule, the kind that starts a project's lead for the user (a page's that acts, recorded, never done again).
+        KindSpec("project.new", sender: .user, effect: .change, servedBy: .requests, page: .acts, wire: .typed(WireKinds.ProjectNew.self),
+                 voiced: .recorded(.init(arguments: .ofType, keepsResult: true, rerun: false, carded: false, batch: false, phrase: "make a new project and start its lead for you", dialog: .asArguments))),
         KindSpec("questions", sender: .anyone, effect: .read, servedBy: .requests, page: .bySender, wire: .typed(WireKinds.Questions.self),
                  voiced: .notRecorded(phrase: nil)),
         KindSpec("draft", sender: .webDraft, effect: .change, servedBy: .requests, page: .bySender, wire: page,
@@ -209,6 +213,9 @@ public struct KindSpec: Sendable {
                  voiced: .recorded(.init(arguments: .ofType, keepsResult: true, rerun: false, carded: false, batch: false, phrase: "switch your node to another build", dialog: .asArguments))),
         KindSpec("build.seal", sender: .user, effect: .change, servedBy: .requests, page: .terminalOnly("it seals the unit that starts the node's build: only the switch's own code, from a terminal, may"), wire: .typed(WireKinds.BuildSeal.self),
                  voiced: .recorded(.init(arguments: .ofType, keepsResult: true, rerun: false, carded: false, batch: false, phrase: "accept the node's unit naming the build you switched to", dialog: .asArguments))),
+        // G3 (D1, D2): `vibeswitcher update` and `rollback` up to the handover, done by the server (`UpdateRequest`): a guarded change, no page's until slices 14–15.
+        KindSpec("update", sender: .user, effect: .change, servedBy: .requests, page: .terminalOnly("a guarded change: it installs and runs another commit's code as the node, and no page makes one until each asks a biometric of its own (device keys, slices 14 and 15)"), wire: .typed(WireKinds.Update.self),
+                 voiced: .recorded(.init(arguments: .ofType, keepsResult: true, rerun: false, carded: false, batch: false, phrase: "install another build and switch your node to it", dialog: .asArguments))),
         KindSpec("subscribe", sender: .anyone, effect: .read, servedBy: .hub, page: .bySender, wire: live,
                  voiced: .notRecorded(phrase: nil)),
         KindSpec("unsubscribe", sender: .anyone, effect: .read, servedBy: .hub, page: .bySender, wire: live,
@@ -310,9 +317,19 @@ public struct KindSpec: Sendable {
         // Brief me: a read of the user's own, which may ask the summaries' model: never a session's.
         KindSpec("brief", sender: .webRead, effect: .read, servedBy: .requests, page: .bySender, wire: .typed(WireKinds.Brief.self),
                  voiced: .notRecorded(phrase: nil)),
+        // The node's logs, masked as `vibeswitcher logs` masks them (the no-terminal inventory's C8): a read of the
+        // user's, which names every project's sessions and who asked for them: never a session's.
+        KindSpec("logs", sender: .webRead, effect: .read, servedBy: .requests, page: .bySender, wire: .typed(WireKinds.Logs.self),
+                 voiced: .notRecorded(phrase: nil)),
         // Check for Updates now: it asks GitHub and keeps only its answer; the user's, never a session's or a page's.
         KindSpec("update.check", sender: .user, effect: .read, servedBy: .requests, page: .acts, wire: .typed(WireKinds.UpdateCheck.self),
                  voiced: .notRecorded(phrase: nil)),
+        // G3 (C9, N6): the journal's acknowledgment, recorded in the vault as the user's (`JournalAckRequest`): the server writes no journal entry and clears no mark (`status --ack` in a terminal does until slices 14–15 change the reader); a guarded change, no page's until then.
+        KindSpec("journal.ack", sender: .user, effect: .change, servedBy: .requests, page: .terminalOnly("a guarded change: it records that you have seen the starts and requests nobody explained (the marks stay until vibeswitcher status --ack in a terminal), and no page makes one until each asks a biometric of its own (device keys, slices 14 and 15)"), wire: .typed(WireKinds.JournalAck.self),
+                 voiced: .recorded(.init(arguments: .ofType, keepsResult: true, rerun: true, carded: false, batch: false, phrase: "acknowledge the starts, stops and restarts the journal shows", dialog: .asArguments))),
+        // G3 (E8, N8): Claude Code's self-update switch in its own settings (`ClaudeAutoUpdate`): a guarded change, no page's until slices 14–15.
+        KindSpec("claude.autoupdate", sender: .user, effect: .change, servedBy: .requests, page: .terminalOnly("a guarded change: it writes an agent's own settings (~/.claude), as hooks.install does, and no page makes one until each asks a biometric of its own (device keys, slices 14 and 15)"), wire: .typed(WireKinds.ClaudeAutoUpdateSwitch.self),
+                 voiced: .recorded(.init(arguments: .ofType, keepsResult: true, rerun: true, carded: false, batch: false, phrase: "turn Claude Code's self-update on or off", dialog: .asArguments))),
         KindSpec("approve.list", sender: .user, effect: .read, servedBy: .requests, page: .acts, wire: .typed(WireKinds.ApproveList.self),
                  voiced: .notRecorded(phrase: nil)),
         KindSpec("approve", sender: .user, effect: .change, servedBy: .requests, page: .acts, wire: .typed(WireKinds.Approve.self),

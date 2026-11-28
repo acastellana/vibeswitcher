@@ -86,7 +86,8 @@ struct ConfigSealFirstLookTests {
         try write("export PATH=$HOME/planted:$PATH\n", home + "/.bashrc")
         // The lead's look, the app's look before any accept: neither seals any of it.
         let check = try lead.checkConfig(root: root)
-        let homeNames = Set(ConfigSeal.homeFiles.map { "~/" + $0.0 })
+        // main's compiled twins (`.zwc`) aren't there here: one first watched holds only once it is (`comesAndGoes`).
+        let homeNames = Set(ConfigSeal.homeFiles.filter { !$0.0.hasSuffix(".zwc") }.map { "~/" + $0.0 })
         #expect(homeNames.isSubset(of: Set(check.held)), "\(check.held)")
         #expect(try app.checkConfig(root: root).held == check.held)
         #expect(try recorded(root).filter { $0.hasPrefix("~/") }.isEmpty)

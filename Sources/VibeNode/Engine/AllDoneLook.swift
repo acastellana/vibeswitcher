@@ -7,7 +7,7 @@ import VibeCore
 /// the user's node while the AI summaries may run (`Options.summarizeBatch`, the app's `ClaudeHeadless.allDone`), else
 /// the written fallback. `status` then says it for a day: the project, when, the summary, how many merged and its
 /// receipts summed; the board carries the mark (`BoardValue.allDone`: `vibeswitcher board` and the page's card), and a
-/// page that shows the board marks it seen (`seeAllDone`). Its state is its own, on the engine's queue.
+/// page that shows the board marks it seen (`see`). Its state is its own, on the engine's queue.
 final class AllDoneWatch {
     /// How long `status` says a board cleared.
     static let shown: TimeInterval = 24 * 60 * 60
@@ -72,17 +72,11 @@ final class AllDoneWatch {
         }
     }
 
-    /// The user saw `root`'s all-done cards (a page showed its board: `seen` with a project, the app's
-    /// `AllDoneWatch.see`): each unseen mark gets its seen time, under the board's lock, on `reads`; nothing written
-    /// when none is unseen. `done` hears whether the board changed, on `queue`.
-    func see(root: String, done: @escaping (Bool) -> Void = { _ in }) {
+    /// Acknowledge the displayed mark on the board writer's queue and deliver the outcome on the engine's queue.
+    func see(root: String, id: String, done: @escaping (Result<Bool, Error>) -> Void) {
         EngineWatch.assertOn(queue)
         let now = now().timeIntervalSince1970
-        reads.async({ _ in
-            let store = BoardStore(root: root)
-            guard (try? store.read())?.hasUnseenAllDone == true else { return false }
-            return (try? store.update { $0.seeAllDone(at: now) }) ?? false
-        }, then: done)
+        reads.async({ _ in Result { try BoardStore(root: root).seeAllDone(id: id, at: now) } }, then: done)
     }
 
     /// What `status` says of each board that cleared in the last day: its newest mark.
@@ -111,9 +105,6 @@ extension LeadEngine {
     func noteAllDone(previous: [String: LeadBoard], loaded: [String: LeadBoard]) {
         allDone.mark(previous: previous, loaded: loaded, model: summariesAllowed ? batchModel : nil)
     }
-
-    /// The user saw `root`'s all-done cards (`AllDoneWatch.see`). On `queue`.
-    func seeAllDone(root: String, done: @escaping (Bool) -> Void = { _ in }) { allDone.see(root: root, done: done) }
 
     /// What `status` says of each board that cleared in the last day.
     var allDoneNotices: [String] { allDone.notices(boards: boards) }

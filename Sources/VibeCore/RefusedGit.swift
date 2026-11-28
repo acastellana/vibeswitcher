@@ -33,21 +33,32 @@ import Foundation
 /// `<(…)`, zsh's `=(…)`, a shell option this doesn't read (`bash -s`, fish's), or any path when the command is given
 /// input) on a line that names git anywhere. And a git whose option or command word the shell makes from an expansion
 /// (`git $x …`, `git ${o:--C} x`, `git {push,x}`, `git pus?`, zsh's `git =x` and `git pus(h|x)`), or that the program
-/// running it fills in (`xargs git`, `xargs -I% git % x`, `find -exec git {} \;`). And, on a line that names git, a
-/// program whose own name the shell makes from a variable, braces, zsh's `=`, or a substitution alone (`g=git; $g push`,
-/// `command {git,push}`, `=git push`, `$(echo git) push`; not a path built on one, `"$(git rev-parse
-/// --show-toplevel)/scripts/x.sh"`).
+/// running it fills in (`xargs git`, `xargs -I% git % x`, `find -exec git {} \;`).
 ///
-/// Not seen here, and so open: a file a shell runs or sources (`bash x.sh`, `bash -x x.sh`, `source x`, which is how
-/// every script runs), and another language's interpreter or a program not listed that runs a command (`python3 -c`,
-/// `perl -e`, `osascript`, `script`, `ssh`); input a shell takes from further off, a reader nested in what's given it
-/// (`… | { true; bash dev/stdin; }`, `zsh -c '. /dev/stdin' <<< …`); text that reaches git without naming it
-/// (`a=gi; ${a}t push`, `$'\x67it'`, base64), or a program's name with text beside a substitution
-/// (`/usr/bin/$(echo git) push`); an argument after git's command that the shell makes (`git checkout $b`: a rule
-/// reads it as written); a variable set another way (`read GIT_DIR` after `set -a`, a file sourced; `HOME` or
-/// `XDG_CONFIG_HOME` set on its own or exported, which every program reads, before a git); a function or alias
-/// defined in a file the shell reads; and a git alias the user's config already has. A spelling found later is
-/// refused the same way, as unreadable, not listed here.
+/// And, on any line (`built`; the audit of keychain-keys-the-stated, F3), a program whose own name the shell makes,
+/// since it can be git or security: a pattern, a variable or a substitution in its last name (`/usr/bin/gi? push`,
+/// `g=gi; ${g}t push`, `"$tool" x`, `$(echo git) push`, zsh's `=git push`), an expansion not quoted anywhere in it,
+/// which the shell splits, braces too (`$(brew --prefix)/bin/x`, `{/usr/bin/gi,x}t`), or what xargs or find put there
+/// (`find … -exec {} \;`); a loop whose body's program is a variable too (`for t in git; do $t push; done`). A path
+/// whose expansion is in double quotes and whose last name is written out is read by that name (`"$ROOT/scripts/x.sh"`,
+/// `"$d/git" push` is a git). And a launcher it doesn't read (`script`, `setsid`, `chroot`, `su`, …: `launchers`),
+/// whatever it runs. A `[[ … ]]` test's operands aren't programs only in its plain form, and a `case` arm's pattern
+/// only in its plain form (`ShellWords.scan`); a line with any other (a quoted or escaped `[[`, `)]]`, a test across
+/// lines, a `case` with a test) is read the strict way: each word that could be a program is read as one, and the
+/// reason says to write the test plainly. That costs a rewrite of an odd-looking test; it never lets a line through
+/// that the reading before refused (RefusedGitMonotonicTests holds it to that, against a copy of it).
+///
+/// Not seen here, and so open, because the guard reads the Bash lines a session types: script files, other
+/// interpreters and remote shells are outside it. That is a file a shell runs or sources (`bash x.sh`, `bash -x x.sh`,
+/// `source x`, which is how every script runs, whatever is in it); another language's interpreter, a remote shell, or
+/// a program or launcher not listed that runs a command (`python3 -c`, `perl -e`, `osascript`, `ssh`, `tmux`); input a
+/// shell takes from further off, a reader nested in what's given it (`… | { true; bash dev/stdin; }`, `zsh -c '.
+/// /dev/stdin' <<< …`); text handed to another interpreter (`sh -c`, `eval`, zsh's `*(e:…:)`) that names neither git
+/// nor security, which is read only for naming them (`sh -c 'a=gi; ${a}t push'`, `eval $'\x67it push'`, base64); an
+/// argument after git's command that the shell makes (`git checkout $b`: a rule reads it as written); a variable set
+/// another way (`read GIT_DIR` after `set -a`, a file sourced; `HOME` or `XDG_CONFIG_HOME` set on its own or exported,
+/// which every program reads, before a git); a function or alias defined in a file the shell reads; and a git alias the
+/// user's config already has. A spelling found later is refused the same way, as unreadable, not listed here.
 public enum RefusedGit {
     /// The refused options. `--config-env` is `-c` with its value read from an environment variable.
     public static let options = ["-C", "-c", "--git-dir", "--work-tree", "--exec-path", "--config-env"]
@@ -88,6 +99,8 @@ public enum RefusedGit {
         case option(String)
         case command(String)
         case variable(String)
+        /// The `security` command-line tool, which reaches your Keychains (`keychainTool`).
+        case keychain
         case unreadable(Unread)
 
         /// Why a line's git can't be read. Refused, not guessed at (decision 2026-10-25 16:33: hardening fails closed):
@@ -100,8 +113,15 @@ public enum RefusedGit {
             case handed(String)
             /// A git whose option or command word (as written) the shell makes from an expansion.
             case expanded(String)
-            /// A program whose own name (as written) the shell makes from an expansion, on a line that names git.
+            /// A program whose own name (as written) the shell makes from an expansion, on a line that names git; or,
+            /// on any line (`built`), from a pattern, a variable or a substitution in its last name, an expansion not
+            /// quoted anywhere in it, or what xargs or find put there.
             case program(String)
+            /// The same, on a line whose `[[ … ]]` test or `case` arm isn't written plainly, so each word that could be
+            /// a program was read as one (`ShellWords.scan`).
+            case test(String)
+            /// A launcher that runs the command it's given in a way this doesn't read (its name: `script`, `setsid`).
+            case launcher(String)
         }
 
         /// The hook's reason, as the session reads it.
@@ -116,21 +136,35 @@ public enum RefusedGit {
             case .variable(let name):
                 "VibeSwitcher refuses setting \(name)\(configHomes.contains(name) ? " for git" : "") to every role: it points git at another repository, work tree, config "
                     + "or programs, as git's -C, -c and --git-dir do. Run git in your own worktree without it."
+            case .keychain:
+                "VibeSwitcher refuses the `security` command to every session it starts: it reaches your Keychains, where "
+                    + "VibeSwitcher keeps its keys, and on 2026-11-26 probing them crashed the Mac's keychain daemon and locked "
+                    + "your login keychain. Keychain checks are done only in a keyboard session with the user: ask your lead."
             case .unreadable(.tangled):
                 "VibeSwitcher refuses a command nested more than \(ShellWords.depthLimit) levels deep (subshells, substitutions) "
                     + "or too tangled to read: it can't check what git it runs. Write it flatter."
             case .unreadable(.handed(let interpreter)):
-                "VibeSwitcher refuses a line that hands text naming git to \(interpreter), which runs it as commands of its own "
-                    + "(as `sh -c '…'`, `eval`, `env -S`, `trap`, `watch` and a shell or `source` reading its input do): it can't "
-                    + "check what git that runs. Run the git command plainly, on a line of its own, without the wrapper."
+                "VibeSwitcher refuses a line that hands text naming git or security to \(interpreter), which runs it as commands of "
+                    + "its own (as `sh -c '…'`, `eval`, `env -S`, `trap`, `watch` and a shell or `source` reading its input do): it "
+                    + "can't check what that runs. Run the git command plainly, on a line of its own, without the wrapper."
             case .unreadable(.expanded(let word)):
                 "VibeSwitcher refuses git with `\(Self.short(word))` where its options or its command go: the shell makes that "
                     + "word from an expansion (a variable, a substitution, braces or a pattern), so it can't check what git "
                     + "runs. Run the git command plainly, its options and command written out, without the variable."
             case .unreadable(.program(let word)):
-                "VibeSwitcher refuses a command whose name the shell makes from an expansion (`\(Self.short(word))`) on a line "
-                    + "that names git: it can't check whether that runs git. Write the program's name out, and run the git "
-                    + "command plainly, without the variable."
+                "VibeSwitcher refuses a command whose name the shell makes (`\(Self.short(word))`): a pattern, a variable or a "
+                    + "substitution there (or what xargs or find put there) can make it git or security, which it can't check. "
+                    + "Write the program's name out. In a path, put the variable in double quotes and write the last name out "
+                    + "(\"$ROOT/scripts/x.sh\"); in a loop, name the program or pass the variable to one (bash \"$f\")."
+            case .unreadable(.test(let word)):
+                "VibeSwitcher refuses a command whose name the shell makes (`\(Self.short(word))`): this line has a `[[ … ]]` "
+                    + "test or a `case` pattern that isn't written plainly, so each word that could be a command is read as one. "
+                    + "Write the program's name out, or write the test plainly: `[[` first in the command (after if, while, "
+                    + "until, !, then or do only), `]]` a word of its own after a space, all on one line, with no ( … ) "
+                    + "grouping and no `case` on the same line; a case pattern as words joined by | before its )."
+            case .unreadable(.launcher(let name)):
+                "VibeSwitcher refuses `\(name)`: it runs the command after it in a way this guard doesn't read, so it can't "
+                    + "check whether that's git or security. Run the command without it."
             }
         }
 
@@ -141,7 +175,8 @@ public enum RefusedGit {
     /// The refusal a git in `line` would run with, or nil when none does. `rules`: the role's deny rules that run git
     /// (`LeadLaunch.gitRules`).
     public static func refusal(in line: String, rules: [String] = []) -> Refusal? {
-        guard let commands = ShellWords.commands(in: line) else { return .unreadable(.tangled) }
+        guard let scan = ShellWords.scan(line) else { return .unreadable(.tangled) }
+        let commands = scan.commands
         // As `ShellWords.Scanner.lookahead`: what reading the commands may cost, a word at a time (`find -exec` reads
         // each command after it, and each `find` there its own, so `find . -exec find . -exec …` costs 2^n unbounded:
         // a hook that times out lets the call through). Past it, the line is refused, not read.
@@ -154,12 +189,30 @@ public enum RefusedGit {
         for command in commands {
             if let refusal = refusal(command: command, rules: rules, named: named, budget: &budget) { return refusal }
         }
+        // Then, on any line, a program whose name the shell makes, or a launcher this doesn't read: after everything
+        // above, which reads the line as it did before (RefusedGitMonotonicTests: nothing it refused is let through).
+        if scan.tangled { return .unreadable(.tangled) }
+        for command in commands {
+            if let refusal = built(command, odd: scan.odd, budget: &budget) { return refusal }
+        }
         return nil
     }
 
-    /// Whether `text` names git: `git` without its case, between characters that aren't ASCII letters or digits
-    /// (`/usr/bin/git`, `GIT_DIR`, `.git`; not `github`, `digit`, `RefusedGit`), read as a shell would read it again:
-    /// quotes, backslashes and a backslash's line break taken out (`g""it`, `g\it`).
+    /// The programs a line is read closely for: git, and `security` (`keychainTool`), whose text handed to another
+    /// interpreter, or whose name made by the shell, is refused as git's is.
+    static let named = ["git", keychainTool]
+
+    /// The `security` command-line tool (/usr/bin/security), refused to every role whatever its arguments, by its
+    /// name in any folder and behind every wrapper `refusal(command:)` reads (`env`, `command`, `xcrun`, `sudo`, …):
+    /// it reaches your Keychains, where the app's and the vault's keys are, and another program of your account can
+    /// replace them with it (2026-11-26, a measurement on scratch keychains, which also crashed securityd and locked
+    /// the login keychain). Not seen, as for git: a script file a shell runs (scripts/build-app.sh runs it, in your own
+    /// shell), another language's interpreter, or a program that calls the Security framework itself.
+    public static let keychainTool = "security"
+
+    /// Whether `text` names git or `security` (`named`): the word without its case, between characters that aren't
+    /// ASCII letters or digits (`/usr/bin/git`, `GIT_DIR`, `.git`; not `github`, `digit`, `RefusedGit`, `SecurityAudit`),
+    /// read as a shell would read it again: quotes, backslashes and a backslash's line break taken out (`g""it`, `g\it`).
     static func names(_ text: String) -> Bool {
         var bytes: [UInt8] = []
         var skipBreak = false
@@ -172,14 +225,16 @@ public enum RefusedGit {
         func wordByte(_ byte: UInt8) -> Bool {
             (byte >= UInt8(ascii: "a") && byte <= UInt8(ascii: "z")) || (byte >= UInt8(ascii: "0") && byte <= UInt8(ascii: "9"))
         }
-        let git = Array("git".utf8)
-        var at = 0
-        while at + git.count <= bytes.count {
-            if bytes[at] == git[0], bytes[at + 1] == git[1], bytes[at + 2] == git[2],
-               at == 0 || !wordByte(bytes[at - 1]), at + git.count == bytes.count || !wordByte(bytes[at + git.count]) {
-                return true
+        for name in named {
+            let word = Array(name.utf8)
+            var at = 0
+            while at + word.count <= bytes.count {
+                if bytes[at..<(at + word.count)].elementsEqual(word),
+                   at == 0 || !wordByte(bytes[at - 1]), at + word.count == bytes.count || !wordByte(bytes[at + word.count]) {
+                    return true
+                }
+                at += 1
             }
-            at += 1
         }
         return false
     }
@@ -270,12 +325,64 @@ public enum RefusedGit {
     struct Wrapper {
         var valued: Set<String> = []
         var operands = 0
+        /// Its options read as getopt_long reads them (`Getopt`), instead of a word each and `valued`'s next.
+        var getopt: Getopt?
+    }
+    /// A wrapper's options as getopt_long reads them (sudo's): short ones run together (`-nu root`), a value attached
+    /// (`-uroot`) or the next word; long ones with `=value` or the next word, spelled to any prefix that names one
+    /// alone (`--us root`); `--` ends them. `valued`: the letters and long names that take a value; `optional`: those
+    /// whose value is attached or, alone, the next word when that isn't an option (sudo's `-h host`, `-h` alone its
+    /// help); `flags`: the long names that take none, for the prefixes.
+    struct Getopt {
+        var valued: Set<String>
+        var optional: Set<String> = []
+        var flags: Set<String> = []
+    }
+    /// sudo's options (1.9.17p2), its parse_args' `+Aa:BbC:c:D:Eeg:Hh::iKklNnPp:R:r:SsT:t:U:u:Vv` and long options:
+    /// `-a`, `-c`, `-r` and `-t` too, which sudo reads with their value where it doesn't support them (macOS's BSD
+    /// auth, login class, SELinux role and type), and refuses to run.
+    static let sudo = Getopt(valued: ["a", "C", "c", "D", "g", "p", "R", "r", "T", "t", "U", "u", "--auth-type", "--close-from",
+                                      "--login-class", "--chdir", "--group", "--host", "--prompt", "--chroot", "--role", "--type",
+                                      "--command-timeout", "--other-user", "--user"],
+                             optional: ["h"],
+                             flags: ["--askpass", "--background", "--bell", "--preserve-env", "--edit", "--set-home", "--help",
+                                     "--login", "--remove-timestamp", "--reset-timestamp", "--list", "--no-update",
+                                     "--non-interactive", "--preserve-groups", "--stdin", "--shell", "--version", "--validate"])
+
+    /// What the option at `words[index]` (a word that starts with `-`) takes, read as `getopt` says: how many words (it and its value's), the values
+    /// it's given, and whether it ends the options (`--`).
+    static func option(_ getopt: Getopt, _ words: [String], at index: Int) -> (count: Int, values: [String], ends: Bool) {
+        let option = words[index]
+        let next = index + 1 < words.count ? words[index + 1] : nil
+        if option == "--" { return (1, [], true) }
+        if starts(option, with: "--") {
+            let body = option.utf8.dropFirst(2)
+            let equals = body.firstIndex(of: UInt8(ascii: "="))
+            let name = "--" + String(decoding: body[..<(equals ?? body.endIndex)], as: UTF8.self)
+            let attached = equals.map { String(decoding: body[body.index(after: $0)...], as: UTF8.self) }
+            // The name, or the one long option it's a prefix of: another (none, or several) sudo refuses to run.
+            let known = getopt.valued.union(getopt.flags).filter { starts($0, with: "--") }
+            let named = known.contains(name) ? [name] : known.filter { starts($0, with: name) }
+            guard named.count == 1, let long = named.first, getopt.valued.contains(long) else { return (1, attached.map { [$0] } ?? [], false) }
+            if let attached { return (1, [attached], false) }
+            return next.map { (2, [$0], false) } ?? (1, [], false)
+        }
+        var letters = option.utf8.dropFirst()
+        while let letter = letters.popFirst() {
+            let short = String(decoding: [letter], as: UTF8.self)
+            let valued = getopt.valued.contains(short)
+            guard valued || getopt.optional.contains(short) else { continue }
+            if !letters.isEmpty { return (1, [String(decoding: letters, as: UTF8.self)], false) }
+            guard let next, valued || !starts(next, with: "-") else { return (1, [], false) }
+            return (2, [next], false)
+        }
+        return (1, [], false)
     }
     static let wrappers: [String: Wrapper] = {
         let timeout = Wrapper(valued: ["-s", "--signal", "-k", "--kill-after"], operands: 1)
         return ["env": Wrapper(valued: ["-u", "-P", "-S", "-C"]), "command": Wrapper(), "builtin": Wrapper(), "exec": Wrapper(valued: ["-a"]),
                 "nohup": Wrapper(), "nice": Wrapper(valued: ["-n"]), "xcrun": Wrapper(valued: ["--sdk", "--toolchain", "-sdk"]),
-                "sudo": Wrapper(valued: ["-u", "-g"]), "caffeinate": Wrapper(valued: ["-t", "-w"]), "time": Wrapper(valued: ["-o"]),
+                "sudo": Wrapper(getopt: sudo), "caffeinate": Wrapper(valued: ["-t", "-w"]), "time": Wrapper(valued: ["-o"]),
                 "xargs": Wrapper(valued: ["-I", "-J", "-L", "-n", "-P", "-E", "-s", "-R", "-S"]),
                 "timeout": timeout, "gtimeout": timeout, "arch": Wrapper(valued: ["-arch", "-d", "-e"]),
                 "stdbuf": Wrapper(valued: ["-i", "-o", "-e"]), "gstdbuf": Wrapper(valued: ["-i", "-o", "-e"]),
@@ -283,6 +390,132 @@ public enum RefusedGit {
                 // zsh's precommand modifiers, and its `repeat N git …`.
                 "noglob": Wrapper(), "nocorrect": Wrapper(), "-": Wrapper(), "repeat": Wrapper(operands: 1)]
     }()
+
+    /// Programs that run a command they're given in a way `wrappers` doesn't read (a typescript, a new session, another
+    /// root, a sandbox profile, a lock, another user): refused whatever they run, since what that is isn't checked.
+    /// One not listed here isn't seen (the header's "Not seen").
+    static let launchers: Set<String> = ["script", "setsid", "chroot", "sandbox-exec", "taskpolicy", "unbuffer", "su", "doas",
+                                         "runuser", "pkexec", "flock", "chrt", "ionice", "daemonize", "unshare", "nsenter",
+                                         "setpriv", "systemd-run", "firejail"]
+
+    /// Why a command is refused for its program, on any line (the audit of keychain-keys-the-stated, F3): a name the
+    /// shell makes, so it can't tell what runs, or a launcher it doesn't read. Its program is found as `refusal(command:)`
+    /// finds it (after variables set, keywords, `[[ … ]]`, the wrappers it reads, find's `-exec`), skipping the words
+    /// that are never one (`ShellWords.Kind`: a plain test's operands, a `case` arm's pattern, a glob group). An
+    /// array's words aren't run. `odd`: the line has a test or an arm that isn't plain (the reason says so);
+    /// `filled`: the text xargs or find puts in a command's words (`{}`, `-I %`); `appends`: xargs adds its input's.
+    static func built(_ command: ShellWords.Command, odd: Bool, budget: inout Int, depth: Int = 0, filled: [String] = [],
+                      appends: Bool = false) -> Refusal? {
+        guard depth <= ShellWords.depthLimit else { return .unreadable(.tangled) }
+        let words = command.words
+        // What follows a test's `]]` or zsh's `always` is a command too, as `refusal(command:)` reads it.
+        if let close = words.firstIndex(where: { $0 == "]]" || $0 == "always" }),
+           let refusal = built(command.from(close + 1), odd: odd, budget: &budget, depth: depth + 1, filled: filled, appends: appends) {
+            return refusal
+        }
+        var filled = filled
+        var appends = appends
+        var wrapped = false
+        var index = 0
+        while index < words.count {
+            budget -= 1
+            guard budget >= 0 else { return .unreadable(.tangled) }
+            let word = words[index]
+            if command.kinds[index] != .plain || assigned(word) != nil || keywords.contains(word) {
+                index += 1
+                continue
+            }
+            if word == "function" {
+                index += 2
+                continue
+            }
+            if word == "[[" {
+                index += 1
+                while index < words.count, words[index] != "]]" {
+                    budget -= 1
+                    guard budget >= 0 else { return .unreadable(.tangled) }
+                    index += 1
+                }
+                index += 1
+                continue
+            }
+            if starts(word, with: "(("), word.hasSuffix("))") {
+                index += 1
+                continue
+            }
+            // The program, or a wrapper before it: by its name as written, so a name the shell makes is refused first.
+            let name = folded((word as NSString).lastPathComponent)
+            if command.last[index].expanded || command.bare[index] || filled.contains(where: { !$0.isEmpty && word.contains($0) }) {
+                return .unreadable(odd ? .test(word) : .program(word))
+            }
+            if launchers.contains(name) { return .unreadable(.launcher(name)) }
+            guard let wrapper = wrappers[name] else { break }
+            index += 1
+            wrapped = appends
+            while index < words.count, starts(words[index], with: "-") || ((name == "env" || name == "sudo") && assigned(words[index]) != nil) {
+                budget -= 1
+                guard budget >= 0 else { return .unreadable(.tangled) }
+                let option = words[index]
+                // A variable sudo sets (`sudo LANG=C git …`) is one word, not options.
+                if let getopt = wrapper.getopt, starts(option, with: "-") {
+                    let taken = Self.option(getopt, words, at: index)
+                    index += taken.count
+                    if taken.ends { break }
+                    continue
+                }
+                // `command -v x` (`-V`) says what `x` is, and runs nothing.
+                if name == "command", option.dropFirst().contains(where: { $0 == "v" || $0 == "V" }) { return nil }
+                // `env -S '…'`: its string is text handed over (`refusal(command:)`), not read here; the word after it
+                // is env's program all the same (`env -S '' setsid ls`).
+                if name == "env", let string = split(option) {
+                    index += string.isEmpty ? 2 : 1
+                    continue
+                }
+                if name == "xargs", wrapper.valued.contains(option) || starts(option, with: "-I") || starts(option, with: "-J") {
+                    var values = wrapper.valued.contains(option) && index + 1 < words.count ? [words[index + 1]] : []
+                    for valued in ["-I", "-J"] where option.utf8.count > 2 && starts(option, with: valued) {
+                        values.append(String(decoding: option.utf8.dropFirst(2), as: UTF8.self))
+                    }
+                    if starts(option, with: "-I") || starts(option, with: "-J") { filled += values }
+                }
+                index += wrapper.valued.contains(option) ? 2 : 1
+            }
+            if name == "xargs" { appends = true }
+            index += wrapper.operands
+        }
+        // No program after a wrapper behind xargs (`xargs env`, `xargs nohup`): xargs' input is the command.
+        guard index < words.count else { return appends && wrapped ? .unreadable(odd ? .test("xargs") : .program("xargs")) : nil }
+        let program = folded((words[index] as NSString).lastPathComponent)
+        guard program == "find" || program == "gfind" else { return nil }
+        // `find … -exec x … \;`: each command find runs, read to BSD's end and to GNU's, as `refusal(command:)` does.
+        var at = index + 1
+        while at < words.count {
+            budget -= 1
+            guard budget >= 0 else { return .unreadable(.tangled) }
+            guard ["-exec", "-execdir", "-ok", "-okdir"].contains(words[at]) else {
+                at += 1
+                continue
+            }
+            func ends(_ end: Int, exactly: Bool) -> Bool {
+                let word = words[end]
+                let plus = words[end - 1] == "{}"
+                return exactly ? word == ";" || (plus && word == "+") : starts(word, with: ";") || (plus && starts(word, with: "+"))
+            }
+            var end = at + 1
+            while end < words.count, !ends(end, exactly: false) { end += 1 }
+            var gnuEnd = end
+            while gnuEnd < words.count, !ends(gnuEnd, exactly: true) { gnuEnd += 1 }
+            budget -= gnuEnd - at
+            guard budget >= 0 else { return .unreadable(.tangled) }
+            for last in gnuEnd == end ? [end] : [end, gnuEnd] {
+                if let refusal = built(command[(at + 1)..<last], odd: odd, budget: &budget, depth: depth + 1, filled: filled + ["{}"]) {
+                    return refusal
+                }
+            }
+            at = end + 1
+        }
+        return nil
+    }
 
     /// The builtins that export (or declare) the variables named after them, `NAME=value` or `NAME`.
     static let exporters: Set<String> = ["export", "declare", "typeset", "readonly", "local"]
@@ -360,10 +593,16 @@ public enum RefusedGit {
                         if let refusal = unread(by: "env -S", text, reads: fills, named: named, budget: &budget) { return refusal }
                     }
                     var values = [option]
-                    if wrapper.valued.contains(option), index + 1 < words.count { values.append(words[index + 1]) }
-                    for valued in wrapper.valued where option.utf8.count > valued.utf8.count && starts(option, with: valued) {
-                        values.append(String(decoding: option.utf8.dropFirst(valued.utf8.count), as: UTF8.self))
+                    var taken = (count: wrapper.valued.contains(option) ? 2 : 1, values: [String](), ends: false)
+                    if let getopt = wrapper.getopt, starts(option, with: "-") {
+                        taken = Self.option(getopt, words, at: index)
+                    } else {
+                        if wrapper.valued.contains(option), index + 1 < words.count { taken.values.append(words[index + 1]) }
+                        for valued in wrapper.valued where option.utf8.count > valued.utf8.count && starts(option, with: valued) {
+                            taken.values.append(String(decoding: option.utf8.dropFirst(valued.utf8.count), as: UTF8.self))
+                        }
                     }
+                    values += taken.values
                     for value in values {
                         guard let variable = assigned(value) else { continue }
                         if isRefused(variable: variable) { return .variable(variable) }
@@ -372,7 +611,8 @@ public enum RefusedGit {
                     if name == "xargs", starts(option, with: "-I") || starts(option, with: "-J") {
                         filled += values.dropFirst().filter { !$0.isEmpty }
                     }
-                    index += wrapper.valued.contains(option) ? 2 : 1
+                    index += taken.count
+                    if taken.ends { break }
                 }
                 if name == "xargs" { appends = true }
                 index += wrapper.operands
@@ -382,6 +622,8 @@ public enum RefusedGit {
         }
         guard index < words.count else { return appends && wrapped && named ? .unreadable(.expanded("xargs")) : nil }
         let program = folded((words[index] as NSString).lastPathComponent)
+        // `security`, by its name in any folder, behind any wrapper above: whatever it's asked.
+        if program == keychainTool { return .keychain }
         if exporters.contains(program) {
             // `export GIT_DIR=x`, `declare -x GIT_DIR`: refused whatever runs after it on the line.
             for word in words.dropFirst(index + 1) {
@@ -680,10 +922,40 @@ enum ShellWords {
         var expanded: Bool { !isDisjoint(with: [.variable, .substitution, .pattern]) }
     }
 
+    /// How the word being read is made: as a whole, in its last name (what follows its last `/` as written, the name
+    /// of the program it runs), and whether an expansion in it isn't quoted (`$x`, `$(…)`, braces: the shell splits
+    /// the value into words, or braces make several, so its first word can be anything).
+    struct Shape: ExpressibleByArrayLiteral {
+        var all: Made = []
+        var last: Made = []
+        var bare = false
+
+        init(arrayLiteral elements: Made...) { elements.forEach { insert($0) } }
+
+        mutating func insert(_ how: Made) {
+            all.insert(how)
+            last.insert(how)
+        }
+
+        /// A `/` as written: what follows is the last name.
+        mutating func slash() { last = [] }
+    }
+
+    /// What a word is to `RefusedGit.built`, which reads each command's program: a word that may be one (`plain`), or
+    /// one that never is: an operand of a plain `[[ … ]]` test, a word of a `case` arm's pattern, of zsh's glob group
+    /// or qualifier written without spaces (`*(om[1])`, `^(a|b)$`), or an array's element in parentheses that hold
+    /// no separator and are closed (`a=(x $y)`).
+    enum Kind { case plain, operand, pattern, group, element }
+
     /// One simple command: its words, quotes and escapes taken off, and how each was made.
     struct Command {
         var words: [String] = []
         var made: [Made] = []
+        /// How each word's last name is made (`Shape.last`), whether an expansion in it isn't quoted (`Shape.bare`), and
+        /// what it is to `RefusedGit.built` (`Kind`).
+        var last: [Made] = []
+        var bare: [Bool] = []
+        var kinds: [Kind] = []
         /// Its input is given on the line: a pipe into it, a here-string, a here-document, a `<` redirection.
         var input = false
         /// The words in an array's parentheses (`a=(x y)`): read as a command, though the shell runs none.
@@ -692,7 +964,8 @@ enum ShellWords {
         var group = false
 
         subscript(range: Range<Int>) -> Command {
-            Command(words: Array(words[range]), made: Array(made[range]), input: input, array: array, group: group)
+            Command(words: Array(words[range]), made: Array(made[range]), last: Array(last[range]), bare: Array(bare[range]),
+                    kinds: Array(kinds[range]), input: input, array: array, group: group)
         }
         /// The words from `index` on.
         func from(_ index: Int) -> Command { self[min(index, words.count)..<words.count] }
@@ -702,18 +975,52 @@ enum ShellWords {
     static let unexpanded: Set<String> = ["{", "}", "{}", "[", "[[", "]", "]]"]
 
     /// The simple commands in `line`, or nil when it nests deeper than `depthLimit` or costs more than `lookahead` allows.
-    static func commands(in line: String) -> [Command]? {
+    static func commands(in line: String) -> [Command]? { scan(line)?.commands }
+
+    /// A line read for `RefusedGit.built`: its commands, each word's `Kind` settled, and whether it has a `[[ … ]]` test
+    /// or a `case` arm that isn't written plainly (`odd`), which is then read the strict way.
+    struct Scan {
+        var commands: [Command]
+        var odd: Bool
+        /// A redirection it doesn't know, which the shell may read otherwise: the line isn't read for `built`.
+        var tangled: Bool
+    }
+
+    /// The simple commands in `line`, as `commands(in:)`, with what `RefusedGit.built` reads of them. A plain test's
+    /// operands, a `case` arm's pattern words: only when every test (or every arm) on the line is plain, and no `case`
+    /// is on a line with a test; otherwise each such word is `plain`, read as one that may be a program.
+    static func scan(_ line: String) -> Scan? {
         var scanner = Scanner(chars: line.unicodeScalars.map(Character.init))
         scanner.list(until: nil)
-        return scanner.unreadable ? nil : scanner.commands
+        guard !scanner.unreadable else { return nil }
+        let tests = !scanner.oddTest && !(scanner.sawCase && scanner.sawTest)
+        let patterns = !scanner.oddPattern
+        var commands = scanner.commands
+        for index in commands.indices {
+            commands[index].kinds = commands[index].kinds.map {
+                ($0 == .operand && !tests) || ($0 == .pattern && !patterns) ? .plain : $0
+            }
+        }
+        return Scan(commands: commands, odd: !tests || !patterns, tangled: scanner.oddRedirection)
     }
+
+    /// The keywords after which `[[` opens a test, or `case` a case: unquoted, in a command's own place.
+    static let opening: Set<String> = ["!", "{", "if", "then", "else", "elif", "do", "while", "until"]
 
     struct Scanner {
         let chars: [Character]
         var i = 0
         var commands: [Command] = []
         /// How the word being read (the innermost list's) is made so far.
-        var made: Made = []
+        var made: Shape = []
+        /// A `[[` that opens no plain test, a test that isn't plain (`list`), or a `case` anywhere; a `case` arm that
+        /// isn't plain. Any of them, and the line's tests (or arms) are read the strict way (`scan`).
+        var oddTest = false
+        var sawTest = false
+        var sawCase = false
+        var oddPattern = false
+        /// A redirection this doesn't know (`<|`, `>>>`): the line is refused as too tangled (`RefusedGit.built`'s caller).
+        var oddRedirection = false
         /// Here-documents whose bodies start after the current line: each delimiter, whether `<<-` strips tabs, and
         /// whether the delimiter was quoted (the body is then text; unquoted, the shell runs its substitutions).
         var pending: [(delimiter: String, tabs: Bool, quoted: Bool)] = []
@@ -748,8 +1055,11 @@ enum ShellWords {
 
         /// Reads commands until `terminator` (`)` of a subshell or `$(`, or a backtick) or the line's end; past it.
         /// `array`: the words of an array's parentheses; `input`: the list's commands take the input of the subshell
-        /// they're in; `group`: the words of zsh's glob group or qualifier.
-        mutating func list(until terminator: Character?, array: Bool = false, group: Bool = false, input inherited: Bool = false) {
+        /// they're in; `group`: the words of zsh's glob group or qualifier, and `inert` when they are never a command's
+        /// (not after a keyword, `if(…)`, `{(…)`, `!(…)`, where the shell reads a subshell); `parenthesized`: a plain
+        /// test's `( … )`, whose words are its operands.
+        mutating func list(until terminator: Character?, array: Bool = false, group: Bool = false, inert: Bool = false,
+                           input inherited: Bool = false, parenthesized: Bool = false) {
             guard enter() else { return }
             // The word this list is read inside of (`a$(…)b`) keeps how it was made.
             let outer = made
@@ -761,31 +1071,177 @@ enum ShellWords {
             var command = Command(input: inherited, array: array, group: group)
             var word: String?
             var redirectTarget = false
+            // What `RefusedGit.built` reads of this list (`Kind`); none of it changes how the list is read. Where the word
+            // being read starts, as written. Whether a command starts here (the list's start, or after `;`, `&`, `|`
+            // or a line break, not after a subshell's `)`), and its words so far are unquoted `opening` keywords with
+            // no redirection: only then does `[[` open a test, or `case` a case. A plain test open. The `case`s open
+            // (and where the one being read has its `case`), whether an arm's pattern is being read, whether it has a
+            // word, whether the alternative being read has one, and where an arm's `;;` (`;&`, `;;&`, `;|`) goes on.
+            // In a glob group: whether it has spaces or separators (then its words may be commands), and the commands
+            // read at this level.
+            var start = i
+            var fresh = true
+            var opening = true
+            var testing = parenthesized
+            var arms = 0
+            var caseWord = -1
+            var pattern = false
+            var armWord = false
+            var alternative = false
+            var armEnd = -1
+            var spaced = false
+            var mine: [Int] = []
             func endWord() {
                 if let current = word {
+                    let raw = String(chars[min(start, chars.count)..<min(i, chars.count)])
                     if redirectTarget {
                         redirectTarget = false
+                        if testing || pattern, raw.contains("]]") || current.contains("]]") { oddTest = true }
                     } else {
+                        let kept = ShellWords.unexpanded.contains(current)
                         command.words.append(current)
-                        command.made.append(ShellWords.unexpanded.contains(current) ? made.subtracting(.pattern) : made)
+                        command.made.append(kept ? made.all.subtracting(.pattern) : made.all)
+                        command.last.append(kept ? made.last.subtracting(.pattern) : made.last)
+                        command.bare.append(made.bare && !kept)
+                        command.kinds.append(kind(current, literal: raw == current))
                     }
                 }
                 word = nil
                 made = []
             }
+            /// What the word just read is (`Kind`), and the state it moves to: a plain test opens at an unquoted `[[`
+            /// in a command's place followed by a space, and closes at a `]]` word of its own with a space before it;
+            /// any other `[[` or `]]` makes the line's tests odd. A `case` arm's pattern words: one to an alternative.
+            func kind(_ current: String, literal: Bool) -> Kind {
+                let before: Character? = start > 0 ? chars[start - 1] : nil
+                var kind = array ? Kind.element : Kind.plain
+                if current == "case" { sawCase = true }
+                if testing {
+                    kind = .operand
+                    if literal, current == "]]", before == " " || before == "\t" {
+                        testing = false
+                    } else if current.contains("]]") || current == "[[" {
+                        oddTest = true
+                    }
+                } else if pattern {
+                    kind = .pattern
+                    if literal, current == "esac", !armWord {
+                        arms -= 1
+                        pattern = false
+                        kind = .plain
+                    } else {
+                        if alternative { oddPattern = true }
+                        alternative = true
+                        armWord = true
+                    }
+                } else if current == "[[" {
+                    if literal, fresh, opening, peek() == " " || peek() == "\t" {
+                        testing = true
+                        sawTest = true
+                        kind = .operand
+                    } else {
+                        oddTest = true
+                    }
+                } else if literal, current == "case", fresh, opening {
+                    caseWord = command.words.count - 1
+                } else if literal, current == "in", caseWord >= 0, command.words.count - 1 == caseWord + 2 {
+                    arms += 1
+                    pattern = true
+                    armWord = false
+                    alternative = false
+                } else if literal, current == "esac", fresh, opening, arms > 0 {
+                    arms -= 1
+                }
+                opening = opening && literal && ShellWords.opening.contains(current)
+                return kind
+            }
             func endCommand() {
                 endWord()
                 // A command not begun keeps the input a pipe before a line break gave it (`a |⏎ b`).
                 if !command.words.isEmpty {
+                    mine.append(commands.count)
                     commands.append(command)
                     command = Command(input: inherited, array: array, group: group)
                 }
                 redirectTarget = false
+                opening = true
+                caseWord = -1
+                alternative = false
+            }
+            /// The list's end: a test or a `case` still open is odd; a glob group's words never run when it has no
+            /// spaces or separators and is closed.
+            func finish(closed: Bool) {
+                endCommand()
+                // A test still open, or a test's parentheses that its `]]` closed inside (`[[ ( a ]] )`), or that never closed.
+                if parenthesized ? !testing || !closed : testing { oddTest = true }
+                if pattern || arms > 0 { oddPattern = true }
+                if group, inert, closed, !spaced {
+                    for index in mine { commands[index].kinds = commands[index].words.map { _ in .group } }
+                }
+                // An array's parentheses with a separator in them, or never closed: the shell doesn't read them as an
+                // array's, and each word that could be a program is read as one.
+                if array, !closed || spaced {
+                    for index in mine { commands[index].kinds = commands[index].kinds.map { $0 == .element ? .plain : $0 } }
+                }
+            }
+            /// Whether `(` after `word` opens an array's parentheses (`a=(x y)`, `a+=(x)`, `a[1]=(x)`: a name and one
+            /// `=`, last).
+            func isArray(_ word: String?) -> Bool {
+                word.map { $0.hasSuffix("=") && $0.utf8.filter { $0 == UInt8(ascii: "=") }.count == 1 && RefusedGit.assigned($0) != nil } ?? false
             }
             while let c = peek() {
+                if word == nil { start = i }
+                let prior: Character? = i > 0 ? chars[i - 1] : nil
+                if testing {
+                    // In a plain test: the characters it can hold, by one reading. Anything else (a `;`, a line break, a
+                    // lone `&` or `|`, a parenthesis that isn't glued to a word, `]]` with text after it), and the line's
+                    // tests are read the strict way.
+                    let closer = word == "]]" && start > 0 && String(chars[start..<i]) == "]]" && (chars[start - 1] == " " || chars[start - 1] == "\t")
+                    let usual: Bool
+                    if closer {
+                        usual = !parenthesized && (c == " " || c == "\t" || c == ";" || c == "&" || c == "|" || c == ")" || c == "\n" || c == terminator)
+                    } else if c == terminator {
+                        usual = parenthesized
+                    } else {
+                        switch c {
+                        case ";", "\n", ")": usual = false
+                        case "#": usual = word != nil
+                        case "&": usual = peek(1) != ">" && ((peek(1) == "&" && prior != "&") || (prior == "&" && (i < 2 || chars[i - 2] != "&") && peek(1) != "&"))
+                        case "|": usual = peek(1) == "|" && peek(2) != "|" && peek(2) != "&"
+                        case "(": usual = word == "=" || (word != nil && peek(1) != ")" && !isArray(word)) || (word == nil && (peek(1) == " " || peek(1) == "\t"))
+                        case "<", ">": usual = word == nil && (peek(1) == " " || peek(1) == "\t" || peek(1) == "(")
+                        default: usual = true
+                        }
+                    }
+                    if !usual { oddTest = true }
+                }
+                if pattern {
+                    // In a `case` arm's pattern: words, one to an alternative, `|` between them and `)` after. Anything
+                    // else, and the line's arms are read as commands.
+                    let usual: Bool
+                    if i == armEnd || (i == armEnd + 1 && chars[armEnd] == ";" && c == "&") {
+                        usual = true
+                    } else if c == terminator {
+                        usual = false
+                    } else {
+                        switch c {
+                        case " ", "\t": usual = true
+                        case "\n": usual = word == nil && !armWord
+                        case "#": usual = word != nil || !armWord
+                        case "|": usual = (word != nil || alternative) && peek(1) != "|" && peek(1) != "&"
+                        case ")": usual = word != nil || alternative
+                        case "(": usual = word != nil && word != "=" && peek(1) != ")" && !isArray(word)
+                        case ";", "&", "<", ">": usual = false
+                        default: usual = true
+                        }
+                    }
+                    if !usual { oddPattern = true }
+                }
+                if group, " \t\n;&<>".contains(c) || (c == "|" && peek(1) == "|") || ((c == "(" || c == "#") && word == nil) { spaced = true }
+                if array, ";&|<>".contains(c) || (c == "(" && word == nil) { spaced = true }
                 if let terminator, c == terminator {
+                    finish(closed: true)
                     i += 1
-                    endCommand()
                     return
                 }
                 switch c {
@@ -794,15 +1250,25 @@ enum ShellWords {
                     i += 1
                 case "\n":
                     endCommand()
+                    fresh = true
                     i += 1
                     bodies()
                     made = []
                 case "&" where peek(1) == ">":
                     // `&>file`, `&>>file`: a redirection of both outputs, not the end of the command.
                     endWord()
+                    opening = false
                     i += 1
                 case ";", "&", "|":
+                    // A `case` arm's end, `;;` (`;&`, `;;&`, zsh's `;|`): the next arm's pattern follows.
+                    let arm = c == ";" && arms > 0 && !pattern && (peek(1) == ";" || peek(1) == "&" || peek(1) == "|")
                     endCommand()
+                    fresh = true
+                    if arm {
+                        pattern = true
+                        armWord = false
+                        armEnd = i + 1
+                    }
                     if c == "|", peek(1) != "|" {
                         // A pipe (`|`, `|&`): the next command reads what the last one wrote.
                         i += peek(1) == "&" ? 2 : 1
@@ -824,23 +1290,37 @@ enum ShellWords {
                     // (`a=(x y)`, `a+=(x)`, `a[1]=(x)`: a name and one `=`, last), whose words are then a command of
                     // their own, marked as one that isn't run. After other text it's zsh's glob group (`git pus(h|x)`):
                     // the word before it is one the shell makes, and the group is read as commands, a wider reading.
-                    let array = word.map { $0.hasSuffix("=") && $0.utf8.filter { $0 == UInt8(ascii: "=") }.count == 1 && RefusedGit.assigned($0) != nil } ?? false
+                    let array = isArray(word)
                     let group = word != nil && !array && peek(1) != ")"
                     if group { made.insert(.pattern) }
                     let input = command.input
+                    // A plain test's own parentheses, `[[ -n $a && ( $b || $c ) ]]`: spaced, and read as operands.
+                    let parenthesized = testing && word == nil && (peek(1) == " " || peek(1) == "\t")
+                    // A keyword glued to it (`{($x);}`, `if($x);then …`, `!($x)`, `time($x)`): bash, and zsh after `{`,
+                    // read a subshell, whose words may run.
+                    let inert = group && !(word.map { RefusedGit.keywords.contains($0) || ShellWords.opening.contains($0) || $0 == "time" } ?? false)
                     endCommand()
                     i += 1
-                    list(until: ")", array: array, group: group, input: input && !array)
+                    list(until: ")", array: array, group: group, inert: inert, input: input && !array, parenthesized: parenthesized)
+                    fresh = false
+                    // A pattern's group (`@(a|b))`) is its alternative's.
+                    if pattern, group { alternative = true }
                 case ")":
+                    // An arm's `)` ends its pattern: its commands follow, in a command's place.
+                    let arm = pattern && (word != nil || alternative)
                     endCommand()
+                    if arm { pattern = false }
+                    fresh = arm
                     i += 1
                 case "`":
                     i += 1
                     list(until: "`")
                     word = word ?? ""
                     made.insert(.substitution)
+                    made.bare = true
                 case "$" where peek(1) == "(" || peek(1) == "{" || peek(1) == "[":
                     word = (word ?? "") + expansion()
+                    made.bare = true
                 case "$" where peek(1) == "\"":
                     // bash's `$"…"`, a quoted string it may translate: the quoted text (zsh reads `$` and the quotes,
                     // `$push`; the hook takes bash's reading, which a rule can match).
@@ -856,6 +1336,7 @@ enum ShellWords {
                             text.append(next)
                             i += 2
                         } else {
+                            if d == "/" { made.slash() }
                             text.append(d)
                             i += 1
                         }
@@ -866,7 +1347,11 @@ enum ShellWords {
                 case "'":
                     i += 1
                     var text = ""
-                    while let d = peek(), d != "'" { text.append(d); i += 1 }
+                    while let d = peek(), d != "'" {
+                        if d == "/" { made.slash() }
+                        text.append(d)
+                        i += 1
+                    }
                     i += 1
                     if !text.isEmpty { made.insert(.text) }
                     word = (word ?? "") + text
@@ -878,6 +1363,7 @@ enum ShellWords {
                     if peek(1) == "\n" { i += 2; continue }
                     if let next = peek(1) {
                         word = (word ?? "") + String(next)
+                        if next == "/" { made.slash() }
                         made.insert(.text)
                     }
                     i += 2
@@ -885,6 +1371,7 @@ enum ShellWords {
                     while let d = peek(), d != "\n" { i += 1 }
                 case "<" where peek(1) == "<" && peek(2) != "<":
                     endWord()
+                    opening = false
                     i += 2
                     command.input = true
                     hereDocument()
@@ -896,6 +1383,8 @@ enum ShellWords {
                     } else {
                         endWord()
                     }
+                    opening = false
+                    let run = i
                     i += 1
                     if peek() == "(" {
                         // Process substitution, `<(…)` or `>(…)`: commands of their own, and a word (or the target).
@@ -907,6 +1396,8 @@ enum ShellWords {
                     }
                     if c == "<" { command.input = true }
                     while let d = peek(), d == "<" || d == ">" || d == "|" { i += 1 }
+                    // The operators the shells have; another (`<|`, `>>>`) may be read otherwise, as a pipe after it.
+                    if !["<", ">", ">>", ">|", ">>|", "<>", "<<<"].contains(String(chars[run..<i])) { oddRedirection = true }
                     if peek() == "&", let d = peek(1), d.isNumber || d == "-" {
                         // A descriptor copied or closed (`2>&1`, `>&-`).
                         i += 1
@@ -918,16 +1409,25 @@ enum ShellWords {
                     }
                 default:
                     switch c {
-                    case "$": made.insert(startsParameter() ? .variable : .text)
-                    case "{", "*", "?", "[": made.insert([.pattern, .text])
+                    case "$" where startsParameter():
+                        made.insert(.variable)
+                        made.bare = true
+                    case "{":
+                        // Braces make several words, and may hold a `/` (`{/usr/bin/gi,x}t`).
+                        made.insert([.pattern, .text])
+                        made.bare = true
+                    case "*", "?", "[": made.insert([.pattern, .text])
                     case "=" where word == nil: made.insert([.pattern, .text])
+                    case "/":
+                        made.slash()
+                        made.insert(.text)
                     default: made.insert(.text)
                     }
                     word = (word ?? "") + String(c)
                     i += 1
                 }
             }
-            endCommand()
+            finish(closed: terminator == nil)
         }
 
         /// At a `$` that opens no `$(`, `${`, `$[` or `$'`: whether a parameter's name follows (`$x`, `$1`, `$@`), read
@@ -956,6 +1456,7 @@ enum ShellWords {
                 case "$" where peek(1) == "(" || peek(1) == "{" || peek(1) == "[":
                     text += expansion()
                 default:
+                    if c == "/" { made.slash() }
                     made.insert(c == "$" && startsParameter() ? .variable : .text)
                     text.append(c)
                     i += 1

@@ -232,7 +232,9 @@ struct RequestsTests {
                                   // The feature plugins listed (2026-11-22).
                                   "plugin.list",
                                   // External plugins (2026-11-22): what an add shows, and an agent's vs-ask.
-                                  "plugin.inspect", "plugin.file"]
+                                  "plugin.inspect", "plugin.file",
+                                  // The node's logs, masked (the no-terminal inventory's C8, 2026-11-26).
+                                  "logs"]
         let changes: Set<String> = ["stop", "lead", "answer", "hold", "tell", "config.accept", "base.accept", "base.keep", "hooks.install", "hooks.remove", "build.switch",
                                     "draft", "draft.clear", "web.open", "web.revoke", "term.open", "term.close",
                                     // Driving an ordinary session (2026-11-20).
@@ -263,7 +265,9 @@ struct RequestsTests {
                                     // `vibeswitcher update`'s seal of the unit's ExecStart move after its switch (2026-11-24).
                                     "build.seal",
                                     // An answer replaced, a tell taken back, before the lead has it (2026-11-24).
-                                    "answer.replace", "tell.retract"]
+                                    "answer.replace", "tell.retract",
+                                    // A new project from the page (the no-terminal inventory's C1, 2026-11-26).
+                                    "project.new"]
         #expect(Set(NodeWire.kinds.keys) == reads.union(changes), "a kind added to NodeWire.kinds is classified here")
         for kind in reads { #expect(!NodeWire.changesState(kind), "\(kind)") }
         for kind in changes { #expect(NodeWire.changesState(kind), "\(kind)") }

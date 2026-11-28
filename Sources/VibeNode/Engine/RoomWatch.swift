@@ -54,8 +54,12 @@ final class RoomWatch {
     weak var leads: RoomLeads?
     /// The leads refused for the machine's room or load (`LeadWitness.RoomWaits`); none until it's started.
     private var waits: LeadWitness.RoomWaits?
-    /// The machine's load as the room watch reads it, as the leads' tools judge it (`MacLoad.steady`); faked in tests.
-    var load: () -> Double? = MacLoad.steady
+    /// The machine's load averages as the room watch reads them, judged as the leads' tools judge them (`MacLoad.room`,
+    /// with every project's team sessions and the heavy slots held: main's rule (cI) of 2026-11-27); faked in tests.
+    var averages: () -> MacLoad.Averages? = MacLoad.averages
+    /// The machine-wide heavy slots the room watch reads the holders of (`TestLock.readHolders`; nil, or a slot that
+    /// can't be read: counted as held, so the 5-minute counts too); faked in tests.
+    var heavyLock: () -> TestLock? = { TestLock.standard() }
     /// Each look's read of the machine's memory (`MacMemory.read`), on the reads queue; faked in tests.
     var memory: () -> MacMemory? = { MacMemory.read() }
 
@@ -78,11 +82,15 @@ final class RoomWatch {
     func look(limits given: MacLimits? = nil) {
         EngineWatch.assertOn(queue)
         guard let waits else { return }
-        let mac = MacLoad.count(link.sessions.map { ($0.label, $0.cwd, $0.isLive) }, load: load())
-        let (memory, root) = (self.memory, self.root)
-        // The wait files and the sleep ledger (and its lock) are read on `reads`.
+        let mac = MacLoad.count(link.sessions.map { ($0.label, $0.cwd, $0.isLive) }, load: nil)
+        // Before the host's first welcome, its empty list says nothing of the team sessions: not idle.
+        let listed = link.state == .connected
+        let (memory, root, averages, lock) = (self.memory, self.root, self.averages, self.heavyLock)
+        // The wait files and the sleep ledger (and its lock) are read on `reads`, the slots' files too.
         reads.async({ _ -> [(root: String, text: String)] in
             var mac = mac
+            // The load start_worker judges: the 1-minute alone while no team session runs and no slot is held.
+            mac.judge(MacLoad.room(averages(), teamSessions: listed ? mac.sessions : nil, slotsHeld: lock()?.readHolders()?.count))
             mac.memory = memory()
             let limits = given ?? MacLimits.current(file: root.appendingPathComponent(MacLimits.fileName),
                                                     boostFile: root.appendingPathComponent("boost.json"))

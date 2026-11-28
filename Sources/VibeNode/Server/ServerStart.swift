@@ -126,8 +126,11 @@ public enum ServerStart {
         // `<node root>/bin/vibeswitcher`: `ApprovalVoice.commandLineAnchor`); unreadable, no peer is the user's.
         if rule.mode == .approval {
             let commandLine = ApprovalVoice.commandLineAnchor(nodeRoot: parsed.nodeRoot, own: Platform.CodeIdentity.ownCdhash(), pins: NodePins.read())
-            requests.approval = ApprovalVoice(authenticator: ApprovalVoice.System(timeout: 60), commandLine: commandLine)
-            say("the Mac's rule: Touch ID per state change; the command line's code \(commandLine == nil ? "couldn't be read: no peer is the user's" : "read")")
+            // This server's own coalition, read once here (the node job's): a peer in it is refused (the coalition line).
+            let coalition = Platform.Processes.coalition(getpid())
+            requests.approval = ApprovalVoice(authenticator: ApprovalVoice.System(timeout: 60), commandLine: commandLine, coalition: coalition)
+            say("the Mac's rule: Touch ID per state change; the command line's code \(commandLine == nil ? "couldn't be read: no peer is the user's" : "read")"
+                + "; this server's coalition \(coalition.map { "\($0)" } ?? "couldn't be read: no peer is the user's")")
         }
         var options = LeadEngine.Options()
         options.firstLook = parsed.node || parsed.testFirstLook
@@ -166,6 +169,14 @@ public enum ServerStart {
         requests.nodeRoot = parsed.nodeRoot
         // Where `build.switch` finds the builds: the account's own install folder on the node, a test's on a scratch node.
         requests.installRoot = accountHome.map { NodeFolders.defaultPrefix(accountHome: $0) } ?? parsed.testInstallRoot
+        // G3's `update` on the user's Linux node only (a scratch server, and the Mac's, have none): its install,
+        // install-node of the build this server's own image is (`/proc/self/exe`, as the command line proves its own) in a
+        // scope of the user's manager.
+        if parsed.node, !Platform.CodeIdentity.isAvailable, let accountHome,
+           case .success(let build) = NodeFolders.installedBuild(executable: "/proc/self/exe", prefix: NodeFolders.defaultPrefix(accountHome: accountHome),
+                                                                 program: UpdateInstall.serverProgram) {
+            requests.updateInstaller = .script(own: build.folder, scope: UpdateInstall.systemdRun)
+        }
         // Check for Updates on the user's node (`UpdateWatch`): a scratch server asks GitHub nothing.
         if parsed.node, let accountHome {
             let updates = UpdateWatch(file: root.appendingPathComponent("update-check.json"), running: commit,

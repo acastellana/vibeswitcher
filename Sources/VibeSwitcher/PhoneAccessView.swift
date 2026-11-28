@@ -19,6 +19,10 @@ struct PhoneAccessView: View {
                 Text("Couldn't read the list of paired phones (\(access.devicesFilePath)). Phones can't connect until it reads again: restore the file, or delete it and pair your phones again.")
                     .foregroundStyle(.red).font(.callout).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
             }
+            if access.devicesUnverified {
+                Text("No phone is paired: the list of paired phones (\(access.devicesFilePath)) wasn't written by VibeSwitcher, or was changed since, so none of it is trusted. Pair your phone again; that writes a new list.")
+                    .foregroundStyle(.red).font(.callout).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+            }
             if access.state == .on {
                 Divider()
                 pairingSection

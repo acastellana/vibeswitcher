@@ -3,6 +3,58 @@ import Testing
 import VibeCore
 @testable import VibeNode
 
+/// A Dismiss request against the real board store, with a disconnected host on either platform.
+struct AllDoneDismissTests {
+    let scratch = Scratch()
+
+    @Test func seenAcknowledgesOnlyTheDisplayedMarkAndRefusesBoardFailures() async throws {
+        let queue = DispatchQueue(label: "dismiss-test")
+        let root = scratch.url("node")
+        let socket = scratch.url("host.sock").path
+        let link = HostLink(dialer: ConnectorDialer(path: socket), root: root, queue: queue)
+        let engine = LeadEngine(root: root, nodeRoot: nil, link: link, clock: nil)
+        let requests = Requests(link: link, sessions: nil, rule: CardWorld.rule, root: root, hostSocket: socket, commit: "test", hostPID: 1)
+        requests.engine = engine
+        let store = BoardStore(root: scratch.url("repo").path)
+        let project = queue.sync { engine.leads.lead(root: store.root).project }
+        func seen(_ mark: String?) async -> NodeWire.Reply {
+            var args = ["project": NodeWire.Value.string(project)]
+            args["mark"] = mark.map(NodeWire.Value.string)
+            let request = NodeWire.Request(id: "dismiss", kind: "seen", args: args)
+            return await withCheckedContinuation { continuation in
+                queue.async { requests.handle(request, from: CardWorld.user) { continuation.resume(returning: $0) } }
+            }
+        }
+
+        try store.update { board in
+            board.allDone = [LeadAllDone(id: "displayed", at: 1, since: 0, tasks: []),
+                             LeadAllDone(id: "successor", at: 2, since: 1, tasks: [])]
+        }
+        #expect(await seen("displayed").result?["changed"] == .bool(true))
+        let marks = try #require(try store.read().allDone)
+        #expect(marks.first?.seenAt != nil && marks.last?.seenAt == nil)
+        #expect(await seen("displayed").result?["changed"] == .bool(false))
+        #expect(await seen(nil).error?.code == NodeWire.Code.badArgs.rawValue)
+        #expect(try store.read().allDone?.last?.seenAt == nil)
+
+        let folder = URL(fileURLWithPath: store.folder)
+        let file = folder.appendingPathComponent("board.json")
+        let original = try Data(contentsOf: file)
+        let unreadable = Data("incomplete board".utf8)
+        try unreadable.write(to: file)
+        #expect(await seen("successor").error?.code == NodeWire.Code.refused.rawValue)
+        #expect(try Data(contentsOf: file) == unreadable)
+        try original.write(to: file)
+
+        // A directory in the lock file's place prevents the update even though the board is readable.
+        let lock = folder.appendingPathComponent("board.json.lock")
+        try FileManager.default.moveItem(at: lock, to: folder.appendingPathComponent("original-lock"))
+        try FileManager.default.createDirectory(at: lock, withIntermediateDirectories: false)
+        #expect(await seen("successor").error?.code == NodeWire.Code.refused.rawValue)
+        #expect(try store.read().allDone?.last?.seenAt == nil)
+    }
+}
+
 /// The all-done mark on a node (`AllDoneLook.swift`, the app's `AllDoneWatch`): a board that goes from open work to none,
 /// with a merge, is marked under its lock with the written summary, and `status` says it for a day; a board first read
 /// already clear is no clear.
@@ -83,15 +135,13 @@ struct AllDoneLookTests {
         #expect(WireSchema.check(value, as: "board") == nil)
         #expect(BoardText.allDoneLines(card, now: now).first == "All tasks finished 0s ago · 2 tasks · 2 merged")
 
-        let changed = Locked<[Bool]>([])
-        world.queue.sync { engine.seeAllDone(root: world.repo) { ok in changed.mutate { $0.append(ok) } } }
-        #expect(await eventually(timeout: 30) { changed.value.count == 1 })
-        #expect(changed.value == [true] && (try? store.read())?.allDone?.first?.seenAt != nil)
-        world.queue.sync { engine.seeAllDone(root: world.repo) { ok in changed.mutate { $0.append(ok) } } }
-        #expect(await eventually(timeout: 30) { changed.value.count == 2 })
-        #expect(changed.value == [true, false], "seen once")
+        world.queue.sync { _ = engine.leads.lead(root: world.repo) }
+        let args: [String: NodeWire.Value] = ["project": .string(world.project), "mark": .string(mark.id)]
+        #expect(await world.ask("seen", args, action: nil)?.result?["changed"] == .bool(true))
+        #expect(try store.read().allDone?.first?.seenAt != nil)
+        #expect(await world.ask("seen", args, action: nil)?.result?["changed"] == .bool(false))
         // A project no lead runs is gone.
-        let gone = try #require(await world.ask("seen", ["project": .string("local:project:nowhere")], action: nil))
+        let gone = try #require(await world.ask("seen", ["project": .string("local:project:nowhere"), "mark": .string(mark.id)], action: nil))
         #expect(gone.error?.code == NodeWire.Code.gone.rawValue, "\(gone)")
     }
 

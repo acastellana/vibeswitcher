@@ -12,10 +12,12 @@ import Testing
 /// opens in the child, aren't calls of `open`), outside comments and string literals.
 struct CloseOnExecLintTests {
     static let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+    private let scratch = Scratch()
 
-    /// What the rule covers: folders, and single files, relative to the repository: the server and the engine too (E1).
+    /// What the rule covers: folders, and single files, relative to the repository: the server and the engine too (E1),
+    /// and the keeper's package (`Keeper/Sources`: what slice K0 moved there from VibePlatform, and the keeper itself).
     static let covered = ["Sources/VibeHost", "Sources/vibeswitcher-host", "Sources/VibeCore/UnixSocket.swift",
-                          "Sources/vibeswitcher-server", "Sources/VibeNode", "Sources/VibePlatform"]
+                          "Sources/vibeswitcher-server", "Sources/VibeNode", "Sources/VibePlatform", "Keeper/Sources"]
 
     /// Where every spawn names what it keeps.
     static let spawning = ["Sources/VibeHost", "Sources/vibeswitcher-host"]
@@ -184,16 +186,17 @@ struct CloseOnExecLintTests {
         return found
     }
 
-    /// The Swift files under `place` (a folder or one file, relative to the repository), by path, with their text.
-    static func files(_ place: String) -> [(path: String, text: String)] {
-        let url = repo.appendingPathComponent(place)
+    /// The Swift files under `place` (a folder or one file, relative to the repository, or to `root`, a test's tree), by
+    /// path, with their text.
+    static func files(_ place: String, root: URL = repo) -> [(path: String, text: String)] {
+        let url = root.appendingPathComponent(place)
         var isFolder: ObjCBool = false
         guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isFolder) else { return [] }
         let paths = isFolder.boolValue
             ? (FileManager.default.subpaths(atPath: url.path) ?? []).filter { $0.hasSuffix(".swift") }.sorted().map { "\(place)/\($0)" }
             : [place]
         return paths.compactMap { path in
-            (try? String(contentsOf: repo.appendingPathComponent(path), encoding: .utf8)).map { (path, $0) }
+            (try? String(contentsOf: root.appendingPathComponent(path), encoding: .utf8)).map { (path, $0) }
         }
     }
 
@@ -228,16 +231,22 @@ struct CloseOnExecLintTests {
 
     // MARK: Tests
 
-    @Test func noBareSocketAcceptOrOpen() {
+    /// Every finding in the covered places of `root` (the repository, or a test's tree), and those no exemption lists.
+    static func scan(root: URL = repo) -> (all: [Finding], unexempted: [Finding]) {
         var unexempted: [Finding] = []
         var all: [Finding] = []
-        for place in Self.covered {
-            for file in Self.files(place) {
-                let found = Self.findings(path: file.path, text: file.text)
+        for place in covered {
+            for file in files(place, root: root) {
+                let found = findings(path: file.path, text: file.text)
                 all += found
-                unexempted += found.filter { !Self.exempted($0) }
+                unexempted += found.filter { !exempted($0) }
             }
         }
+        return (all, unexempted)
+    }
+
+    @Test func noBareSocketAcceptOrOpen() {
+        let (all, unexempted) = Self.scan()
         #expect(unexempted.isEmpty, "made without close-on-exec: \(unexempted)")
         for exemption in Self.exemptions {
             #expect(all.contains { $0.path == exemption.path && (exemption.call == nil || $0.call == exemption.call) },
@@ -288,6 +297,17 @@ struct CloseOnExecLintTests {
         let flagged = "let fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0)"
         #expect(Self.findings(path: "Sources/VibePlatform/Fixture+Linux.swift", text: flagged).isEmpty)
         #expect(Self.findings(path: "Sources/VibePlatform/Fixture+Darwin.swift", text: flagged).count == 1)
+    }
+
+    /// The keeper's package is read: its real files are among the covered ones, and a bare socket planted in a sample
+    /// tree's `Keeper/Sources` is found by the same scan.
+    @Test func theKeepersSourcesAreCovered() throws {
+        #expect(Self.covered.flatMap { Self.files($0) }.contains { $0.path == "Keeper/Sources/VibeKeep/Sockets+Darwin.swift" })
+        let tree = scratch.url("close-on-exec-keeper")
+        let planted = tree.appendingPathComponent("Keeper/Sources/VibeKeep/Planted.swift")
+        try FileManager.default.createDirectory(at: planted.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try "import Foundation\nlet fd = socket(AF_UNIX, SOCK_STREAM, 0)\n".write(to: planted, atomically: true, encoding: .utf8)
+        #expect(Self.scan(root: tree).unexempted.map(\.description) == ["Keeper/Sources/VibeKeep/Planted.swift:2: socket("])
     }
 
     @Test func aSpawnThatDoesntNameItsKeepIsFound() {

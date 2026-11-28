@@ -67,7 +67,7 @@ struct InspectorView: View {
                                  rows: leads.teamRows.rows(lead.root, board: lead.board, seen: seen), open: { session in
                         if let id = UUID(uuidString: session) { model.select(hostID: id) }
                     }, answer: { question, text in leads.answer(question, root: lead.root, with: text) }, notices: leads.answerNotices,
-                                 summaries: leads.summaries, keepAwake: leads.keepAwake, hosted: cache.hosted(host.sessions),
+                                 summaries: leads.summaries, keepAwake: leads.keepAwake, hosted: cache.hosted(host.sessions), hostListed: host.hasListed,
                                  recordsDir: leads.recordsDirs[lead.root] ?? LeadWorkflow.defaultRecordsDir,
                                  mail: leads.mail[lead.root] ?? LeadMailFeed([], project: ""))
                         .equatable()

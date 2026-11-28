@@ -652,3 +652,53 @@ Instance 1: arm A's runner merged at about 21:45 and arm B's audit was then refu
 
 Every normal-arm merge (A2 at about 23:05, A3 and A4 next) re-breaks the team branch's merge onto main. Repeating the catch-up after each one would charge the team arm for the experiment's setup, not for its way of working.
 
+# Archived 2026-11-24 21:19:24: 2026-11-24 housekeeping: 6 superseded by later entries, 3 one-off situations now over, 3 now enforced by checks (lead-rules.md #4, #25, #27)
+
+## 2026-10-17 17:45 The lead's decisions.md and progress.md move into the repository (docs/lead/ by default) and are committed to the base branch automatically by the tool server, touching only those files. board.json, workflow.md and run/ stay local and git-ignored.
+
+User's call. The project's reasoning should survive a lost .vibeswitcher folder, another machine or a new lead, and be visible to teammates. The board holds transient state (sessions, PIDs, questions) and stays local.
+
+## 2026-10-20 16:56:08 No GitHub push-protection bypass, ever: fixtures that must look like real secrets are assembled at run time from pieces, docs elide the prefixes, and a repo-wide lint keeps complete shapes out of every file; no .github/secret_scanning.yml. The three commits of the failed attempt (2554086, 9a2c0b9, fff5c70) are dropped from project-lead by a reset to 9dca1f7 (which GitHub already has), run by the user.
+
+2026-10-20 17:0x: the user refused a second 'allow me to expose this secret' click ('This is unacceptable'); GitHub matches shapes regardless of EXAMPLE markers, and the ignore config can't land on main through a push it blocks.
+
+## 2026-10-23 02:44:18 Ending a session ends only processes of the same uid carrying that session's VIBESWITCHER_SESSION id, plus at cleanup processes whose cwd is inside the removed worktree. Existing orphans on the Mac are not swept automatically; the user decides about those.
+
+The narrowest scope that catches everything an agent starts (the env var is inherited even through setsid) while never touching another session's, another project's or the user's own processes. Reversible: it can be widened later.
+
+## 2026-11-01 08:54:47 From 2026-11-01, every feature or process change the lead plans gets an entry in docs/process/impact.md, written when it's planned: hypothesis, metric, baseline, check date and window. Each retrospective reviews the entries that are due with scripts/impact-metrics.sh, records the result and a verdict (keep/tune/revert/inconclusive) with the why, and each verdict becomes a task or a recorded decision. It starts manual; a lead tool replaces it only once the routine has proved useful.
+
+The user wants to track which features help and why, to self-improve recursively. Today's changes (one suite per task, strict paths, the boost release) were all made on reasoned guesses; the ledger turns them into checked results.
+
+## 2026-11-05 00:30:33 After record_incident, in the same turn, set auto_advance: false on the planned task, sharpen its contract, then set auto_advance back to true.
+
+turn-this-incident-into-9 auto-started on the generic brief before the sharpened contract landed (2026-11-03). If it happens again despite this, make a product task so incident tasks wait for the lead's contract.
+
+## 2026-11-08 05:42:44 swift-testing-s-parallel merges as built: under a heavy slot, Swift Testing's parallel width is capped to VS_HEAVY_CORES. Its cost gets measured on the merges that follow, not tuned in the task: the next 5 merge test runs' swift-test times against the earlier 290–400 s, and the app's freezes per hour (IM-18) against 3.43/h. If merge runs stay above about 1.5x (around 600 s) on a calm Mac, the width goes to 2× the slot's share.
+
+On 2026-11-08 from 03:40 to 05:35, the load reached 100–225 on 12 cores whenever full suites overlapped, and the app froze dozens of times. Each suite ran 12 tests at once whatever its slot. The worker's two timings (1003–1093 s) came while the Mac was loaded at 57 to 225, so they can't separate the width's cost from the load.
+
+## 2026-11-08 20:36:08 Correction to the incident recorded 2026-11-08 about hung merge tests: the merge test of 2aa1e894 wasn't a hang. The Mac was asleep (51.8 min on the wall clock, 4.9 min awake; `pmset -g log` shows 41 sleeps between 15:00 and 20:00 on battery). The fix is that a merge's timeout counts awake time (turn-this-incident-into-16, contract v3). The stall limit isn't lowered.
+
+The lead told the user "at least one merge really did hang" from the hung log, which can't show sleep. The worker checked the power log and the lead confirmed it. The afternoon's slow runs and the "tests stopped at 16:08" reading also fit the Mac sleeping, so neither test width nor battery load was the cause.
+
+## 2026-11-12 09:06:53 Model routing, 2026-11-12: Opus is the default everywhere. Fable goes to the lead as advisor, to hard tasks as advisor, to re-rolled tasks and to sensitive or security audits (task each-role-gets-the, after when-fable-s-limit). Whether routine audits move from Fable to Opus waits on audit-eval-on-opus. Keep verifier_model=opus until that eval has finished, so its run stays on Opus, and only then reconsider clearing it.
+
+The user: Opus works well for nearly everything, Fable should go to the hardest parts (strategy, decisions, organisation), and "we need to just do optimally" (credits aside, since part of Fable is included in the plan). Claude Code's advisor puts Fable at decision points without running it throughout.
+
+## 2026-11-12 12:16:33 a-calm-mac-merge's timing check (median calm-Mac merge at or under 10 min, against 15) is the lead's to read from merges-*.jsonl after it merges, together with check 4's freezes per hour, in the next retrospective, instead of the worker holding the Mac quiet for 45 minutes.
+
+With 6–8 sessions running, no calm window was available, and holding all work for a measurement costs more than reading the merges' own recorded runs, which now carry their core width.
+
+## 2026-11-17 17:02:56 flaky-host-tests-make merges with 4 of its 5 flakes fixed. The fifth, HostedSessionTests/headlessAnswersQueriesOnlyWhenNoClient (finding F1), stays open as a known flake. Its failure diagnosis now prints the probe's output first, and the next failure's log is the evidence for a fix: the flake ledger's rule (3 flakes of one test become a task) picks it up.
+
+It passed 28 of 28 runs under load in the worker's runs and 10 of 10 in the verifier's. The one failing log (2026-11-12) cut off the field that would say which side lost the byte. So another round now would be guesswork, and it would hold back four real fixes, including the app's sleep bug (a parser busy at a sleep was replaced on waking and its bytes dropped).
+
+## 2026-11-18 22:19:43 verifier_model is set to opus temporarily (the user's answer to BD489D1B, 2026-11-18): reviews on Opus until Fable's limit resets on Nov 24, 01:00, then back to Fable. The first lead turn after the reset clears it with configure(verifier_model: ""). Sensitive and security audits still went to Fable regardless (task sensitive-audits-fall-back makes them follow verifier_model while Fable is refused), so those reviews wait until the reset.
+
+Fable's weekly limit was spent while Opus still worked. The user allowed reviews on the workers' model for those days only.
+
+## 2026-11-19 08:23:23 While Claude's limits are spent (until Nov 24, 01:00), work that hasn't started goes to Codex, and finished work goes to an Opus review where the gate allows it (the user, 2026-11-19: "the ones that are running, if they have a lot of work done, then they can go through opus 5.5 if not, just kill them and do it through Codex"). Applied: audits-run-on-codex is moved to Codex; task-rows-say-when already runs there. All eight finished tasks have their work done, but their reviews are sensitive or security ones, which VibeSwitcher routes to Fable whatever verifier_model says (LeadWorkflow.auditModel's security route). The Opus fallback for those is unmerged work in sensitive-audits-fall, so the eight stay waiting for the reset. An audit retried on the-lead-s-records on Nov 19 at 08:2x launched on Fable and stopped at the limit, which confirms it.
+
+This follows the user's instruction. The review gate for sensitive paths is a guard rail the lead doesn't work around.
+

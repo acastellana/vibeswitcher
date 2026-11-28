@@ -20,6 +20,7 @@ import { actsLine, doButton } from '../acting.js';
 import { boostMarkText, STATES, stateOf, lastPart, dateTime } from '../words.js';
 import { queryWords, holdsAll } from './twocol.js';
 import { typing, shownNow } from '../keys.js';
+import { unseenAllDone } from './alldone.js';
 
 // The ring's colours, in the order they go round: one meaning each, as everywhere on the page.
 const RING = ['working', 'review', 'ready', 'blocked', 'queued'];
@@ -46,7 +47,7 @@ export function ring(counts, size = 28) {
 // The project's one line: what needs the user, else what moves, else quiet.
 export function projectLine(project) {
   if (project.waiting) return { words: t('needYou', { n: project.waiting }), tone: 'asked' };
-  if (project.board?.allDone && !project.board.allDone.seen) return { words: t('allDone'), tone: 'ready' };
+  if (unseenAllDone(project.board)) return { words: t('allDone'), tone: 'ready' };
   if (project.motion) return { words: t('inMotion', { n: project.motion }), tone: '' };
   return { words: project.lead && !project.live ? t('noLead') : t('quiet'), tone: 'quiet' };
 }

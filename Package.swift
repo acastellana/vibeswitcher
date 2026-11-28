@@ -12,6 +12,13 @@ let testSettings: [SwiftSetting] = [.enableExperimentalFeature("SymbolLinkageMar
 let swiftCrypto: Package.Dependency = .package(url: "https://github.com/apple/swift-crypto.git", exact: "3.15.1")
 let crypto: Target.Dependency = .product(name: "Crypto", package: "swift-crypto", condition: .when(platforms: [.linux]))
 
+// The keeper's package (Keeper/: docs/superpowers/specs/2026-11-27-v2-mac-keeper-design.md, "Its program"), named by
+// path on both systems: it names no package (`KeeperLintTests`), root builds it alone, and VibePlatform and VibeCore
+// take what moved into it (`VibeKeep`: the pins record, the root walk, the dynamic code check by token, a socket's peer)
+// from it, so each has one implementation. A path names no version and gets no pin in Package.resolved.
+let keeper: Package.Dependency = .package(path: "Keeper")
+let vibeKeep: Target.Dependency = .product(name: "VibeKeep", package: "Keeper")
+
 #if os(Linux)
 // On Linux (the system this manifest is read on, not the one built for) the package is only the portable targets
 // that compile there so far: docs/superpowers/plans/2026-11-12-v2-stage-1-core-on-linux.md. The Mac's package is
@@ -21,10 +28,10 @@ let portableTargets: [Target] = [
     // has no wrapper for), in C. Imported only by VibePlatform.
     .target(name: "CVibePlatform"),
     // Every system call the shared code makes, one implementation per system.
-    .target(name: "VibePlatform", dependencies: ["CVibePlatform"]),
+    .target(name: "VibePlatform", dependencies: ["CVibePlatform", vibeKeep]),
     // Shared model, status rules, process table and hook installer (the plan's Task 11; what only the Mac has is in
     // Sources/VibeCore/MacOnly, compiled there alone).
-    .target(name: "VibeCore", dependencies: ["VibePlatform", crypto]),
+    .target(name: "VibeCore", dependencies: ["VibePlatform", vibeKeep, crypto]),
     // Tiny binary that Claude Code / Codex hooks invoke on every lifecycle event.
     .executableTarget(name: "vibeswitcher-hook", dependencies: ["VibeCore"]),
     // The project lead's tool server (MCP over stdio) for the lead, its workers and its verifiers.
@@ -70,6 +77,7 @@ let package = Package(
         // the same pins on both systems (SwiftPM removes a pin when the package no longer names its dependency).
         .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", exact: "1.19.0"),
         swiftCrypto,
+        keeper,
     ],
     targets: portableTargets + (measuring ? notYetPortableTargets : []),
     swiftLanguageModes: [.v5]
@@ -82,12 +90,13 @@ let package = Package(
         // Terminal emulator: the window's terminal view and the host's headless terminal.
         .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", exact: "1.19.0"),
         swiftCrypto,
+        keeper,
     ],
     targets: [
         // Every system call the shared code makes, one implementation per system.
-        .target(name: "VibePlatform"),
+        .target(name: "VibePlatform", dependencies: [vibeKeep]),
         // Shared model, status rules, process table and hook installer.
-        .target(name: "VibeCore", dependencies: ["VibePlatform", crypto]),
+        .target(name: "VibeCore", dependencies: ["VibePlatform", vibeKeep, crypto]),
         // The session host's internals: PTYs, replay buffers, the socket server.
         .target(name: "VibeHost", dependencies: ["VibeCore", .product(name: "SwiftTerm", package: "SwiftTerm"), crypto]),
         // The menu bar app.

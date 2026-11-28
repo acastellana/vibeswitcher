@@ -66,5 +66,21 @@ extension Platform.Host {
         guard sysctlbyname("kern.boottime", &time, &size, nil, 0) == 0 else { return nil }
         return Date(timeIntervalSince1970: TimeInterval(time.tv_sec) + TimeInterval(time.tv_usec) / 1_000_000)
     }
+
+    /// The host's port, asked for once (each `mach_host_self` adds a reference to it).
+    private static let machHost = mach_host_self()
+
+    /// `host_statistics(HOST_CPU_LOAD_INFO)`: a host call, no process looked at; nil when it failed (main's
+    /// LoadRecorder.cpuTicks of 2026-11-27, moved here).
+    public static func cpuTicks() -> (user: UInt32, system: UInt32, idle: UInt32, nice: UInt32)? {
+        var info = host_cpu_load_info()
+        var count = mach_msg_type_number_t(MemoryLayout<host_cpu_load_info>.size / MemoryLayout<integer_t>.size)
+        let result = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { host_statistics(machHost, HOST_CPU_LOAD_INFO, $0, &count) }
+        }
+        guard result == KERN_SUCCESS else { return nil }
+        let ticks = info.cpu_ticks
+        return (ticks.0, ticks.1, ticks.2, ticks.3)
+    }
 }
 #endif

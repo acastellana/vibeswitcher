@@ -13,6 +13,7 @@ cd "$(dirname "$0")/.."
 source scripts/lib/scratch.sh
 source scripts/lib/swift-jobs.sh
 source scripts/lib/resource-bundles.sh
+source scripts/lib/watched-sizes.sh
 
 # --- The keychain search list (this block is the same in setup-signing.sh and build-app.sh; test-signing.sh checks) ---
 LOGIN_KEYCHAIN="$HOME/Library/Keychains/login.keychain-db"
@@ -102,20 +103,20 @@ scratch_tmpdir vs-build
 # and progress line, and status says when main holds merge-gate code newer than it (turn-this-incident-into-12: a
 # merge ran an install older than the fix that guarded it). Read before the compile and compared after it: a checkout
 # that moves while it compiles (a merge fast-forwarding main) would otherwise stamp a commit the build wasn't made
-# from. Changes not committed in Sources/ (files changed, or new and not ignored), or a move during the compile, are
+# from. Changes not committed in Sources/ or Keeper/ (files changed, or new and not ignored), or a move during the compile, are
 # said (VSSourceChanged), and the tool server takes such a build as not comparable with main.
 # A move is read from what HEAD holds of the files the build reads (their tree and blob ids), not from HEAD's commit id:
 # the lead commits its records (docs/lead/) to main at any time, and a build that overlapped one was marked as not
 # matching, so status took it as not installed (2026-11-15, 65325752 during the build of 64a97228).
 source_state() {
-    git ls-tree HEAD -- Sources Package.swift Package.resolved scripts/build-app.sh scripts/lib Resources Web 2>/dev/null || true
-    git diff HEAD -- Sources Package.swift
-    git ls-files --others --exclude-standard -- Sources Package.swift
+    git ls-tree HEAD -- Sources Keeper Package.swift Package.resolved scripts/build-app.sh scripts/lib Resources Web 2>/dev/null || true
+    git diff HEAD -- Sources Keeper Package.swift
+    git ls-files --others --exclude-standard -- Sources Keeper Package.swift
 }
 SOURCE_COMMIT="$(git rev-parse --verify --quiet 'HEAD^{commit}' || true)"
 SOURCE_STATE="$(source_state | shasum)"
 SOURCE_CHANGED=false
-if ! git diff --quiet HEAD -- Sources Package.swift || [[ -n "$(git ls-files --others --exclude-standard -- Sources Package.swift)" ]]; then
+if ! git diff --quiet HEAD -- Sources Keeper Package.swift || [[ -n "$(git ls-files --others --exclude-standard -- Sources Keeper Package.swift)" ]]; then
     SOURCE_CHANGED=true
 fi
 Resources/bin/vs-heavy --as scripts/build-app.sh bash -c 'heavy_swift build -c release'
@@ -259,6 +260,10 @@ if [[ -n "${KEYCHAIN:-}" ]] && security show-keychain-info "$KEYCHAIN" 2>&1 | gr
     security set-keychain-settings -l "$KEYCHAIN"
     echo "The signing keychain now stays unlocked until the Mac sleeps or you log out (it locked after 5 minutes)."
 fi
+# What the app installs into a folder the config seal watches (the hooks' binary, copied as it is into
+# ~/.vibeswitcher/bin), signed as it ships: within 80% of ConfigSeal.readLimit, or the build fails before any install.
+SEAL_READ_LIMIT="$(seal_read_limit)"
+check_watched_sizes "$SEAL_READ_LIMIT" "$APP/Contents/MacOS/vibeswitcher-hook"
 echo "Built $APP"
 
 if [[ "${1:-}" == "--install" ]]; then

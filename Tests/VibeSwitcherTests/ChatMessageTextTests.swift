@@ -260,7 +260,8 @@ struct ChatMessageTextTests {
     @Test func aSelectionSurvivesTheRowsFirstHover() throws {
         let home = scratch.url("chat-row")
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
-        let chat = ChatModel(outbox: ComposerOutbox(url: home.appendingPathComponent("outbox.json")), home: home.path, steerRoot: home)
+        let chat = ChatModel(outbox: ComposerOutbox(url: home.appendingPathComponent("outbox.json")), home: home.path, steerRoot: home,
+                             defaults: scratch.defaults("chat-row"))
         let item = ChatItem.reply(ChatEntry(id: "r1", at: Date(), kind: .reply(Self.reply)))
         func row(_ reached: Bool) -> ChatItemRow {
             ChatItemRow(item: item, chat: chat, expanded: [], agent: .agent(.claude), rowID: nil, canSend: false, resend: { _ in }, openImage: { _ in },
@@ -290,7 +291,8 @@ struct ChatMessageTextTests {
     @Test func aReplysTimeIsItsTextsTooltipBeforeAnyHover() throws {
         let home = scratch.url("chat-row-tooltip")
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
-        let chat = ChatModel(outbox: ComposerOutbox(url: home.appendingPathComponent("outbox.json")), home: home.path, steerRoot: home)
+        let chat = ChatModel(outbox: ComposerOutbox(url: home.appendingPathComponent("outbox.json")), home: home.path, steerRoot: home,
+                             defaults: scratch.defaults("chat-row"))
         let at = Date(timeIntervalSince1970: 1_793_000_000)
         let item = ChatItem.reply(ChatEntry(id: "r1", at: at, kind: .reply(Self.reply)))
         let row = ChatItemRow(item: item, chat: chat, expanded: [], agent: .agent(.claude), rowID: nil, canSend: false, resend: { _ in },

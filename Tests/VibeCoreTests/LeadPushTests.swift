@@ -38,8 +38,12 @@ struct LeadPushTests {
 
     // MARK: The request
 
+    /// Kept in .vibeswitcher (records_dir empty), the lead's records add no commit before the request: it counts the
+    /// commits ahead as they were made (`aPushRequestCommitsTheRecordsFirstAndAsksForThatHead` has the records').
+    static let localRecords = ["test_command: true", "records_dir:"]
+
     @Test func pushRemoteRecordsARequestAndPushesNothing() throws {
-        let (scene, lead) = try ahead(2)
+        let (scene, lead) = try ahead(2, workflow: Self.localRecords)
         let before = originMain(scene)
         let main = remote.head(scene.root)
 
@@ -65,6 +69,26 @@ struct LeadPushTests {
         #expect(stale.outcome == .gone && stale.request == nil)
         #expect(originMain(scene) == before)
         #expect(try vault.pushRequest(root: scene.root) == newer)
+    }
+
+    /// The lead's records written since their last commit (fetch_remote's line, a decision) go in first, as one
+    /// commit, so the head the request records, and the user's click pushes, carries them (`LeadRecords`).
+    @Test func aPushRequestCommitsTheRecordsFirstAndAsksForThatHead() throws {
+        let (scene, lead) = try ahead(1)
+        #expect(!lead.call("record_decision", ["decision": "Push it", "why": "the work is in"]).isError)
+        #expect(!Git.run(["status", "--porcelain", "--", "docs/lead"], in: scene.root).output.isEmpty)
+        let before = remote.head(scene.root)
+
+        let request = try asked(lead, root: scene.root)
+        let main = remote.head(scene.root)
+        #expect(Git.run(["rev-parse", "main~1"], in: scene.root).output == before)
+        #expect(Git.run(["log", "-1", "--format=%s", "main"], in: scene.root).output == "Lead: 1 decision, 1 progress line")
+        #expect(Git.run(["show", "main:docs/lead/decisions.md"], in: scene.root).output.contains("Push it"))
+        #expect(Git.run(["show", "main:docs/lead/progress.md"], in: scene.root).output.contains("Fetched origin/main"))
+        #expect(request.commit == main && request.ahead == 2, "\(request)")
+        // The request's own line waits on disk for what next needs it in git.
+        #expect(progress(scene.root).contains("Asked the user to push main at \(main.prefix(8))"))
+        #expect(!Git.run(["show", "main:docs/lead/progress.md"], in: scene.root).output.contains("Asked the user to push"))
     }
 
     @Test func pushRemoteRefusesBeforeAFetchWhenTheRemoteIsAheadAndWhenNothingIsAhead() throws {
@@ -93,7 +117,7 @@ struct LeadPushTests {
 
     /// Push pushes the commit you were shown, not where main is by then.
     @Test func anApprovalPushesExactlyTheApprovedCommitEvenAfterMainMovedOn() throws {
-        let (scene, lead) = try ahead(2)
+        let (scene, lead) = try ahead(2, workflow: Self.localRecords)
         let request = try asked(lead, root: scene.root)
         try remote.commit("later.txt", "later\n", in: scene.root, message: "Later")
         let later = remote.head(scene.root)

@@ -93,6 +93,32 @@ struct LeadHandoverTests: LeadTeamFixture {
         #expect(worker.awaitsRole)
     }
 
+    /// At a handover the records the lead before wrote and never committed (no merge since) go in as one commit,
+    /// when the new lead's tool server starts; a restarted tool server of the same lead (an install) commits nothing.
+    @Test func aHandoverCommitsTheRecordsTheLeadBeforeLeftUncommitted() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let first = try lead(root, runtime)
+        #expect(!call(first, "record_decision", ["decision": "Before the handover", "why": "w"]).isError)
+        _ = call(first, "add_task", ["title": "One", "goal": "g", "acceptance": ["a"]])
+        let before = Git.run(["rev-parse", "main"], in: root).output
+        // The same lead's tool server again, as after an install: nothing committed.
+        _ = LeadToolset(root: root, runtime: runtime, vault: vault(for: runtime))
+        #expect(Git.run(["rev-parse", "main"], in: root).output == before)
+
+        let grant = try vault.startLead(root: root, branch: "main")
+        _ = try LeadHandover.begin(BoardStore(root: root), inbox: temp.url("steer"))
+        try BoardStore(root: root).update { LeadHandover.started(try #require(new.session), on: &$0) }
+        try vault.bind(grant, root: root, session: try #require(new.session))
+        let seat = FakeSeat(runtime, agent: new)
+        _ = LeadToolset(root: root, runtime: seat, vault: vault(for: seat))
+
+        #expect(Git.run(["rev-parse", "main~1"], in: root).output == before)
+        #expect(LeadRecords.isSubject(Git.run(["log", "-1", "--format=%s", "main"], in: root).output))
+        #expect(Git.run(["show", "main:docs/lead/decisions.md"], in: root).output.contains("Before the handover"))
+        #expect(Git.run(["status", "--porcelain", "--", "docs/lead"], in: root).output.isEmpty)
+    }
+
     @Test func wakesWaitingForTheReplacedLeadGoToTheNewOne() throws {
         let root = try repo()
         let inbox = temp.url("steer")

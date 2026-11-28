@@ -57,6 +57,8 @@ struct ShebangWriteLintTests {
         ("Tests/VibeCoreTests/ScriptScratchLintTests.swift", "(bare)", "a script for the lint to read; never run"),
         ("Tests/VibeCoreTests/ScriptScratchLintTests.swift", "(late)", "a script for the lint to read; never run"),
         ("Tests/VibeCoreTests/ScriptScratchLintTests.swift", "(calledAlone)", "a script for the lint to read; never run"),
+        ("Tests/VibeCoreTests/KeychainCallLintTests.swift", "\"scripts/probe.sh\"", "a script for the lint to read; never run"),
+        ("Tests/VibeCoreTests/KeychainCallLintTests.swift", "\"scripts/build-app.sh\"", "a script for the lint to read; never run"),
         ("Tests/VibeCoreTests/ProductInventoryTests.swift", "ProductInventory.script", "committed, and run as bash's argument from a checkout (`ProductInventory`); never exec'd"),
         ("Tests/VibeCoreTests/InstallRelaunchTests.swift", "main.sh", "the stand-in's main.sh, run as bash's argument (its Contents/MacOS link is /bin/bash); never exec'd"),
         ("Tests/VibePlatformTests/ToolsTests.swift", "(write)", "stand-ins run as /bin/sh's argument, and tools whose paths are looked up, never run"),

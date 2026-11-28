@@ -76,6 +76,50 @@ extension WireKinds {
         }
     }
 
+    /// `project.new`: a new project (`name`; `location`, the projects folder or a folder in it, else the projects folder;
+    /// `goal`, its lead's) made with its git repository and first commit, then its lead started (`Requests.newProject`).
+    /// Not made: `made` false, `refused` the reason (`ProjectMaker.Refusal.Reason`), `said` why.
+    public enum ProjectNew: WireChangeKind {
+        public static let kind = "project.new"
+        public struct Args: WireArgs, Equatable {
+            public var name: String?
+            public var location: String?
+            public var goal: String?
+            public enum CodingKeys: String, CodingKey, CaseIterable { case name, location, goal }
+            public init(name: String?, location: String? = nil, goal: String? = nil) {
+                self.name = name
+                self.location = location
+                self.goal = goal
+            }
+        }
+        public struct Result: Codable, Sendable, Equatable {
+            public var made: Bool?
+            @WireNull public var name: String?
+            @WireNull public var folder: String?
+            @WireNull public var commit: String?
+            /// What the lead's start did: started, shown, waiting or refused; null when nothing was made.
+            @WireNull public var lead: String?
+            @WireNull public var session: String?
+            /// Why nothing was made (`ProjectMaker.Refusal.Reason`); null when it was.
+            @WireNull public var refused: String?
+            /// What happened, in a sentence.
+            public var said: String?
+            public var notes: [String]?
+            public init(made: Bool, name: String?, folder: String?, commit: String?, lead: String?, session: String?, refused: String?,
+                        said: String, notes: [String]) {
+                self.made = made
+                self.name = name
+                self.folder = folder
+                self.commit = commit
+                self.lead = lead
+                self.session = session
+                self.refused = refused
+                self.said = said
+                self.notes = notes
+            }
+        }
+    }
+
     // MARK: Cards
 
     /// A card's code and id: what `hold`, `base accept` and `base keep` take.
@@ -672,32 +716,48 @@ extension WireKinds {
 
     public enum SessionReply: WireChangeKind {
         public static let kind = "session.reply"
+        /// `choice` (one option's number, from 1) answers a single choice; `choices` (the options' numbers, from 1, each
+        /// once: every box to be ticked when it is submitted) answers a multi-select (the no-terminal inventory's C5,
+        /// 2026-11-26). One of the two, never both.
         public struct Args: WireArgs, Equatable {
             public var session: String?
             public var choice: Int?
+            public var choices: [Int]?
             public var text: String?
             public var question: String?
             public var options: [String]?
-            public enum CodingKeys: String, CodingKey, CaseIterable { case session, choice, text, question, options }
-            public init(session: String?, choice: Int?, text: String? = nil, question: String?, options: [String]?) {
+            public enum CodingKeys: String, CodingKey, CaseIterable { case session, choice, choices, text, question, options }
+            public init(session: String?, choice: Int?, choices: [Int]? = nil, text: String? = nil, question: String?, options: [String]?) {
                 self.session = session
                 self.choice = choice
+                self.choices = choices
                 self.text = text
                 self.question = question
                 self.options = options
             }
         }
+        /// A single choice's reply has `choice` and `option`; a multi-select's `choices` and `options` (the ticked rows'
+        /// words as its screen showed them, a free-text row's the words typed), in the options' order.
         public struct Result: Codable, Sendable, Equatable {
             public var session: String?
             public var terminal: String?
             public var choice: Int?
             public var option: String?
+            public var choices: [Int]?
+            public var options: [String]?
             public var question: String?
             public init(session: String, terminal: String, choice: Int, option: String, question: String) {
                 self.session = session
                 self.terminal = terminal
                 self.choice = choice
                 self.option = option
+                self.question = question
+            }
+            public init(session: String, terminal: String, choices: [Int], options: [String], question: String) {
+                self.session = session
+                self.terminal = terminal
+                self.choices = choices
+                self.options = options
                 self.question = question
             }
         }

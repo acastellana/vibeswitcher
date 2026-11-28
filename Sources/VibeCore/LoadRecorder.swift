@@ -9,9 +9,11 @@ import Foundation
 /// main thread) and `merges-<yyyy-MM-dd>.jsonl` one line per merge in any project (`MergeSample`, written by the merging
 /// lead's tool server). Both 0600, kept `keepDays` days. `scripts/load-report.sh` reads them.
 ///
-/// What's recorded is `ps`-level and no more: load averages, memory pressure and swap, the host's census of team
-/// sessions, the heavy slots' project and task, and above `topLoad` the busiest process groups by command name (the
-/// kernel's, never arguments) and the project folder's name of their cwd (never the path, nor any folder below it).
+/// What's recorded is `ps`-level and no more: load averages, memory pressure and swap, the CPU's idle share, the host's
+/// census of team sessions, the heavy slots' project and task and the runnable threads in each holder's process tree,
+/// the runnable threads of every process this account can read, and above `topLoad` the busiest process groups by
+/// command name (the kernel's, never arguments) and the project folder's name of their cwd (never the path, nor any
+/// folder below it).
 public enum LoadStats {
     /// Files older than this many days are removed.
     public static let keepDays = 14
@@ -125,6 +127,16 @@ public struct LoadSample: Codable, Equatable, Sendable {
     /// Boost mode was in force (`BoostState.active`: the app's last word on, and fresh); nil in lines from before it was
     /// recorded, so hours boosted sum the samples with true.
     public var boost: Bool? = nil
+    /// The CPU's idle share since the previous sample, in percent of all cores' time (to 0.1), from the host's tick
+    /// counts (`HOST_CPU_LOAD_INFO`); nil when either reading failed, there was no previous sample within
+    /// `LoadRecorder.ticksSpan`, and in lines from before it was recorded. Never 0 for "unknown".
+    public var cpuIdle: Double? = nil
+    /// The runnable threads (running or waiting for a core) at the sample, summed over every process this account can
+    /// read (`LoadRecorder.processes`): the Mac's, less those of root's and other users' processes, which the kernel
+    /// doesn't show it (Spotlight's mds, WindowServer, the system's daemons). Nil when the process table couldn't be
+    /// read, and in lines from before it was recorded. With `heavy.held`'s `runnable`, the load outside the slots'
+    /// trees is a number: this less theirs (the account's), the 1-minute load less theirs (everyone's).
+    public var runnable: Int? = nil
 
     public struct Memory: Codable, Equatable, Sendable {
         /// "normal", "warn" or "critical" (the kernel's memory pressure level).
@@ -162,6 +174,14 @@ public struct LoadSample: Codable, Equatable, Sendable {
             public var task: String?
             /// How long it has held the slot, in minutes.
             public var minutes: Int?
+            /// The runnable threads in its process tree at the sample (`LoadRecorder.runnable(in:holder:)`); nil when
+            /// its note names no process, its tree is gone, the process table couldn't be read, its tree is counted on
+            /// another slot (`sameTreeAs`), and in lines from before it was recorded.
+            public var runnable: Int? = nil
+            /// The slot held by the same process, whose `runnable` counts this one's tree too: a lead's tool server
+            /// holds a slot for each merge or audit it runs, in itself, and the process table can't tell their runs
+            /// apart. Counted once, so the holders' sum is the threads in their trees. Nil when it has a tree of its own.
+            public var sameTreeAs: Int? = nil
         }
     }
 
@@ -300,13 +320,39 @@ public struct LoadProcess: Equatable, Sendable {
     public var comm: String
     /// The CPU time it has used, user and system, in seconds.
     public var cpuSeconds: Double
+    /// Its threads running or waiting for a core (`pti_numrunning`).
+    public var runnable: Int
 
-    public init(pid: Int32, ppid: Int32, pgid: Int32, comm: String, cpuSeconds: Double) {
+    public init(pid: Int32, ppid: Int32, pgid: Int32, comm: String, cpuSeconds: Double, runnable: Int = 0) {
         self.pid = pid
         self.ppid = ppid
         self.pgid = pgid
         self.comm = comm
         self.cpuSeconds = cpuSeconds
+        self.runnable = runnable
+    }
+}
+
+/// The host's CPU tick counts since boot, all cores together (`HOST_CPU_LOAD_INFO`): they wrap at 2³².
+public struct CPUTicks: Equatable, Sendable {
+    public var user: UInt32
+    public var system: UInt32
+    public var idle: UInt32
+    public var nice: UInt32
+
+    public init(user: UInt32, system: UInt32, idle: UInt32, nice: UInt32) {
+        self.user = user
+        self.system = system
+        self.idle = idle
+        self.nice = nice
+    }
+
+    /// The idle share of the ticks from `earlier` to these, in percent to 0.1; nil when none passed.
+    public func idle(since earlier: CPUTicks) -> Double? {
+        let idle = UInt64(self.idle &- earlier.idle)
+        let total = UInt64(user &- earlier.user) + UInt64(system &- earlier.system) + idle + UInt64(nice &- earlier.nice)
+        guard total > 0 else { return nil }
+        return (Double(idle) / Double(total) * 1000).rounded() / 10
     }
 }
 
@@ -321,6 +367,8 @@ public final class LoadRecorder: @unchecked Sendable {
         public var heavy: () -> (slots: Int, holders: [TestLock.Holder])
         /// Every process this user can read; nil when the table couldn't be read.
         public var processes: () -> [LoadProcess]?
+        /// The host's CPU ticks now; nil when they couldn't be read.
+        public var cpuTicks: () -> CPUTicks?
         /// A process's cwd; nil when it can't be read.
         public var cwd: (Int32) -> String?
         /// A cwd's project folder name (`LoadStats.project(ofFolder:)`).
@@ -338,8 +386,10 @@ public final class LoadRecorder: @unchecked Sendable {
                     heavy: @escaping () -> (slots: Int, holders: [TestLock.Holder]), processes: @escaping () -> [LoadProcess]?,
                     cwd: @escaping (Int32) -> String?, project: @escaping (String) -> String?, window: TimeInterval = 2,
                     sleep: @escaping (TimeInterval) -> Void = { Thread.sleep(forTimeInterval: $0) },
-                    boost: @escaping () -> Bool? = { nil }, tallyLeads: @escaping ([String], Date) -> Void = { _, _ in }) {
+                    boost: @escaping () -> Bool? = { nil }, tallyLeads: @escaping ([String], Date) -> Void = { _, _ in },
+                    cpuTicks: @escaping () -> CPUTicks? = { nil }) {
             self.averages = averages
+            self.cpuTicks = cpuTicks
             self.memory = memory
             self.heavy = heavy
             self.processes = processes
@@ -356,7 +406,7 @@ public final class LoadRecorder: @unchecked Sendable {
             Sources(averages: LoadRecorder.averages, memory: LoadRecorder.memory, heavy: LoadRecorder.heavySlots,
                     processes: LoadRecorder.processes, cwd: LoadRecorder.cwd, project: { LoadStats.project(ofFolder: $0) },
                     boost: { BoostState.active() != nil },
-                    tallyLeads: { roots, now in LeadTokenLedger.tally(roots: roots, now: now) })
+                    tallyLeads: { roots, now in LeadTokenLedger.tally(roots: roots, now: now) }, cpuTicks: LoadRecorder.cpuTicks)
         }
     }
 
@@ -366,6 +416,11 @@ public final class LoadRecorder: @unchecked Sendable {
     private let queue = DispatchQueue(label: "vibeswitcher.load-recorder", qos: .utility)
     /// The last look at the processes' CPU time, and when (for the next sample's CPU shares).
     private var lastLook: (at: Date, cpu: [Int32: Double])?
+    /// The last sample's CPU ticks, and when (the next sample's idle share is over the time between).
+    private var lastTicks: (at: Date, ticks: CPUTicks)?
+    /// The longest time between two tick readings an idle share is recorded over: a minute's sample skipped, or two,
+    /// still give one; after a longer gap (the Mac asleep, the app stopped) the next sample has none.
+    public static let ticksSpan: TimeInterval = 180
     /// The day last pruned.
     private var pruned: String?
     /// When the leads' tokens were last tallied, and the projects whose lead was live then (tallied once more after
@@ -437,10 +492,35 @@ public final class LoadRecorder: @unchecked Sendable {
                                         minutes: holder.since.map { _ in Int(holder.held(now: date) / 60) })
             }),
             top: nil, costMs: 0, boost: sources.boost())
+        let ticks = sources.cpuTicks()
+        if let ticks, let last = lastTicks, date > last.at, date.timeIntervalSince(last.at) <= Self.ticksSpan {
+            sample.cpuIdle = ticks.idle(since: last.ticks)
+        }
+        lastTicks = ticks.map { (date, $0) }
+        // One read of the table a minute: the groups' over load 48 (its second look), the runnable threads' always.
+        let processes: [LoadProcess]?
         if let one = averages.first, one > LoadStats.topLoad {
-            sample.top = topGroups(at: date)
+            let look = topGroups(at: date)
+            sample.top = look.groups
+            processes = look.processes ?? sources.processes()
         } else {
             lastLook = nil
+            processes = sources.processes()
+        }
+        if let processes {
+            sample.runnable = processes.reduce(0) { $0 + $1.runnable }
+            // A process holding several slots (a lead's tool server's merge and audits) has one tree: counted once, on
+            // the first of its slots.
+            var counted: [Int32: Int] = [:]
+            for (index, holder) in heavy.holders.enumerated() where index < sample.heavy.held.count {
+                guard let pid = holder.pid else { continue }
+                if let slot = counted[pid] {
+                    sample.heavy.held[index].sameTreeAs = slot
+                    continue
+                }
+                counted[pid] = holder.slot
+                sample.heavy.held[index].runnable = Self.runnable(in: processes, holder: pid)
+            }
         }
         sample.costMs = (Double(Platform.Clock.threadCPUNanoseconds() - started) / 1e4).rounded() / 100
         return sample
@@ -459,18 +539,46 @@ public final class LoadRecorder: @unchecked Sendable {
     }
 
     /// The busiest process groups since the last look (the previous minute's, when it was taken then; else a look
-    /// `window` ago), by command name and project folder.
-    func topGroups(at date: Date) -> [LoadSample.Group]? {
+    /// `window` ago), by command name and project folder; and the processes as the last look read them (nil when it
+    /// didn't).
+    func topGroups(at date: Date) -> (groups: [LoadSample.Group]?, processes: [LoadProcess]?) {
         var previous = lastLook
         if previous == nil || date.timeIntervalSince(previous!.at) > 180 || date <= previous!.at {
-            guard let first = sources.processes() else { return nil }
+            guard let first = sources.processes() else { return (nil, nil) }
             previous = (date.addingTimeInterval(-sources.window), Dictionary(first.map { ($0.pid, $0.cpuSeconds) }, uniquingKeysWith: max))
             sources.sleep(sources.window)
         }
-        guard let previous, let now = sources.processes() else { return nil }
+        guard let previous, let now = sources.processes() else { return (nil, nil) }
         lastLook = (date, Dictionary(now.map { ($0.pid, $0.cpuSeconds) }, uniquingKeysWith: max))
         let elapsed = max(1, date.timeIntervalSince(previous.at))
-        return Self.groups(now, previous: previous.cpu, elapsed: elapsed, cwd: sources.cwd, project: sources.project)
+        return (Self.groups(now, previous: previous.cpu, elapsed: elapsed, cwd: sources.cwd, project: sources.project), now)
+    }
+
+    /// The runnable threads in the process tree of a heavy slot's holder, process `holder` (its note's pid): the holder,
+    /// its children and theirs, and every process in a group one of them is in or the holder leads (vs-heavy and its
+    /// command each lead their own): so a child whose parent ended, reparented to launchd, still counts while it stays
+    /// in its group, and so do what's left of a holder that has ended. A group the holder is in but doesn't lead (the shell's job that ran
+    /// it) isn't its tree. Nil when none of it is in `processes`: the holder has ended and left nothing in its group.
+    /// A descendant that left its groups (setsid) and whose parent ended can't be told from anyone else's.
+    public static func runnable(in processes: [LoadProcess], holder: Int32) -> Int? {
+        let own = processes.first { $0.pid == holder }
+        // The group the holder was started in, when it doesn't lead it: not its tree.
+        let outer = own.flatMap { $0.pgid != holder ? $0.pgid : nil }
+        var members = Set<Int32>(own.map { [$0.pid] } ?? [])
+        var groups: Set<Int32> = [holder]
+        var grew = true
+        while grew {
+            grew = false
+            for process in processes where !members.contains(process.pid) {
+                if members.contains(process.ppid) || groups.contains(process.pgid) {
+                    members.insert(process.pid)
+                    if process.pgid > 0, process.pgid != outer { groups.insert(process.pgid) }
+                    grew = true
+                }
+            }
+        }
+        guard !members.isEmpty else { return nil }
+        return processes.reduce(0) { $0 + (members.contains($1.pid) ? $1.runnable : 0) }
     }
 
     /// `processes`' groups (by process group) whose CPU over `elapsed` seconds since `previous` (pid → CPU seconds; a
@@ -549,9 +657,16 @@ public final class LoadRecorder: @unchecked Sendable {
             // Only this user's, and none that has ended: the Mac gives the CPU time of no other, and no system counts one here.
             guard case .brief(let info) = Platform.Processes.brief(pid), info.uid == me, info.state != .zombie,
                   let cpu = Platform.Processes.cpuSeconds(pid) else { continue }
-            found.append(LoadProcess(pid: pid, ppid: info.ppid, pgid: info.pgid, comm: info.name, cpuSeconds: cpu))
+            found.append(LoadProcess(pid: pid, ppid: info.ppid, pgid: info.pgid, comm: info.name, cpuSeconds: cpu,
+                                     runnable: Platform.Processes.runnableThreads(pid) ?? 0))
         }
         return found
+    }
+
+    /// The host's CPU ticks (`Platform.Host.cpuTicks`: on the Mac `host_statistics(HOST_CPU_LOAD_INFO)`, a host call, no
+    /// process looked at); nil when it failed, or isn't read (Linux).
+    public static func cpuTicks() -> CPUTicks? {
+        Platform.Host.cpuTicks().map { CPUTicks(user: $0.user, system: $0.system, idle: $0.idle, nice: $0.nice) }
     }
 
     /// A process's current folder; nil when it can't be read (another user's, or gone).

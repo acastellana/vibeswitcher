@@ -16,7 +16,7 @@ public enum HeldChange {
     /// Why a request that depends on the watched things `names` (seal names, `~/…`) of `home` is refused, or nil; `accept`
     /// says what the user does first.
     public static func refusal(_ names: [String], home: String, vault: LeadVault, accept: String) -> StartRefusal? {
-        let watched = ConfigSeal.homeWatched(home: home)
+        let watched = ConfigSeal.homeWatched(home: home, macList: MacSealList.namedByTheNode)
         let items = names.compactMap { name in watched.first { $0.name == name } }
         guard !items.isEmpty else { return nil }
         let record: [String: String]?

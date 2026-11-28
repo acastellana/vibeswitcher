@@ -10,6 +10,11 @@
 //                 session.reply, session.new, session.resume and lead (as a node that doesn't take them from a page)
 //   ?toggle       the asking session's question is Claude's auto-mode popup, whose second option is a setting toggled
 //                 with Space: the node refuses it from a page, as it does there
+//   ?large        the site's lead asks a question too long for a snapshot's part: the cards hold its stub
+//                 (`tooLarge`), and `questions` gives it in parts, as the node does; ?large=changing: it changes between
+//                 its parts every time, so the page says it keeps changing; with ?slow each part takes a moment
+//   ?multi        the asking session's question is a multi-select (several ticks, a free-text row, Submit): a page
+//                 that acts answers it with choices, as the node does
 //   ?rich         "Add dark mode…" holds what an agent writes: a heading, emphasis, a quote, links, nested lists, a
 //                 table, fenced code, a long output and a failed command (each state of the chat, to see and shoot)
 //   ?stream       "Bank webhooks…" streams a long rich reply on load and again each time one ends
@@ -17,6 +22,7 @@
 
 import { diffOps, summaryOf } from './chatops.js';
 import { taskGroup, taskState } from './words.js';
+import { PART_BYTES, sha256 } from './cardparts.js';
 
 const HOME = '/home/dev';
 const SITE = `${HOME}/projects/example-site`;
@@ -93,6 +99,9 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
     add(ASKING, { cwd: API, status: 'needs-you', since: ago(20), startedAt: ago(140), title: 'Why does the payout job run twice?', detail: 'Bash: pytest tests/test_payouts.py',
       prompt: options.toggle
         ? { question: 'Auto mode lets Claude run commands without asking first.', options: ['Continue', 'Also scan shell history'], descriptions: [null, 'on'], text: [], multiSelect: false, at: ago(20) }
+        : options.multi
+        ? { question: 'Which checks should run before the payout fix ships?', options: ['Unit tests', 'Integration tests', 'Lint', 'Type something'],
+          descriptions: ['tests/test_payouts.py', 'Against the staging database', null, null], text: [3], multiSelect: true, at: ago(20) }
         : { question: 'Bash command\n  pytest tests/test_payouts.py\nDo you want to proceed?', options: ['Yes', 'Yes, and don’t ask again for this command', 'No, and tell Claude what to do differently (esc)'],
           descriptions: [null, null, null], text: [], multiSelect: false, at: ago(20) },
       draft: { text: 'Once the tests pass, also add one for two regions at once.', images: [], at: ago(8), action: 'mock-draft' },
@@ -180,6 +189,38 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
       proposal: null, decideBy: null, state: 'open', answer: null, answeredVersion: null, withdrawReason: null, task: null,
     },
   }]]);
+
+  // `?large`: a lead's question too long for a snapshot's part. The cards stream holds its stub, as the node's
+  // (`CardStore.Card.tooLargeStub`); `questions` gives the whole value, and in parts.
+  const CARD_LONG = 'local:card:10e60000-0000-4000-8000-0000000010e6';
+  const wholeCards = new Map();
+  if (options.large && !options.empty) {
+    const tables = ['accounts', 'payouts', 'invoices', 'webhooks', 'regions', 'schedules', 'audit_log', 'tokens'];
+    const steps = Array.from({ length: 2600 }, (_, at) => `${at + 1}. Copy ${tables[at % tables.length]} rows ${at * 500 + 1}–${at * 500 + 500} into the new schema, check their totals, then mark the batch done.`);
+    const full = {
+      id: CARD_LONG, kind: 'question', project: SITE_PROJECT, root: SITE, open: true, closed: null, notice: null, at: ago(600), blocking: false, draft: null, seen: 'long-1',
+      question: {
+        id: 'q-long-migration', short: 'q-long', text: `The data migration is planned in ${steps.length} batches, each checked before the next:\n\n${steps.join('\n')}\n\nRun all of them tonight, or only the first hundred to see how long they take?`,
+        options: ['Run all of them tonight', 'Only the first hundred'], priority: 'important', whyNow: 'The maintenance window opens at 22:00.', version: 1, revisionNote: null,
+        proposal: null, decideBy: null, state: 'open', answer: null, answeredVersion: null, withdrawReason: null, task: null,
+      },
+    };
+    wholeCards.set(CARD_LONG, full);
+    cards.set(CARD_LONG, longStub(full));
+  }
+  function longStub(full) {
+    const stub = {};
+    for (const key of ['id', 'kind', 'project', 'root', 'open', 'closed', 'at', 'blocking']) stub[key] = full[key] ?? null;
+    stub.tooLarge = { bytes: new TextEncoder().encode(JSON.stringify(full)).length + 40, command: 'vibeswitcher questions' };
+    return stub;
+  }
+  // The card's bytes as one string a byte a character, for btoa.
+  const base64 = (bytes) => {
+    let binary = '';
+    for (let at = 0; at < bytes.length; at += 8192) binary += String.fromCharCode(...bytes.subarray(at, at + 8192));
+    return btoa(binary);
+  };
+  let longChanges = 0;
 
   const CARD_HELD = 'local:card:c0f1a2b3-0000-4000-8000-00000000c0f1';
   const CARD_BASE = 'local:card:ba5e0000-0000-4000-8000-00000000ba5e';
@@ -913,11 +954,58 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
       emit(put('cards', cards, card.id));
       return { ok: true, result: { card: card.id, held: true } };
     }
+    // The node's logs (`logs`, as `NodeLogs.read`): the server's and the host's, or the session log, each line masked by
+    // the node (a secret shows as •••), at most `lines` of them, newest last.
+    if (message.kind === 'logs') {
+      const count = args.lines ?? 200;
+      if (!Number.isInteger(count) || count < 1 || count > 500) return badArgs('logs’ lines is from 1 to 500');
+      const stamp = (minutes) => new Date(Date.now() - minutes * 60000).toISOString().replace(/\.\d+Z$/, 'Z');
+      const lines = args.sessions
+        ? [`${stamp(52)} session e91d05a3 started for the user in ~/projects/example-api (pts/7)`, `${stamp(40)} session 3f6b8c21 started for the user in ~/projects/example-payouts (pts/8)`,
+          `${stamp(31)} session a47e9d05 ended: exit 0 after 26m`, `${stamp(12)} session 0d5c3e88 env DATABASE_URL=••• kept from its preset`, `${stamp(2)} session 3f6b8c21 resized to 160×48`]
+        : [`${stamp(95)} vibeswitcher-node: listening on 127.0.0.1:8790 (the page) and the node's socket`, `${stamp(94)} host: welcomed the server (build 4ee11d5b)`,
+          `${stamp(60)} lead example-site: started, its base landing-base`, `${stamp(33)} hook: Authorization: Bearer ••• in a tool's output, masked`,
+          `${stamp(20)} cards: a question from the site's lead (blocking)`, `${stamp(4)} web: a page paired on this machine, acting`];
+      return { ok: true, result: { log: args.sessions ? 'sessions' : 'node', lines: lines.slice(-count), cut: 0, why: null } };
+    }
+    // The cards (`questions`): with `card` alone one card whole; with `part` that part of its bytes, as
+    // `Requests.cardPart` gives it (an `?older` node takes no part: it gives the card whole, as before parts).
+    if (message.kind === 'questions') {
+      if (args.card === undefined) return { ok: true, result: { cards: clone(cards).filter((card) => card.open), more: 0 } };
+      const full = wholeCards.get(args.card) || cards.get(args.card);
+      if (args.part === undefined || options.older) return { ok: true, result: { cards: full ? [structuredClone(full)] : [], more: 0 } };
+      if (!full) return { ok: false, error: { code: 'gone', message: `no card ${args.card}` } };
+      if (!Number.isInteger(args.part) || args.part < 0) return badArgs('questions’ part is a part’s number from 0');
+      if (args.part > 0 && !args.version) return badArgs('questions with a part after the first needs the version the first part gave');
+      // `?large=changing`: a draft left on it between its parts, every time.
+      if (options.large === 'changing' && args.part > 0 && full.id === CARD_LONG) full.draft = { text: `Draft ${++longChanges}`, version: longChanges, at: new Date().toISOString(), action: 'mock-draft' };
+      const bytes = new TextEncoder().encode(JSON.stringify(full));
+      return sha256(bytes).then((hashed) => {
+        const version = hashed ?? `mock-${bytes.length}-${longChanges}`;
+        if (args.version && args.version !== version) return { ok: false, error: { code: 'changed', message: 'the card changed while it was being read: read it again from its first part' } };
+        const parts = Math.max(1, Math.ceil(bytes.length / PART_BYTES));
+        if (args.part >= parts) return badArgs(`the card has ${parts} parts, from 0: not ${args.part}`);
+        const data = base64(bytes.subarray(args.part * PART_BYTES, (args.part + 1) * PART_BYTES));
+        const answer = { ok: true, result: { part: { card: full.id, version, part: args.part, parts, bytes: bytes.length, data } } };
+        // `?slow`: each part a moment, so the card's loading line can be seen.
+        return options.slow ? new Promise((resolve) => later(1500, () => resolve(answer))) : answer;
+      });
+    }
     // A session's own question answered (`session.reply`, as `Requests.replySession`): the question on its screen read
     // again, refused unless it is the one the page was shown; then the keys typed, and the question closes a moment
     // after the reply, as the node's next read of the screen finds it gone.
     if (message.kind === 'session.reply') {
-      if (!Number.isInteger(args.choice) || args.choice < 1) return badArgs('session.reply needs choice, an option’s number from 1');
+      const several = args.choices !== undefined;
+      if (several) {
+        if (args.choice !== undefined) return badArgs('session.reply takes choice or choices, not both');
+        if (!Array.isArray(args.choices) || !args.choices.every(Number.isInteger)) return badArgs('session.reply’s choices are a list of options’ numbers from 1');
+        if (!args.choices.length) return badArgs('session.reply’s choices name no option: tick at least one');
+        if (args.choices.length > 32) return badArgs('session.reply takes at most 32 choices');
+        const low = args.choices.find((n) => n < 1);
+        if (low !== undefined) return badArgs(`session.reply’s choices are options’ numbers from 1, not ${low}`);
+        const twice = args.choices.find((n, i) => args.choices.indexOf(n) !== i);
+        if (twice !== undefined) return badArgs(`session.reply’s choices name option ${twice} twice`);
+      } else if (!Number.isInteger(args.choice) || args.choice < 1) return badArgs('session.reply needs choice, an option’s number from 1');
       const text = typeof args.text === 'string' && args.text.trim() ? args.text : null;
       const found = hostedSession(args.session, 'session.reply');
       if (found.refusal) return found.refusal;
@@ -930,7 +1018,22 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
       if (args.options != null && JSON.stringify(args.options) !== JSON.stringify(menu.options)) {
         return no('its options aren’t the ones you were shown; they are now: ' + menu.options.map((option, index) => `${index + 1}. ${option}`).join('; '));
       }
-      if (menu.multiSelect) return no('its question takes several ticks: answer it in the session’s terminal');
+      if (several) {
+        // As `SessionReplyTicks.plan`: only the options it offers, words only for its free-text row.
+        if (!menu.multiSelect) return no('its question takes one choice, not several: answer it with choice');
+        const count = menu.options.length;
+        if (args.choices.length > count) return no(`its question has ${count} options: ${args.choices.length} choices are more than it offers`);
+        const past = args.choices.find((n) => n > count);
+        if (past !== undefined) return no(`its question has ${count} options, not ${past}`);
+        const ticked = [...args.choices].sort((a, b) => a - b).map((n) => n - 1);
+        const writing = ticked.filter((index) => (menu.text || []).includes(index));
+        if (writing.length && !text) return no(`option ${writing[0] + 1} takes your words: give them with the choices`);
+        if (!writing.length && text) return no('none of the options chosen takes words');
+        later(250, () => answered(target.id));
+        return { ok: true, result: { session: target.id, terminal: target.terminal, choices: ticked.map((index) => index + 1),
+          options: ticked.map((index) => (writing.includes(index) ? text : menu.options[index])), question: menu.question } };
+      }
+      if (menu.multiSelect) return no('its question takes several ticks: give them as choices');
       const index = args.choice - 1;
       if (index >= menu.options.length) return no(`its question has ${menu.options.length} options, not ${args.choice}`);
       if (menu.descriptions?.[index] != null && options.toggle) {
@@ -1057,6 +1160,51 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
         emit(put('sessions', sessions, sid), put('leads', leads, project));
       });
       return { ok: true, result: { happened: 'started', session: sid, program: `${HOME}/.local/bin/claude`, notes } };
+    }
+    // A new project (`project.new`, as `Requests.newProject` and `ProjectMaker.make`): the name by the app's rules, where
+    // the projects folder (~/projects here) or a real folder in it, nothing there by its folder name; made, a moment
+    // later its lead's session and the project are listed. A refusal is a result: `made` false, its reason, the node's
+    // sentence. `?slow`: the node takes a few seconds, as a first commit of a big folder would.
+    if (message.kind === 'project.new') {
+      const name = typeof args.name === 'string' ? args.name.trim() : '';
+      if (!name) return badArgs('project.new needs name, the project’s name');
+      const not = (reason, said) => ({ ok: true, result: { made: false, name: null, folder: null, commit: null, lead: null, session: null, refused: reason, said, notes: [] } });
+      const folderName = name.split(/\s+/).filter(Boolean).join('-').toLowerCase();
+      // eslint-disable-next-line no-control-regex
+      if (/[\u0000-\u001f\u007f-\u009f\u2028\u2029]|\p{Cf}|\p{Default_Ignorable_Code_Point}|\u2800/u.test(name) || [...name].length > 100) return not('name', 'A project name can’t hold a control or invisible character.');
+      if (/[/:]/.test(folderName)) return not('name', 'A folder name can’t contain “/” or “:”.');
+      if (!/[\p{L}\p{N}]/u.test(folderName)) return not('name', 'A project name needs at least one letter or number.');
+      if (folderName.startsWith('.')) return not('name', 'A folder name can’t start with “.”: the folder would be hidden.');
+      const root = `${HOME}/projects`;
+      const typed = typeof args.location === 'string' ? args.location.trim().replace(/\/+$/, '') : '';
+      const where = typed || root;
+      if (where.slice(root.length).split('/').some((part) => part.startsWith('.') && part !== '.' && part !== '..') && where.startsWith(root + '/')) {
+        return not('hidden', 'A hidden folder isn’t a project’s place.');
+      }
+      if (where.split('/').some((part) => part === '.' || part === '..') || !(where === root || where.startsWith(root + '/'))) {
+        return not('outside', `A project from here is made in your projects folder, ~/projects, or a folder inside it; ${where.replace(HOME, '~')} isn’t.`);
+      }
+      if (where !== root && !FOLDERS.includes(where)) return not('location', `${where.replace(HOME, '~')} isn’t there.`);
+      const folder = `${where}/${folderName}`;
+      if (FOLDERS.includes(folder) || [...leads.values()].some((lead) => lead.root === folder)) {
+        return not('exists', `There’s already a folder named “${folderName}” in ${where.replace(HOME, '~')}.`);
+      }
+      FOLDERS.push(folder);
+      REPOSITORIES.push(folder);
+      const sid = id(Math.random().toString(16).slice(2, 10).padEnd(8, '0'));
+      const project = `local:project:${Math.random().toString(36).slice(2, 14)}`;
+      const wait = options.slow ? 2600 : 600;
+      return new Promise((resolve) => later(wait, () => {
+        resolve({ ok: true, result: { made: true, name, folder, commit: Array.from({ length: 40 }, (_, at) => '0123456789abcdef'[(at * 7 + name.length) % 16]).join(''),
+          lead: 'started', session: sid, refused: null, said: `“${name}” is made in ${folder.replace(HOME, '~')}, with its git repository and first commit; its lead started.`, notes: [] } });
+        later(400, () => {
+          add(sid, { cwd: folder, role: 'lead', lead: project, status: 'working', since: new Date().toISOString(), startedAt: new Date().toISOString(),
+            title: typeof args.goal === 'string' && args.goal.trim() ? args.goal.trim() : null, detail: 'Reading the project’s records', project });
+          leads.set(project, { named: null, held: 0, reportsWaiting: 0, notice: null, looks: 0, questions: { open: 0, blocking: 0 }, cards: [], told: [], push: null,
+            project, root: folder, session: sid, bound: sid, replaced: [], starting: false, lastStart: 'started', lastStartAt: new Date().toISOString() });
+          emit(put('sessions', sessions, sid), put('leads', leads, project));
+        });
+      }));
     }
     if (message.kind === 'send') {
       const target = sessions.get(args.session);
@@ -1322,11 +1470,11 @@ const ago = (seconds) => new Date(now() - seconds * 1000).toISOString();
   // it showed before, docs/process/v2-no-terminal.md's table B and A5), so their lines can be seen.
   const STARTS = ['lead', 'session.new', 'session.reply', 'session.resume'];
   const BUTTONS = ['config.held', 'config.accept', 'base.show', 'base.accept', 'base.keep', 'shells', 'session.close-shells', 'presets.edit', 'update.check', 'web.revoke',
-    'session.reopen', 'prompt-audit'];
+    'session.reopen', 'prompt-audit', 'project.new'];
   const KINDS = ['chat.page',
     'answer', 'answer.replace', 'tell', 'tell.retract', 'hold', 'send', 'session.draft', 'session.draft.clear', 'session.complete',
     'session.attach', 'session.usage', 'stats', 'session.ports', 'board.task', 'board.image', 'chat.image', 'session.presets', 'brief', 'recent',
-    'mail', 'settings', 'seen', 'push', 'push.decline', 'set', 'stop', ...STARTS, ...BUTTONS].filter((kind) => !options.older || (!STARTS.includes(kind) && !BUTTONS.includes(kind)));
+    'mail', 'settings', 'seen', 'push', 'push.decline', 'set', 'stop', 'questions', 'logs', ...STARTS, ...BUTTONS].filter((kind) => !options.older || (!STARTS.includes(kind) && !BUTTONS.includes(kind)));
   // The node's own words for refusing each (`?refuse=KIND,…`).
   const REFUSE = new Set(options.refuse || []);
   const REFUSALS = {

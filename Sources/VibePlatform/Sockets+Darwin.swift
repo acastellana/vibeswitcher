@@ -1,4 +1,6 @@
 #if canImport(Darwin)
+import VibeKeep
+
 // The Mac's sockets: the calls VibeCore's UnixSocket and the pipes' writers made themselves, moved here unchanged.
 extension Platform {
     /// The process at the other end of a socket, as the kernel names it: its audit token, which holds its pid and
@@ -8,11 +10,12 @@ extension Platform {
 
 extension audit_token_t {
     /// Fields as libbsm's `audit_token_to_pid` and `audit_token_to_pidversion` read them.
-    public var pid: pid_t { pid_t(bitPattern: val.5) }
-    public var pidVersion: Int32 { Int32(bitPattern: val.7) }
+    /// (In the keeper's package, Keeper/Sources/VibeKeep/Sockets+Darwin.swift, moved there unchanged.)
+    public var pid: pid_t { Keep.Sockets.pid(self) }
+    public var pidVersion: Int32 { Keep.Sockets.pidVersion(self) }
 
     /// The same process image: the same pid, not exec'd since (nor a pid reused).
-    public func sameImage(as other: audit_token_t) -> Bool { pid == other.pid && pidVersion == other.pidVersion }
+    public func sameImage(as other: audit_token_t) -> Bool { Keep.Sockets.sameImage(self, as: other) }
 }
 
 extension Platform.Sockets {
@@ -37,12 +40,9 @@ extension Platform.Sockets {
         Sys.write(fd, bytes, count)
     }
 
-    /// The user id of the process at the other end.
-    public static func peerUID(_ fd: Int32) -> uid_t? {
-        var uid: uid_t = 0
-        var gid: gid_t = 0
-        return getpeereid(fd, &uid, &gid) == 0 ? uid : nil
-    }
+    /// The user id of the process at the other end (the keeper's package's,
+    /// Keeper/Sources/VibeKeep/Sockets+Darwin.swift).
+    public static func peerUID(_ fd: Int32) -> uid_t? { Keep.Sockets.peerUID(fd) }
 
     /// The pid of the process at the other end, as it is when asked (see `peerToken`): for a log, not to tell who's
     /// calling.
@@ -55,12 +55,9 @@ extension Platform.Sockets {
     /// The audit token of the process at the other end, as it runs now: its pid and pidversion (an exec changes the
     /// version), which Security's code checks take as the process's image. Not fixed when the connection was made
     /// (nor is LOCAL_PEERPID): it's whichever process last sent or received on the peer's socket, so it moves to a
-    /// forked child that writes, and names the new image after the connector's exec.
-    public static func peerToken(_ fd: Int32) -> Platform.PeerToken? {
-        var token = audit_token_t()
-        var size = socklen_t(MemoryLayout<audit_token_t>.size)
-        return getsockopt(fd, SOL_LOCAL, LOCAL_PEERTOKEN, &token, &size) == 0 ? token : nil
-    }
+    /// forked child that writes, and names the new image after the connector's exec. (The keeper's package's,
+    /// Keeper/Sources/VibeKeep/Sockets+Darwin.swift.)
+    public static func peerToken(_ fd: Int32) -> Platform.PeerToken? { Keep.Sockets.peerToken(fd) }
 
     /// Nothing on the Mac, whose `peerToken` already names whoever last used the peer's socket. (Linux: its socket's
     /// bytes then come with their sender.)

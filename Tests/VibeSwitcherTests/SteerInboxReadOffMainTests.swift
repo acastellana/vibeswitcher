@@ -20,7 +20,8 @@ struct SteerInboxReadOffMainTests {
         let root = home.appendingPathComponent("vibeswitcher")
         try FileManager.default.createDirectory(at: root.appendingPathComponent("steer"), withIntermediateDirectories: true,
                                                 attributes: [.posixPermissions: 0o700])
-        return ChatModel(outbox: ComposerOutbox(url: home.appendingPathComponent("outbox.json")), home: home.path, steerRoot: root)
+        return ChatModel(outbox: ComposerOutbox(url: home.appendingPathComponent("outbox.json")), home: home.path, steerRoot: root,
+                         defaults: temp.defaults("steer-read-off-main-defaults"))
     }
 
     /// Where each of the chat's inbox reads ran, and whether it read `.delivered` too.

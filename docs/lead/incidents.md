@@ -165,3 +165,30 @@ Evidence: docs/lead/progress.md line 2603, committed in 5d597f5d at 10:57 from a
 Task: merges-never-sit-blocked
 Check: task turn-this-incident-into-19 turns it into a check that runs before merge.
 
+## 2026-11-26 08:54:18 A worker's scratch-keychain probe put a macOS "unlock scratch.keychain-db" password dialog on the user's screen twice; the user cancelled both.
+
+Evidence: Task the-app-s-keychain, 2026-11-26 about 09:1x: its worker measured Keychain behaviour with `security` on scratch keychain files; the scratch keychain auto-locked (default 300 s timeout) and a `security add-generic-password` call, which lets UI through, waited on an unlock dialog for about 2 minutes until the worker killed it. The worker reported one dialog; the user reported seeing two. The contract forbade anything that puts a dialog on the user's screen, but nothing enforced it: AGENTS.md's rule names debuggers, not the `security` tool or keychains, and no lint or guard covers `security` calls in tests, scripts or worker probes. A check should make a locked or interactive keychain call impossible from the team's tests and scripts (for example a lint that every `security` invocation in scripts/ and Tests/ goes through one helper that creates the keychain unlocked with no timeout, passes no-UI, and wraps a hard timeout), plus a line in AGENTS.md's hard rules.
+
+Task: the-app-s-keychain
+Check: task turn-this-incident-into-20 turns it into a check that runs before merge.
+
+## 2026-11-26 09:18:28 A worker's Keychain probes left the user's real login keychain locked with a lock timer set, which stopped every new Claude session on the Mac ("Not logged in") and put a stream of real password prompts on the user's screen until the user unlocked it by hand.
+
+Evidence: Task the-app-s-keychain, 2026-11-26 about 08:45–09:20. New worker sessions failed from 08:59 (turn-this-incident-into-20 twice on "Not logged in · Please run /login"; v2-device-keys-slice-2 twice with its tools never connecting). The user's screenshots show "security wants to use the login keychain" repeatedly and "Unapproved caller. SecurityAgent may only be invoked by Apple software". The user found the login keychain's "lock after N minutes" setting in force and set it to 10000 minutes; a login keychain normally has no timer, and a keychain made by `security create-keychain` gets a 300 s timer, the same the worker reported on its scratch keychains. The worker had reported touching only scratch keychains with HOME redirected; which call reached the default keychain is not yet established (the task's written account is to find it; candidates are `security` subcommands that act on the default keychain when no path is given, such as set-keychain-settings and lock-keychain). After the user unlocked the keychain, a new worker started normally. Same root event as the dialog incident recorded earlier today; its check task (turn-this-incident-into-20) was widened to cover default-keychain subcommands and ACL calls.
+
+Task: the-app-s-keychain
+Check: task turn-this-incident-into-21 turns it into a check that runs before merge.
+
+## 2026-11-27 11:28:33 After a power-loss restart the session host's vault started over, and the next install's host handover was refused ("this host has no vault key to check its proof with"), leaving the user on the old host build
+
+Evidence: 2026-11-27. host.log: "the vault started over: the app key on stdin waits for your confirmation" (host started 10:05:39 UTC), "pid 728 didn't prove it's the app" ×3; then at the 11:17 install "couldn't take over: handover refused: this host has no vault key to check its proof with", "going back to …/host/launcher-1795728984". app.log 11:05:41 "host: proof refused: The team's vault could not be opened and was started again…"; 11:17:57.685 "host: handover failed: the old build answered (pid 1293, build 1795728984; asked for 1795774651)". Reboot at 11:01 after the battery ran flat (hold at 09:57).
+
+Task: find-why-the-team
+Check: task turn-this-incident-into-22 turns it into a check that runs before merge.
+
+## 2026-11-27 20:12:12 When AC power returned after a battery hold, held work resumed all at once and the Mac's load went to 230 on 12 cores; the app's main thread froze 14 times in 5 minutes, up to 24.8 s
+
+Evidence: 2026-11-27. Battery hold from 19:54 (9%), released on AC at about 20:04 ("Released: on AC power, after 10 min"); four workers told by the lead to resume at the same moment, two audits and the queued merges released by auto_advance. Hang reports hang-20261127-200139 through hang-20261127-200431 in ~/.vibeswitcher/debug: 1-minute load 21.4 at 20:01:39, 83.2 at 20:02:01, 142.1, 154.7, 182.0, 186.3, 198.0, 207.0, 208.4, 217.6, 224.6, 223.3, 229.8 by 20:04:31; stuck 2.8 s to 24.8 s each, the lead's chat shown; most marked 'likely starvation', two 'real work' with TeamRows.rows on top. The load fell back to 9 (1-minute) by 20:11. The load gate judged room from a low reading at the release, so nothing staggered the starts.
+
+Check: task turn-this-incident-into-23 turns it into a check that runs before merge.
+

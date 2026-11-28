@@ -76,6 +76,8 @@ public final class Requests: @unchecked Sendable {
     let completionIndex = SessionCompletions()
     /// Images web pages are sending in parts (`session.attach`). On `queue`.
     let attachments = SessionAttachments()
+    /// The `logs` reads under way (`NodeLogs.readsInFlight` at most). On `queue`.
+    var logReads = 0
     /// The reply each recorded action (and each page's draft) got, by action id, the newest `repliesKept` (a retry is
     /// answered so).
     var replies: [String: NodeWire.Reply] = [:]
@@ -129,6 +131,10 @@ public final class Requests: @unchecked Sendable {
     var approveBatches: [ApproveBatch] = []
     /// The waits a `build.switch` runs on (a test's shorter ones).
     public var switchTiming = SwitchRequest.Timing()
+    /// What runs `update`'s install (`UpdateInstall.Installer`): the user's node's own build's install-node in a scope of
+    /// its manager, set at the server's start (`ServerStart`); a test's fake. Nil: `update` installs nothing (it is
+    /// refused). Never a request's.
+    public var updateInstaller: UpdateInstall.Installer?
     /// The web's gate and tokens (the live plan's I1, `NodeLive`): what `web.open` and `web.revoke` act on; none:
     /// both are refused.
     public var web: WebAccess?
@@ -451,11 +457,13 @@ public final class Requests: @unchecked Sendable {
         case "start": start(request, reply: reply)
         case "stop": stop(request, reply: reply)
         case "lead": lead(request, reply: reply)
+        case "project.new": newProject(request, reply: reply)
         case "questions": questions(request, reply: reply)
         case "board": board(request, reply: reply)
         case "settings": settings(request, reply: reply)
         case "recent": recent(request, reply: reply)
         case "brief": brief(request, reply: reply)
+        case "logs": logs(request, reply: reply)
         case "update.check": updateCheck(request, reply: reply)
         case "approve.list": approveList(request, reply: reply)
         case "web.pairing": webPairing(request, reply: reply)
@@ -504,6 +512,9 @@ public final class Requests: @unchecked Sendable {
         case "hooks.install", "hooks.remove": hooks(request, reply: reply)
         case "build.switch": buildSwitch(request, reply: reply)
         case "build.seal": buildSeal(request, reply: reply)
+        case "update": update(request, reply: reply)
+        case "journal.ack": journalAck(request, reply: reply)
+        case "claude.autoupdate": claudeAutoUpdate(request, reply: reply)
         case "web.open", "web.revoke":
             if request.kind == "web.open", request.args?["tailnet"]?.bool == true { return webOpenTailnet(request, reply: reply) }
             guard let web else { return reply(.init(re: request.id, error: .init(.refused, "this server has no web listener"))) }
@@ -735,6 +746,7 @@ public final class Requests: @unchecked Sendable {
         case "tell", "tell.retract": return "the lead's chat shows whether the message arrived"
         case "answer.replace": return "`vibeswitcher questions --all` shows the card's answer now"
         case "lead", "session.new", "session.reopen": return "`vibeswitcher status` lists the sessions running now"
+        case "project.new": return "the projects folder shows whether the project's folder was made, and `vibeswitcher status` whether its lead runs"
         case "answer", "approve": return "`vibeswitcher questions` shows whether the card is still open (a shell request's session shows whether its command ran)"
         case "push": return "the repository's remote shows whether the push went"
         case "build.switch": return "`vibeswitcher status` names the build running now"
@@ -861,7 +873,9 @@ public final class Requests: @unchecked Sendable {
 
     /// The card or project a request names, as recorded and shown.
     static func subject(_ request: NodeWire.Request) -> String? {
-        request.args?["card"]?.string ?? request.args?["project"]?.string ?? request.args?["folder"]?.string
+        // A new project by its name (it has no folder yet).
+        if request.kind == "project.new" { return request.args?["name"]?.string }
+        return request.args?["card"]?.string ?? request.args?["project"]?.string ?? request.args?["folder"]?.string
             ?? request.args?["session"]?.string ?? request.args?["key"]?.string ?? request.args?["plugin"]?.string
     }
 
@@ -1039,7 +1053,15 @@ public final class Requests: @unchecked Sendable {
             guard let engine, let root = engine.leads.leads[project]?.root else {
                 return reply(.init(re: request.id, error: .init(.gone, "no lead's project \(ConfigSeal.inert(project, limit: 80)) on this node")))
             }
-            return engine.seeAllDone(root: root) { reply(.init(re: request.id, result: .object(["changed": .bool($0)]))) }
+            guard let mark = request.args?["mark"]?.string, !mark.isEmpty else {
+                return reply(.init(re: request.id, error: .init(.badArgs, "seen for a project needs the displayed mark ID")))
+            }
+            return engine.allDone.see(root: root, id: mark) { outcome in
+                switch outcome {
+                case .success(let changed): reply(.init(re: request.id, result: .object(["changed": .bool(changed)])))
+                case .failure: reply(.init(re: request.id, error: .init(.refused, "The board could not be updated.")))
+                }
+            }
         }
         guard let id = request.args?["session"]?.string, !id.isEmpty else {
             return reply(.init(re: request.id, error: .init(.badArgs, "seen needs a session or a project")))
@@ -1156,7 +1178,7 @@ public final class Requests: @unchecked Sendable {
         return SwitchRequest.doing(session, status: scanned?.status, since: scanned?.statusSince, now: Date())
     }
 
-    private func buildSwitch(_ request: NodeWire.Request, reply: @escaping (NodeWire.Reply) -> Void) {
+    func buildSwitch(_ request: NodeWire.Request, reply: @escaping (NodeWire.Reply) -> Void) {
         guard let commit = request.args?["commit"]?.string else {
             return reply(.init(re: request.id, error: .init(.badArgs, "build.switch needs commit, 40 lowercase hex digits")))
         }

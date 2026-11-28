@@ -36,3 +36,58 @@ public enum ClaudeUpdateHint {
             + "DISABLE_AUTOUPDATER=1 in Claude Code's settings stops these holds"
     }
 }
+
+/// Claude Code's self-update switch (E8): `DISABLE_AUTOUPDATER=1` in the `env` of its own settings
+/// (`<home>/.claude/settings.json`, `HookInstaller.configURL`), the one setting that stops the holds `ClaudeUpdateHint`
+/// explains. Written as the hooks are: only the `env` member replaced, every other byte kept, the file behind a link
+/// edited and a change made meanwhile started over from (`HookInstaller.edit(_:member:change:)`), inside `appWrite` so
+/// the vault seals the app's own write. The `claude.autoupdate` kind's.
+public enum ClaudeAutoUpdate {
+    /// Claude Code's variable (`LeadLaunch.autoUpdaterVariable`, the one each team role's environment carries).
+    public static var variable: String { LeadLaunch.autoUpdaterVariable }
+
+    /// Claude Code's settings in `home`.
+    public static func settingsPath(home: String) -> String { HookInstaller.configURL(for: .claude, home: home).path }
+
+    /// Whether the settings at `home` leave the updater on (no `DISABLE_AUTOUPDATER` set to a value but "0" or "", as
+    /// Claude Code reads it); nil when they can't be read as an object.
+    public static func isOn(home: String) -> Bool? {
+        let path = settingsPath(home: home)
+        guard let data = FileManager.default.contents(atPath: path) else { return FileManager.default.fileExists(atPath: path) ? nil : true }
+        if data.allSatisfy({ [0x20, 0x0A, 0x0D, 0x09].contains($0) }) { return true }
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        guard let env = object["env"] else { return true }
+        guard let variables = env as? [String: Any] else { return nil }
+        guard let value = variables[variable] else { return true }
+        let text = (value as? String) ?? "\(value)"
+        return text.isEmpty || text == "0"
+    }
+
+    /// Turns the updater `on` (the variable taken out of `env`, `env` gone when that leaves it empty) or off (set to
+    /// "1"), through `appWrite` (`LeadVault.appWrite`, then sealed: the server's; a test's records the paths). True when
+    /// the file changed; a refusal, nothing written, when it isn't a JSON object or its `env` isn't one.
+    public static func set(on: Bool, home: String, appWrite: ([String], () throws -> Void) throws -> Void) -> Result<Bool, StartRefusal> {
+        let path = settingsPath(home: home)
+        guard let was = isOn(home: home) else {
+            return .failure(StartRefusal("\(ConfigSeal.inert(path, limit: .max)) isn't a JSON object with an object `env`: nothing was changed", exitCode: 1))
+        }
+        guard was != on else { return .success(false) }
+        do {
+            try appWrite([path]) {
+                try HookInstaller.edit(URL(fileURLWithPath: path), member: "env") { config in
+                    var config = config
+                    var env = config["env"] as? [String: Any] ?? [:]
+                    env[variable] = on ? nil : "1"
+                    config["env"] = env.isEmpty ? nil : env
+                    return config
+                }
+            }
+        } catch {
+            return .failure(StartRefusal("\(ConfigSeal.inert(path, limit: .max)) wasn't changed: \(ConfigSeal.inert(HookInstaller.whyNot(error), limit: .max))", exitCode: 1))
+        }
+        guard isOn(home: home) == on else {
+            return .failure(StartRefusal("\(ConfigSeal.inert(path, limit: .max)) doesn't say what was written: it changed meanwhile; try again", exitCode: 1))
+        }
+        return .success(true)
+    }
+}

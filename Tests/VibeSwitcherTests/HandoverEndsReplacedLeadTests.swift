@@ -13,6 +13,7 @@ import VibeCore
 @Suite(.serialized)
 struct HandoverEndsReplacedLeadTests {
     let routing = ReplacedLeadRoutingTests()
+    let temp = Scratch()
     typealias Reading = LeadController.TurnReading
 
     static let idle = Reading(activity: .idle(background: nil), asking: false, turnEnded: true)
@@ -386,7 +387,7 @@ struct HandoverEndsReplacedLeadTests {
 
     /// The old lead's unsent text goes to the new lead's box, ahead of what's there: nothing is dropped.
     @Test func theOldLeadsUnsentTextIsCarriedToTheNewLeadsBox() {
-        let composer = ComposerDrafts()
+        let composer = ComposerDrafts(defaults: temp.defaults("carried-draft"))
         composer.drafts = ["host:old": "the composer's draft", "host:new": "the new lead's own"]
         composer.attachments = ["host:old": ["/scratch/a.png"], "host:new": ["/scratch/b.png", "/scratch/a.png"]]
         MainWindowController.carryDraft(composer, from: "host:old", to: "host:new", typed: "typed in its terminal")

@@ -131,9 +131,9 @@ struct ProductInventoryTests: LeadTeamFixture {
         let lead = try lead(root, runtime)
         try merge(lead, runtime, root: root, slug: "add-b", file: "src/b.txt")
         let records = Git.run(["rev-parse", "main"], in: root).output
-        #expect(Git.run(["log", "-1", "--format=%s", records], in: root).output == LeadRecords.subject)
+        #expect(LeadRecords.isSubject(Git.run(["log", "-1", "--format=%s", records], in: root).output))
         #expect(files(of: records, root) == ["docs/lead/progress.md", ProductInventory.output])
-        #expect(Git.run(["log", "-1", "--format=%B", records], in: root).output == LeadRecords.message("docs/lead", inventory: true))
+        #expect(Git.run(["log", "-1", "--format=%B", records], in: root).output == LeadRecords.message("docs/lead", inventory: true, adding: [.progress: 1]))
         // Made from the merged code, and the checkout holds what was committed.
         #expect(Git.run(["show", "main:\(ProductInventory.output)"], in: root).output == "# Inventory\na.txt\nb.txt")
         let status = Git.run(["status", "--porcelain", "--", "docs"], in: root).output
@@ -146,7 +146,8 @@ struct ProductInventoryTests: LeadTeamFixture {
         guard case .committed(let next) = lead.records.flush(base: "main") else { Issue.record("not committed"); return }
         #expect(files(of: next, root) == ["docs/lead/decisions.md"])
         try merge(lead, runtime, root: root, slug: "add-d", file: "d.txt")
-        #expect(files(of: Git.run(["rev-parse", "main"], in: root).output, root) == ["docs/lead/progress.md"])
+        // No inventory to make: nothing is committed after the merge, its records waiting for the next that needs them.
+        #expect(Git.run(["rev-parse", "main"], in: root).output == BoardStore(root: root).load().task("add-d")?.merged?.commit)
         #expect(runs(runsFile) == 1)
 
         // Another change to the code: made again, with that merge's records.
@@ -188,9 +189,8 @@ struct ProductInventoryTests: LeadTeamFixture {
         let runtime = FakeRuntime()
         let lead = try lead(root, runtime)
         try merge(lead, runtime, root: root, slug: "add-b", file: "src/b.txt")
-        let records = Git.run(["rev-parse", "main"], in: root).output
-        #expect(Git.run(["log", "-1", "--format=%s", records], in: root).output == LeadRecords.subject)
-        #expect(files(of: records, root) == ["docs/lead/progress.md"])
+        // No inventory made: nothing is committed after the merge, and it landed.
+        #expect(Git.run(["rev-parse", "main"], in: root).output == BoardStore(root: root).load().task("add-b")?.merged?.commit)
         #expect(Git.run(["show", "main:src/b.txt"], in: root).output == "add-b")
         #expect(!FileManager.default.fileExists(atPath: root + "/" + ProductInventory.output))
         // Not run again for the same code at the next flush.

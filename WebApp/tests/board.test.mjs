@@ -160,7 +160,8 @@ test('the batch that cleared the board: its summary, what it cost, and each task
   assert.deepEqual(card.tasks.map((task) => task.word), ['merged', 'merged', 'set aside']);
   assert.equal(allDoneCard(null), null);
   assert.equal(allDoneCard({ ...mark, summary: null, receipts: null, pricesAsOf: null }).cost, null);
-  assert.equal(validate('seen.args', { project: 'local:project:x' }), null);
+  assert.equal(validate('seen.args', { project: 'local:project:x', mark: mark.id }), null);
+  assert.notEqual(validate('seen.args', { project: 'local:project:x', mark: 5 }), null);
 });
 
 test('the all-done card is also an item of the lead’s chat, in the node’s shape', () => {

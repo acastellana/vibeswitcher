@@ -86,7 +86,7 @@ struct RecordsFirstTests: LeadTeamFixture {
         #expect(task.status == .done)
         let onto = try #require(task.merged?.onto)
         #expect(onto != before)
-        #expect(Git.run(["log", "-1", "--format=%s", onto], in: root).output == LeadRecords.subject)
+        #expect(LeadRecords.isSubject(Git.run(["log", "-1", "--format=%s", onto], in: root).output))
         #expect(Git.run(["show", "\(onto):docs/lead/progress.md"], in: root).output.contains("FIXED"))
         #expect(Git.run(["rev-parse", "\(onto)~1"], in: root).output == before)
         let progress = try String(contentsOfFile: root + "/docs/lead/progress.md", encoding: .utf8)
@@ -145,7 +145,7 @@ struct RecordsFirstTests: LeadTeamFixture {
         #expect(task.status == .done)
         // The records commit, on the base as it was; the merge's commit on top of it.
         let onto = try #require(task.merged?.onto)
-        #expect(Git.run(["log", "-1", "--format=%s", onto], in: root).output == LeadRecords.subject)
+        #expect(LeadRecords.isSubject(Git.run(["log", "-1", "--format=%s", onto], in: root).output))
         #expect(Git.run(["rev-parse", "\(onto)~1"], in: root).output == before)
         #expect(Git.run(["show", "\(onto):docs/lead/progress.md"], in: root).output.contains("FIXED"))
         let landed = Git.run(["log", "--format=%s", "\(onto)..main"], in: root).output.split(separator: "\n").map(String.init)
@@ -181,7 +181,8 @@ struct RecordsFirstTests: LeadTeamFixture {
             #expect(task.status == .done, "\(slug) \(task.status): \(batch.text)")
         }
         let landed = Git.run(["log", "--reverse", "--format=%s", "\(before)..main"], in: root).output.split(separator: "\n").map(String.init)
-        #expect(Array(landed.prefix(3)) == [LeadRecords.subject, "add-b's work", "add-c's work"], "\(landed)")
+        #expect(LeadRecords.isSubject(landed.first ?? ""), "\(landed)")
+        #expect(Array(landed.dropFirst().prefix(2)) == ["add-b's work", "add-c's work"], "\(landed)")
         let onto = Git.run(["rev-list", "--reverse", "\(before)..main"], in: root).output.split(separator: "\n").first.map(String.init) ?? ""
         #expect(Git.run(["show", "\(onto):docs/lead/progress.md"], in: root).output.contains("FIXED"))
     }
@@ -225,7 +226,7 @@ struct RecordsFirstTests: LeadTeamFixture {
         let head = Git.run(["rev-parse", "main"], in: root).output
         #expect(head != before)
         #expect(Git.run(["rev-parse", "main~1"], in: root).output == before)
-        #expect(Git.run(["log", "-1", "--format=%B", "main"], in: root).output == LeadRecords.message("docs/lead"))
+        #expect(Git.run(["log", "-1", "--format=%B", "main"], in: root).output == LeadRecords.message("docs/lead", adding: [.decisions: 1, .progress: 1]))
         let files = Git.run(["show", "--name-only", "--format=", "main"], in: root).output.split(separator: "\n").map(String.init)
         #expect(Set(files) == ["docs/lead/decisions.md", "docs/lead/progress.md"], "\(files)")
         #expect(Git.run(["show", "main:a.txt"], in: root).output == "one")

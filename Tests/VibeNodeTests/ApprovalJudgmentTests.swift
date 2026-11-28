@@ -16,7 +16,7 @@ struct ApprovalJudgmentTests {
     static let pid: pid_t = 9_000_901
     static let commandLine = Data(repeating: 0xc1, count: 20)
     static let user = PeerFacts(pid: pid, uid: getuid(), cgroup: nil, ancestry: [.init(pid: pid, startTicks: 5)], terminal: .named("ttytest-mac"),
-                                sessionMarker: nil, underRunner: false)
+                                sessionMarker: false, underRunner: false, coalition: ApprovalVoiceTests.terminalCoalition)
 
     /// A `Requests` on the Mac's rule with `person`, over a link with no host, with an engine to hold cards.
     private func requests(_ person: any ApprovalVoice.Authenticator, commandLinePeer: Bool = true, hardened: Bool = true,
@@ -28,7 +28,7 @@ struct ApprovalJudgmentTests {
         let requests = Requests(link: link, sessions: nil, rule: VoiceRule(mode: .approval, scopes: [], uid: getuid(), says: VoiceRule.approvalSays),
                                 root: root, hostSocket: scratch.url("h.sock").path, commit: "test", hostPID: 1)
         requests.engine = LeadEngine(root: root, nodeRoot: nil, link: link, clock: nil)
-        requests.approval = ApprovalVoice(authenticator: person, commandLine: Self.commandLine, runs: { token, code in
+        requests.approval = ApprovalVoice(authenticator: person, commandLine: Self.commandLine, coalition: ApprovalVoiceTests.nodeCoalition, runs: { token, code in
             commandLinePeer && code == Self.commandLine && token.pid == Self.pid
         }, hardened: { _ in hardened })
         requests.approvalLinkWelcomed = { welcomed }

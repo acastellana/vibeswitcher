@@ -543,17 +543,35 @@ public struct TestLock: Sendable {
     }
 
     /// The slots held now, with who holds them: a slot is tried (and let go at once), so a holder that died isn't
-    /// counted, whatever its note says.
-    public func holders() -> [Holder] {
+    /// counted, whatever its note says. A slot that couldn't be looked at is left out (`readHolders` says so).
+    public func holders() -> [Holder] { scan().holders }
+
+    /// As `holders`, nil when a slot couldn't be looked at: the folder couldn't be listed, or a slot file in it couldn't
+    /// be opened (one that doesn't exist was never taken). The load gate counts that as a slot held (`MacLoad.room`).
+    public func readHolders() -> [Holder]? {
+        let scanned = scan()
+        return scanned.unreadable ? nil : scanned.holders
+    }
+
+    private func scan() -> (holders: [Holder], unreadable: Bool) {
         // Every slot there is: another project's heavy_slots may be more than this one's.
-        let files = (try? FileManager.default.contentsOfDirectory(atPath: directory)) ?? []
+        var unreadable = false
+        let files: [String]
+        do { files = try FileManager.default.contentsOfDirectory(atPath: directory) } catch {
+            // No folder yet: no slot was ever taken.
+            files = []
+            if FileManager.default.fileExists(atPath: directory) || !Self.isMissing(error) { unreadable = true }
+        }
         let highest = files.compactMap { name -> Int? in
             guard isSlot((directory as NSString).appendingPathComponent(name)) else { return nil }
             return name == "test-build.lock" ? 1 : Int(name.dropFirst("test-build-".count).dropLast(".lock".count))
         }.max() ?? 1
-        return (1...max(slots, highest)).compactMap { index in
+        let holders: [Holder] = (1...max(slots, highest)).compactMap { index in
             let fd = open(slotPath(index), O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
-            guard fd >= 0 else { return nil }
+            guard fd >= 0 else {
+                if errno != ENOENT { unreadable = true }
+                return nil
+            }
             defer { close(fd) }
             if flock(fd, LOCK_EX | LOCK_NB) == 0 {
                 flock(fd, LOCK_UN)
@@ -561,6 +579,15 @@ public struct TestLock: Sendable {
             }
             return holder(index)
         }
+        return (holders, unreadable)
+    }
+
+    /// The error says the file or folder doesn't exist.
+    private static func isMissing(_ error: Error) -> Bool {
+        let error = error as NSError
+        if error.domain == NSCocoaErrorDomain, error.code == NSFileReadNoSuchFileError { return true }
+        if let underlying = error.userInfo[NSUnderlyingErrorKey] as? NSError, underlying.domain == NSPOSIXErrorDomain, underlying.code == Int(ENOENT) { return true }
+        return false
     }
 
     /// Waits in line for a slot up to `timeout` (checking `cancel`), takes the first it may, and writes `what` (run in

@@ -464,16 +464,16 @@ struct LeadRemoteTests: LeadTeamFixture {
         let merged = lead.call("merge_remote", [:])
         #expect(!merged.isError, "\(merged.text)")
         #expect(merged.text.contains("Merged origin/main into main as a fast-forward: 1 commit from the remote"), "\(merged.text)")
-        // main moved to the remote's tip (then the lead's records commit, after the merge, on top of it).
-        #expect(isAncestor(tip, of: "main", in: scene.root))
+        // main moved to the remote's tip, and no records commit after it: the remote left the records alone.
+        #expect(head(scene.root) == tip)
         let first = Git.run(["rev-list", "--first-parent", "main"], in: scene.root).output.split(whereSeparator: \.isNewline).map(String.init)
         #expect(first.contains(tip), "\(first)")
         #expect(Git.run(["rev-list", "--merges", "main"], in: scene.root).output.isEmpty)
         #expect(read(scene.root + "/b.txt") == "bee\n")
-        // The uncommitted lines are still there, in the file and then in the records' commit.
+        // The uncommitted lines are still there in the file, uncommitted, for what next needs them in git.
         #expect(read(progress).contains("- uncommitted line") && read(progress).contains("Fetched origin/main"))
         #expect(read(progress).contains("Merged origin/main into main"))
-        #expect(Git.run(["show", "main:docs/lead/progress.md"], in: scene.root).output.contains("- uncommitted line"))
+        #expect(!Git.run(["show", "main:docs/lead/progress.md"], in: scene.root).output.contains("- uncommitted line"))
         // Taken as the user's work: the vault's head is main's, so a merge of a task wouldn't refuse it as a move.
         #expect(try vault.head(root: scene.root, branch: "main") == head(scene.root))
         #expect(lead.call("merge_remote", [:]).text.contains("Nothing to merge"))

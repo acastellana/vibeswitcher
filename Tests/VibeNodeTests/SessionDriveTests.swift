@@ -210,6 +210,37 @@ struct SessionDriveTests {
         try await harness.waitFor { harness.agent["trusted"] as? Bool == true }
     }
 
+    /// A multi-select answered with `choices` (the no-terminal inventory's C5): the boxes ticked as asked, the free-text
+    /// row's words typed, then Submit; `choice` on it, and `choices` on a single choice, refused, nothing typed.
+    @Test func aMultiSelectIsTickedAndSubmitted() async throws {
+        let world = try await CardWorld.make(scratch)
+        defer { world.stop() }
+        let harness = try await claude(world)
+        let id = harness.session.id.uuidString
+        let question: [String: Any] = ["question": "Which toppings?", "header": "Toppings",
+                                       "options": [["label": "Cream"], ["label": "Nuts"], ["label": "Sprinkles"]], "multiSelect": true]
+        harness.tell(["op": "ask", "questions": [question]])
+        try await harness.screenShows { $0.contains("[ ] Sprinkles") }
+        try await harness.waitFor { harness.agent["mode"] as? String == "question" }
+        let menu = try #require(SessionPrompt.menu(on: harness.screen))
+        #expect(menu.multiSelect && menu.options == ["Cream", "Nuts", "Sprinkles", "Type something"], "\(menu)")
+        let one = try #require(await world.ask("session.reply", ["session": .string(id), "choice": .int(1)]))
+        #expect(one.error?.code == NodeWire.Code.refused.rawValue && one.error?.message.contains("give them as choices") == true, "\(one)")
+        let past = try #require(await world.ask("session.reply", ["session": .string(id), "choices": .array([.int(1), .int(5)])]))
+        #expect(past.error?.message.contains("has 4 options, not 5") == true, "\(past)")
+        let twice = try #require(await world.ask("session.reply", ["session": .string(id), "choices": .array([.int(1), .int(1)])]))
+        #expect(twice.error?.code == NodeWire.Code.badArgs.rawValue, "\(twice)")
+
+        let reply = try #require(await world.ask("session.reply", ["session": .string(id), "choices": .array([.int(1), .int(3), .int(4)]),
+                                                                    "text": .string("Honey"), "question": .string(menu.question),
+                                                                    "options": .array(menu.options.map(NodeWire.Value.string))]))
+        #expect(reply.ok && reply.result?["choices"] == .array([.int(1), .int(3), .int(4)]), "\(reply)")
+        #expect(reply.result?["options"] == .array([.string("Cream"), .string("Sprinkles"), .string("Honey")]), "\(reply)")
+        // Submitted: the review tab (a single choice, answered as before) shows next.
+        try await harness.screenShows { $0.contains("Submit answers") }
+        #expect((harness.agent["answers"] as? [String: [String]])?["0"] == ["Cream", "Sprinkles", "Honey"], "\(harness.agent)")
+    }
+
     // MARK: voice
 
     @Test func aSessionsProcessAToolServerAndAWebPageCannotDrive() async throws {

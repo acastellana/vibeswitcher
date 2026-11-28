@@ -50,10 +50,11 @@ struct LeadStartTests {
             _ = await eventually(timeout: 60) { self.queue.sync { self.link.state == .connected } }
         }
 
-        func start(_ folder: String? = nil, goal: String? = nil, takeHead: Bool = false, replace: Bool = false) async -> LeadEngine.StartOutcome {
+        func start(_ folder: String? = nil, goal: String? = nil, takeHead: Bool = false, replace: Bool = false,
+                   stillMade: ((String?) -> String?)? = nil) async -> LeadEngine.StartOutcome {
             // Waited on, not awaited as a continuation: a start that never answers fails the test, it doesn't hang it.
             let answer = Locked<LeadEngine.StartOutcome?>(nil)
-            engine.startLead(folder: folder ?? repo, goal: goal, takeHead: takeHead, replace: replace) { answer.value = $0 }
+            engine.startLead(folder: folder ?? repo, goal: goal, takeHead: takeHead, replace: replace, stillMade: stillMade) { answer.value = $0 }
             _ = await eventually(timeout: 180) { answer.value != nil }
             return answer.value ?? .refused("the test: no answer to the start in 180 s")
         }
@@ -190,6 +191,31 @@ struct LeadStartTests {
         #expect(world.leads().count == 1)
         #expect(world.spawns.value.count == 1)
         #expect(world.spawns.value.first?.command?.contains("a goal asked meanwhile") == true, "\(world.spawns.value.first?.command ?? "")")
+    }
+
+    /// The re-check's N-r2: a pinned start (`project.new`'s) held for the host's welcome is asked its pin again when it is
+    /// taken up, and one that no longer holds starts nothing; one taken without waiting is asked it again just before the
+    /// launch (its third ask: `startLead`'s two, then `prepare`'s), and refused there.
+    @Test func aPinnedStartIsAskedItsPinAgainAfterTheWaitAndBeforeTheLaunch() async throws {
+        let world = try await world(connect: false)
+        defer { world.stop() }
+        let pin = Locked<String?>(nil)
+        #expect(await world.start(goal: "a goal", stillMade: { _ in pin.value }) == .waiting)
+        pin.value = "the folder made was swapped while it waited"
+        await world.connect()
+        #expect(await eventually(timeout: 120) { world.stored?.lastStart == "refused: the folder made was swapped while it waited" },
+                "\(String(describing: world.stored))")
+        #expect(world.spawns.value.isEmpty && world.leads().isEmpty)
+        #expect(world.held().isEmpty, "\(world.held())")
+
+        let asks = Locked<[String?]>([])
+        let outcome = await world.start(goal: "a goal", stillMade: { root in
+            asks.mutate { $0.append(root) }
+            return asks.value.count >= 3 ? "swapped just before the launch" : nil
+        })
+        #expect(outcome == .refused("swapped just before the launch"), "\(outcome)")
+        #expect(asks.value == [nil, world.repo, world.repo], "\(asks.value)")
+        #expect(world.spawns.value.isEmpty && world.leads().isEmpty)
     }
 
     // MARK: A running lead

@@ -196,8 +196,10 @@ public final class NodeWebListener: @unchecked Sendable {
         }
         made.onRequest = { request in
             guard let asset = assets.asset(path: request.path) else { return .plain(404) }
-            // A file the browser holds already (its ETag in If-None-Match) is 304 with no body (`WebAssets.response`).
-            let answer = WebAssets.response(to: asset, ifNoneMatch: request.headers["if-none-match"])
+            // A file the browser holds already (its ETag in If-None-Match) is 304 with no body; text goes gzipped to a
+            // browser that takes it (`WebAssets.response`, D26).
+            let answer = WebAssets.response(to: asset, ifNoneMatch: request.headers.all("if-none-match").joined(separator: ","),
+                                            acceptEncoding: request.headers.all("accept-encoding").joined(separator: ","))
             var response = WebResponse(status: answer.status, body: answer.body)
             response.headers = answer.headers.map { WebHeaders.Field(name: $0.0, value: $0.1) }
             return response

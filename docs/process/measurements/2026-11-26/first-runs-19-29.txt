@@ -1,0 +1,48 @@
+
+######## agent-bootout.txt
+== agent-bootout (2026-11-26 19:29, run from: a shell session of the app's host (a shell card))
+== launchctl print, the job's own lines
+	path = /private/tmp/mac-measure.Dxf8od/dev.vibeswitcher.measure.agent-bootout.42989.plist
+	type = LaunchAgent
+	state = running
+	program = /bin/sh
+	domain = gui/501 [100020]
+	pid = 43021
+== parsed as NodeAgent.printed does (one tab in, no deeper)
+program=/bin/sh
+pid=43021
+main pid 43021: coalition=read resource=241971 jetsam=241972
+group pid 43028: coalition=read resource=241971 jetsam=241972
+setsid pid 43027: coalition=read resource=241971 jetsam=241972
+== after bootout (once the job's own process ended, or 5 s)
+main (43021): ended
+group (43028): ended
+setsid (43027): still running
+
+######## escape-launchctl.txt
+== escape-launchctl (2026-11-26 19:29, run from: a shell session of the app's host (a shell card))
+== this script's own facts (run from: a shell session of the app's host (a shell card))
+self: pid=41419 ppid=41317 pgid=41317 sid=35406 uid=501
+dev_tty=opens
+VIBESWITCHER_SESSION=set CLAUDECODE=unset
+pid=41419
+bsdinfo=read ppid=41317 pgid=41317 uid=501 status=2 tty=ttys005 start_us=1795717737378539
+shortbsdinfo=read ppid=41317 pgid=41317 uid=501 status=2
+kern_proc_pid=read ppid=41317 tdev=ttys005
+pidpath=/private/tmp/mac-measure.hZvmc4/bin/facts
+coalition=read resource=1841 jetsam=1842
+procargs=read bytes=2924 argc=1 environment_entries=29 MEASURE_MARK_seen=0
+cs_status=0x22020201 valid=1 adhoc=0 get_task_allow=0 hard=0 kill=1 runtime=0 linker_signed=1 platform=0 debugged=0
+responsible=41419
+self: pid=42392 ppid=1 pgid=42392 sid=1 uid=501
+dev_tty=none
+VIBESWITCHER_SESSION=unset CLAUDECODE=unset
+pid=42392
+bsdinfo=read ppid=1 pgid=42392 uid=501 status=2 tty=none start_us=1795717747547917
+shortbsdinfo=read ppid=1 pgid=42392 uid=501 status=2
+kern_proc_pid=read ppid=1 tdev=none
+pidpath=/private/tmp/mac-measure.hZvmc4/bin/facts
+coalition=read resource=241969 jetsam=241970
+procargs=read bytes=828 argc=1 environment_entries=11 MEASURE_MARK_seen=0
+cs_status=0x22020201 valid=1 adhoc=0 get_task_allow=0 hard=0 kill=1 runtime=0 linker_signed=1 platform=0 debugged=0
+responsible=42392

@@ -103,6 +103,16 @@ public enum LeadLaunch {
                             "Bash(vmmap:*)", "Bash(malloc_history:*)", "Bash(dtrace:*)", "Bash(dtruss:*)",
                             "Bash(sudo dtrace:*)", "Bash(sudo dtruss:*)"]
 
+    /// The `security` command-line tool, to every role: it reaches your Keychains, where VibeSwitcher keeps the app's
+    /// key and the vault's (`AppProof.keychainService`, `VaultStorage.keychainService`). On 2026-11-26 a measurement
+    /// on scratch keychains showed another program of your account can replace them with it (it can't read them), and
+    /// its probing crashed the Mac's keychain daemon and locked your login keychain. A first layer, spelled as
+    /// `gitAround` spells git's other names; the role's `PreToolUse` hook refuses it by its name in any folder and
+    /// behind any wrapper the git guard reads (`RefusedGit.keychainTool`). Keychain checks are the user's, in a
+    /// keyboard session (`LeadPrompts.keychain`). scripts/build-app.sh runs it in your own shell, where no rule applies.
+    static let keychainTool = ["security", "/usr/bin/security", "env security", "/usr/bin/env security", "command security",
+                               "xcrun security", "sudo security", "exec security"].map { "Bash(\($0):*)" }
+
     /// Claude Code's raw cross-session messaging (another session on the Mac, by its name). Anyone on the Mac can send
     /// one and claim any name, and a role that could reach every session could steer them: a lead tells another
     /// project's lead with `tell_lead` (`LeadMail`: the sender filled in by the vault, guarded, recorded), and a worker
@@ -275,10 +285,10 @@ public enum LeadLaunch {
         switch role {
         case .lead:
             return readOnly + gitWrites + gitAround + remoteWrites + fileWrites + privateFiles + outsideReads + userSettings + killsByName
-                + crossSession + LinuxLaunch.denyRules(for: .lead)  // Linux's own (S10): none on the Mac.
+                + keychainTool + crossSession + LinuxLaunch.denyRules(for: .lead)  // Linux's own (S10): none on the Mac.
         case .verifier:
             return readOnly + gitWrites + gitAround + remoteWrites + fileWrites + privateFiles + outsideReads + userSettings + killsByName + debuggers
-                + crossSession + claudeHome + claudeStores
+                + keychainTool + crossSession + claudeHome + claudeStores
                 + LinuxLaunch.denyRules(for: .verifier)  // Linux's own (S10): none on the Mac.
         case .worker:
             // Edits and commits on its own branch, and brings it up to date with the lead's (`git merge <base>`, what
@@ -303,8 +313,8 @@ public enum LeadLaunch {
                 rules += ["Edit(\(records)/**)", "Write(\(records)/**)", "Bash(git add \(records)*)", "Bash(git rm \(records)*)",
                           "Bash(git rm * \(records)*)"]
             }
-            return rules + gitAround + remoteWrites + privateFiles + outsideReads + userSettings + killsByName + debuggers + crossSession + claudeHome
-                + claudeStores + LinuxLaunch.denyRules(for: .worker)  // Linux's own (S10): none on the Mac.
+            return rules + gitAround + remoteWrites + privateFiles + outsideReads + userSettings + killsByName + debuggers + keychainTool
+                + crossSession + claudeHome + claudeStores + LinuxLaunch.denyRules(for: .worker)  // Linux's own (S10): none on the Mac.
         }
     }
 
@@ -879,6 +889,8 @@ public enum LeadLaunch {
          "Codex's TUI loads them whatever a session says (only `codex exec --ignore-rules` skips them); keep them narrow, and the Claude audit reads what the branch did"),
         ("pkill, killall and debuggers refused by rule",
          "its brief, and its sandbox: a sandboxed command signals only its own processes"),
+        ("the `security` command refused by rule and by the hook (your Keychains, where VibeSwitcher's keys are)",
+         "its brief only: Keychain checks are done in a keyboard session with the user"),
     ]
 
     /// Codex's own flags a project's Codex command may carry that would loosen the worker's sandbox or clash with the

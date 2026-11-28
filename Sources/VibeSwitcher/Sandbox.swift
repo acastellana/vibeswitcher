@@ -1591,7 +1591,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("answer", "answers the fake lead's open questions: its row reads as its terminal does again"),
         ("leadmail", "writes made-up messages between the fake lead and other projects' leads (start the lead first) to its private lead-mail record, one of them refused, and shows its Team tab: they're under Between leads"),
         ("extras", "adds to the fake lead's board (start the lead first) a proposal on a timer, a revised question, a task needing an audit, an all-done card and two results"),
-        ("phone-show off|notinstalled|notrunning|https|portinuse|expired|unreadable", "Settings › Phone as in that setup state, with nothing started (run phone first to have a phone listed): the switch off, each problem under it, an expired pairing code, a list of paired phones that can't be read"),
+        ("phone-show off|notinstalled|notrunning|https|portinuse|expired|unreadable|unverified", "Settings › Phone as in that setup state, with nothing started (run phone first to have a phone listed): the switch off, each problem under it, an expired pairing code, a list of paired phones that can't be read, or one VibeSwitcher didn't write"),
         ("phone", "serves the phone's web app for this sandbox on a port of 127.0.0.1, one phone paired: STATE/phone.json says where, its token, and the Host and Tailscale-User-Login headers to send (as tailscale serve would)"),
         ("dictation key|nokey|note|ack|press|release|letgo|cancel|turnon", "push to talk in the composer (no microphone, no OpenAI: a made-up recording and transcript): a key saved or none, the one-time note about OpenAI shown again on the next press, the mic held down in the selected session's composer (a Claude session's through its fake /voice, see tell's \"voice\" op: until it listens or says why not), let go (release: until the text is in; letgo: once it waits for Claude's text), its ✕ clicked, the notice's Turn on Claude dictation clicked"),
         ("soak [MINUTES [every SECONDS] [hour CYCLES] [worker-mb MB] [without LIST]]|stop", "a working day's actions on a timer, each cycle (every 20 s): a fake Claude started and its chat shown, a prompt sent and a long reply streamed, a dictation through its /voice, the lead's chat and its Team tab, its board's checkpoints, an accessibility client's walk of the window, the oldest fake past 3 ended and removed; the footprint (the process's own task_info) and the per-session state each minute, what grew by class at minute 2 and the end, in STATE/soak.log. a wallet request filed in the chat, sent and answered, the wallet desk's clock moved the cycle's share of a simulated hour (CYCLES cycles, default 30) with its 15 s refreshes; each simulated hour's least footprint and the live counters (wallet desk, timers, boards), and RESULT soak-simulated-hour-growth-mb at the end. every other cycle a worker shaped like a real one (a task on the lead's board, a transcript of MB MB of tool calls, default 4, its steer inbox, its chat and its terminal fed a build's output) ended by the role sweep, its footprint once removed, and RESULT soak-worker-growth-mb. LIST leaves out sessions, stream, dictation, team, ax, reports, wallet, workers. With no MINUTES: the log so far"),
@@ -2186,6 +2186,24 @@ private final class Driver: NSObject, NSApplicationDelegate {
         }),
         // What shows while Apple's installer runs.
         ("installing-tools", { _ in ToolInstaller.waitingPanel(ToolInstaller.waitingText) {} }),
+        // The session host doesn't take the app's proof (another key: a reinstall, a Keychain reset, or a key another
+        // program replaced), and the vault that started over: the alert `HostClient.confirmKeyReset` shows, made here
+        // with the host's own refusals and never answered (nothing is asked of a host).
+        ("key-refused", { _ in
+            let alert = HostClient.keyResetAlert(reason: "That isn't the key this session host knows for VibeSwitcher.", live: 0)
+            alert.layout()
+            return alert.window
+        }),
+        ("vault-started-over", { _ in
+            let alert = HostClient.keyResetAlert(reason: AppProof.vaultStartedOver, live: 0)
+            alert.layout()
+            return alert.window
+        }),
+        ("vault-key-unreadable", { _ in
+            let alert = HostClient.keyResetAlert(reason: AppProof.vaultKeyUnreadable, live: 0)
+            alert.layout()
+            return alert.window
+        }),
     ] }
 
     /// The `menu-bar-dots` sheet's sessions: made up, one in each status a dot can show.
@@ -2865,7 +2883,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         case "phone": servePhone(reply)
         case "phone-show":
             if settings == nil { showSettings(.phone) }
-            guard sharedPhone().showInSandbox(rest) else { return reply(false, "phone-show off|notinstalled|notrunning|https|portinuse|expired|unreadable") }
+            guard sharedPhone().showInSandbox(rest) else { return reply(false, "phone-show off|notinstalled|notrunning|https|portinuse|expired|unreadable|unverified") }
             settle { reply(true, "Settings › Phone shows \(rest)") }
         case "dictation": dictate(rest, reply)
         case "soak": soak(rest, reply)

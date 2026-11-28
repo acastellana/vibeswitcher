@@ -70,7 +70,9 @@ public enum SwitchSeal {
               let swapped = swap(bytes) else { return nil }
         var lines: [ConfigSeal.FolderLine] = []
         var count = 0
-        ConfigSeal.walk(watched.path, relative: "", name: watched.name, count: &count) { lines.append($0) }
+        // Within the look's own budget for a folder (`ConfigSeal.folderBudget`), so the hash is the look's.
+        var budget = ConfigSeal.folderBudget
+        ConfigSeal.walk(watched.path, relative: "", name: watched.name, count: &count, budget: &budget) { lines.append($0) }
         var found = false
         func hash(_ data: Data) -> String {
             var hasher = SHA256()

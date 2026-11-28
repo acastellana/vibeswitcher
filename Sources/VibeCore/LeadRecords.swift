@@ -5,10 +5,15 @@ import Foundation
 /// the plan's reasoning survives a deleted `.vibeswitcher`, another Mac or a new lead, and `decisions-archive.md`, where
 /// `archive_decisions` moves the decisions every lead start no longer needs to read. The board stays local.
 ///
-/// The lead itself may not edit files or run git that writes; its tool server commits for it, batched (before and after each
-/// merge, and at most every `interval` otherwise), as small commits of their own that touch only those two files
-/// (`Worktrees.commitFiles`), and the product inventory when the code before it makes another (`ProductInventory`):
-/// the user's own staged and unstaged changes in the main checkout stay as they are. A
+/// The lead itself may not edit files or run git that writes; its tool server writes them to disk at once and commits
+/// them for it only when something needs them in git, as one commit for all written since the last: before a merge's
+/// rebase and tests (`commitBeforeMerge`), before a push request records the head (`push_remote`), at a lead handover
+/// (a new lead's first call), for a redaction (`redact_record`), and when the remote's commits change them
+/// (`merge_remote`); after a merge, a revert or merge_remote only when the code it landed makes another product
+/// inventory (`commitInventory`). On 2026-11-25 and 26 a timer committing every 5 minutes made about 120 of the 140
+/// commits on main, with no merge among most of them. The commits are small and of their own, touching only the
+/// records (`Worktrees.commitFiles`) and the product inventory when the code before it makes another
+/// (`ProductInventory`): the user's own staged and unstaged changes in the main checkout stay as they are. A
 /// commit takes the same lock as a merge into the branch, so none lands between a merge's rebase-and-test and its
 /// fast-forward, and it records the branch's new head in the vault as the lead's own (only the lead's session may),
 /// so the next merge's check that nothing else moved the branch takes it.
@@ -50,12 +55,28 @@ public final class LeadRecords: @unchecked Sendable {
         case failed(String)
     }
 
+    /// The subject of a records commit that adds no entry of its own (a redaction, an archive, the inventory), and of
+    /// every one before 2026-11-27.
     public static let subject = "Lead: decisions and progress"
+
+    /// A records commit's subject: how many entries of each kind it adds ("Lead: 3 decisions, 41 progress lines"), or
+    /// `subject` when it adds none.
+    static func subject(adding counts: [Kind: Int]) -> String {
+        let parts = [(Kind.decisions, "decision", "decisions"), (.progress, "progress line", "progress lines"), (.incidents, "incident", "incidents")]
+            .compactMap { kind, one, many in counts[kind].flatMap { $0 > 0 ? "\($0) \($0 == 1 ? one : many)" : nil } }
+        return parts.isEmpty ? subject : "Lead: " + parts.joined(separator: ", ")
+    }
+
+    /// Whether `line` is a records commit's subject, either form.
+    public static func isSubject(_ line: some StringProtocol) -> Bool {
+        line == subject || line.range(of: #"^Lead: \d+ (decisions?|progress lines?|incidents?)(, \d+ (decisions?|progress lines?|incidents?))*$"#,
+                                      options: .regularExpression) != nil
+    }
 
     /// No trailer (Co-Authored-By or any other): a project's workflow may refuse them (project-c's regression_command
     /// does), and these commits land on its base among its own.
-    static func message(_ dir: String, inventory: Bool = false, redactions: [LeadRedaction] = []) -> String {
-        "\(subject)\n\nThe project lead's \(dir)/decisions.md, \(dir)/progress.md, \(dir)/incidents.md, \(dir)/decisions-archive.md and \(dir)/progress-archive.md"
+    static func message(_ dir: String, inventory: Bool = false, redactions: [LeadRedaction] = [], adding counts: [Kind: Int] = [:]) -> String {
+        "\(subject(adding: counts))\n\nThe project lead's \(dir)/decisions.md, \(dir)/progress.md, \(dir)/incidents.md, \(dir)/decisions-archive.md and \(dir)/progress-archive.md"
             + (inventory ? ", and \(ProductInventory.output) as \(ProductInventory.script) makes it from the code before this commit," : "")
             + " committed by VibeSwitcher for the lead (its tool server); nothing else is in this commit."
             + (redactions.isEmpty ? "" : "\n\nRedacted by the lead (redact_record), each line replaced only to clear a lint:\n"
@@ -70,7 +91,7 @@ public final class LeadRecords: @unchecked Sendable {
     /// The lead's own moves of the base the vault couldn't record: this commit, and the merges (`checkBaseMoves`), take
     /// them instead of waiting on them as moves nobody made.
     let landed = LandedMoves()
-    /// The least time between two commits, but for the one after a merge.
+    /// The least time between two of the timer's passes (`tick`), which commit nothing but a redaction left waiting.
     public var interval: TimeInterval = 300
     /// How long a commit waits for a held index.lock in the main checkout.
     var lockWait: TimeInterval = 5
@@ -79,7 +100,7 @@ public final class LeadRecords: @unchecked Sendable {
     /// A test's stand-in for a route gone wrong or for git failing, in every landing's check (`Worktrees.Landing.probe`).
     var landingProbe: Worktrees.LandingProbe?
     private let lock = NSLock()
-    private var lastFlush: Date
+    private var lastTick: Date
     private var lastOutcome: Outcome?
     private var timer: DispatchSourceTimer?
     /// The product inventory last made (`ProductInventory`), and what from (its key): made again only when that changes,
@@ -89,7 +110,7 @@ public final class LeadRecords: @unchecked Sendable {
     public init(store: BoardStore, vault: LeadVault, now: Date = Date()) {
         self.store = store
         self.vault = vault
-        lastFlush = now
+        lastTick = now
     }
 
     deinit { timer?.cancel() }
@@ -105,22 +126,57 @@ public final class LeadRecords: @unchecked Sendable {
     public func flush(base: String, now: Date = Date(), holdingBaseLock: Bool = false, inventory withInventory: Bool = true) -> Outcome {
         lock.lock()
         defer { lock.unlock() }
-        lastFlush = now
         let outcome = commit(base: base, now: now, holdingBaseLock: holdingBaseLock, inventory: withInventory)
         lastOutcome = outcome
         return outcome
     }
 
-    /// A flush when `interval` has passed since the last one; nil when it isn't due.
+    /// The timer's pass, once `interval` has passed since the last: progress.md's earlier months roll over to its
+    /// archive, on disk, and nothing is committed but a redaction (`redact_record`) whose commit had to wait (a merge
+    /// ran): the lines it clears fail a lint on `base` for every worker that branches from it meanwhile. Nil when it
+    /// isn't due or committed nothing; else what the flush did. Records are otherwise committed only when something
+    /// needs them in git (see the type's comment): until 2026-11-27 this committed them every 5 minutes.
     @discardableResult
     public func tick(base: String, now: Date = Date()) -> Outcome? {
-        due(now) ? flush(base: base, now: now) : nil
+        guard due(now, taking: true) else { return nil }
+        try? store.withRecordsLock { _ = try Self.rollProgress(store, now: now) }
+        return redactionWaits(on: base) ? flush(base: base, now: now) : nil
     }
 
-    private func due(_ now: Date = Date()) -> Bool {
+    /// Whether a redaction waits for its commit: its new line is in its file and not on `base` yet. One whose line has
+    /// left the file since (archived, rolled over) is never carried by a commit, and would have every pass commit.
+    private func redactionWaits(on base: String) -> Bool {
+        let lines = { (text: String) in Set(text.components(separatedBy: "\n").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }) }
+        return LeadRedaction.pending(store).contains { redaction in
+            let path = (root as NSString).appendingPathComponent(redaction.file)
+            guard let text = try? String(contentsOfFile: path, encoding: .utf8), lines(text).contains(redaction.new) else { return false }
+            let committed = Git.run(["cat-file", "blob", "\(base):\(redaction.file)"], in: root)
+            return !(committed.ok && lines(committed.output).contains(redaction.new))
+        }
+    }
+
+    /// Whether a pass is due; `taking`: it starts now, the next one due `interval` later.
+    private func due(_ now: Date = Date(), taking: Bool = false) -> Bool {
         lock.lock()
         defer { lock.unlock() }
-        return now.timeIntervalSince(lastFlush) >= interval
+        guard now.timeIntervalSince(lastTick) >= interval else { return false }
+        if taking { lastTick = now }
+        return true
+    }
+
+    /// After a merge, a revert or merge_remote landed code: the records are committed with the product inventory when
+    /// the code at `base`'s head makes another one (`ProductInventory`), so the inventory the lead reads follows the
+    /// code; otherwise nothing is committed, the records waiting for the next thing that needs them in git. Nil when
+    /// nothing was due; else what the flush did.
+    @discardableResult
+    public func commitInventory(base: String, now: Date = Date()) -> Outcome? {
+        guard store.recordsDir != nil else { return nil }
+        let head = Git.run(["rev-parse", "--verify", "--quiet", "refs/heads/\(base)"], in: root).output
+        guard !head.isEmpty else { return nil }
+        lock.lock()
+        let due = inventory(at: head) != nil
+        lock.unlock()
+        return due ? flush(base: base, now: now) : nil
     }
 
     /// Ticks every `every` seconds on a queue of its own while this lives; `base` gives the branch, or nil to skip
@@ -156,7 +212,7 @@ public final class LeadRecords: @unchecked Sendable {
     public var statusLine: String? {
         lock.lock()
         defer { lock.unlock() }
-        let kept = store.recordsDir.map { "they're kept in \($0)/ and committed on the next try (after the next merge, or within \(Int(interval / 60)) min)" } ?? ""
+        let kept = store.recordsDir.map { "they're kept in \($0)/ and committed on the next try (before the next merge, push request or lead handover)" } ?? ""
         switch lastOutcome {
         case .failed(let why)?: return "Records: committing decisions.md and progress.md failed: \(why) Nothing is lost: \(kept)."
         case .waiting(let why)?: return "Records: decisions.md and progress.md wait to be committed: \(why) \(kept.prefix(1).uppercased() + kept.dropFirst())."
@@ -224,7 +280,8 @@ public final class LeadRecords: @unchecked Sendable {
                 .contains { $0.trimmingCharacters(in: .whitespacesAndNewlines) == redaction.new } } ?? false
         }
         let result = Worktrees.commitFiles(root: root, branch: base, paths: paths, contents: snapshot,
-                                           message: Self.message(dir, inventory: inventory != nil, redactions: redactions),
+                                           message: Self.message(dir, inventory: inventory != nil, redactions: redactions,
+                                                                 adding: Self.added(snapshot, dir: dir, head: head, root: root)),
                                            from: head, lockWait: lockWait, lockPause: lockPause,
                                            landing: Worktrees.Landing(route: "records commit", records: dir, probe: landingProbe, redactions: redactions))
         switch result {
@@ -243,6 +300,19 @@ public final class LeadRecords: @unchecked Sendable {
                 return .failed("committed \(commit.prefix(8)) on \(base), but couldn't record it as the lead's (\(error)): the next merge or commit from this tool server records it; if it restarts first, the next merge asks the user about it.")
             }
             return .committed(commit)
+        }
+    }
+
+    /// How many entries of each log the snapshot `taken` adds to `head`'s: its entries' first lines `head` doesn't
+    /// have (an archived or rolled-over one leaves its log, and adds none).
+    static func added(_ taken: [String: Data], dir: String, head: String, root: String) -> [Kind: Int] {
+        [Kind.decisions, .progress, .incidents].reduce(into: [:]) { counts, kind in
+            let path = "\(dir)/\(kind.name)"
+            guard let data = taken[path] else { return }
+            let firsts = { (text: String) in text.components(separatedBy: "\n").filter { $0.hasPrefix(kind.marker) } }
+            let before = Git.run(["cat-file", "blob", "\(head):\(path)"], in: root)
+            let known = Set(before.ok ? firsts(before.output) : [])
+            counts[kind] = firsts(String(decoding: data, as: UTF8.self)).filter { !known.contains($0) }.count
         }
     }
 

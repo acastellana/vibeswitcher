@@ -76,7 +76,7 @@ extension LeadToolsetTests {
         #expect(MacLoad.Averages(one: 40, five: 12).steady == 40)
         let now = MacLoad.averages()
         #expect(now.map { $0.one >= 0 && $0.five >= 0 } == true)
-        #expect(MacLoad.steady().map { $0 >= 0 } == true)
+        #expect(MacLoad.room(now, teamSessions: nil, slotsHeld: 0).map { $0.load >= 0 && $0.reading == .steady } == true)
     }
 
     // MARK: The limits
@@ -187,7 +187,7 @@ extension LeadToolsetTests {
         let refused = call(lead, "start_worker", ["task": "one"])
         #expect(refused.isError)
         #expect(refused.text.contains("Not started"))
-        #expect(refused.text.contains("load 150.0 (load_threshold \(MacLoad.number(2 * Self.cores)), twice the \(MacLoad.processors) cores)"))
+        #expect(refused.text.contains("load 150.0 (the last minute's; the 5-minute average is 150.0; load_threshold \(MacLoad.number(2 * Self.cores)), twice the \(MacLoad.processors) cores)"), "\(refused.text)")
         #expect(refused.text.contains("2 team sessions across 2 projects (this one 0, 2 others 2) (mac_max_sessions 6)"))
         #expect(refused.text.contains(LeadPrompts.retryWhenWoken) && !refused.text.contains("about 5 minutes"))
         #expect(runtime.spawned.isEmpty)
@@ -213,7 +213,7 @@ extension LeadToolsetTests {
         runtime.averages = MacLoad.Averages(one: 20, five: 64)
         let start = call(lead, "start_worker", ["task": "two"])
         #expect(start.isError && start.text.contains("load 64.0"), "\(start.text)")
-        #expect(start.text.contains("the greater of its 1- and 5-minute averages"), "\(start.text)")
+        #expect(start.text.contains("load 64.0 (its 5-minute average; the last minute's is 20.0;"), "\(start.text)")
         let audit = call(lead, "audit", ["task": "one"])
         #expect(audit.isError && audit.text.contains("load 64.0"), "\(audit.text)")
         #expect(runtime.spawned.count == 1)
@@ -254,7 +254,7 @@ extension LeadToolsetTests {
         runtime.unlisted = Self.neighbours
         #expect(try runtime.sessions().count == 1)
         let counted = "7 team sessions across 3 projects (this one 1, 2 others 6) (mac_max_sessions 6)"
-        #expect(call(lead, "status").text.contains("Mac (every project's team): load 0.5 (load_threshold \(MacLoad.number(2 * Self.cores)), twice the \(MacLoad.processors) cores), \(counted)."))
+        #expect(call(lead, "status").text.contains("Mac (all projects): load 0.5 (greater of 1- and 5-min; load_threshold \(MacLoad.number(2 * Self.cores))), \(counted)."))
         let refused = call(lead, "start_worker", ["task": "two"])
         #expect(refused.isError)
         #expect(refused.text.contains("team sessions of all its projects are at mac_max_sessions"), "\(refused.text)")
@@ -265,7 +265,7 @@ extension LeadToolsetTests {
         runtime.censusDown = "The session host didn't answer in time."
         let unknown = call(lead, "start_worker", ["task": "two"])
         #expect(unknown.isError && unknown.text.contains("count of every project's team sessions can't be read"), "\(unknown.text)")
-        #expect(call(lead, "status").text.contains("Mac (every project's team): not known"))
+        #expect(call(lead, "status").text.contains("Mac (all projects): not known"))
         #expect(runtime.spawned.count == 1)
         runtime.censusDown = nil
         #expect(!call(lead, "start_worker", ["task": "two"]).isError)
@@ -481,6 +481,61 @@ extension LeadToolsetTests {
         }
     }
 
+    /// A load that can't be read is waited out as one over load_threshold (fails toward waiting, as start_worker refuses
+    /// it): read nil first, the merge doesn't test at once; read nil mid-wait, the wait doesn't end there. It ends once a
+    /// reading is under the threshold. Its polls are the test's events: no time is waited for.
+    @Test func mergesWaitTakesAnUnreadableLoadForNoRoom() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        let mac = MergeRunMacSleepTests.Mac()
+        loadWait(lead, mac: mac) {}
+        var workflow = LeadWorkflow()
+        workflow.testTimeoutMinutes = 45
+        runtime.averageReadings = [nil, nil, MacLoad.Averages(one: 3, five: 3)]
+        let first = try lead.waitForLoad(workflow, slug: "add-b")
+        #expect(first != nil && first?.from == nil)
+        #expect(runtime.averageReadings.isEmpty)
+        runtime.averageReadings = [MacLoad.Averages(one: 150, five: 150), nil, MacLoad.Averages(one: 3, five: 3)]
+        let middle = try lead.waitForLoad(workflow, slug: "add-b")
+        #expect(middle?.from == 150)
+        #expect(runtime.averageReadings.isEmpty)
+    }
+
+    /// Bounded as a load that stays high is (test_timeout_min of awake time): a load that stays unreadable ends in the
+    /// same refusal, saying it couldn't be read, never in an endless wait.
+    @Test func aLoadThatStaysUnreadableRefusesAtTheWaitsLimit() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        let mac = MergeRunMacSleepTests.Mac()
+        loadWait(lead, mac: mac) { mac.stayAwake(46 * 60) }
+        runtime.load = nil
+        var workflow = LeadWorkflow()
+        workflow.testTimeoutMinutes = 45
+        do {
+            _ = try lead.waitForLoad(workflow, slug: "add-b")
+            Issue.record("it never refused")
+        } catch {
+            let text = (error as? LeadToolset.Problem)?.text ?? "\(error)"
+            #expect(text.contains("Not merged (nothing was tested): the Mac's load couldn't be read for the 45 min merge waits (test_timeout_min)"), "\(text)")
+        }
+    }
+
+    /// The pipeline watch names a load that can't be read as a hold, since merge's wait takes it for no room; a
+    /// readable load under load_threshold holds nothing.
+    @Test func thePipelineWatchHoldsOnAnUnreadableLoad() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        lead.macLimits = { MacLimits(maxSessions: 6, loadThreshold: 24) }
+        runtime.load = nil
+        let unread = lead.pipelineSignals(LeadWorkflow(), now: Date()).loadHold
+        #expect(unread != nil && unread?.load == nil && unread?.threshold == 24)
+        runtime.load = 3
+        #expect(lead.pipelineSignals(LeadWorkflow(), now: Date()).loadHold == nil)
+    }
+
     @Test func mergeRefusesWhenTheLoadStaysAboveTheThreshold() throws {
         let root = try repo()
         let runtime = FakeRuntime()
@@ -521,7 +576,7 @@ extension LeadToolsetTests {
         runtime.others = Self.neighbours
         runtime.load = 12.5
         let status = call(lead, "status").text
-        #expect(status.contains("Mac (every project's team): load 12.5"))
+        #expect(status.contains("Mac (all projects): load 12.5"))
         #expect(status.contains("6 team sessions across 2 projects (this one 0, 2 others 6) (mac_max_sessions 6)"))
         #expect(status.contains("start_worker and audit refuse until it eases"))
         runtime.others = []

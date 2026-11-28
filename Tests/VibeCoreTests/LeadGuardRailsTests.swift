@@ -563,8 +563,9 @@ struct LeadGuardRailsTests: LeadTeamFixture {
                             "rm -f \(other)/b.txt", "rm -f \(root)/a.txt", "rm -f ../../../a.txt", "rm -f \(worktree)/b.txt"] {
                 #expect(!Self.allowed(command, by: rules), "\(name): \(command)")
             }
-            // Debuggers: said, and refused.
+            // Debuggers: said, and refused. The Keychain too: probes are the user's (`RefusedSecurityTests`).
             #expect(brief.contains(LeadPrompts.debuggers), "\(name)")
+            #expect(brief.contains(LeadPrompts.keychain), "\(name)")
             for words in ["lldb", "sample", "leaks", "dtrace", "task_for_pid", "outside the test suite's own checks", "Developer Tools Access"] {
                 #expect(LeadPrompts.debuggers.contains(words), "\(words)")
             }

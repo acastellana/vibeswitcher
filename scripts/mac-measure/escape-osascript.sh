@@ -20,4 +20,5 @@ if [[ $mm_dry == 1 ]]; then mm_say "dry run done: nothing was run"; exit 0; fi
 "$mm_bin/detach" /usr/bin/osascript -e "tell application \"Terminal\" to do script \"$tool_scratch/escape.command; exit\"" > /dev/null
 mm_wait_soft "$mm_out/escaped.txt" '^== its chain' 90 \
     || echo "== nothing ran within 90 s: the escape was refused or needed a consent that wasn't given" > "$mm_out/escaped.txt"
+mm_seen="any consent dialog (its words and your answer), and did a new Terminal window open?"
 mm_record "$mm_out/mine.txt" "$mm_out/escaped.txt"

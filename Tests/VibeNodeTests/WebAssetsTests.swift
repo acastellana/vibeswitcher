@@ -202,8 +202,116 @@ struct WebAssetsTests {
             let response = WebAssets.response(to: asset, ifNoneMatch: given)
             #expect(response.status == 200, "\(given ?? "nil")")
             #expect(response.body == asset.body)
-            #expect(response.headers.map(\.0) == asset.headers.map(\.0))
+            // The file's headers, and `Vary` for text (D26: a cache keeps the gzipped form apart).
+            #expect(response.headers.map(\.0) == asset.headers.map(\.0) + ["Vary"])
         }
+    }
+
+    // MARK: Compressed serving (D26)
+
+    static let chrome = "gzip, deflate, br, zstd"
+
+    /// Text goes gzipped to a browser that takes it: `Content-Encoding: gzip`, the gzip's own `ETag` (every `ETag` is
+    /// its body's), `Vary: Accept-Encoding`; everything else as it was. Without gzip in `Accept-Encoding`, or with
+    /// `q=0`, the file as it is, still `Vary`. An image goes as it is, with no `Vary`.
+    @Test func textGoesGzippedToABrowserThatTakesIt() throws {
+        let embedded = EmbeddedAssets(port: Self.port)
+        let script = try #require(embedded.asset(path: "/_/\(EmbeddedAssets.build)/js/i18n.js"))
+        let packed = WebAssets.response(to: script, ifNoneMatch: nil, acceptEncoding: Self.chrome)
+        #expect(packed.status == 200)
+        #expect(packed.body == WebGzip.gzip(script.body))
+        #expect(packed.body.count * 3 < script.body.count, "\(packed.body.count) of \(script.body.count)")
+        let named = { (name: String, headers: [(String, String)]) in headers.filter { $0.0 == name }.map(\.1) }
+        #expect(named("Content-Encoding", packed.headers) == ["gzip"])
+        #expect(named("Vary", packed.headers) == ["Accept-Encoding"])
+        #expect(named("ETag", packed.headers) == [WebAssets.etag(of: packed.body)])
+        #expect(named("ETag", packed.headers) != named("ETag", script.headers))
+        // Every other header is the file's, in its order.
+        let others = { (headers: [(String, String)]) in headers.filter { !["Content-Encoding", "Vary", "ETag"].contains($0.0) }.map { "\($0.0): \($0.1)" } }
+        #expect(others(packed.headers) == others(script.headers))
+        for plain in [nil, "", "identity", "br, zstd", "gzip;q=0", "deflate, gzip; q=0.0", "gzip;q=0, *", "*;q=0, identity"] as [String?] {
+            let response = WebAssets.response(to: script, ifNoneMatch: nil, acceptEncoding: plain)
+            #expect(response.body == script.body, "\(plain ?? "nil")")
+            #expect(named("Content-Encoding", response.headers).isEmpty, "\(plain ?? "nil")")
+            #expect(named("Vary", response.headers) == ["Accept-Encoding"], "\(plain ?? "nil")")
+            #expect(named("ETag", response.headers) == named("ETag", script.headers))
+        }
+        for taken in ["gzip", "GZIP", "x-gzip", "*", "br;q=1.0, gzip;q=0.5", "deflate,gzip"] {
+            #expect(WebAssets.takesGzip(taken), "\(taken)")
+        }
+        for page in ["/", "/style.css", "/_/\(EmbeddedAssets.build)/app.js"] {
+            let asset = try #require(embedded.asset(path: page))
+            #expect(named("Content-Encoding", WebAssets.response(to: asset, ifNoneMatch: nil, acceptEncoding: Self.chrome).headers) == ["gzip"], "\(page)")
+        }
+        let icon = try #require(embedded.asset(path: "/icon.png"))
+        let image = WebAssets.response(to: icon, ifNoneMatch: nil, acceptEncoding: Self.chrome)
+        #expect(image.body == icon.body)
+        #expect(image.headers.map(\.0) == icon.headers.map(\.0), "no Vary, no Content-Encoding on an image")
+    }
+
+    /// A file too small to gain goes as it is (gzip's own 18 bytes would make it larger).
+    @Test func aFileGzipWouldGrowGoesAsItIs() throws {
+        let folder = FolderAssets(root: try page(["js/words.js": "export {}\n", "app.js": "import './js/words.js';\n",
+                                                  "style.css": "a{}\n", "index.html": "<!doctype html>"]), port: Self.port)
+        let asset = try #require(folder.asset(path: "/style.css"))
+        let response = WebAssets.response(to: asset, ifNoneMatch: nil, acceptEncoding: Self.chrome)
+        #expect(response.body == asset.body)
+        #expect(!response.headers.contains { $0.0 == "Content-Encoding" })
+        #expect(response.headers.contains { $0 == ("Vary", "Accept-Encoding") })
+    }
+
+    /// 304 is weighed against the form asked for: the gzip's `ETag` with gzip taken, the file's without; neither for the
+    /// other. A 304 carries no `Content-Encoding`.
+    @Test func a304IsForTheFormTheBrowserHolds() throws {
+        let embedded = EmbeddedAssets(port: Self.port)
+        let asset = try #require(embedded.asset(path: "/_/\(EmbeddedAssets.build)/js/i18n.js"))
+        let gzipTag = WebAssets.etag(of: WebGzip.gzip(asset.body))
+        let plainTag = try #require(header("ETag", asset).first)
+        let held = WebAssets.response(to: asset, ifNoneMatch: gzipTag, acceptEncoding: Self.chrome)
+        #expect(held.status == 304 && held.body.isEmpty)
+        #expect(!held.headers.contains { $0.0 == "Content-Encoding" || $0.0 == "Content-Type" })
+        #expect(held.headers.contains { $0 == ("ETag", gzipTag) } && held.headers.contains { $0 == ("Vary", "Accept-Encoding") })
+        #expect(WebAssets.response(to: asset, ifNoneMatch: plainTag, acceptEncoding: nil).status == 304)
+        #expect(WebAssets.response(to: asset, ifNoneMatch: plainTag, acceptEncoding: Self.chrome).status == 200)
+        #expect(WebAssets.response(to: asset, ifNoneMatch: gzipTag, acceptEncoding: nil).status == 200)
+    }
+
+    @Test func serializedRevalidationsKeepOnlyTheirCacheAndSecurityHeaders() throws {
+        let asset = try #require(EmbeddedAssets(port: Self.port).asset(path: "/app.js"))
+        for encoding in ["identity", "gzip"] {
+            let body = encoding == "gzip" ? WebGzip.gzip(asset.body) : asset.body
+            let tag = WebAssets.etag(of: body)
+            let held = WebAssets.response(to: asset, ifNoneMatch: tag, acceptEncoding: encoding)
+            let wire = WebResponse(status: held.status, headers: held.headers, body: held.body).serialized()
+            let parts = String(decoding: wire, as: UTF8.self).components(separatedBy: "\r\n\r\n")
+            #expect(parts.count == 2 && parts.last == "")
+            let lines = parts[0].components(separatedBy: "\r\n")
+            #expect(lines.first == "HTTP/1.1 304 Not Modified")
+            for name in ["Content-Length", "Content-Encoding", "Content-Type"] {
+                #expect(!lines.contains { $0.lowercased().hasPrefix(name.lowercased() + ":") }, "\(encoding): \(name)")
+            }
+            for (name, value) in [("ETag", tag), ("Vary", "Accept-Encoding"), ("Cache-Control", "no-cache"),
+                                  ("Content-Security-Policy", Self.policy), ("Cross-Origin-Resource-Policy", "same-origin"),
+                                  ("X-Content-Type-Options", "nosniff")] {
+                #expect(lines.filter { $0.lowercased().hasPrefix(name.lowercased() + ":") } == ["\(name): \(value)"])
+            }
+        }
+    }
+
+    @Test func encodingRefusalsApplyBeforeSizeAndConditionalChecks() throws {
+        let source = EmbeddedAssets(port: Self.port)
+        let small = try #require(source.asset(path: "/build.json"))
+        for encoding in ["gzip, identity;q=0", "*;q=0, x-gzip"] {
+            let packed = WebAssets.response(to: small, ifNoneMatch: nil, acceptEncoding: encoding)
+            #expect(packed.status == 200 && packed.body == WebGzip.gzip(small.body))
+            #expect(packed.headers.contains { $0 == ("Content-Encoding", "gzip") })
+        }
+        for encoding in ["identity;q=0", "*;q=0", "gzip;q=0, identity;q=0, *"] {
+            #expect(WebAssets.response(to: small, ifNoneMatch: "*", acceptEncoding: encoding).status == 406, "\(encoding)")
+        }
+        let icon = try #require(source.asset(path: "/icon.png"))
+        #expect(WebAssets.response(to: icon, ifNoneMatch: nil, acceptEncoding: "gzip, identity;q=0").status == 406)
+        #expect(WebAssets.response(to: icon, ifNoneMatch: nil, acceptEncoding: "*;q=0, identity").body == icon.body)
     }
 
     @Test func theBuildIsTheSameForTheSameFiles() throws {
@@ -329,6 +437,23 @@ struct WebAssetsTests {
         let ran = try await embed(root: root, out: out)
         #expect(ran.status == 0, "\(ran.errors)")
         #expect(paths(in: try String(contentsOf: out, encoding: .utf8)) == ["app.js", "index.html", "js/words.js", "style.css"])
+    }
+
+    /// index.html's preload list names only files embedded with it (D26): a stale name is refused, nothing written.
+    @Test func theGeneratorRefusesAPreloadOfAFileNotEmbedded() async throws {
+        let root = try page()
+        try Data(#"<!doctype html><script type="module" src="app.js"></script><link rel="modulepreload" href="js/words.js"><link rel="modulepreload" href="js/gone.js">"#.utf8)
+            .write(to: root.appendingPathComponent("index.html"))
+        let out = try outFile("preload")
+        let ran = try await embed(root: root, out: out)
+        #expect(ran.status != 0)
+        #expect(ran.errors.contains("modulepreload js/gone.js"), "\(ran.errors)")
+        #expect(!FileManager.default.fileExists(atPath: out.path))
+        try FileManager.default.removeItem(at: root.appendingPathComponent("js/words.js"))
+        try Data(#"<!doctype html><link rel="modulepreload" href="js/words.js">"#.utf8).write(to: root.appendingPathComponent("index.html"))
+        #expect(try await embed(root: root, out: out).status != 0)
+        try Data("export const word = 'x';\n".utf8).write(to: root.appendingPathComponent("js/words.js"))
+        #expect(try await embed(root: root, out: out).status == 0)
     }
 
     /// The first load's budget (500 ms) wants small files: no file over 256 KiB, and the page under 1.5 MiB. A vendored

@@ -17,7 +17,7 @@ import Testing
     static let allowedJournal: Set<String> = [
         "Start.swift: journal: { context.writeJournal($0) },",
         "Stop.swift: journal: { context.writeJournal($0) },",
-        #"Status.swift: guard context.writeJournal(NodeJournal.entry(event: "ack", action: action)) else {"#,
+        "Status.swift: guard context.writeJournal(JournalAck.entry(action: action)) else {",
     ]
 
     static func sources() throws -> [(name: String, text: String)] {

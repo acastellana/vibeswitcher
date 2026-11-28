@@ -45,7 +45,7 @@ struct LeadChatHandoverTests {
         try LeadChatHistory.record(.init(from: oldID.uuidString, to: newID.uuidString, transcript: old.path, at: at.timeIntervalSince1970,
                                          reason: "the last one's context was 72% full", root: root))
 
-        let chat = ChatModel(home: home)
+        let chat = ChatModel(home: home, defaults: scratch.defaults("handover-chat-defaults"))
         await Self.opened(chat, path: new.path, history: .init(root: root, session: newID.uuidString))
         let notice = LeadRotation.notice(reason: "the last one's context was 72% full", at: at)
         #expect(chat.items.map(\.id) == ["o1", "o2.0", "handover:\(newID.uuidString)", "n2.0", "n3"])
@@ -55,10 +55,10 @@ struct LeadChatHandoverTests {
         #expect(chat.isHistory("o1") && chat.isHistory("handover:\(newID.uuidString)") && !chat.isHistory("n3"))
 
         // The old lead's own chat, and a chat with no lead's history: exactly its own turns.
-        let plain = ChatModel(home: home)
+        let plain = ChatModel(home: home, defaults: scratch.defaults("handover-plain-defaults"))
         await Self.opened(plain, path: new.path, history: nil)
         #expect(plain.items.map(\.id) == ["n1", "n2.0", "n3"])
-        let first = ChatModel(home: home)
+        let first = ChatModel(home: home, defaults: scratch.defaults("handover-first-defaults"))
         await Self.opened(first, path: old.path, history: .init(root: root, session: oldID.uuidString))
         #expect(first.items.map(\.id) == ["o1", "o2.0", "o3", "o4.0"])
     }

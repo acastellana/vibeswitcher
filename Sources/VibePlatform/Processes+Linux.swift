@@ -410,6 +410,9 @@ extension Platform.Processes {
             return line.cpuSeconds(ticksPerSecond: ticksPerSecond)
         }
 
+        /// Not read on Linux yet (each thread's state is in /proc/PID/task/TID/stat): nil.
+        static func runnableThreads(_ pid: pid_t) -> Int? { nil }
+
         /// statm's second number, in pages. Its first is the whole size: 0 for what has no memory of its own (a
         /// zombie, a kernel thread).
         static func residentBytes(_ pid: pid_t) -> Int64? {
@@ -587,6 +590,9 @@ extension Platform.Processes.System {
     }
 
     static let hasCgroups = true
+
+    /// nil: Linux has no launchd coalitions (its cgroup is `cgroup`).
+    static func coalition(_ pid: pid_t) -> UInt64? { nil }
 
     static func cgroup(_ pid: pid_t) -> [String]? {
         guard case .success(let bytes) = contents("/proc/\(pid)/cgroup"), !bytes.isEmpty else { return nil }

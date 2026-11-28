@@ -687,7 +687,11 @@ final class Harness {
         host = HostClient(socketPath: socket, appKey: { [keyStore] in keyStore.key() })
         pane = TerminalPaneController(host: host)
         steerRoot = home.appendingPathComponent("vibeswitcher")
-        chat = ChatModel(outbox: ComposerOutbox(url: home.appendingPathComponent("outbox.json")), home: home.path, steerRoot: steerRoot)
+        // The composer's drafts in defaults of the harness's own: the test binary's standard ones are shared by every
+        // test process on this Mac, and each harness has the same key, so a draft one test left was sent by the next
+        // (pastedImagesAndTheirTextArriveOnce's image alone went as "[Image #1] and another thing", 2026-11-27).
+        chat = ChatModel(outbox: ComposerOutbox(url: home.appendingPathComponent("outbox.json")), home: home.path, steerRoot: steerRoot,
+                         defaults: temp.defaults("sync-defaults"))
         sync = ChatSync(chat: chat, host: host)
         // Kept a shell: the agent runs under it, and the shell is the terminal's once it exits.
         command = (keepShell ? "" : "exec ") + "/usr/bin/python3 -I -u '\(script.path)' '\(transcript.path)' '\(control.path)' '\(state.path)'"

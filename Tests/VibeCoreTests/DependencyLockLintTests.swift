@@ -4,7 +4,8 @@ import Testing
 /// What a build is made of stays what was checked (the user's word of 2026-11-26: "we need to be careful here";
 /// docs/process/v2-locked-versions.md says what is locked and what isn't):
 /// - every `.package(` in Package.swift names its version `exact:`, and Package.resolved is tracked and pins each of
-///   those packages at that version;
+///   those packages at that version; but for one named by a path inside the repository (`.package(path: "Keeper")`,
+///   the keeper's package), which is the commit's own files and gets no pin;
 /// - every SwiftPM command in scripts/, Resources/bin and the workflows takes Package.resolved as it is
 ///   (`--only-use-versions-from-resolved-file`, given by `swiftpm_options` or on its line), so a stale lock file fails
 ///   the build instead of being re-resolved and rewritten; a command's words inside a message (a double-quoted string
@@ -164,6 +165,12 @@ struct DependencyLockLintTests {
         return lower.hasSuffix(".git") ? String(lower.dropLast(4)) : lower
     }
 
+    /// Whether a `.package(`'s text names only a path inside the repository: relative, no `..`, nothing else said.
+    static func inRepository(_ text: String) -> Bool {
+        let path = try! NSRegularExpression(pattern: #"^\s*path\s*:\s*"([A-Za-z0-9_-]+(?:/[A-Za-z0-9_-]+)*)"\s*$"#)
+        return !matches(path, text).isEmpty
+    }
+
     /// What's wrong with `manifest` against `resolved`, one line each.
     static func lockProblems(manifest: String, resolved: Data?) -> [String] {
         var problems: [String] = []
@@ -172,6 +179,7 @@ struct DependencyLockLintTests {
         let found = packages(manifest)
         if found.isEmpty { problems.append("Package.swift names no .package(") }
         for package in found {
+            if inRepository(package.text) { continue }
             guard let exact = package.exact else {
                 problems.append("\(package.url) isn't exact: (\(package.text.trimmingCharacters(in: .whitespaces)))")
                 continue
@@ -280,6 +288,11 @@ struct DependencyLockLintTests {
     @Test func aPackageThatIsntExactOrIsPinnedElsewhereIsFound() {
         let resolved = Data(#"{"pins":[{"location":"https://github.com/a/b.git","state":{"version":"1.2.3"}}]}"#.utf8)
         #expect(Self.lockProblems(manifest: #".package(url: "https://github.com/a/b.git", exact: "1.2.3")"#, resolved: resolved).isEmpty)
+        #expect(Self.lockProblems(manifest: #".package(url: "https://github.com/a/b.git", exact: "1.2.3") .package(path: "Keeper")"#, resolved: resolved).isEmpty,
+                "a path inside the repository")
+        for outside in [#".package(path: "../Keeper")"#, #".package(path: "/opt/k")"#, #".package(path: "Keeper", traits: [])"#] {
+            #expect(Self.lockProblems(manifest: outside, resolved: resolved).count == 1, "\(outside)")
+        }
         #expect(Self.lockProblems(manifest: #".package(url: "https://github.com/a/b", exact: "1.2.3")"#, resolved: resolved).isEmpty, "with or without .git")
         #expect(Self.lockProblems(manifest: #".package(url: "https://github.com/a/b.git", from: "1.2.3")"#, resolved: resolved)
                 == [#"https://github.com/a/b.git isn't exact: (url: "https://github.com/a/b.git", from: "1.2.3")"#])
