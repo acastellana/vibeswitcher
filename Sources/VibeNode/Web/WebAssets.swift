@@ -1,7 +1,7 @@
 import Foundation
 import VibeCore
 
-/// What the web listener answers a `GET` with, once `If-None-Match` is weighed: 200 with the file, or 304 with no body.
+/// What the web listener answers a `GET` with, after negotiation and revalidation: 200, 304 or 406.
 public struct WebAssetResponse: Sendable {
     public var status: Int
     public var body: Data
@@ -87,34 +87,43 @@ public enum WebAssets {
     public static let compressible: Set<String> = [contentTypes["html"]!, contentTypes["js"]!, contentTypes["css"]!, contentTypes["json"]!,
                                                    contentTypes["webmanifest"]!]
 
-    /// Whether an `Accept-Encoding` value takes gzip: `gzip` or `x-gzip` named with no `q=0`; named neither, `*` with
-    /// no `q=0` (RFC 9110 12.5.3: a coding named outweighs `*`).
-    public static func takesGzip(_ acceptEncoding: String?) -> Bool {
-        var named: [Double] = []
-        var any: Double?
+    /// Explicit coding names take precedence over the wildcard. Identity is acceptable unless
+    /// identity;q=0 excludes it, or *;q=0 excludes it without a more specific identity entry.
+    private static func acceptedEncodings(_ acceptEncoding: String?) -> (gzip: Bool, identity: Bool) {
+        var gzip: Bool?
+        var identity: Bool?
+        var wildcard: Bool?
         for item in (acceptEncoding ?? "").split(separator: ",") {
             let parts = item.split(separator: ";").map { $0.trimmingCharacters(in: .whitespaces).lowercased() }
             guard let name = parts.first else { continue }
             let q = parts.dropFirst().first { $0.hasPrefix("q=") }.flatMap { Double($0.dropFirst(2)) } ?? 1
-            if name == "gzip" || name == "x-gzip" { named.append(q) } else if name == "*" { any = q }
+            switch name {
+            case "gzip", "x-gzip": gzip = gzip == true || q > 0
+            case "identity": identity = identity == true || q > 0
+            case "*": wildcard = q > 0
+            default: break
+            }
         }
-        if !named.isEmpty { return named.contains { $0 > 0 } }
-        return (any ?? 0) > 0
+        return (gzip ?? wildcard ?? false, identity ?? (wildcard != false))
     }
 
-    /// The asset as the browser asked for it: gzipped (`Content-Encoding: gzip`, its own `ETag`, the gzip's bytes'
-    /// as every `ETag` is its body's) where its type is `compressible`, `acceptEncoding` takes gzip and that is smaller;
-    /// else as it is. A compressible type's answer says `Vary: Accept-Encoding` either way, so a cache never hands one
-    /// form to a browser that asked for the other. Every other header stays as it was: the policy, nosniff, CORP.
-    public static func encoded(_ asset: WebAsset, acceptEncoding: String?) -> WebAsset {
-        guard let type = asset.headers.first(where: { $0.0 == "Content-Type" })?.1, compressible.contains(type) else { return asset }
+    public static func takesGzip(_ acceptEncoding: String?) -> Bool {
+        acceptedEncodings(acceptEncoding).gzip
+    }
+
+    /// Select the smaller acceptable representation. Only text has a gzip representation.
+    public static func encoded(_ asset: WebAsset, acceptEncoding: String?) -> WebAsset? {
+        let accepts = acceptedEncodings(acceptEncoding)
+        guard let type = asset.headers.first(where: { $0.0 == "Content-Type" })?.1, compressible.contains(type) else {
+            return accepts.identity ? asset : nil
+        }
         var headers = asset.headers.filter { $0.0 != "Vary" }
         headers.append(("Vary", "Accept-Encoding"))
-        guard takesGzip(acceptEncoding), let etag = asset.headers.first(where: { $0.0 == "ETag" })?.1 else {
-            return WebAsset(body: asset.body, headers: headers)
-        }
-        let packed = gzipped(asset.body, key: etag)
-        guard packed.body.count < asset.body.count else { return WebAsset(body: asset.body, headers: headers) }
+        let identity = WebAsset(body: asset.body, headers: headers)
+        guard accepts.gzip else { return accepts.identity ? identity : nil }
+        let tag = asset.headers.first(where: { $0.0 == "ETag" })?.1 ?? etag(of: asset.body)
+        let packed = gzipped(asset.body, key: tag)
+        guard !accepts.identity || packed.body.count < asset.body.count else { return identity }
         headers = headers.map { $0.0 == "ETag" ? ("ETag", packed.etag) : $0 }
         if let at = headers.firstIndex(where: { $0.0 == "Content-Type" }) { headers.insert(("Content-Encoding", "gzip"), at: at + 1) }
         return WebAsset(body: packed.body, headers: headers)
@@ -144,7 +153,10 @@ public enum WebAssets {
     /// 304 with no body (and no `Content-Type` or `Content-Encoding`) when `ifNoneMatch` names the `ETag` of the form
     /// the browser asked for (weak or strong, in a list) or is `*`; else 200 with that form (`encoded`).
     public static func response(to asset: WebAsset, ifNoneMatch: String?, acceptEncoding: String? = nil) -> WebAssetResponse {
-        let asset = encoded(asset, acceptEncoding: acceptEncoding)
+        guard let asset = encoded(asset, acceptEncoding: acceptEncoding) else {
+            let security = asset.headers.filter { !["Content-Type", "Content-Encoding", "Cache-Control", "ETag", "Vary"].contains($0.0) }
+            return WebAssetResponse(status: 406, body: Data(), headers: security + [("Vary", "Accept-Encoding"), ("Cache-Control", "no-store")])
+        }
         let etag = asset.headers.first { $0.0 == "ETag" }?.1
         let given = (ifNoneMatch ?? "").split(separator: ",").map { tag -> Substring in
             let tag = Substring(tag.trimmingCharacters(in: .whitespaces))

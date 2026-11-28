@@ -148,6 +148,33 @@ private final class WiredWorld: @unchecked Sendable {
 extension WebListenerTests {
     /// `NodeWebListener`: the listener behind the plan's seams, as the live wire contract has it.
     struct Wired {
+        @Test func repeatedAssetFieldsNegotiateAndRevalidateOnTheWire() throws {
+            let assets = EmbeddedAssets(port: WebAssetsTests.port)
+            let world = try WiredWorld(assets: assets)
+            let asset = try #require(assets.asset(path: "/build.json"))
+            let path = "GET /build.json HTTP/1.1\r\nHost: \(world.host)\r\n"
+            for (fields, bytes) in [("Accept-Encoding: identity\r\n", asset.body),
+                                    ("Accept-Encoding: gzip\r\nAccept-Encoding: identity;q=0\r\n", WebGzip.gzip(asset.body))] {
+                let client = try world.connect()
+                client.send(path + fields + "\r\n")
+                let head = try #require(client.head())
+                #expect(head.hasPrefix("HTTP/1.1 200 OK\r\n"))
+                #expect(Data(client.rest()) == bytes)
+                let tag = WebAssets.etag(of: bytes)
+                let held = try world.exchange(path + fields + "If-None-Match: \"old\"\r\nIf-None-Match: \(tag)\r\n\r\n")
+                #expect(held.head.hasPrefix("HTTP/1.1 304 Not Modified\r\n") && held.body.isEmpty)
+                let lines = held.head.components(separatedBy: "\r\n")
+                for (name, value) in [("ETag", tag), ("Vary", "Accept-Encoding"), ("Cache-Control", "no-cache"),
+                                      ("Content-Security-Policy", WebAssetsTests.policy), ("Cross-Origin-Resource-Policy", "same-origin"),
+                                      ("X-Content-Type-Options", "nosniff")] {
+                    #expect(lines.filter { $0.lowercased().hasPrefix(name.lowercased() + ":") } == ["\(name): \(value)"])
+                }
+                #expect(!lines.contains { $0.lowercased().hasPrefix("content-length:") })
+            }
+            let refused = try world.exchange(path + "Accept-Encoding: gzip;q=0\r\nAccept-Encoding: identity;q=0\r\n\r\n")
+            #expect(refused.head.hasPrefix("HTTP/1.1 406 Not Acceptable\r\n"))
+        }
+
         @Test func theLimitsAreTheContracts() {
             let limits = NodeWebListener.limits
             #expect(limits.maxHeaderBytes == 8 * 1_024 && limits.headSeconds == 5 && limits.maxMessageBytes == 64 * 1_024)

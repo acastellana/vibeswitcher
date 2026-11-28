@@ -229,7 +229,7 @@ struct WebAssetsTests {
         // Every other header is the file's, in its order.
         let others = { (headers: [(String, String)]) in headers.filter { !["Content-Encoding", "Vary", "ETag"].contains($0.0) }.map { "\($0.0): \($0.1)" } }
         #expect(others(packed.headers) == others(script.headers))
-        for plain in [nil, "", "identity", "br, zstd", "gzip;q=0", "deflate, gzip; q=0.0", "gzip;q=0, *", "*;q=0"] as [String?] {
+        for plain in [nil, "", "identity", "br, zstd", "gzip;q=0", "deflate, gzip; q=0.0", "gzip;q=0, *", "*;q=0, identity"] as [String?] {
             let response = WebAssets.response(to: script, ifNoneMatch: nil, acceptEncoding: plain)
             #expect(response.body == script.body, "\(plain ?? "nil")")
             #expect(named("Content-Encoding", response.headers).isEmpty, "\(plain ?? "nil")")
@@ -274,6 +274,44 @@ struct WebAssetsTests {
         #expect(WebAssets.response(to: asset, ifNoneMatch: plainTag, acceptEncoding: nil).status == 304)
         #expect(WebAssets.response(to: asset, ifNoneMatch: plainTag, acceptEncoding: Self.chrome).status == 200)
         #expect(WebAssets.response(to: asset, ifNoneMatch: gzipTag, acceptEncoding: nil).status == 200)
+    }
+
+    @Test func serializedRevalidationsKeepOnlyTheirCacheAndSecurityHeaders() throws {
+        let asset = try #require(EmbeddedAssets(port: Self.port).asset(path: "/app.js"))
+        for encoding in ["identity", "gzip"] {
+            let body = encoding == "gzip" ? WebGzip.gzip(asset.body) : asset.body
+            let tag = WebAssets.etag(of: body)
+            let held = WebAssets.response(to: asset, ifNoneMatch: tag, acceptEncoding: encoding)
+            let wire = WebResponse(status: held.status, headers: held.headers, body: held.body).serialized()
+            let parts = String(decoding: wire, as: UTF8.self).components(separatedBy: "\r\n\r\n")
+            #expect(parts.count == 2 && parts.last == "")
+            let lines = parts[0].components(separatedBy: "\r\n")
+            #expect(lines.first == "HTTP/1.1 304 Not Modified")
+            for name in ["Content-Length", "Content-Encoding", "Content-Type"] {
+                #expect(!lines.contains { $0.lowercased().hasPrefix(name.lowercased() + ":") }, "\(encoding): \(name)")
+            }
+            for (name, value) in [("ETag", tag), ("Vary", "Accept-Encoding"), ("Cache-Control", "no-cache"),
+                                  ("Content-Security-Policy", Self.policy), ("Cross-Origin-Resource-Policy", "same-origin"),
+                                  ("X-Content-Type-Options", "nosniff")] {
+                #expect(lines.filter { $0.lowercased().hasPrefix(name.lowercased() + ":") } == ["\(name): \(value)"])
+            }
+        }
+    }
+
+    @Test func encodingRefusalsApplyBeforeSizeAndConditionalChecks() throws {
+        let source = EmbeddedAssets(port: Self.port)
+        let small = try #require(source.asset(path: "/build.json"))
+        for encoding in ["gzip, identity;q=0", "*;q=0, x-gzip"] {
+            let packed = WebAssets.response(to: small, ifNoneMatch: nil, acceptEncoding: encoding)
+            #expect(packed.status == 200 && packed.body == WebGzip.gzip(small.body))
+            #expect(packed.headers.contains { $0 == ("Content-Encoding", "gzip") })
+        }
+        for encoding in ["identity;q=0", "*;q=0", "gzip;q=0, identity;q=0, *"] {
+            #expect(WebAssets.response(to: small, ifNoneMatch: "*", acceptEncoding: encoding).status == 406, "\(encoding)")
+        }
+        let icon = try #require(source.asset(path: "/icon.png"))
+        #expect(WebAssets.response(to: icon, ifNoneMatch: nil, acceptEncoding: "gzip, identity;q=0").status == 406)
+        #expect(WebAssets.response(to: icon, ifNoneMatch: nil, acceptEncoding: "*;q=0, identity").body == icon.body)
     }
 
     @Test func theBuildIsTheSameForTheSameFiles() throws {

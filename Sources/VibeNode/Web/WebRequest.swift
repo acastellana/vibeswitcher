@@ -87,7 +87,7 @@ public struct WebRequest: Sendable, Equatable {
     }
 }
 
-/// What a request is answered with. The listener adds `Content-Length`, `Connection: close` and
+/// What a request is answered with. The listener adds `Content-Length` except on a 304, `Connection: close` and
 /// `X-Content-Type-Options: nosniff` to every response, and `Content-Type: application/octet-stream` to a body that
 /// names no type; a field of those names given here (but the type) is left out.
 public struct WebResponse: Sendable, Equatable {
@@ -119,6 +119,7 @@ public struct WebResponse: Sendable, Equatable {
         case 403: return "Forbidden"
         case 404: return "Not Found"
         case 405: return "Method Not Allowed"
+        case 406: return "Not Acceptable"
         case 408: return "Request Timeout"
         case 413: return "Content Too Large"
         case 414: return "URI Too Long"
@@ -151,7 +152,8 @@ public struct WebResponse: Sendable, Equatable {
             head += "\(field.name): \(field.value)\r\n"
         }
         if !typed, !body.isEmpty { head += "Content-Type: application/octet-stream\r\n" }
-        head += "Content-Length: \(body.count)\r\nConnection: close\r\nX-Content-Type-Options: nosniff\r\n\r\n"
+        if status != 304 { head += "Content-Length: \(body.count)\r\n" }
+        head += "Connection: close\r\nX-Content-Type-Options: nosniff\r\n\r\n"
         return Data(head.utf8) + body
     }
 }
