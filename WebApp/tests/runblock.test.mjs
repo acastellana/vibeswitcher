@@ -47,6 +47,14 @@ test('P-s2: a bare fence holding one command line gets Run, which leaves `! comm
   assert.equal(store.sessionDraftOf(SID)?.text, '! cd site && python3 -m http.server 8000', 'drafted, not sent');
 });
 
+for (const language of ['', 'sh']) {
+  test(`Run checks default-ignorable characters in a ${language || 'bare'} fence`, () => {
+    const block = (filename) => open([fence + language, 'cat ' + filename, fence].join('\n'));
+    assert.equal(runs(block('café.txt').chat).length, 1);
+    assert.equal(runs(block('café\u180b.txt').chat).length, 0);
+  });
+}
+
 test('P-s2: a bare fence holding a sentence or two lines gets no Run', () => {
   setLanguage('en');
   for (const body of ['Build succeeded.', 'npm install\nnpm run dev']) {

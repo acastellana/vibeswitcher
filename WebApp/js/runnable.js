@@ -16,7 +16,7 @@ const COMPOUND = new Set(['if', 'then', 'else', 'elif', 'fi', 'for', 'while', 'u
 // Characters that don't show, or change how what's around them shows (the app's `hasHiddenCharacters`, and the
 // shell card's blank-looking ones): controls but tab and newline, format characters, separators and spaces other than
 // a plain space, private use, unassigned, variation selectors, the combining grapheme joiner, the fillers.
-const HIDDEN = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Co}\p{Cn}\p{Cs}\p{Zs}\u{FE00}-\u{FE0F}\u{E0100}-\u{E01EF}͏ᅟᅠ⠀ㅤﾠ]/u;
+const HIDDEN = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Co}\p{Cn}\p{Cs}\p{Zs}\p{Default_Ignorable_Code_Point}\u2800]/u;
 
 export function hasHidden(text) {
   for (const ch of text) {
